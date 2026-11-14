@@ -80,7 +80,7 @@ Rustは `rust-toolchain.toml` に従う。Cコンパイラ・SDKとPython 3を�
 ```sh
 ./scripts/test-release.sh --locked
 cargo build --release --locked -p suz
-python3 scripts/test-distribution.py target/release/suz --version 0.2.0
+python3 scripts/test-distribution.py target/release/suz --version 0.3.0
 ```
 
 `--version` には対象バージョンを指定する。`CARGO_TARGET_DIR` を変更している場合は、その配下の実行ファイルを指定する。
