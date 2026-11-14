@@ -1,0 +1,11 @@
+[package]
+name = "suz"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.100"
+publish = false
+license = "MIT OR Apache-2.0"
+
+[[test]]
+name = "spec_cases"
+path = "tests/spec_cases.rs"

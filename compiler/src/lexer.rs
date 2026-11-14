@@ -1,0 +1,624 @@
+use crate::{Diagnostic, ErrorKind};
+pub(crate) mod templates;
+use std::ops::Range;
+
+const KEYWORDS: &[&str] = &[
+    "const",
+    "fix",
+    "var",
+    "fn",
+    "struct",
+    "enum",
+    "if",
+    "ifexpr",
+    "elif",
+    "else",
+    "while",
+    "loop",
+    "for",
+    "in",
+    "break",
+    "continue",
+    "return",
+    "match",
+    "matchexpr",
+    "as",
+    "or",
+    "not",
+    "log",
+    "expr",
+    "true",
+    "false",
+    "nan",
+    "inf",
+];
+const TYPES: &[&str] = &[
+    "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "bool", "void",
+];
+const SYMBOLS: &[&str] = &[
+    "(", ")", "{", "}", ",", ":", ".", "->", "=>", "=", "+=", "-=", "*=", "/=", "%=", "+%=", "-%=",
+    "*%=", "&=", "|=", "^=", "<<=", ">>=", "+", "-", "*", "/", "%", "+%", "-%", "*%", "&", "|",
+    "^", "~", "<<", ">>", "==", "!=", "<", "<=", ">", ">=", "&&", "||", "..<", "..=",
+];
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Kind<'a> {
+    Template(&'a str),
+    Ident(&'a str),
+    Keyword(&'a str),
+    TypeName(&'a str),
+    Integer(&'a str),
+    Float(&'a str),
+    Symbol(&'a str),
+    Wildcard,
+    Newline,
+    End,
+}
+
+#[derive(Debug)]
+pub(crate) struct Token<'a> {
+    pub kind: Kind<'a>,
+    pub line: usize,
+    pub column: usize,
+    /// Byte range in the source after CRLF normalization.
+    pub span: Range<usize>,
+}
+
+pub(crate) fn position(prefix: &str) -> (usize, usize) {
+    (
+        prefix.bytes().filter(|b| *b == b'\n').count() + 1,
+        prefix.rsplit('\n').next().unwrap().chars().count() + 1,
+    )
+}
+
+fn error(line: usize, column: usize, kind: ErrorKind, message: impl Into<String>) -> Diagnostic {
+    Diagnostic {
+        kind,
+        line,
+        column,
+        message: message.into(),
+    }
+}
+
+fn valid_digit_separators(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    bytes.iter().enumerate().all(|(index, byte)| {
+        *byte != b'_'
+            || (index > 0
+                && bytes[index - 1].is_ascii_digit()
+                && bytes.get(index + 1).is_some_and(u8::is_ascii_digit))
+    })
+}
+
+fn number(rest: &str) -> Result<(Kind<'_>, usize), &'static str> {
+    let integer_end = rest
+        .bytes()
+        .take_while(|b| b.is_ascii_digit() || *b == b'_')
+        .count();
+    let mut end = integer_end;
+    let bytes = rest.as_bytes();
+    if bytes.get(end) == Some(&b'.')
+        && bytes
+            .get(end + 1)
+            .is_some_and(|b| b.is_ascii_digit() || *b == b'_')
+    {
+        end += 1;
+        end += bytes[end..]
+            .iter()
+            .take_while(|b| b.is_ascii_digit() || **b == b'_')
+            .count();
+        if bytes.get(end) == Some(&b'e') {
+            end += 1;
+            if matches!(bytes.get(end), Some(b'+' | b'-')) {
+                end += 1;
+            }
+            let start = end;
+            end += bytes[end..]
+                .iter()
+                .take_while(|b| b.is_ascii_digit() || **b == b'_')
+                .count();
+            if start == end {
+                return Err("a floating-point exponent requires digits [lit.float]");
+            }
+        }
+        if !valid_digit_separators(&rest[..end]) {
+            return Err(
+                "a floating-point separator must be a single underscore between digits [lit.float]",
+            );
+        }
+        return Ok((Kind::Float(&rest[..end]), end));
+    }
+    let text = &rest[..end];
+    if !valid_digit_separators(text) {
+        return Err(
+            "an integer separator must be a single underscore between digits [lit.integer]",
+        );
+    }
+    if bytes.get(end) == Some(&b'e') {
+        return Err("a floating-point exponent requires a decimal point [lit.float]");
+    }
+    // Keep range operators and named field access separate from numbers.
+    if bytes.get(end) == Some(&b'.')
+        && !bytes
+            .get(end + 1)
+            .is_some_and(|next| *next == b'.' || next.is_ascii_alphabetic() || *next == b'_')
+    {
+        return Err("a decimal point requires digits on both sides [lit.float]");
+    }
+    Ok((Kind::Integer(text), end))
+}
+
+fn can_end_operand(kind: Option<Kind<'_>>) -> bool {
+    matches!(
+        kind,
+        Some(
+            Kind::Ident(_)
+                | Kind::TypeName(_)
+                | Kind::Integer(_)
+                | Kind::Float(_)
+                | Kind::Keyword("true" | "false" | "nan" | "inf")
+                | Kind::Symbol(")" | "}")
+        )
+    )
+}
+
+fn continues_line(kind: Kind<'_>, previous: Option<Kind<'_>>) -> bool {
+    match kind {
+        Kind::Keyword("or") => true,
+        Kind::Symbol("-") => can_end_operand(previous),
+        Kind::Symbol(symbol) => matches!(
+            symbol,
+            "=" | "+="
+                | "-="
+                | "*="
+                | "/="
+                | "%="
+                | "+%="
+                | "-%="
+                | "*%="
+                | "&="
+                | "|="
+                | "^="
+                | "<<="
+                | ">>="
+                | "+"
+                | "*"
+                | "/"
+                | "%"
+                | "+%"
+                | "-%"
+                | "*%"
+                | "&"
+                | "|"
+                | "^"
+                | "<<"
+                | ">>"
+                | "=="
+                | "!="
+                | "<"
+                | "<="
+                | ">"
+                | ">="
+                | "&&"
+                | "||"
+        ),
+        _ => false,
+    }
+}
+
+/// Input must already have normalized newlines.
+pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
+    let mut tokens: Vec<Token<'_>> = Vec::new();
+    let mut delimiters = Vec::new();
+    let mut continuation = false;
+    let (mut offset, mut line, mut column) = (0, 1, 1);
+    while offset < source.len() {
+        let rest = &source[offset..];
+        let ch = rest.chars().next().unwrap();
+        match ch {
+            ' ' | '\t' => {
+                offset += 1;
+                column += 1;
+                continue;
+            }
+            '/' if rest.starts_with("//") => {
+                let length = rest.find('\n').unwrap_or(rest.len());
+                column += rest[..length].chars().count();
+                offset += length;
+                continue;
+            }
+            '\n' => {
+                if delimiters.last() != Some(&"(") && !continuation {
+                    tokens.push(Token {
+                        kind: Kind::Newline,
+                        line,
+                        column,
+                        span: offset..offset + 1,
+                    });
+                }
+                offset += 1;
+                line += 1;
+                column = 1;
+                continue;
+            }
+            '`' => {
+                let length = templates::scan(rest, line, column)?.0;
+                tokens.push(Token {
+                    kind: Kind::Template(&rest[..length]),
+                    line,
+                    column,
+                    span: offset..offset + length,
+                });
+                offset += length;
+                column += rest[..length].chars().count();
+                continuation = false;
+                continue;
+            }
+            _ => {}
+        }
+        let (kind, length) = if ch.is_ascii_alphabetic() || ch == '_' {
+            let length = rest
+                .bytes()
+                .take_while(|b| b.is_ascii_alphanumeric() || *b == b'_')
+                .count();
+            let word = &rest[..length];
+            if word == "as" && rest.as_bytes().get(length) == Some(&b'%') {
+                (Kind::Symbol("as%"), length + 1)
+            } else {
+                let kind = if word == "_" {
+                    Kind::Wildcard
+                } else if KEYWORDS.contains(&word) {
+                    Kind::Keyword(word)
+                } else if TYPES.contains(&word) {
+                    Kind::TypeName(word)
+                } else {
+                    Kind::Ident(word)
+                };
+                (kind, length)
+            }
+        } else if ch.is_ascii_digit() {
+            number(rest)
+                .map_err(|message| error(line, column, ErrorKind::InvalidSource, message))?
+        } else if ch == '.' && rest.as_bytes().get(1).is_some_and(u8::is_ascii_digit) {
+            return Err(error(
+                line,
+                column,
+                ErrorKind::InvalidSource,
+                "a decimal point requires digits on both sides [lit.float]",
+            ));
+        } else if let Some(symbol) = SYMBOLS
+            .iter()
+            .filter(|symbol| rest.starts_with(**symbol))
+            .max_by_key(|symbol| symbol.len())
+        {
+            (Kind::Symbol(symbol), symbol.len())
+        } else {
+            return Err(error(
+                line,
+                column,
+                ErrorKind::InvalidSource,
+                format!("unexpected character {ch:?} [syntax.grammar]"),
+            ));
+        };
+        continuation = continues_line(kind, tokens.last().map(|token| token.kind));
+        match kind {
+            Kind::Symbol("(" | "{") => {
+                if let Kind::Symbol(symbol) = kind {
+                    delimiters.push(symbol);
+                }
+            }
+            Kind::Symbol(")") if delimiters.last() == Some(&"(") => {
+                delimiters.pop();
+            }
+            Kind::Symbol("}") if delimiters.last() == Some(&"{") => {
+                delimiters.pop();
+            }
+            _ => {}
+        }
+        tokens.push(Token {
+            kind,
+            line,
+            column,
+            span: offset..offset + length,
+        });
+        offset += length;
+        column += length; // All supported non-comment tokens are ASCII.
+    }
+    tokens.push(Token {
+        kind: Kind::End,
+        line,
+        column,
+        span: offset..offset,
+    });
+    for (index, token) in tokens.iter().enumerate() {
+        if matches!(token.kind, Kind::Symbol("..<" | "..=")) {
+            let touches_left = index > 0
+                && !matches!(tokens[index - 1].kind, Kind::Newline | Kind::End)
+                && tokens[index - 1].span.end == token.span.start;
+            let touches_right = tokens.get(index + 1).is_some_and(|next| {
+                !matches!(next.kind, Kind::Newline | Kind::End) && next.span.start == token.span.end
+            });
+            if !touches_left || !touches_right {
+                return Err(error(
+                    token.line,
+                    token.column,
+                    ErrorKind::InvalidSource,
+                    "range bounds must touch the range operator [for.range-spacing]",
+                ));
+            }
+        }
+    }
+    Ok(tokens)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn kinds(source: &str) -> Vec<Kind<'_>> {
+        lex(source)
+            .unwrap()
+            .into_iter()
+            .map(|token| token.kind)
+            .collect()
+    }
+
+    #[test]
+    fn malformed_floats_do_not_confuse_ranges_and_field_access() {
+        for literal in ["1.", "1.)", "1.}", "1.\n", ".5", "1e3", "1e-3"] {
+            let error = lex(&format!("// 日本語\n\t{literal}")).unwrap_err();
+            assert_eq!(error.kind, ErrorKind::InvalidSource, "{literal}");
+            assert_eq!((error.line, error.column), (2, 2), "{literal}");
+            assert!(error.message.contains("[lit.float]"), "{literal}: {error}");
+        }
+        for source in ["1..<2", "1..=2", "1.value", "(1).value", "1.0", "1.0e-3"] {
+            assert!(lex(source).is_ok(), "{source}");
+        }
+    }
+
+    #[test]
+    fn classifies_words_without_reserving_info() {
+        assert_eq!(
+            kinds("fn main u8 info _ _x fnx true nan inf"),
+            vec![
+                Kind::Keyword("fn"),
+                Kind::Ident("main"),
+                Kind::TypeName("u8"),
+                Kind::Ident("info"),
+                Kind::Wildcard,
+                Kind::Ident("_x"),
+                Kind::Ident("fnx"),
+                Kind::Keyword("true"),
+                Kind::Keyword("nan"),
+                Kind::Keyword("inf"),
+                Kind::End,
+            ]
+        );
+    }
+
+    #[test]
+    fn takes_the_longest_operator_and_preserves_cast_boundaries() {
+        assert_eq!(
+            kinds("+%= +% += + <<= << <= < >>= >> >= > != == -> => as% as % aside%"),
+            vec![
+                Kind::Symbol("+%="),
+                Kind::Symbol("+%"),
+                Kind::Symbol("+="),
+                Kind::Symbol("+"),
+                Kind::Symbol("<<="),
+                Kind::Symbol("<<"),
+                Kind::Symbol("<="),
+                Kind::Symbol("<"),
+                Kind::Symbol(">>="),
+                Kind::Symbol(">>"),
+                Kind::Symbol(">="),
+                Kind::Symbol(">"),
+                Kind::Symbol("!="),
+                Kind::Symbol("=="),
+                Kind::Symbol("->"),
+                Kind::Symbol("=>"),
+                Kind::Symbol("as%"),
+                Kind::Keyword("as"),
+                Kind::Symbol("%"),
+                Kind::Ident("aside"),
+                Kind::Symbol("%"),
+                Kind::End,
+            ]
+        );
+    }
+
+    #[test]
+    fn reads_numbers_without_absorbing_ranges_or_unary_signs() {
+        assert_eq!(
+            kinds("-1_000 1.25e-3 0.0 12.5e+2 0..<10 1..=2"),
+            vec![
+                Kind::Symbol("-"),
+                Kind::Integer("1_000"),
+                Kind::Float("1.25e-3"),
+                Kind::Float("0.0"),
+                Kind::Float("12.5e+2"),
+                Kind::Integer("0"),
+                Kind::Symbol("..<"),
+                Kind::Integer("10"),
+                Kind::Integer("1"),
+                Kind::Symbol("..="),
+                Kind::Integer("2"),
+                Kind::End,
+            ]
+        );
+        for source in ["16_777_216.0", "0.123_456", "1.0e1_0", "1_2.3_4e-0_5"] {
+            assert_eq!(kinds(source), vec![Kind::Float(source), Kind::End]);
+        }
+        for source in [
+            "1__0", "1_", "1_.0", "1._0", "1__000.0", "1.0__0", "1.0_", "1.0e", "1.0e+", "1.0e_10",
+            "1.0e+_10", "1.0e1__0", "1.0e10_",
+        ] {
+            assert_eq!(
+                lex(source).unwrap_err().kind,
+                ErrorKind::InvalidSource,
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn continues_across_comments_and_blank_lines_after_operators() {
+        assert_eq!(
+            kinds("x = // comment\n\n 1 + // comment\n\n 2\ny or\n3"),
+            vec![
+                Kind::Ident("x"),
+                Kind::Symbol("="),
+                Kind::Integer("1"),
+                Kind::Symbol("+"),
+                Kind::Integer("2"),
+                Kind::Newline,
+                Kind::Ident("y"),
+                Kind::Keyword("or"),
+                Kind::Integer("3"),
+                Kind::End,
+            ]
+        );
+        assert_eq!(
+            kinds("a\nor b"),
+            vec![
+                Kind::Ident("a"),
+                Kind::Newline,
+                Kind::Keyword("or"),
+                Kind::Ident("b"),
+                Kind::End
+            ]
+        );
+        assert_eq!(
+            kinds("(a\nor b)"),
+            vec![
+                Kind::Symbol("("),
+                Kind::Ident("a"),
+                Kind::Keyword("or"),
+                Kind::Ident("b"),
+                Kind::Symbol(")"),
+                Kind::End
+            ]
+        );
+    }
+
+    #[test]
+    fn innermost_braces_restore_statement_newlines() {
+        assert_eq!(
+            kinds("f(\nexpr {\nx\ny\n}\n)"),
+            vec![
+                Kind::Ident("f"),
+                Kind::Symbol("("),
+                Kind::Keyword("expr"),
+                Kind::Symbol("{"),
+                Kind::Newline,
+                Kind::Ident("x"),
+                Kind::Newline,
+                Kind::Ident("y"),
+                Kind::Newline,
+                Kind::Symbol("}"),
+                Kind::Symbol(")"),
+                Kind::End,
+            ]
+        );
+        assert_eq!(
+            kinds("{(x\ny)\nz}"),
+            vec![
+                Kind::Symbol("{"),
+                Kind::Symbol("("),
+                Kind::Ident("x"),
+                Kind::Ident("y"),
+                Kind::Symbol(")"),
+                Kind::Newline,
+                Kind::Ident("z"),
+                Kind::Symbol("}"),
+                Kind::End,
+            ]
+        );
+    }
+
+    #[test]
+    fn unary_operators_do_not_continue_lines_outside_parentheses() {
+        assert_eq!(
+            kinds("return -\n1"),
+            vec![
+                Kind::Keyword("return"),
+                Kind::Symbol("-"),
+                Kind::Newline,
+                Kind::Integer("1"),
+                Kind::End
+            ]
+        );
+        assert_eq!(
+            kinds("not\ntrue"),
+            vec![
+                Kind::Keyword("not"),
+                Kind::Newline,
+                Kind::Keyword("true"),
+                Kind::End
+            ]
+        );
+        assert_eq!(
+            kinds("1 -\n2"),
+            vec![
+                Kind::Integer("1"),
+                Kind::Symbol("-"),
+                Kind::Integer("2"),
+                Kind::End
+            ]
+        );
+        assert_eq!(
+            kinds("x as u8 -\n1"),
+            vec![
+                Kind::Ident("x"),
+                Kind::Keyword("as"),
+                Kind::TypeName("u8"),
+                Kind::Symbol("-"),
+                Kind::Integer("1"),
+                Kind::End
+            ]
+        );
+    }
+
+    #[test]
+    fn ranges_require_adjacent_bounds_even_across_suppressed_newlines() {
+        for source in [
+            "a ..<b",
+            "a..< b",
+            "a\n..<b",
+            "a..<\nb",
+            "(a\n..<b)",
+            "(a..<\nb)",
+            "a..<// comment\nb",
+        ] {
+            let error = lex(source).unwrap_err();
+            assert_eq!(error.kind, ErrorKind::InvalidSource, "{source}");
+            assert!(error.message.contains("for.range-spacing"), "{source}");
+        }
+        assert!(lex("(a+1)..<(b+2)").is_ok());
+    }
+
+    #[test]
+    fn keeps_physical_positions_when_newlines_are_suppressed() {
+        let source = "a + // 日本語\n\t2";
+        let tokens = lex(source).unwrap();
+        let two = tokens
+            .iter()
+            .find(|token| token.kind == Kind::Integer("2"))
+            .unwrap();
+        assert_eq!((two.line, two.column), (2, 2));
+        assert_eq!(&source[two.span.clone()], "2");
+        assert_eq!(two.span.start, source.len() - 1);
+        assert!(!tokens.iter().any(|token| token.kind == Kind::Newline));
+    }
+
+    #[test]
+    fn distinguishes_invalid_characters_from_template_text() {
+        for source in [";", "!", "\u{000b}", "名前"] {
+            assert_eq!(lex(source).unwrap_err().kind, ErrorKind::InvalidSource);
+        }
+        assert_eq!(
+            lex("log info `a // b`").unwrap()[2].kind,
+            Kind::Template("`a // b`")
+        );
+    }
+}
