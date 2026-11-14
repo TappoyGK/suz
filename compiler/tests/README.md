@@ -12,7 +12,7 @@
 | 配布検査 | `python3 scripts/test-distribution.py PATH --version VERSION` | 指定した配布バイナリをソースツリー外へコピーして検証 |
 | リリース検査 | `./scripts/test-release.sh` | 書式・Clippy、Rustのreleaseビルドで全テスト、生成Cを `-O2` にした例集全体の実行 |
 
-Cを繰り返しビルドする追加の型・演算・制御の組合せ検査、大量の変形入力、浮動小数点ログの全指数・疑似乱数値、最適化別の境界値検査は、リリース検査用の `#[ignore]` テストにする。通常の `cargo test` では理由とともに `ignored` と表示される。
+Cを繰り返しビルドする追加の型・演算・制御の組合せ検査、テキストプール上限を設定別・コマンド別に検証する実行検査、大量の変形入力、浮動小数点ログの全指数・疑似乱数値、最適化別の境界値検査は、リリース検査用の `#[ignore]` テストにする。通常の `cargo test` では理由とともに `ignored` と表示される。
 
 リリース検査は `--include-ignored` で普段のテストも含めて実行する。`SUZ_CASES` は解除し、例集の全例を検証する。`SUZ_JOBS` と `CC` は引き継ぐ。`./scripts/test-release.sh --offline` のようにCargoのオプションも渡せる。
 
@@ -82,6 +82,12 @@ SUZ_TIMINGS=1 ./scripts/test-spec-cases.sh
 - `compiler/tests/spec_cases/value_blocks.rs`：値ブロックのスコープ、外側の変数の更新、評価順序、制御移動と代入先の制約のテスト。
 - `compiler/tests/spec_cases/arithmetic.rs`：整数の算術、境界値、パニック、定数評価のテスト。
 - `compiler/tests/spec_cases/logs.rs`：テンプレート、整数・boolの表示、評価中のパニック、ログ出力のアトミック性のテスト。
+- `compiler/tests/spec_cases/text_float_casts.rs`：浮動小数点への変換、定数と実行時の丸め、失敗処理を検査する。解析処理の境界値とRustの数値解析との比較は `compiler/src/check/text_parse_tests.rs` に置く。
+- `compiler/tests/spec_cases/text_struct_casts.rs`：構造体変換の入れ子、フィールド型、エスケープ、改行、定数評価と失敗処理を検査する。
+- `compiler/tests/spec_cases/text_struct_runtime.rs`：失敗した構造体変換がプールを増やさないこと、一時領域の解放、確保失敗の位置、定数結果の静的配置を検査する。
+- `compiler/tests/spec_cases/text_casts.rs`：整数・真偽値への変換、整数のラップ変換、定数評価、失敗処理の型と制御移動を検査する。
+- `compiler/tests/spec_cases/text.rs`：テンプレートの定数依存、入れ子のスコープ、診断、定数と実行時の浮動小数点表示の一致を検査する。
+- `compiler/tests/spec_cases/text_runtime.rs`・`text_runtime.c`：環境層の確保・解放の記録によるテキストプールの共有実体、容量計測、上限、確保失敗、一時バッファの検査。プール単体のCプログラムはテスト起動ごとに最適化設定別で1回ビルドし、Cargoの出力ディレクトリに置いた同じ実行ファイルを各検査から別プロセスで起動する。検査結果は再利用しない。`text_environment.c` は生成プログラムの確保要求を記録し、遅延登録、ログ本文の解放、確保失敗時のソース位置、NULを含む出力を検査する。textのC実行テストは、通常の開発プロファイルでは動作を検査し、リリースプロファイルではサニタイザーも有効にする。最適化ありのプール検査は、プロファイルによらずサニタイザーを有効にする。
 - `compiler/tests/spec_cases/matches.rs`：整数・boolのmatchとmatchexpr、定数パターン、制御移動、式の結果を捨てる場合のテスト。
 - `compiler/tests/spec_cases/ranges.rs`：forの整数境界、入れ子の制御、範囲の参照・スコープ・診断のテスト。
 - `compiler/tests/spec_cases/shifts.rs`：シフトの型・境界値・定数評価のテスト。

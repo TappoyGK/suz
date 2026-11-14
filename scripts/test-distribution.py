@@ -36,14 +36,29 @@ def verify(binary, version, cc, directory):
     copied = directory / "suz"
     shutil.copy2(binary, copied)
     source = directory / "program.suz"
-    source.write_text("""fn main() -> u8 {
+    source.write_text(r"""fn main() -> u8 {
     fix zero: f64 = 0.0
     fix invalid = zero / zero
     if invalid == invalid || 1.0 / -zero != -inf { return 1 }
     fix tiny: f32 = 1.40129846e-45
     if tiny + tiny != 2.80259693e-45 { return 2 }
     log info `${invalid} ${-zero}`
+    fix input = `Entry { name: \`a\\0b\`, count: 42, ratio: 1.0000000596046447753906250000000001, mode: Mode.Last }`
+    fix item = input as Entry or return 3
+    fix name = `a\0${`b`}`
+    if item.name != name || item.count != 42 || item.mode != Mode.Last { return 4 }
+    if item.ratio != 1.00000011920928955078125 { return 5 }
+    fix wrapped = `257` as% u8 or return 6
+    fix enabled = `true` as bool or return 6
+    if wrapped != 1 || not enabled { return 6 }
     return 7
+}
+enum Mode: u8 { First, Last }
+struct Entry {
+    name: text,
+    count: u8,
+    ratio: f32,
+    mode: Mode,
 }
 """)
     panic = directory / "panic.suz"
@@ -92,7 +107,31 @@ def verify(binary, version, cc, directory):
             [exported / "scripts/build-c.sh", "program.c", "-o", f"program{optimization}", optimization],
             exported, dict(env, CC=str(cc)),
         )
-        run([exported / f"program{optimization}"], directory, env, 7)
+        result = run([exported / f"program{optimization}"], directory, env, 7)
+        require(
+            not result.stdout and result.stderr == f"info {source.name}:7: nan -0.0\n".encode(),
+            f"incorrect exported program output: {result.stderr!r}",
+        )
+
+    for limit, expected in (("1", 101), ("unlimited", 7)):
+        result = run(
+            [copied, "run", source, "--cc", cc, "--text-pool-limit", limit],
+            directory, env, expected,
+        )
+        if expected == 101:
+            require(b"[rt.text-allocation]" in result.stderr, "missing text pool diagnostic")
+        limited_export = directory / f"exported-{limit}"
+        run(
+            [copied, "emit-c", source, "-o", limited_export, "--text-pool-limit", limit],
+            directory, without_tools,
+        )
+        run(
+            [limited_export / "scripts/build-c.sh", "program.c", "-o", "program"],
+            limited_export, dict(env, CC=str(cc)),
+        )
+        result = run([limited_export / "program"], directory, env, expected)
+        if expected == 101:
+            require(b"[rt.text-allocation]" in result.stderr, "missing exported text pool diagnostic")
 
     # A custom compiler path exercises actual missing SDK/linker failures without
     # modifying the developer's Xcode installation or system search paths.
