@@ -1,0 +1,217 @@
+#[cfg(test)]
+#[path = "../tests/support/integer_bounds.rs"]
+mod integer_bounds;
+
+mod ast;
+mod check;
+mod codegen;
+mod lexer;
+mod parser;
+
+use std::fmt;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ErrorKind {
+    InvalidSource,
+    Unsupported,
+}
+
+#[derive(Debug)]
+pub struct Diagnostic {
+    pub kind: ErrorKind,
+    pub line: usize,
+    pub column: usize,
+    pub message: String,
+}
+
+impl fmt::Display for Diagnostic {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}: {}", self.line, self.column, self.message)
+    }
+}
+
+impl std::error::Error for Diagnostic {}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ArithmeticMode {
+    #[default]
+    Default,
+    Warn,
+    Deny,
+}
+
+#[derive(Debug)]
+pub struct Warning {
+    pub line: usize,
+    pub column: usize,
+    pub message: String,
+}
+
+pub struct Compilation {
+    pub c: String,
+    pub warnings: Vec<Warning>,
+}
+
+/// Compile Suz source to C11.
+pub fn compile(bytes: &[u8]) -> Result<String, Diagnostic> {
+    compile_with_mode(bytes, ArithmeticMode::Default).map(|result| result.c)
+}
+
+pub fn compile_with_mode(bytes: &[u8], mode: ArithmeticMode) -> Result<Compilation, Diagnostic> {
+    compile_with_source_name(bytes, mode, "<input>")
+}
+
+/// Compile with a source name used in generated runtime diagnostics.
+pub fn compile_with_source_name(
+    bytes: &[u8],
+    mode: ArithmeticMode,
+    source_name: &str,
+) -> Result<Compilation, Diagnostic> {
+    let (checked, warnings) = analyze(bytes, mode)?;
+    Ok(Compilation {
+        c: codegen::generate(&checked, source_name),
+        warnings,
+    })
+}
+
+/// Validate source and return warnings without generating C.
+pub fn check_source(bytes: &[u8], mode: ArithmeticMode) -> Result<Vec<Warning>, Diagnostic> {
+    analyze(bytes, mode).map(|(_, warnings)| warnings)
+}
+
+fn analyze(
+    bytes: &[u8],
+    mode: ArithmeticMode,
+) -> Result<(check::CheckedProgram, Vec<Warning>), Diagnostic> {
+    let source = std::str::from_utf8(bytes).map_err(|error| {
+        let prefix = std::str::from_utf8(&bytes[..error.valid_up_to()]).unwrap();
+        let (line, column) = lexer::position(prefix);
+        Diagnostic {
+            kind: ErrorKind::InvalidSource,
+            line,
+            column,
+            message: "source is not valid UTF-8 [src.encoding]".into(),
+        }
+    })?;
+    for (offset, _) in source.match_indices('\r') {
+        if source.as_bytes().get(offset + 1) != Some(&b'\n') {
+            let (line, column) = lexer::position(&source[..offset]);
+            return Err(Diagnostic {
+                kind: ErrorKind::InvalidSource,
+                line,
+                column,
+                message: "CR must be followed by LF [src.newline]".into(),
+            });
+        }
+    }
+    let source = source.replace("\r\n", "\n");
+    let tokens = lexer::lex(&source)?;
+    let program = parser::parse(&tokens)?;
+    let checked = check::check(&program)?;
+    let message = "integer arithmetic has no 'or' handler [diagnostic.arithmetic]";
+    if mode == ArithmeticMode::Deny
+        && let Some(location) = checked.unhandled_arithmetic.first()
+    {
+        return Err(location.error(ErrorKind::InvalidSource, message));
+    }
+    let warnings = if mode == ArithmeticMode::Warn {
+        checked
+            .unhandled_arithmetic
+            .iter()
+            .map(|location| Warning {
+                line: location.line,
+                column: location.column,
+                message: message.into(),
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    Ok((checked, warnings))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_comments_crlf_and_decimal_separators() {
+        for source in [
+            "// 前置き\nfn main() -> u8 { return 2_5_5 } // 後置き",
+            "fn main(\r\n) -> u8 {\r\n\treturn 255\r\n}\r\n",
+            "fn main() -> u8 { return 000255 }",
+        ] {
+            assert!(compile(source.as_bytes()).unwrap().contains("return 255;"));
+        }
+    }
+
+    #[test]
+    fn diagnoses_encoding_newlines_and_literal_bounds() {
+        for (source, position, rule) in [
+            (b"//\xff".as_slice(), (1, 3), "src.encoding"),
+            (b"//\r".as_slice(), (1, 3), "src.newline"),
+            (
+                b"fn main() -> u8 {\n    return 256\n}".as_slice(),
+                (2, 12),
+                "lit.range",
+            ),
+            (
+                b"fn main() -> u8 {\n    return 1__0\n}".as_slice(),
+                (2, 12),
+                "lit.integer",
+            ),
+            (
+                b"fn main() -> u8 {\n    return 1_\n}".as_slice(),
+                (2, 12),
+                "lit.integer",
+            ),
+        ] {
+            let error = compile(source).unwrap_err();
+            assert_eq!(error.kind, ErrorKind::InvalidSource);
+            assert_eq!((error.line, error.column), position);
+            assert!(error.message.contains(rule), "{error}");
+        }
+    }
+
+    #[test]
+    fn validates_the_main_signature() {
+        for (source, column) in [
+            ("fn main() -> i32 { return 0 }", 14),
+            ("fn main() -> void {}", 14),
+            ("fn main(value: u8) -> u8 { return value }", 9),
+            ("fn main() { return 0 }", 11),
+            ("fn main -> u8 { return 0 }", 9),
+        ] {
+            let error = compile(source.as_bytes()).unwrap_err();
+            assert_eq!(error.kind, ErrorKind::InvalidSource, "{source}");
+            assert_eq!((error.line, error.column), (1, column), "{source}");
+            assert!(error.message.contains("[prog.main]"), "{error}");
+        }
+        let error = compile(b"fn helper() -> u8 { return 0 }").unwrap_err();
+        assert_eq!(error.kind, ErrorKind::InvalidSource);
+        assert!(error.message.contains("[prog.main]"));
+    }
+
+    #[test]
+    fn rejects_return_without_a_value() {
+        let error = compile(b"fn main() -> u8 { return\n7 }").unwrap_err();
+        assert_eq!(error.kind, ErrorKind::InvalidSource);
+        assert!(error.message.contains("fn.return"));
+    }
+
+    #[test]
+    fn does_not_accept_only_a_prefix_of_a_program() {
+        for (source, kind) in [
+            (
+                "fn main() -> u8 { return 7 } fn other() -> void {}",
+                ErrorKind::InvalidSource,
+            ),
+            (
+                "fn main() -> u8 { return 7 } garbage",
+                ErrorKind::InvalidSource,
+            ),
+        ] {
+            assert_eq!(compile(source.as_bytes()).unwrap_err().kind, kind);
+        }
+    }
+}

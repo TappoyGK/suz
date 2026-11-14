@@ -1,0 +1,192 @@
+use super::{FixedToken, Parser};
+use crate::{
+    Diagnostic, ErrorKind,
+    ast::{EnumDeclaration, Expression, FieldInitializer, StructDeclaration, StructField, Type},
+    lexer::{Kind, Token},
+};
+use std::collections::BTreeSet;
+
+impl Parser<'_, '_> {
+    pub(super) fn condition(&mut self) -> Result<Expression, Diagnostic> {
+        let previous = self.restricted_condition;
+        self.restricted_condition = true;
+        let result = self.expression();
+        self.restricted_condition = previous;
+        result
+    }
+    pub(super) fn parenthesized_expression(&mut self) -> Result<Expression, Diagnostic> {
+        let previous = self.restricted_condition;
+        self.restricted_condition = false;
+        let result = self.expression();
+        self.restricted_condition = previous;
+        result
+    }
+    fn field_declaration(&mut self) -> Result<StructField, Diagnostic> {
+        let location = self.location();
+        let Kind::Ident(name) = self.token().kind else {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                "expected a field name [struct.field]",
+            ));
+        };
+        let name = name.to_owned();
+        self.cursor += 1;
+        if self.token().kind != Kind::Symbol(":") {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                "field type is required [struct.field]",
+            ));
+        }
+        self.cursor += 1;
+        let ty = self.parse_type()?;
+        if ty == Type::Void {
+            return Err(location.error(
+                ErrorKind::InvalidSource,
+                "field type cannot be void [type.void]",
+            ));
+        }
+        Ok(StructField { name, ty, location })
+    }
+    pub(super) fn field_initializer(&mut self) -> Result<FieldInitializer, Diagnostic> {
+        let location = self.location();
+        let Kind::Ident(name) = self.token().kind else {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                "expected a named field initializer [struct.literal]",
+            ));
+        };
+        let name = name.to_owned();
+        self.cursor += 1;
+        if self.token().kind != Kind::Symbol(":") {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                "field initializer requires ':' [struct.literal]",
+            ));
+        }
+        self.cursor += 1;
+        Ok(FieldInitializer {
+            name,
+            location,
+            value: self.expression()?,
+        })
+    }
+}
+
+pub(super) fn collect(
+    tokens: &[Token<'_>],
+    enums: &[EnumDeclaration],
+) -> Result<Vec<StructDeclaration>, Diagnostic> {
+    let mut p = Parser {
+        tokens,
+        enums,
+        structs: &[],
+        restricted_condition: false,
+        cursor: 0,
+        constant_expression: false,
+        in_value: false,
+    };
+    let mut headers = Vec::<StructDeclaration>::new();
+    let mut depth = 0usize;
+    while p.token().kind != Kind::End {
+        if depth == 0 && p.token().kind == Kind::Keyword("struct") {
+            let start = p.cursor;
+            p.cursor += 1;
+            let location = p.location();
+            let Kind::Ident(name) = p.token().kind else {
+                return Err(p.error(
+                    ErrorKind::InvalidSource,
+                    "expected a struct name [src.ident]",
+                ));
+            };
+            let name = name.to_owned();
+            if enums.iter().any(|decl| decl.name == name)
+                || headers.iter().any(|decl| decl.name == name)
+            {
+                return Err(location.error(
+                    ErrorKind::InvalidSource,
+                    "duplicate type name [decl.duplicate]",
+                ));
+            }
+            p.cursor += 1;
+            p.expect(FixedToken::Symbol("{"))?;
+            let mut braces = 1;
+            while braces != 0 {
+                match p.token().kind {
+                    Kind::Symbol("{") => braces += 1,
+                    Kind::Symbol("}") => braces -= 1,
+                    Kind::End => {
+                        return Err(p.error(
+                            ErrorKind::InvalidSource,
+                            "unclosed struct declaration [struct.field]",
+                        ));
+                    }
+                    _ => {}
+                }
+                p.cursor += 1;
+            }
+            headers.push(StructDeclaration {
+                name,
+                location,
+                fields: Vec::new(),
+                start,
+                end: p.cursor,
+            });
+            continue;
+        }
+        match p.token().kind {
+            Kind::Symbol("{" | "(" | "[") => depth += 1,
+            Kind::Symbol("}" | ")" | "]") => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        p.cursor += 1;
+    }
+    p.structs = &headers;
+    let mut declarations = headers.clone();
+    for decl in &mut declarations {
+        p.cursor = decl.start + 2;
+        decl.fields = p.delimited_list("{", "}", Parser::field_declaration)?;
+        if decl.fields.is_empty() {
+            return Err(decl.location.error(
+                ErrorKind::InvalidSource,
+                "struct requires at least one field [struct.nonempty]",
+            ));
+        }
+        let mut names = BTreeSet::new();
+        for field in &decl.fields {
+            if !names.insert(&field.name) {
+                return Err(field.location.error(
+                    ErrorKind::InvalidSource,
+                    "duplicate field name [struct.field]",
+                ));
+            }
+        }
+    }
+    fn visit(
+        id: usize,
+        declarations: &[StructDeclaration],
+        states: &mut [u8],
+    ) -> Result<(), Diagnostic> {
+        if states[id] == 2 {
+            return Ok(());
+        }
+        states[id] = 1;
+        for field in &declarations[id].fields {
+            if let Type::Struct(child) = field.ty {
+                if states[child] == 1 {
+                    return Err(field.location.error(
+                        ErrorKind::InvalidSource,
+                        "struct contains itself by value [struct.recursion]",
+                    ));
+                }
+                visit(child, declarations, states)?;
+            }
+        }
+        states[id] = 2;
+        Ok(())
+    }
+    let mut states = vec![0; declarations.len()];
+    for id in 0..declarations.len() {
+        visit(id, &declarations, &mut states)?;
+    }
+    Ok(declarations)
+}

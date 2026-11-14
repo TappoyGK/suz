@@ -1,0 +1,44 @@
+use super::arguments::Command;
+
+pub const USAGE: &str = "Usage:
+  suz build INPUT -o OUTPUT [OPTIONS]
+  suz run INPUT [OPTIONS]
+  suz check INPUT [OPTIONS]
+  suz emit-c INPUT -o DIRECTORY [OPTIONS]
+  suz --version
+  suz --help
+  suz --licenses";
+
+pub fn text(command: Option<Command>) -> String {
+    let mut text = match command {
+        None => format!(
+            "{USAGE}\n\nCommands:\n  build    Build an executable\n  run      Build and run a program\n  check    Validate source without a C compiler\n  emit-c   Export C and runtime sources\n"
+        ),
+        Some(command) => {
+            let output = match command {
+                Command::Build => " -o OUTPUT",
+                Command::EmitC => " -o DIRECTORY",
+                _ => "",
+            };
+            format!("Usage: suz {} INPUT{output} [OPTIONS]\n", command.name())
+        }
+    };
+    text.push_str("\nOptions:\n");
+    if command.is_none() || matches!(command, Some(Command::Build | Command::EmitC)) {
+        text.push_str("  -o PATH                        Output path (required)\n");
+    }
+    if command.is_none() || matches!(command, Some(Command::Build | Command::Run)) {
+        text.push_str("  -O0, -O2                       Optimization (default: -O0)\n  --cc PATH                      Clang executable (default: clang on PATH)\n");
+    }
+    if command != Some(Command::Check) {
+        text.push_str("  --env FILE                     Environment C source (default: bundled environment)\n");
+    }
+    if command.is_none() || command == Some(Command::Build) {
+        text.push_str("  --force                        Replace an existing regular output file\n");
+    }
+    text.push_str("  --warn-unhandled-arithmetic     Warn about integer arithmetic without an or handler\n  --deny-unhandled-arithmetic     Reject integer arithmetic without an or handler\n  --help                         Display help\n  --                             Treat remaining arguments as filenames\n\nArithmetic diagnostics are disabled by default.\n");
+    if command.is_none() {
+        text.push_str("  --version                      Display the version\n  --licenses                     Display copyright and license notices\n");
+    }
+    text
+}
