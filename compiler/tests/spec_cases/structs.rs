@@ -6,22 +6,22 @@ fn nested_struct_constants_and_equality_preserve_scalar_semantics() {
     let source = r#"struct Outer { inner: Inner, mode: Mode }
 struct Inner { value: f32, flag: bool }
 enum Mode: u8 { A, B }
-const first = Outer { mode: Mode.B, inner: Inner { value: 1.5, flag: true } }
-const equal = first == Outer { inner: Inner { flag: true, value: 1.5 }, mode: Mode.B }
-const bad = Inner { value: nan, flag: false }
-const unequal = bad != bad
-const field = first.inner.value
+const FIRST = Outer { mode: Mode.B, inner: Inner { value: 1.5, flag: true } }
+const EQUAL = FIRST == Outer { inner: Inner { flag: true, value: 1.5 }, mode: Mode.B }
+const BAD = Inner { value: nan, flag: false }
+const UNEQUAL = BAD != BAD
+const FIELD = FIRST.inner.value
 fn copy(value: Outer) -> Outer { return value }
 fn main() -> u8 {
-    fix value = copy(first)
-    fix selected = ifexpr equal { value } else { first }
-    if not equal || not unequal || field != 1.5 || selected != first { return 1 }
-    fix nested = Outer { inner: bad, mode: Mode.A }
+    fix value = copy(FIRST)
+    fix selected = ifexpr EQUAL { value } else { FIRST }
+    if not EQUAL || not UNEQUAL || FIELD != 1.5 || selected != FIRST { return 1 }
+    fix nested = Outer { inner: BAD, mode: Mode.A }
     if nested == nested || not (nested != nested) { return 2 }
     var calls: u8 = 0
-    fix result = first == nested == expr {
+    fix result = FIRST == nested == expr {
         calls += 1
-        first
+        FIRST
     }
     if result || calls != 0 { return 3 }
     return 0
@@ -131,12 +131,12 @@ fn struct_fields_reject_invalid_declarations_access_and_overlapping_writes() {
             "assign.rhs-write",
         ),
         (
-            "struct Item { x: u8 }\nconst p = Item { x: 1 / 0 }",
+            "struct Item { x: u8 }\nconst P = Item { x: 1 / 0 }",
             "",
             "const.evaluation",
         ),
         (
-            "struct Item { x: u8 }\nconst p = Item { x: p.x }",
+            "struct Item { x: u8 }\nconst P = Item { x: P.x }",
             "",
             "const.initializer",
         ),

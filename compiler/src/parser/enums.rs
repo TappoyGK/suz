@@ -15,6 +15,7 @@ impl Parser<'_, '_> {
                 "expected an enum variant name [enum.variant]",
             ));
         };
+        super::names::check(super::names::Shape::Variant, name, location)?;
         self.cursor += 1;
         if self.token().kind == Kind::Symbol("=") {
             return Err(self.error(
@@ -34,6 +35,7 @@ impl Parser<'_, '_> {
                 "expected an enum name [src.ident]",
             ));
         };
+        super::names::check(super::names::Shape::Type, name, location)?;
         let name = name.to_owned();
         self.cursor += 1;
         if self.token().kind != Kind::Symbol(":") {

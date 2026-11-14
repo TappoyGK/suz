@@ -40,6 +40,8 @@ mod invalid_inputs;
 mod logs;
 #[path = "spec_cases/matches.rs"]
 mod matches;
+#[path = "spec_cases/names.rs"]
+mod names;
 #[path = "spec_cases/native_cli.rs"]
 mod native_cli;
 #[path = "spec_cases/panics.rs"]

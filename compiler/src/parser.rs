@@ -3,6 +3,7 @@ mod enums;
 mod expressions;
 mod functions;
 mod logs;
+mod names;
 mod statements;
 mod structs;
 
@@ -76,6 +77,7 @@ impl<'a, 's> Parser<'a, 's> {
                 ));
             }
         };
+        names::check(names::Shape::Constant, &name, location)?;
         self.cursor += 1;
         let annotation = if self.token().kind == Kind::Symbol(":") {
             self.cursor += 1;

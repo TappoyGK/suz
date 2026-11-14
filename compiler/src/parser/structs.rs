@@ -29,6 +29,7 @@ impl Parser<'_, '_> {
                 "expected a field name [struct.field]",
             ));
         };
+        super::names::check(super::names::Shape::Value, name, location)?;
         let name = name.to_owned();
         self.cursor += 1;
         if self.token().kind != Kind::Symbol(":") {
@@ -98,6 +99,7 @@ pub(super) fn collect(
                     "expected a struct name [src.ident]",
                 ));
             };
+            super::names::check(super::names::Shape::Type, name, location)?;
             let name = name.to_owned();
             if enums.iter().any(|decl| decl.name == name)
                 || headers.iter().any(|decl| decl.name == name)

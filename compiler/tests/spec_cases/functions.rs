@@ -124,7 +124,7 @@ fn functions_reject_invalid_parameters_void_values_and_returns() {
         ),
         ("fn f(f: u8) -> void {}", "", "decl.shadowing"),
         (
-            "const name: u8 = 0\nfn f(name: u8) -> void {}",
+            "fn name() -> u8 { return 0 }\nfn f(name: u8) -> void {}",
             "",
             "decl.shadowing",
         ),
