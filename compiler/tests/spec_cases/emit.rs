@@ -206,6 +206,8 @@ fn exported_sources_build_independently_with_standard_and_custom_environments() 
         r#"#include "suz_env.h"
 #include <stdio.h>
 #include <stdlib.h>
+void *suz_env_alloc(size_t size) { return malloc(size); }
+void suz_env_free(void *ptr) { free(ptr); }
 void suz_env_log(const char *bytes, size_t length) { fwrite(bytes, 1, length, stdout); }
 _Noreturn void suz_env_panic(void) { exit(101); }
 "#,
@@ -246,6 +248,99 @@ _Noreturn void suz_env_panic(void) { exit(101); }
                 assert_eq!(result.stderr, expected);
                 assert!(result.stdout.is_empty());
             }
+        }
+    }
+}
+
+#[test]
+fn exported_text_pool_limits_preserve_units_defaults_and_full_u64_range() {
+    let directory = TemporaryDirectory::new();
+    fs::write(
+        directory.0.join("input.suz"),
+        "fn main() -> u8 { fix value = `x`\nreturn 0 }",
+    )
+    .unwrap();
+    let binary = Path::new(env!("CARGO_BIN_EXE_suz"));
+    for (index, (value, expected)) in [
+        (None, 1_073_741_824_u64),
+        (Some("1"), 1),
+        (Some("0001"), 1),
+        (Some("2K"), 2048),
+        (Some("256M"), 268_435_456),
+        (Some("2G"), 2_147_483_648),
+        (Some("unlimited"), 0),
+        (Some("18446744073709551615"), u64::MAX),
+        (Some("17179869183G"), 18_446_744_072_635_809_792),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let output = format!("output-{index}");
+        let mut args = vec!["input.suz", "-o", output.as_str()];
+        if let Some(value) = value {
+            args.extend(["--text-pool-limit", value]);
+        }
+        success(&emit(binary, &directory.0, &args));
+        let generated = fs::read_to_string(directory.0.join(&output).join("program.c")).unwrap();
+        assert!(
+            generated.contains(&format!("suz_text_pool_init(UINT64_C({expected}));")),
+            "{value:?}: {generated}"
+        );
+    }
+    for command_name in ["build", "run", "emit-c", "check"] {
+        let output = Command::new(binary)
+            .args([command_name, "--help"])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let help = String::from_utf8(output.stdout).unwrap();
+        assert_eq!(help.contains("--text-pool-limit"), command_name != "check");
+    }
+}
+
+#[test]
+#[ignore = "release check: run scripts/test-release.sh"]
+fn emitted_c_preserves_text_pool_limits() {
+    let directory = TemporaryDirectory::new();
+    fs::write(
+        directory.0.join("input.suz"),
+        "fn main() -> u8 { fix value = `x`\nreturn 0 }",
+    )
+    .unwrap();
+    let binary = Path::new(env!("CARGO_BIN_EXE_suz"));
+    for (index, limit) in [None, Some("256M"), Some("2G"), Some("unlimited"), Some("1")]
+        .into_iter()
+        .enumerate()
+    {
+        let name = format!("generated-{index}");
+        let mut args = vec!["input.suz", "-o", name.as_str()];
+        if let Some(limit) = limit {
+            args.extend(["--text-pool-limit", limit]);
+        }
+        success(&emit(binary, &directory.0, &args));
+        let generated = directory.0.join(name);
+        let mut build = Command::new(generated.join("scripts/build-c.sh"));
+        build
+            .current_dir(&generated)
+            .args(["program.c", "-o", "program"]);
+        for name in ["CFLAGS", "CPPFLAGS", "LDFLAGS"] {
+            build.env_remove(name);
+        }
+        let built = build.output().unwrap();
+        assert!(built.status.success(), "{built:?}");
+        let output = Command::new(generated.join("program")).output().unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(if limit == Some("1") { 101 } else { 0 }),
+            "{output:?}"
+        );
+        if limit == Some("1") {
+            assert!(
+                String::from_utf8_lossy(&output.stderr)
+                    .contains("text pool limit exceeded: limit=1, used=0")
+            );
+        } else {
+            assert!(output.stderr.is_empty());
         }
     }
 }

@@ -13,6 +13,13 @@ pub(super) fn validate_return_positions(statements: &[Statement]) -> Result<(), 
 fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), Diagnostic> {
     fn visit(expr: &Expression, allowed: bool, in_value: bool) -> Result<(), Diagnostic> {
         match &expr.kind {
+            ExpressionKind::Template(parts) => {
+                for part in parts {
+                    if let crate::ast::TemplatePart::Value(value) = part {
+                        visit(value, false, in_value)?;
+                    }
+                }
+            }
             ExpressionKind::Struct { fields, .. } => {
                 for field in fields {
                     visit(&field.value, false, in_value)?;
@@ -65,8 +72,7 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
             }
             ExpressionKind::Negate(inner)
             | ExpressionKind::BitNot(inner)
-            | ExpressionKind::Not(inner)
-            | ExpressionKind::Truncate { operand: inner, .. } => visit(inner, false, in_value)?,
+            | ExpressionKind::Not(inner) => visit(inner, false, in_value)?,
             ExpressionKind::Binary { left, right, .. }
             | ExpressionKind::Logical { left, right, .. } => {
                 visit(left, false, in_value)?;
@@ -217,6 +223,8 @@ pub(super) fn lower_return_handler(
     let id = *next_id;
     *next_id += 1;
     let Value::CastReturn {
+        location,
+        wrap,
         operand,
         return_value,
     } = std::mem::replace(&mut expr.value, Value::Local(id))
@@ -224,6 +232,8 @@ pub(super) fn lower_return_handler(
         unreachable!()
     };
     statements.push(CheckedStatement::CastReturn {
+        location,
+        wrap,
         id,
         ty: expr.ty,
         operand: *operand,

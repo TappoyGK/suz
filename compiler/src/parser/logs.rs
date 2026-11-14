@@ -1,7 +1,7 @@
 use super::Parser;
 use crate::{
     Diagnostic, ErrorKind,
-    ast::{Statement, TemplatePart},
+    ast::{Expression, Statement, TemplatePart},
     lexer::{
         self, Kind,
         templates::{self, Segment},
@@ -22,6 +22,14 @@ impl Parser<'_, '_> {
                 "expected a log template [log.syntax]",
             ));
         };
+        let parts = self.template(raw)?;
+        Ok(Statement::Log { parts, location })
+    }
+
+    pub(super) fn template(
+        &mut self,
+        raw: &str,
+    ) -> Result<Vec<TemplatePart<Expression>>, Diagnostic> {
         let token = self.token();
         let mut parts = Vec::new();
         for segment in templates::scan(raw, token.line, token.column)?.1 {
@@ -43,20 +51,20 @@ impl Parser<'_, '_> {
                         structs: self.structs,
                         restricted_condition: self.restricted_condition,
                         cursor: 0,
-                        constant_expression: false,
-                        in_value: false,
+                        constant_expression: self.constant_expression,
+                        in_value: self.in_value,
                     };
                     if parser.token().kind == Kind::End {
                         return Err(parser.error(
                             ErrorKind::InvalidSource,
-                            "empty interpolation [log.interpolation]",
+                            "empty interpolation [text.interpolation]",
                         ));
                     }
                     let value = parser.expression()?;
                     if parser.token().kind != Kind::End {
                         return Err(parser.error(
                             ErrorKind::InvalidSource,
-                            "expected one interpolation expression [log.interpolation]",
+                            "expected one interpolation expression [text.interpolation]",
                         ));
                     }
                     parts.push(TemplatePart::Value(value));
@@ -64,6 +72,6 @@ impl Parser<'_, '_> {
             }
         }
         self.cursor += 1;
-        Ok(Statement::Log { parts, location })
+        Ok(parts)
     }
 }

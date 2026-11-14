@@ -82,7 +82,11 @@ pub(super) fn check(
             {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
-                    "invalid operand type for this operator [expr.operator-types]",
+                    if ty == Type::Text {
+                        "text does not support arithmetic or bitwise operations [text.operations]"
+                    } else {
+                        "invalid operand type for this operator [expr.operator-types]"
+                    },
                 ));
             }
             let value = match &expr.kind {

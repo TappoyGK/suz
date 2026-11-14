@@ -77,12 +77,11 @@ fn interpolation_panics_before_output_and_keeps_physical_positions() {
 #[test]
 fn templates_validate_syntax_escapes_and_embedded_expressions() {
     for (body, rule) in [
-        ("log info `${}`", "log.interpolation"),
-        ("log info `${1 2}`", "log.interpolation"),
-        ("log info `${`nested`}`", "log.template"),
-        ("log info `bad\\q`", "log.escape"),
-        ("log info `first\nsecond`", "log.template-line"),
-        ("log info `${1 // comment}`", "log.template-line"),
+        ("log info `${}`", "text.interpolation"),
+        ("log info `${1 2}`", "text.interpolation"),
+        ("log info `bad\\q`", "text.escape"),
+        ("log info `first\nsecond`", "text.template-line"),
+        ("log info `${1 // comment}`", "text.template-line"),
         ("log error `text`", "log.syntax"),
         ("log info 1", "log.syntax"),
         (

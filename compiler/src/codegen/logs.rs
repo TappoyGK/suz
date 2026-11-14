@@ -1,9 +1,6 @@
-use super::{
-    ExpressionContext,
-    expressions::{c_string, expression},
-};
+use super::{ExpressionContext, expressions::c_string};
 use crate::{
-    ast::{Location, TemplatePart, Type},
+    ast::{Location, TemplatePart},
     check::CheckedExpression,
 };
 use std::fmt::Write;
@@ -17,58 +14,10 @@ pub(super) fn emit(
     context: &mut ExpressionContext,
 ) {
     let indent = "    ".repeat(depth);
-    writeln!(c, "{indent}{{").unwrap();
-    for (index, part) in parts.iter().enumerate() {
-        if let TemplatePart::Value(value) = part {
-            writeln!(
-                c,
-                "{indent}    const {} suz_log_{id}_{index} = {};",
-                value.ty.c_name(),
-                expression(value, context)
-            )
-            .unwrap();
-        }
-    }
+    let value = super::text::template(parts, location, true, context);
     let filename = std::path::Path::new(&context.source_name)
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or(&context.source_name);
-    writeln!(
-        c,
-        "{indent}    suz_log_begin({}, {});",
-        c_string(filename),
-        location.line
-    )
-    .unwrap();
-    for (index, part) in parts.iter().enumerate() {
-        match part {
-            TemplatePart::Text(text) => {
-                writeln!(
-                    c,
-                    "{indent}    suz_log_text({}, {});",
-                    c_string(text),
-                    text.len()
-                )
-                .unwrap();
-            }
-            TemplatePart::Value(value) => {
-                let kind = match value.ty {
-                    Type::Enum(ty) => {
-                        context.enum_logs.insert(ty.id);
-                        writeln!(c, "{indent}    suz_log_text(suz_enum_{}_names[suz_log_{id}_{index}], suz_enum_{}_lengths[suz_log_{id}_{index}]);", ty.id, ty.id).unwrap();
-                        continue;
-                    }
-                    Type::Bool => "bool",
-                    Type::Integer(ty) if ty.bounds().0 < 0 => "i64",
-                    Type::Integer(_) => "u64",
-                    Type::Float(ty) => ty.name(),
-                    Type::Void | Type::Struct(_) => {
-                        unreachable!("invalid interpolation type is rejected")
-                    }
-                };
-                writeln!(c, "{indent}    suz_log_{kind}(suz_log_{id}_{index});").unwrap();
-            }
-        }
-    }
-    writeln!(c, "{indent}    suz_log_end();\n{indent}}}").unwrap();
+    writeln!(c, "{indent}{{\n{indent}    suz_text_buffer suz_log_{id} = {value};\n{indent}    suz_log_begin({}, {});\n{indent}    suz_log_text(suz_log_{id}.bytes, (size_t)suz_log_{id}.length);\n{indent}    suz_log_end();\n{indent}    suz_text_buffer_dispose(&suz_log_{id});\n{indent}}}", c_string(filename), location.line).unwrap();
 }

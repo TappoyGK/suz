@@ -24,6 +24,7 @@ fn generated_c_and_runtime_reject_unsafe_math_modes() {
         &source,
         &runtime.join("suz_runtime.c"),
         &runtime.join("suz_float.c"),
+        &runtime.join("suz_format_float.c"),
     ] {
         for flag in [
             "-ffast-math",

@@ -1,4 +1,4 @@
-# Suz ツール仕様 v0.1.0
+# Suz ツール仕様 v0.2.0
 
 この文書は、`suz` コマンドの利用方法と配布物の契約を定める。言語の動作は[言語仕様](spec.md)、生成プログラムの動作は[ランタイム仕様](runtime.md)に従う。規則名には `tool.` を使う。
 
@@ -10,7 +10,7 @@
 
 **[tool.prerequisites]** `build` と `run` は、処理の開始時にClang・リンカー・SDKが利用できることを確認する。不足する場合は、不足しているものと導入方法を標準エラーに表示し、終了コード2で終了する。macOSではXcode Command Line Toolsの導入方法として `xcode-select --install` を案内する。コンパイラが見つからない場合とSDKが見つからない場合は、診断を区別する。外部ツールのインストールは利用者が行う。`check` と `emit-c` は、外部ツールを用意せず実行できる。
 
-**[tool.platform]** v0.1.0の対象環境は次のとおりである。OSとClangのバージョンは、コンパイラ・ランタイムを実際に検証した値である。
+**[tool.platform]** v0.2.0の対象環境は次のとおりである。OSとClangのバージョンは、コンパイラ・ランタイムを実際に検証した値である。
 
 | 項目 | 対象環境 |
 |---|---|
@@ -91,6 +91,7 @@ cd generated
 | `-O0`、`-O2` | 可 | 可 | | | 最適化。既定は `-O0` |
 | `--cc PATH` | 可 | 可 | | | Clangの実行ファイル |
 | `--env FILE` | 可 | 可 | | 可 | 標準環境層を置き換えるCソース |
+| `--text-pool-limit SIZE` | 可 | 可 | | 可 | テキストプールの上限。既定は `1G` |
 | `--force` | 可 | | | | 既存の通常ファイルを出力先として置き換える |
 | `--warn-unhandled-arithmetic` | 可 | 可 | 可 | 可 | 整数演算の失敗処理がない箇所を警告する |
 | `--deny-unhandled-arithmetic` | 可 | 可 | 可 | 可 | 同じ箇所をコンパイルエラーにする |
@@ -101,6 +102,26 @@ cd generated
 **[tool.environment]** `--env` のCソースは、ランタイム仕様の環境関数を実装する。`build` と `run` はそのファイルを標準環境層の代わりにリンクする。`emit-c` はその内容を出力先の `runtime/suz_env.c` に収録する。環境層のコンパイルには同梱の `suz_env.h` を使う。
 
 **[tool.build-settings]** C11と厳密な浮動小数点演算を使い、積和の縮約を停止し、非正規化数をIEEEの規則で扱う。Clangへの数値関連オプションはSuzが固定する。具体的には `-ffp-model=strict`、`-ffp-contract=off`、`-fdenormal-fp-math=ieee` を指定する。`CFLAGS`、`CPPFLAGS`、`LDFLAGS` に空でない値がある場合、`build` と `run` は使用方法のエラーにする。
+
+### 3.1 テキストプールの上限
+
+**[tool.text-pool-limit]** `--text-pool-limit SIZE` は、生成するプログラムのテキストプールの上限を指定する。`build`、`run`、`emit-c` で受け付ける。省略時は `1G` とする。設定は生成するプログラムに組み込む。`emit-c` では設定を生成物に含め、そのCから作った実行ファイルにも適用する。
+
+| SIZE | 意味 |
+|---|---|
+| 正の10進整数 | バイト単位の上限 |
+| 正の10進整数に `K`、`M`、`G` を付けた値 | それぞれ1,024、1,048,576、1,073,741,824倍のバイト数 |
+| `unlimited` | 無制限 |
+
+1Gは1 GiB、すなわち1,073,741,824バイトである。無制限はプール固有の容量制限を設けないという意味であり、実行環境のメモリや長さの表現範囲には制約される。計測対象はランタイム仕様の [runtime.text-accounting] に従う。
+
+**[tool.text-pool-size]** 数値部分はASCIIの数字だけとし、単位は大文字で書く。0、負数、不正な表記、単位換算後の値が64ビット符号なし整数の範囲を超える指定、同じオプションの重複指定は使用方法のエラーとする。単位換算はオーバーフローを検査してから結果を使う。
+
+```sh
+suz build program.suz -o program --text-pool-limit 256M
+suz run program.suz --text-pool-limit 2G
+suz emit-c program.suz -o generated --text-pool-limit unlimited
+```
 
 ## 4. 出力と一時ファイル
 
@@ -133,4 +154,4 @@ FILE:LINE:COLUMN: warning: MESSAGE [rule]
 
 `run` で生成プログラムを起動できた場合は `[tool.run]` と `[tool.run-signal]` に従う。プログラムの終了コードとツールのエラーコードは値が重なるため、ツール側の失敗は診断も併せて示す。
 
-**[tool.information]** `--version` は `suz v0.1.0` の形式の1行を標準出力に表示する。`--help` と各コマンドの `--help` は、使用方法・オプション・既定値を標準出力に表示する。`--licenses` は、Suzと同梱物の著作権・ライセンス表示を標準出力に表示する。これらは入力ファイルとClangを用意せず実行でき、成功時は終了コード0である。
+**[tool.information]** `--version` は `suz v0.2.0` の形式の1行を標準出力に表示する。`--help` と各コマンドの `--help` は、使用方法・オプション・既定値を標準出力に表示する。`--licenses` は、Suzと同梱物の著作権・ライセンス表示を標準出力に表示する。これらは入力ファイルとClangを用意せず実行でき、成功時は終了コード0である。

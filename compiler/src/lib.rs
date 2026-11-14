@@ -8,7 +8,7 @@ mod codegen;
 mod lexer;
 mod parser;
 
-use std::fmt;
+use std::{fmt, num::NonZeroU64};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ErrorKind {
@@ -40,6 +40,33 @@ pub enum ArithmeticMode {
     Deny,
 }
 
+/// Limit embedded in generated programs. Zero is reserved by the C runtime
+/// for unlimited storage and cannot be supplied as a finite limit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextPoolLimit {
+    Bytes(NonZeroU64),
+    Unlimited,
+}
+impl Default for TextPoolLimit {
+    fn default() -> Self {
+        Self::Bytes(NonZeroU64::new(1_073_741_824).unwrap())
+    }
+}
+impl TextPoolLimit {
+    fn runtime_value(self) -> u64 {
+        match self {
+            Self::Bytes(bytes) => bytes.get(),
+            Self::Unlimited => 0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CompilationOptions {
+    pub arithmetic_mode: ArithmeticMode,
+    pub text_pool_limit: TextPoolLimit,
+}
+
 #[derive(Debug)]
 pub struct Warning {
     pub line: usize,
@@ -67,9 +94,25 @@ pub fn compile_with_source_name(
     mode: ArithmeticMode,
     source_name: &str,
 ) -> Result<Compilation, Diagnostic> {
-    let (checked, warnings) = analyze(bytes, mode)?;
+    compile_with_options(
+        bytes,
+        source_name,
+        &CompilationOptions {
+            arithmetic_mode: mode,
+            ..CompilationOptions::default()
+        },
+    )
+}
+
+/// Compile with runtime settings embedded in the generated C.
+pub fn compile_with_options(
+    bytes: &[u8],
+    source_name: &str,
+    options: &CompilationOptions,
+) -> Result<Compilation, Diagnostic> {
+    let (checked, warnings) = analyze(bytes, options.arithmetic_mode)?;
     Ok(Compilation {
-        c: codegen::generate(&checked, source_name),
+        c: codegen::generate(&checked, source_name, options.text_pool_limit),
         warnings,
     })
 }

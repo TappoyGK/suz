@@ -68,20 +68,30 @@ impl Batch {
                 command.arg("-I").arg(&runtime);
             }
             compile_c(command.arg("-c").arg(source).arg("-o").arg(&object))?;
-            Ok((object, needs_runtime, super::float_runtime::required(&text)))
+            Ok((
+                object,
+                needs_runtime,
+                super::float_runtime::required(&text),
+                super::float_runtime::parser_required(&text),
+                super::float_runtime::struct_parser_required(&text),
+            ))
         });
         let mut errors = BTreeMap::new();
         let mut entries = Vec::new();
         let mut objects = Vec::new();
         let mut needs_runtime = false;
         let mut needs_float = false;
+        let mut needs_float_parser = false;
+        let mut needs_struct_parser = false;
         for ((index, _), result) in inputs.iter().zip(compiled) {
             match result {
-                Ok((object, uses_runtime, uses_float)) => {
+                Ok((object, uses_runtime, uses_float, uses_float_parser, uses_struct_parser)) => {
                     entries.push(*index);
                     objects.push(object);
                     needs_runtime |= uses_runtime;
                     needs_float |= uses_float;
+                    needs_float_parser |= uses_float_parser;
+                    needs_struct_parser |= uses_struct_parser;
                 }
                 Err(error) => {
                     errors.insert(*index, error);
@@ -122,8 +132,16 @@ impl Batch {
         if needs_runtime {
             command
                 .arg(runtime.join("suz_runtime.c"))
+                .arg(runtime.join("suz_text.c"))
+                .arg(runtime.join("suz_parse.c"))
                 .arg("-lm")
                 .arg(runtime.join("suz_env.c"));
+        }
+        if needs_struct_parser {
+            command.arg(runtime.join("suz_parse_struct.c"));
+        }
+        if needs_float_parser {
+            command.arg(runtime.join("suz_parse_float.c"));
         }
         if needs_float {
             super::float_runtime::link(&mut command, &runtime);

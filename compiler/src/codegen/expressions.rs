@@ -17,6 +17,15 @@ pub(super) fn c_string(text: &str) -> String {
 
 pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionContext) -> String {
     match expr.value {
+        Value::Text { ref text, location } => super::text::constant(text, location, context),
+        Value::Template {
+            ref parts,
+            location,
+            ref constant,
+        } => match constant {
+            Some(text) => super::text::constant(text, location, context),
+            None => super::text::template(parts, location, false, context),
+        },
         Value::Struct { ref fields } => {
             let crate::ast::Type::Struct(id) = expr.ty else {
                 unreachable!()
@@ -99,10 +108,18 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
         }
         Value::CastReturn { .. } => unreachable!("cast returns must be lowered to statements"),
         Value::CheckedCast {
+            ref constant_struct,
+            location,
+            wrap,
             ref operand,
             ref fallback,
+            ..
         } => {
-            let (setup, condition, converted) = cast_parts(operand, expr.ty, context);
+            if let Some(value) = constant_struct {
+                return expression(value, context);
+            }
+            let (setup, condition, converted) =
+                cast_parts(operand, expr.ty, wrap, location, context);
             let fallback = expression(fallback, context);
             format!("({setup}, {condition} ? {converted} : ({fallback}))")
         }
@@ -247,6 +264,7 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                 .ty
                 .integer_storage()
                 .is_some_and(|ty| ty.bounds().0 == 0);
+            let text = operands[0].ty == Type::Text;
             let floating = matches!(operands[0].ty, Type::Float(_));
             let structure = if let Type::Struct(id) = operands[0].ty {
                 context.struct_equals.insert(id);
@@ -254,7 +272,7 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             } else {
                 None
             };
-            if !floating && structure.is_none() {
+            if !floating && !text && structure.is_none() {
                 context.helpers.insert(unsigned);
             }
             // Declarations have no evaluation effects. Assignments remain in
@@ -283,6 +301,23 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                         names[index],
                         names[index + 1]
                     );
+                }
+                if text {
+                    return if operators[index].is_equality() {
+                        format!(
+                            "{} {} {}",
+                            names[index],
+                            operators[index].symbol(),
+                            names[index + 1]
+                        )
+                    } else {
+                        format!(
+                            "suz_text_compare({}, {}) {} 0",
+                            names[index],
+                            names[index + 1],
+                            operators[index].symbol()
+                        )
+                    };
                 }
                 if floating {
                     return format!(

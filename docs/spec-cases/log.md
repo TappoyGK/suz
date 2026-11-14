@@ -4,13 +4,14 @@
 
 ### log-001 テンプレートを変数に保存
 
-主根拠：`[log.template]`。
+主根拠：`[text.template]`。
 
 **ソース：**
 
 ```suz
 fn main() -> u8 {
-    fix text = `hello`
+    fix message = `hello`
+    log info `${message}`
     return 0
 }
 ```
@@ -19,19 +20,19 @@ fn main() -> u8 {
 
 | 設定 | 結果 | 終了コード | 整数演算の警告数 |
 |---|---|---:|---:|
-| 通常 | コンパイルエラー | — | 0 |
+| 通常 | 正常終了 | 0 | 0 |
 
-テンプレートはlog infoの出力内容専用。
+テンプレートをtextの値として保存し、ログへ埋め込む。
 
-**コンパイル診断：**
+**標準エラー：**
 
-| 設定 | 規則 | 行 | 列 |
-|---|---|---:|---:|
-| 通常 | `[log.template]` | 2 | 16 |
+```text
+info log-001.suz:3: hello
+```
 
 ### log-002 テンプレートをソース上で複数行にする
 
-主根拠：`[log.template-line]`。
+主根拠：`[text.template-line]`。
 
 **ソース：**
 
@@ -55,11 +56,11 @@ second`
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[log.template-line]` | 2 | 20 |
+| 通常 | `[text.template-line]` | 2 | 20 |
 
 ### log-003 ログに構造体を埋め込む
 
-主根拠：`[log.interpolation]`。
+主根拠：`[text.interpolation]`。
 
 **ソース：**
 
@@ -84,11 +85,11 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[log.interpolation]` | 4 | 17 |
+| 通常 | `[text.interpolation]` | 4 | 17 |
 
 ### log-004 voidの式をログに埋め込む
 
-主根拠：`[log.interpolation]`。
+主根拠：`[text.interpolation]`。
 
 **ソース：**
 
@@ -113,11 +114,11 @@ voidはログに埋め込める型ではない。
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[log.interpolation]` | 4 | 17 |
+| 通常 | `[text.interpolation]` | 4 | 17 |
 
 ### log-005 埋め込み式から別のログを出力する
 
-主根拠：`[log.interpolation]`。
+主根拠：`[log.evaluation]`。
 
 補助根拠：`[log.output]`。
 
@@ -152,7 +153,7 @@ info log-005.suz:7: outer: 3
 
 ### log-006 埋め込み式の評価中にパニックする
 
-主根拠：`[log.interpolation]`。
+主根拠：`[log.evaluation]`。
 
 補助根拠：`[rt.div-zero]`、`[rt.panic]`。
 
@@ -194,7 +195,7 @@ info log-006.suz:2: inner
 
 ### log-007 定義されていないテンプレートのエスケープ
 
-主根拠：`[log.escape]`。
+主根拠：`[text.escape]`。
 
 **ソース：**
 
@@ -217,13 +218,13 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[log.escape]` | 2 | 24 |
+| 通常 | `[text.escape]` | 2 | 24 |
 
 ### log-008 ログのエスケープと本文のコメント記号
 
-主根拠：`[log.escape]`。
+主根拠：`[text.escape]`。
 
-補助根拠：`[log.output]`、`[log.template-text]`。
+補助根拠：`[log.output]`、`[text.template-text]`。
 
 **ソース：**
 
@@ -249,7 +250,7 @@ next
 
 ### log-009 bool・enum・整数のログ表示
 
-主根拠：`[log.value-format]`。
+主根拠：`[text.value-format]`。
 
 補助根拠：`[log.output]`。
 
@@ -280,9 +281,9 @@ info log-009.suz:4: true false Saw 1234 -7
 
 ### log-010 浮動小数点の通常表記と小さい値の指数表記
 
-主根拠：`[log.float-format]`。
+主根拠：`[text.float-format]`。
 
-補助根拠：`[log.value-format]`。
+補助根拠：`[text.value-format]`。
 
 **ソース：**
 

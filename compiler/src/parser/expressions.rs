@@ -3,7 +3,7 @@ use crate::{
     Diagnostic, ErrorKind,
     ast::{
         BinaryOperator, ComparisonOperator, Expression, ExpressionKind, FailureHandler,
-        LogicalOperator, Type,
+        LogicalOperator,
     },
     lexer::Kind,
 };
@@ -158,34 +158,17 @@ impl Parser<'_, '_> {
             let location = self.location();
             self.cursor += 1;
             let target = self.parse_type()?;
-            let kind = if truncate {
-                let Type::Integer(target) = target else {
-                    return Err(location.error(
-                        ErrorKind::InvalidSource,
-                        "as% requires an integer target type [expr.as-trunc]",
-                    ));
-                };
-                ExpressionKind::Truncate {
-                    operand: Box::new(operand),
-                    target,
-                }
+            let fallback = if self.token().kind == Kind::Keyword("or") {
+                self.cursor += 1;
+                Some(self.failure_handler()?)
             } else {
-                if matches!(target, Type::Bool | Type::Void) {
-                    return Err(
-                        location.error(ErrorKind::InvalidSource, "invalid cast target [expr.as]")
-                    );
-                }
-                let fallback = if self.token().kind == Kind::Keyword("or") {
-                    self.cursor += 1;
-                    Some(self.failure_handler()?)
-                } else {
-                    None
-                };
-                ExpressionKind::Cast {
-                    operand: Box::new(operand),
-                    target,
-                    fallback,
-                }
+                None
+            };
+            let kind = ExpressionKind::Cast {
+                wrap: truncate,
+                operand: Box::new(operand),
+                target,
+                fallback,
             };
             operand = Expression { kind, location };
         }
@@ -218,12 +201,7 @@ impl Parser<'_, '_> {
                     "a standalone block is a statement; use expr for a value [expr.block]",
                 ));
             }
-            Kind::Template(_) => {
-                return Err(self.error(
-                    ErrorKind::InvalidSource,
-                    "templates are only allowed in log info [log.template]",
-                ));
-            }
+            Kind::Template(raw) => ExpressionKind::Template(self.template(raw)?),
             Kind::Keyword("ifexpr") => self.if_expression()?,
             Kind::Keyword("matchexpr") => {
                 self.cursor += 1;

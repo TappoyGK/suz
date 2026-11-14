@@ -3,6 +3,13 @@ use crate::ast::Location;
 
 pub(super) fn collect(expr: &CheckedExpression, locations: &mut Vec<Location>) {
     match &expr.value {
+        Value::Template { parts, .. } => {
+            for part in parts {
+                if let crate::ast::TemplatePart::Value(value) = part {
+                    collect(value, locations);
+                }
+            }
+        }
         Value::Struct { fields } => {
             for (_, field) in fields {
                 collect(field, locations);
@@ -67,7 +74,9 @@ pub(super) fn collect(expr: &CheckedExpression, locations: &mut Vec<Location>) {
             ..
         } => locations.push(*location),
         Value::CastReturn { .. } => unreachable!("cast returns must be lowered to statements"),
-        Value::CheckedCast { operand, fallback } => {
+        Value::CheckedCast {
+            operand, fallback, ..
+        } => {
             collect(operand, locations);
             collect(fallback, locations);
         }

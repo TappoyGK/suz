@@ -143,8 +143,13 @@ impl Build {
         for path in [
             "program.c",
             "runtime/suz_runtime.c",
+            "runtime/suz_text.c",
+            "runtime/suz_parse.c",
+            "runtime/suz_parse_float.c",
+            "runtime/suz_parse_struct.c",
             "runtime/suz_env.c",
             "runtime/suz_float.c",
+            "runtime/suz_format_float.c",
             "runtime/third_party/ryu/ryu/f2s.c",
             "runtime/third_party/ryu/ryu/d2s.c",
         ] {

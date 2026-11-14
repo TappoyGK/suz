@@ -2,6 +2,14 @@ use super::ExpressionContext;
 use std::fmt::Write;
 
 pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
+    for (text, id) in &context.text_literals {
+        writeln!(
+            c,
+            "static const char suz_text_literal_{id}[] = {};",
+            super::expressions::c_string(text)
+        )
+        .unwrap();
+    }
     for id in &context.enum_logs {
         let names = &context.enums[*id].variants;
         let strings = names

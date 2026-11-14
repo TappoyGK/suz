@@ -143,3 +143,73 @@ fn usage_errors_are_tagged_and_do_not_read_source() {
         failure(output, 2, "tool.arguments");
     }
 }
+
+#[test]
+fn invalid_text_pool_limits_are_rejected() {
+    let directory = Directory::new();
+    for command_name in ["build", "run", "emit-c"] {
+        for value in [
+            "",
+            "0",
+            "00",
+            "0K",
+            "-1",
+            "+1",
+            "1m",
+            "1.5G",
+            "1_000",
+            "1KB",
+            "1GiB",
+            " 1",
+            "1 ",
+            "１２",
+            "K",
+            "Unlimited",
+            "unlimitedG",
+            "18446744073709551616",
+            "18446744073709551615G",
+            "17179869184G",
+        ] {
+            let mut args = vec![command_name, "missing.suz", "--text-pool-limit", value];
+            if command_name != "run" {
+                args.extend(["-o", "output"]);
+            }
+            failure(
+                command(&directory.0).args(args).output().unwrap(),
+                2,
+                "tool.text-pool-size",
+            );
+        }
+        for suffix in [
+            vec!["--text-pool-limit"],
+            vec!["--text-pool-limit", "unlimited", "--text-pool-limit", "1"],
+        ] {
+            let mut args = vec![command_name, "missing.suz"];
+            args.extend(suffix);
+            failure(
+                command(&directory.0).args(args).output().unwrap(),
+                2,
+                "tool.text-pool-size",
+            );
+        }
+    }
+    failure(
+        command(&directory.0)
+            .args(["check", "missing.suz", "--text-pool-limit", "1G"])
+            .output()
+            .unwrap(),
+        2,
+        "tool.arguments",
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        let output = command(&directory.0)
+            .args(["run", "missing.suz", "--text-pool-limit"])
+            .arg(std::ffi::OsString::from_vec(vec![0xff]))
+            .output()
+            .unwrap();
+        failure(output, 2, "tool.text-pool-size");
+    }
+    assert_eq!(fs::read_dir(&directory.0).unwrap().count(), 0);
+}

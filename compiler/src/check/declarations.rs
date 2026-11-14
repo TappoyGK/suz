@@ -11,6 +11,13 @@ pub(super) fn dependencies(
     names: &mut Vec<(String, Location)>,
 ) -> Result<(), Diagnostic> {
     match &expr.kind {
+        ExpressionKind::Template(parts) => {
+            for part in parts {
+                if let crate::ast::TemplatePart::Value(value) = part {
+                    dependencies(value, names)?;
+                }
+            }
+        }
         ExpressionKind::Struct { fields, .. } => {
             for field in fields {
                 dependencies(&field.value, names)?;
@@ -25,8 +32,7 @@ pub(super) fn dependencies(
         ExpressionKind::Group(inner)
         | ExpressionKind::Negate(inner)
         | ExpressionKind::Not(inner)
-        | ExpressionKind::BitNot(inner)
-        | ExpressionKind::Truncate { operand: inner, .. } => dependencies(inner, names)?,
+        | ExpressionKind::BitNot(inner) => dependencies(inner, names)?,
         ExpressionKind::Binary { left, right, .. }
         | ExpressionKind::Logical { left, right, .. } => {
             dependencies(left, names)?;

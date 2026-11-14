@@ -63,24 +63,7 @@ pub(super) fn check_statements(
     for statement in input {
         match statement {
             Statement::Log { parts, location } => {
-                let mut checked = Vec::new();
-                for part in parts {
-                    checked.push(match part {
-                        crate::ast::TemplatePart::Text(text) => {
-                            crate::ast::TemplatePart::Text(text.clone())
-                        }
-                        crate::ast::TemplatePart::Value(value) => {
-                            let result = expression(value, None, bindings)?;
-                            if matches!(result.ty, Type::Void | Type::Struct(_)) {
-                                return Err(value.location.error(
-                                    ErrorKind::InvalidSource,
-                                    "this type cannot be interpolated [log.interpolation]",
-                                ));
-                            }
-                            crate::ast::TemplatePart::Value(result)
-                        }
-                    });
-                }
+                let checked = super::text::parts(parts, bindings)?;
                 statements.push(CheckedStatement::Log {
                     parts: checked,
                     location: *location,
