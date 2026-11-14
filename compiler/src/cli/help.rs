@@ -33,6 +33,11 @@ pub fn text(command: Option<Command>) -> String {
     if command != Some(Command::Check) {
         text.push_str("  --env FILE                     Environment C source (default: bundled environment)\n");
     }
+    if command != Some(Command::Check) {
+        text.push_str(
+            "  --text-pool-limit SIZE         Pool byte limit; K/M/G or unlimited (default: 1G)\n",
+        );
+    }
     if command.is_none() || command == Some(Command::Build) {
         text.push_str("  --force                        Replace an existing regular output file\n");
     }

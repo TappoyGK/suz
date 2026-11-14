@@ -5,6 +5,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+void *suz_env_alloc(size_t size) {
+    return malloc(size);
+}
+
+void suz_env_free(void *ptr) {
+    free(ptr);
+}
+
 void suz_env_log(const char *text, size_t len) {
 #ifdef SIGPIPE
     /* A closed output pipe is an output failure, not a process failure. */

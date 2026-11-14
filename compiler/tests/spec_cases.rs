@@ -57,6 +57,18 @@ mod support;
 mod syntax_diagnostics;
 #[path = "support/test_util.rs"]
 mod test_util;
+#[path = "spec_cases/text.rs"]
+mod text;
+#[path = "spec_cases/text_casts.rs"]
+mod text_casts;
+#[path = "spec_cases/text_float_casts.rs"]
+mod text_float_casts;
+#[path = "spec_cases/text_runtime.rs"]
+mod text_runtime;
+#[path = "spec_cases/text_struct_casts.rs"]
+mod text_struct_casts;
+#[path = "spec_cases/text_struct_runtime.rs"]
+mod text_struct_runtime;
 #[path = "spec_cases/value_blocks.rs"]
 mod value_blocks;
 #[path = "spec_cases/workers.rs"]

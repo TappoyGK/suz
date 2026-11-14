@@ -36,6 +36,7 @@ pub struct Options {
     pub optimization: OsString,
     pub force: bool,
     pub mode: suz::ArithmeticMode,
+    pub text_pool_limit: suz::TextPoolLimit,
 }
 
 fn invalid(message: impl std::fmt::Display) -> Failure {
@@ -72,6 +73,7 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
     let mut cc = None;
     let mut environment = None;
     let mut mode = None;
+    let mut text_pool_limit = None;
     let mut force = false;
     let mut help = false;
     let mut paths_only = false;
@@ -103,6 +105,16 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
                     if optimization.replace(arg).is_some() {
                         return Err(invalid("optimization options are mutually exclusive"));
                     }
+                    continue;
+                }
+                Some("--text-pool-limit") if command != Command::Check => {
+                    if text_pool_limit.is_some() {
+                        return Err(pool_size_error("duplicate --text-pool-limit option"));
+                    }
+                    let value = args
+                        .next()
+                        .ok_or_else(|| pool_size_error("expected SIZE after --text-pool-limit"))?;
+                    text_pool_limit = Some(parse_pool_limit(&value)?);
                     continue;
                 }
                 Some("--force") if command == Command::Build && !force => {
@@ -151,6 +163,7 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
         optimization: optimization.unwrap_or_else(|| "-O0".into()),
         force,
         mode: mode.unwrap_or_default(),
+        text_pool_limit: text_pool_limit.unwrap_or_default(),
     }))
 }
 
@@ -168,4 +181,36 @@ fn path_option(
         .ok_or_else(|| invalid(format!("expected a path after {name}")))?;
     *slot = Some(value.into());
     Ok(())
+}
+
+fn pool_size_error(message: impl std::fmt::Display) -> Failure {
+    Failure::tool(2, "tool.text-pool-size", message)
+}
+
+fn parse_pool_limit(value: &std::ffi::OsStr) -> Result<suz::TextPoolLimit> {
+    let error = || {
+        pool_size_error(
+            "expected a positive byte count, K/M/G suffix, or unlimited for --text-pool-limit",
+        )
+    };
+    let value = value.to_str().ok_or_else(error)?;
+    if value == "unlimited" {
+        return Ok(suz::TextPoolLimit::Unlimited);
+    }
+    let (digits, multiplier) = match value.as_bytes().last() {
+        Some(b'K') => (&value[..value.len() - 1], 1_024_u64),
+        Some(b'M') => (&value[..value.len() - 1], 1_048_576_u64),
+        Some(b'G') => (&value[..value.len() - 1], 1_073_741_824_u64),
+        _ => (value, 1),
+    };
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(error());
+    }
+    let bytes = digits
+        .parse::<u64>()
+        .ok()
+        .and_then(|number| number.checked_mul(multiplier))
+        .and_then(std::num::NonZeroU64::new)
+        .ok_or_else(error)?;
+    Ok(suz::TextPoolLimit::Bytes(bytes))
 }

@@ -76,7 +76,11 @@ fn generated_bool_values_preserve_negation_and_copies() {
         };
         let c_file = directory.join(format!("{index}.c"));
         let executable = directory.join(format!("{index}"));
-        fs::write(&c_file, generate(&program, "test.suz")).unwrap();
+        fs::write(
+            &c_file,
+            generate(&program, "test.suz", crate::TextPoolLimit::default()),
+        )
+        .unwrap();
         let output = runtime_link::compiler()
             .args(["-std=c11", "-Wall", "-Wextra", "-Werror"])
             .arg(&c_file)
@@ -236,7 +240,7 @@ return result != {expected} || trace != {trace};
             values[0],
             values[1],
             values[2],
-            generate(&program, "test.suz")
+            generate(&program, "test.suz", crate::TextPoolLimit::default())
         );
         let source = directory.join(format!("{index}.c"));
         let executable = directory.join(format!("{index}"));

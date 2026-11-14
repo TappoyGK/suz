@@ -133,6 +133,7 @@ pub(crate) enum Type {
     Float(FloatType),
     Integer(IntegerType),
     Bool,
+    Text,
 }
 
 impl Type {
@@ -151,7 +152,9 @@ impl Type {
         }
     }
     pub fn from_name(name: &str) -> Option<Self> {
-        if name == "void" {
+        if name == "text" {
+            Some(Self::Text)
+        } else if name == "void" {
             Some(Self::Void)
         } else if name == "bool" {
             Some(Self::Bool)
@@ -167,6 +170,7 @@ impl Type {
         match self {
             Self::Integer(ty) => ty.name(),
             Self::Float(ty) => ty.name(),
+            Self::Text => "text",
             Self::Bool => "bool",
             Self::Void => "void",
             Self::Enum(_) => "enum",
@@ -178,6 +182,7 @@ impl Type {
             Self::Struct(id) => format!("suz_struct_{id}"),
             Self::Integer(ty) => ty.c_name().into(),
             Self::Float(ty) => ty.c_name().into(),
+            Self::Text => "suz_text".into(),
             Self::Bool => "_Bool".into(),
             Self::Void => "void".into(),
             Self::Enum(ty) => ty.base.c_name().into(),
@@ -445,6 +450,7 @@ pub(crate) enum FailureHandler {
 }
 
 pub(crate) enum ExpressionKind {
+    Template(Vec<TemplatePart<Expression>>),
     Struct {
         id: usize,
         fields: Vec<FieldInitializer>,
@@ -475,6 +481,7 @@ pub(crate) enum ExpressionKind {
         fallback: Option<FailureHandler>,
     },
     Cast {
+        wrap: bool,
         operand: Box<Expression>,
         target: Type,
         fallback: Option<FailureHandler>,
@@ -484,10 +491,6 @@ pub(crate) enum ExpressionKind {
     If {
         branches: Vec<(Expression, Expression)>,
         otherwise: Box<Expression>,
-    },
-    Truncate {
-        operand: Box<Expression>,
-        target: IntegerType,
     },
     BitNot(Box<Expression>),
     Binary {

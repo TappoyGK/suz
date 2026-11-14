@@ -84,10 +84,10 @@ pub fn run() -> Result<Outcome> {
                     suz::check_source(&bytes, options.mode).map_err(diagnostic)?,
                 )
             } else {
-                let compiled = suz::compile_with_source_name(
+                let compiled = suz::compile_with_options(
                     &bytes,
-                    options.mode,
                     &options.input.display().to_string(),
+                    &suz::CompilationOptions { arithmetic_mode: options.mode, text_pool_limit: options.text_pool_limit },
                 )
                 .map_err(diagnostic)?;
                 (Some(compiled.c), compiled.warnings)

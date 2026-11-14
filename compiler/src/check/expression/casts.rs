@@ -15,12 +15,57 @@ pub(super) fn check(
 ) -> Result<CheckedExpression, Diagnostic> {
     Ok(match &expr.kind {
         ExpressionKind::Cast {
+            wrap,
             operand,
             target,
             fallback,
         } => {
             let operand = expression(operand, None, bindings)?;
+            if operand.ty == Type::Text {
+                let valid = if *wrap {
+                    matches!(target, Type::Integer(_))
+                } else {
+                    matches!(
+                        target,
+                        Type::Integer(_) | Type::Float(_) | Type::Bool | Type::Struct(_)
+                    )
+                };
+                if !valid {
+                    return Err(expr.location.error(
+                        ErrorKind::InvalidSource,
+                        if *wrap {
+                            "text as% requires an integer target [text.cast-wrap]"
+                        } else {
+                            "unsupported text conversion target [text.cast]"
+                        },
+                    ));
+                }
+                if fallback.is_none() {
+                    return Err(expr.location.error(
+                        ErrorKind::InvalidSource,
+                        "text conversion requires or [text.cast-handler]",
+                    ));
+                }
+            } else if *wrap {
+                if fallback.is_some() {
+                    return Err(expr.location.error(
+                        ErrorKind::InvalidSource,
+                        "integer as% does not accept or [text.cast-wrap-handler-syntax]",
+                    ));
+                }
+                if !matches!((operand.ty, target), (Type::Integer(_), Type::Integer(_))) {
+                    return Err(expr.location.error(
+                        ErrorKind::InvalidSource,
+                        "as% requires integer source and target types [expr.as-trunc]",
+                    ));
+                }
+                return Ok(CheckedExpression {
+                    ty: *target,
+                    value: Value::Truncate(Box::new(operand)),
+                });
+            }
             let safe = match (operand.ty, *target) {
+                (Type::Text, _) => false,
                 (Type::Integer(from), Type::Integer(to)) => {
                     let (from_min, from_max) = from.bounds();
                     let (to_min, to_max) = to.bounds();
@@ -43,6 +88,8 @@ pub(super) fn check(
                 let checked = CheckedExpression {
                     ty: *target,
                     value: Value::CastReturn {
+                        location: expr.location,
+                        wrap: *wrap,
                         operand: Box::new(operand),
                         return_value: Box::new(return_value),
                     },
@@ -62,11 +109,43 @@ pub(super) fn check(
                 None => None,
                 _ => unreachable!(),
             };
+            if operand.ty == Type::Text {
+                let constant_struct = if let Type::Struct(id) = target
+                    && super::super::constants::is_constant(fallback.as_ref().unwrap())
+                {
+                    // Defer errors in unselected constant operands to constant evaluation.
+                    super::super::constants::evaluate(&operand)
+                        .ok()
+                        .flatten()
+                        .and_then(|value| {
+                            let Value::Text { text, .. } = value.value else {
+                                return None;
+                            };
+                            super::super::text_structure::parse(&text, *id, expr.location, bindings)
+                                .map(Box::new)
+                        })
+                } else {
+                    None
+                };
+                return Ok(CheckedExpression {
+                    ty: *target,
+                    value: Value::CheckedCast {
+                        location: expr.location,
+                        constant_struct,
+                        wrap: *wrap,
+                        operand: Box::new(operand),
+                        fallback: Box::new(fallback.unwrap()),
+                    },
+                });
+            }
             if operand.ty.integer_bounds().is_some() && target.integer_bounds().is_some() {
                 if let Some(fallback) = fallback {
                     CheckedExpression {
                         ty: *target,
                         value: Value::CheckedCast {
+                            location: expr.location,
+                            constant_struct: None,
+                            wrap: false,
                             operand: Box::new(operand),
                             fallback: Box::new(fallback),
                         },
@@ -98,6 +177,9 @@ pub(super) fn check(
                     CheckedExpression {
                         ty: *target,
                         value: Value::CheckedCast {
+                            location: expr.location,
+                            constant_struct: None,
+                            wrap: false,
                             operand: Box::new(operand),
                             fallback: Box::new(fallback),
                         },
@@ -130,6 +212,9 @@ pub(super) fn check(
                     CheckedExpression {
                         ty: *target,
                         value: Value::CheckedCast {
+                            location: expr.location,
+                            constant_struct: None,
+                            wrap: false,
                             operand: Box::new(operand),
                             fallback: Box::new(fallback),
                         },
@@ -159,6 +244,9 @@ pub(super) fn check(
                 debug_assert!(safe);
                 let value = if let Some(fallback) = fallback {
                     Value::CheckedCast {
+                        location: expr.location,
+                        constant_struct: None,
+                        wrap: false,
                         operand: Box::new(operand),
                         fallback: Box::new(fallback),
                     }
@@ -169,19 +257,6 @@ pub(super) fn check(
             }
         }
 
-        ExpressionKind::Truncate { operand, target } => {
-            let operand = expression(operand, None, bindings)?;
-            if !matches!(operand.ty, Type::Integer(_)) {
-                return Err(expr.location.error(
-                    ErrorKind::InvalidSource,
-                    "as% requires an integer operand [expr.as-trunc]",
-                ));
-            }
-            CheckedExpression {
-                ty: Type::Integer(*target),
-                value: Value::Truncate(Box::new(operand)),
-            }
-        }
         _ => unreachable!(),
     })
 }

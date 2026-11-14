@@ -50,6 +50,6 @@ exec "${CC:-clang}" -std=c11 -Wall -Wextra -Werror "$optimization" \
     -ffp-model=strict -ffp-contract=off \
     -fdenormal-fp-math=ieee \
     -I "$runtime" -I "$runtime/third_party/ryu" \
-    "$source_file" "$runtime/suz_runtime.c" "$environment_file" "$runtime/suz_float.c" \
+    "$source_file" "$runtime/suz_runtime.c" "$runtime/suz_text.c" "$runtime/suz_parse.c" "$runtime/suz_parse_float.c" "$runtime/suz_parse_struct.c" "$environment_file" "$runtime/suz_float.c" "$runtime/suz_format_float.c" \
     "$runtime/third_party/ryu/ryu/f2s.c" "$runtime/third_party/ryu/ryu/d2s.c" \
     -lm -o "$output_file"

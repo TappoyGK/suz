@@ -74,8 +74,17 @@ pub fn build_and_run_c(c_file: &Path, executable: &Path) -> Result<Output> {
             .arg("-I")
             .arg(&runtime)
             .arg(runtime.join("suz_runtime.c"))
+            .arg(runtime.join("suz_text.c"))
+            .arg(runtime.join("suz_parse.c"))
+            .args(
+                super::float_runtime::parser_required(&source)
+                    .then(|| runtime.join("suz_parse_float.c")),
+            )
             .arg("-lm")
             .arg(runtime.join("suz_env.c"));
+        if super::float_runtime::struct_parser_required(&source) {
+            command.arg(runtime.join("suz_parse_struct.c"));
+        }
         if super::float_runtime::required(&source) {
             super::float_runtime::link(&mut command, &runtime);
         }

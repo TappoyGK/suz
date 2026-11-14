@@ -6,6 +6,8 @@ use crate::check::CheckedExpression;
 pub(super) fn cast_parts(
     operand: &CheckedExpression,
     target: crate::ast::Type,
+    wrap: bool,
+    location: crate::ast::Location,
     context: &mut ExpressionContext,
 ) -> (String, String, String) {
     use crate::ast::{FloatType, IntegerType, Type};
@@ -18,6 +20,57 @@ pub(super) fn cast_parts(
     context.temporaries.push(operand.ty);
     let source = expression(operand, context);
     let local = format!("suz_cmp_{index}");
+    if operand.ty == Type::Text {
+        context.uses_text = true;
+        let output = context.temporaries.len();
+        if let Type::Struct(id) = target {
+            context.struct_parsers.insert(id);
+            context.temporaries.push(target);
+            let position = super::text::position(location, context);
+            return (
+                format!("{local} = {source}"),
+                format!("suz_parse_struct_{id}({local}, &suz_cmp_{output}, {position})"),
+                format!("suz_cmp_{output}"),
+            );
+        }
+        let (result_type, function, arguments, converted) = match target {
+            Type::Float(ty) => (
+                Type::Float(ty),
+                match ty {
+                    FloatType::F32 => "suz_parse_f32",
+                    FloatType::F64 => "suz_parse_f64",
+                },
+                String::new(),
+                format!("suz_cmp_{output}"),
+            ),
+            Type::Bool => (
+                Type::Bool,
+                "suz_parse_bool",
+                String::new(),
+                format!("suz_cmp_{output}"),
+            ),
+            Type::Integer(ty) => {
+                context.bit_helpers.insert(ty);
+                (
+                    Type::Integer(IntegerType::U64),
+                    "suz_parse_integer",
+                    format!(
+                        ", {}, {}, {}",
+                        ty.bits(),
+                        u8::from(ty.bounds().0 < 0),
+                        u8::from(wrap)
+                    ),
+                    format!("suz_bits_{}(suz_cmp_{output})", ty.name()),
+                )
+            }
+            _ => unreachable!(),
+        };
+        context.temporaries.push(result_type);
+        let condition = format!(
+            "{function}(suz_text_bytes({local}), suz_text_length({local}){arguments}, &suz_cmp_{output})"
+        );
+        return (format!("{local} = {source}"), condition, converted);
+    }
     let mut converted = format!("({}){local}", target.c_name());
     let condition = match (operand.ty, target) {
         (Type::Float(FloatType::F64), Type::Float(FloatType::F32)) => {

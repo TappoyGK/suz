@@ -28,6 +28,13 @@ pub(crate) fn walk_expression<V: Visitor + ?Sized>(
     expr: &Expression,
 ) -> Result<(), Diagnostic> {
     match &expr.kind {
+        ExpressionKind::Template(parts) => {
+            for part in parts {
+                if let TemplatePart::Value(value) = part {
+                    visitor.expression(value)?;
+                }
+            }
+        }
         ExpressionKind::Struct { fields, .. } => {
             for field in fields {
                 visitor.expression(&field.value)?;
@@ -74,8 +81,7 @@ pub(crate) fn walk_expression<V: Visitor + ?Sized>(
         ExpressionKind::Group(inner)
         | ExpressionKind::Negate(inner)
         | ExpressionKind::Not(inner)
-        | ExpressionKind::BitNot(inner)
-        | ExpressionKind::Truncate { operand: inner, .. } => visitor.expression(inner)?,
+        | ExpressionKind::BitNot(inner) => visitor.expression(inner)?,
         ExpressionKind::Binary { left, right, .. }
         | ExpressionKind::Logical { left, right, .. } => {
             visitor.expression(left)?;

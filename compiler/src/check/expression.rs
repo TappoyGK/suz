@@ -16,6 +16,7 @@ use crate::{
 // The comparison's bool result never supplies the operand type.
 pub(super) fn operand_type(expr: &Expression, bindings: &Scope) -> Option<Type> {
     match &expr.kind {
+        ExpressionKind::Template(_) => Some(Type::Text),
         ExpressionKind::Struct { id, .. } => Some(Type::Struct(*id)),
         ExpressionKind::Field { target, name } => {
             let Type::Struct(id) = operand_type(target, bindings)? else {
@@ -41,7 +42,6 @@ pub(super) fn operand_type(expr: &Expression, bindings: &Scope) -> Option<Type> 
             .iter()
             .find_map(|arm| operand_type(&arm.body, bindings)),
         ExpressionKind::Cast { target, .. } => Some(*target),
-        ExpressionKind::Truncate { target, .. } => Some(Type::Integer(*target)),
         ExpressionKind::If {
             branches,
             otherwise,
@@ -146,6 +146,7 @@ pub(super) fn expression(
     bindings: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
     let checked = match &expr.kind {
+        ExpressionKind::Template(parts) => super::text::template(parts, expr.location, bindings)?,
         ExpressionKind::Struct { .. } | ExpressionKind::Field { .. } => {
             structs::check(expr, bindings)?
         }
@@ -193,9 +194,7 @@ pub(super) fn expression(
         | ExpressionKind::Not(_)
         | ExpressionKind::Logical { .. }
         | ExpressionKind::Comparison { .. } => operators::check(expr, expected, bindings)?,
-        ExpressionKind::Cast { .. } | ExpressionKind::Truncate { .. } => {
-            casts::check(expr, expected, bindings)?
-        }
+        ExpressionKind::Cast { .. } => casts::check(expr, expected, bindings)?,
         ExpressionKind::Float(text) => {
             let ty =
                 match expected {
@@ -222,7 +221,7 @@ pub(super) fn expression(
             }
             let ty = match expected {
                 Some(Type::Float(_)) => unreachable!(),
-                Some(Type::Bool | Type::Void | Type::Enum(_) | Type::Struct(_)) => {
+                Some(Type::Bool | Type::Void | Type::Enum(_) | Type::Struct(_) | Type::Text) => {
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
                         "an integer literal requires a numeric type [type.expected]",

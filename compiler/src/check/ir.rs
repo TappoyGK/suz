@@ -39,6 +39,8 @@ pub(crate) enum CheckedStatement {
         return_value: CheckedExpression,
     },
     CastReturn {
+        location: Location,
+        wrap: bool,
         id: usize,
         ty: Type,
         operand: CheckedExpression,
@@ -104,6 +106,15 @@ impl IntegerOperation {
 }
 #[derive(Clone)]
 pub(crate) enum Value {
+    Text {
+        text: String,
+        location: Location,
+    },
+    Template {
+        parts: Vec<crate::ast::TemplatePart<CheckedExpression>>,
+        location: Location,
+        constant: Option<String>,
+    },
     Struct {
         fields: Vec<(usize, CheckedExpression)>,
     },
@@ -132,11 +143,16 @@ pub(crate) enum Value {
         handler: Option<CheckedHandler>,
     },
     CastReturn {
+        location: Location,
+        wrap: bool,
         operand: Box<CheckedExpression>,
         return_value: Box<CheckedExpression>,
     },
     Cast(Box<CheckedExpression>),
     CheckedCast {
+        location: Location,
+        constant_struct: Option<Box<CheckedExpression>>,
+        wrap: bool,
         operand: Box<CheckedExpression>,
         fallback: Box<CheckedExpression>,
     },

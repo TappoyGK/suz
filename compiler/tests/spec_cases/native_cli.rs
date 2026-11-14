@@ -208,6 +208,8 @@ fn run_inherits_streams_and_cwd_and_cleans_up_after_signals() {
         r#"#include "suz_env.h"
 #include <stdio.h>
 #include <stdlib.h>
+void *suz_env_alloc(size_t size) { return malloc(size); }
+void suz_env_free(void *ptr) { free(ptr); }
 void suz_env_log(const char *s, size_t n) {
     static int written; (void)s; (void)n;
     if (!written) { putchar(getchar()); written = 1; }
@@ -234,6 +236,8 @@ _Noreturn void suz_env_panic(void) { exit(101); }
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+void *suz_env_alloc(size_t size) { return malloc(size); }
+void suz_env_free(void *ptr) { free(ptr); }
 void suz_env_log(const char *s, size_t n) {
     (void)s; (void)n;
     FILE *f = fopen("ready", "w"); if (!f) exit(91);
@@ -276,5 +280,55 @@ _Noreturn void suz_env_panic(void) { exit(101); }
         assert_eq!(status.signal(), Some(signal));
         fs::remove_file(directory.0.join("ready")).unwrap();
         clean(&directory.0);
+    }
+}
+
+#[test]
+#[ignore = "release check: run scripts/test-release.sh"]
+fn build_and_run_apply_text_pool_limits() {
+    let directory = setup();
+    fs::write(
+        directory.0.join("input.suz"),
+        "fn main() -> u8 { fix value = `x`\nreturn 0 }",
+    )
+    .unwrap();
+    for (index, limit) in [None, Some("256M"), Some("2G"), Some("unlimited"), Some("1")]
+        .into_iter()
+        .enumerate()
+    {
+        let expected = if limit == Some("1") { 101 } else { 0 };
+        let name = format!("program-{index}");
+        for command_name in ["build", "run"] {
+            let mut args = vec![command_name, "input.suz"];
+            if command_name == "build" {
+                args.extend(["-o", name.as_str()]);
+            }
+            if let Some(limit) = limit {
+                args.extend(["--text-pool-limit", limit]);
+            }
+            let output = code(
+                command(&directory.0).args(args).output().unwrap(),
+                if command_name == "build" { 0 } else { expected },
+            );
+            let output = if command_name == "build" {
+                code(
+                    Command::new(directory.0.join(&name)).output().unwrap(),
+                    expected,
+                )
+            } else {
+                output
+            };
+            if expected == 101 {
+                assert!(
+                    String::from_utf8_lossy(&output.stderr)
+                        .contains("text pool limit exceeded: limit=1, used=0"),
+                    "{output:?}"
+                );
+            } else {
+                assert!(output.stderr.is_empty());
+            }
+            assert!(output.stdout.is_empty());
+            clean(&directory.0);
+        }
     }
 }

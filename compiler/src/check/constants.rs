@@ -77,7 +77,17 @@ fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
             Type::Float(_) => float_to_integer(constant_float_raw(inner)?, ty),
             _ => constant_integer_raw(inner),
         },
-        Value::CheckedCast { operand, fallback } => {
+        Value::CheckedCast {
+            operand,
+            fallback,
+            wrap,
+            ..
+        } => {
+            if operand.ty == Type::Text {
+                return text_cast(operand, expr.ty, *wrap)
+                    .and_then(|value| constant_integer_raw(&value))
+                    .or_else(|| constant_integer_raw(fallback));
+            }
             // Both sides must belong to the constant-expression grammar.
             if matches!(operand.ty, Type::Float(_)) {
                 let value = constant_float_raw(operand)?;
@@ -146,7 +156,18 @@ fn constant_float_raw(expr: &CheckedExpression) -> Option<f64> {
             Type::Float(_) => constant_float_raw(inner)?,
             _ => return None,
         },
-        Value::CheckedCast { operand, fallback } => {
+        Value::CheckedCast {
+            operand,
+            fallback,
+            wrap,
+            ..
+        } => {
+            debug_assert!(!wrap);
+            if operand.ty == Type::Text {
+                return text_cast(operand, expr.ty, false)
+                    .and_then(|value| constant_float_raw(&value))
+                    .or_else(|| constant_float_raw(fallback));
+            }
             if matches!(operand.ty, Type::Integer(_)) {
                 let integer = constant_integer_raw(operand)?;
                 return Some(integer_as_float(integer, ty));
@@ -203,6 +224,14 @@ fn constant_bool_raw(expr: &CheckedExpression) -> Option<bool> {
     use std::cmp::Ordering::{Equal, Greater, Less};
     match &expr.value {
         Value::Bool(value) => Some(*value),
+        Value::CheckedCast {
+            operand,
+            fallback,
+            wrap,
+            ..
+        } if operand.ty == Type::Text => text_cast(operand, Type::Bool, *wrap)
+            .and_then(|value| constant_bool_raw(&value))
+            .or_else(|| constant_bool_raw(fallback)),
         Value::Not(inner) => Some(!constant_bool_raw(inner)?),
         Value::Logical {
             operator,
@@ -223,6 +252,14 @@ fn constant_bool_raw(expr: &CheckedExpression) -> Option<bool> {
             for (operator, operand) in operators.iter().zip(operands.iter().skip(1)) {
                 let right = evaluate_raw(operand)?;
                 let order = match left.ty {
+                    Type::Text => {
+                        let (Value::Text { text: a, .. }, Value::Text { text: b, .. }) =
+                            (&left.value, &right.value)
+                        else {
+                            return None;
+                        };
+                        Some(a.cmp(b))
+                    }
                     Type::Struct(_) => {
                         let equal = equal_structs(&left, &right)?;
                         let matches = match operator {
@@ -301,7 +338,30 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
         return constant_field(target, *index);
     }
     let value = match expr.ty {
+        Type::Text => match &expr.value {
+            Value::Text { .. } => expr.value.clone(),
+            Value::Template {
+                constant: Some(text),
+                location,
+                ..
+            } => Value::Text {
+                text: text.clone(),
+                location: *location,
+            },
+            _ => return None,
+        },
         Type::Struct(_) => {
+            if let Value::CheckedCast {
+                constant_struct,
+                fallback,
+                ..
+            } = &expr.value
+            {
+                return constant_struct
+                    .as_deref()
+                    .cloned()
+                    .or_else(|| evaluate_raw(fallback));
+            }
             let Value::Struct { fields } = &expr.value else {
                 return None;
             };
@@ -331,17 +391,24 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
 
 // Grammar and type checking cover unselected operands too; evaluation below
 // visits only the selected path and reports the first failing operation.
-fn is_constant(expr: &CheckedExpression) -> bool {
+pub(super) fn is_constant(expr: &CheckedExpression) -> bool {
     match &expr.value {
         Value::Struct { fields } => fields.iter().all(|(_, value)| is_constant(value)),
         Value::Field { target, .. } => is_constant(target),
+        Value::Text { .. } => true,
+        Value::Template { parts, .. } => parts.iter().all(|part| match part {
+            crate::ast::TemplatePart::Text(_) => true,
+            crate::ast::TemplatePart::Value(value) => is_constant(value),
+        }),
         Value::Integer { .. } | Value::Float(_) | Value::Bool(_) => true,
         Value::Cast(inner)
         | Value::Negate(inner)
         | Value::Truncate(inner)
         | Value::BitNot(inner)
         | Value::Not(inner) => is_constant(inner),
-        Value::CheckedCast { operand, fallback } => is_constant(operand) && is_constant(fallback),
+        Value::CheckedCast {
+            operand, fallback, ..
+        } => is_constant(operand) && is_constant(fallback),
         Value::IntegerArithmetic {
             operation, handler, ..
         } => {
@@ -360,7 +427,10 @@ fn is_constant(expr: &CheckedExpression) -> bool {
     }
 }
 
-fn cast_succeeds(operand: &CheckedExpression, target: Type) -> bool {
+fn cast_succeeds(operand: &CheckedExpression, target: Type, wrap: bool) -> bool {
+    if operand.ty == Type::Text {
+        return text_cast(operand, target, wrap).is_some();
+    }
     if operand.ty.integer_bounds().is_some()
         && let Some((min, max)) = target.integer_bounds()
     {
@@ -380,6 +450,13 @@ fn cast_succeeds(operand: &CheckedExpression, target: Type) -> bool {
 
 fn validate_evaluation(expr: &CheckedExpression) -> Result<(), Diagnostic> {
     match &expr.value {
+        Value::Template { parts, .. } => {
+            for part in parts {
+                if let crate::ast::TemplatePart::Value(value) = part {
+                    validate_evaluation(value)?;
+                }
+            }
+        }
         Value::Struct { fields } => {
             for (_, value) in fields {
                 validate_evaluation(value)?;
@@ -412,9 +489,25 @@ fn validate_evaluation(expr: &CheckedExpression) -> Result<(), Diagnostic> {
         | Value::Truncate(inner)
         | Value::BitNot(inner)
         | Value::Not(inner) => validate_evaluation(inner)?,
-        Value::CheckedCast { operand, fallback } => {
+        Value::CheckedCast {
+            operand,
+            fallback,
+            wrap,
+            ..
+        } => {
             validate_evaluation(operand)?;
-            if !cast_succeeds(operand, expr.ty) {
+            let succeeds = if matches!(expr.ty, Type::Struct(_)) {
+                let Value::CheckedCast {
+                    constant_struct, ..
+                } = &expr.value
+                else {
+                    unreachable!()
+                };
+                constant_struct.is_some()
+            } else {
+                cast_succeeds(operand, expr.ty, *wrap)
+            };
+            if !succeeds {
                 validate_evaluation(fallback)?;
             }
         }
@@ -470,4 +563,11 @@ pub(super) fn constant_integer(expr: &CheckedExpression) -> Result<Option<i128>,
 }
 pub(super) fn constant_float(expr: &CheckedExpression) -> Result<Option<f64>, Diagnostic> {
     Ok(evaluate(expr)?.and_then(|value| constant_float_raw(&value)))
+}
+
+fn text_cast(operand: &CheckedExpression, target: Type, wrap: bool) -> Option<CheckedExpression> {
+    let Value::Text { text, .. } = evaluate_raw(operand)?.value else {
+        return None;
+    };
+    super::text_parse::parse(&text, target, wrap)
 }

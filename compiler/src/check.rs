@@ -9,6 +9,9 @@ mod matches;
 mod ranges;
 mod scope;
 mod statements;
+mod text;
+mod text_parse;
+mod text_structure;
 mod writes;
 
 use crate::{Diagnostic, ast::Program};

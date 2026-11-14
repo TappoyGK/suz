@@ -92,9 +92,13 @@ pub(super) fn emit_block(
                     CheckedStatement::ArithmeticReturn { operation, .. } => {
                         (operation.ty, integer_parts(operation, context))
                     }
-                    CheckedStatement::CastReturn { ty, operand, .. } => {
-                        (*ty, cast_parts(operand, *ty, context))
-                    }
+                    CheckedStatement::CastReturn {
+                        ty,
+                        operand,
+                        wrap,
+                        location,
+                        ..
+                    } => (*ty, cast_parts(operand, *ty, *wrap, *location, context)),
                     _ => unreachable!(),
                 };
                 writeln!(c, "{indent}{setup};").unwrap();
