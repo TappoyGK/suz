@@ -116,6 +116,7 @@ impl Resolver<'_> {
                 "this constant expression is not implemented",
             )
         })?;
+        super::text::register_constants(&value, &self.bindings);
         self.bindings.insert(
             name.to_owned(),
             Binding {

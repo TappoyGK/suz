@@ -145,6 +145,16 @@ pub(super) fn expression(
     expected: Option<Type>,
     bindings: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
+    let checked = expression_inner(expr, expected, bindings)?;
+    super::text::register_constants(&checked, bindings);
+    Ok(checked)
+}
+
+fn expression_inner(
+    expr: &Expression,
+    expected: Option<Type>,
+    bindings: &Scope,
+) -> Result<CheckedExpression, Diagnostic> {
     let checked = match &expr.kind {
         ExpressionKind::Template(parts) => super::text::template(parts, expr.location, bindings)?,
         ExpressionKind::Struct { .. } | ExpressionKind::Field { .. } => {

@@ -233,6 +233,7 @@ pub(crate) struct Parameter {
 }
 
 pub(crate) struct Function {
+    pub keyword_location: Location,
     pub name: String,
     pub location: Location,
     pub parameters: Vec<Parameter>,

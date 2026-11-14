@@ -342,12 +342,8 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
             Value::Text { .. } => expr.value.clone(),
             Value::Template {
                 constant: Some(text),
-                location,
                 ..
-            } => Value::Text {
-                text: text.clone(),
-                location: *location,
-            },
+            } => Value::Text { text: text.clone() },
             _ => return None,
         },
         Type::Struct(_) => {

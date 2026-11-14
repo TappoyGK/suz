@@ -121,8 +121,7 @@ pub(super) fn check(
                             let Value::Text { text, .. } = value.value else {
                                 return None;
                             };
-                            super::super::text_structure::parse(&text, *id, expr.location, bindings)
-                                .map(Box::new)
+                            super::super::text_structure::parse(&text, *id, bindings).map(Box::new)
                         })
                 } else {
                     None

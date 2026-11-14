@@ -1,6 +1,8 @@
 use crate::ast::{BinaryOperator, ComparisonOperator, Location, LogicalOperator, Type};
 
 pub(crate) struct CheckedProgram {
+    pub constant_texts: std::collections::BTreeSet<String>,
+    pub main_location: Location,
     pub structs: Vec<crate::ast::StructDeclaration>,
     pub enums: Vec<crate::ast::EnumDeclaration>,
     pub functions: Vec<CheckedFunction>,
@@ -108,7 +110,6 @@ impl IntegerOperation {
 pub(crate) enum Value {
     Text {
         text: String,
-        location: Location,
     },
     Template {
         parts: Vec<crate::ast::TemplatePart<CheckedExpression>>,

@@ -71,6 +71,9 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
         structs: program.structs.clone(),
         ..ExpressionContext::default()
     };
+    for value in &program.constant_texts {
+        text::constant(value, &mut context);
+    }
     for declaration in &program.structs {
         for field in &declaration.fields {
             if let crate::ast::Type::Float(ty) = field.ty {
@@ -102,7 +105,7 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
         .filter(|f| f.id != program.main_id)
         .map(|f| format!("    (void)suz_fn_{};\n", f.id))
         .collect();
-    let text_init = if context.uses_text {
+    let mut text_init = if context.uses_text {
         format!(
             "    suz_text_pool_init(UINT64_C({}));\n",
             text_pool_limit.runtime_value()
@@ -110,6 +113,9 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
     } else {
         String::new()
     };
+    for (value, id) in &context.text_literals {
+        writeln!(text_init, "    suz_text_constant_{id} = suz_text_intern(suz_text_literal_{id}, UINT64_C({}), true, {});", value.len(), text::position(program.main_location, &context)).unwrap();
+    }
     writeln!(
         c,
         "int main(void) {{\n    suz_runtime_init();\n{references}{text_init}    return (int)suz_fn_{}();\n}}",

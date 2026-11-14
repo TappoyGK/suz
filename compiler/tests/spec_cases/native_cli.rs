@@ -320,8 +320,9 @@ fn build_and_run_apply_text_pool_limits() {
             };
             if expected == 101 {
                 assert!(
-                    String::from_utf8_lossy(&output.stderr)
-                        .contains("text pool limit exceeded: limit=1, used=0"),
+                    String::from_utf8_lossy(&output.stderr).starts_with(
+                        "panic input.suz:1:1: text pool limit exceeded: limit=1, used=0"
+                    ),
                     "{output:?}"
                 );
             } else {

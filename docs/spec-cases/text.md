@@ -670,7 +670,7 @@ info text-024.suz:2: 2
 
 ### text-025 textをログへ埋め込む
 
-主根拠：`[log.temporary-text]`。
+主根拠：`[log.fragments]`。
 
 **ソース：**
 

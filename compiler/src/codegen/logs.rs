@@ -1,6 +1,9 @@
-use super::{ExpressionContext, expressions::c_string};
+use super::{
+    ExpressionContext,
+    expressions::{c_string, expression},
+};
 use crate::{
-    ast::{Location, TemplatePart},
+    ast::{Location, TemplatePart, Type},
     check::CheckedExpression,
 };
 use std::fmt::Write;
@@ -14,10 +17,63 @@ pub(super) fn emit(
     context: &mut ExpressionContext,
 ) {
     let indent = "    ".repeat(depth);
-    let value = super::text::template(parts, location, true, context);
+    writeln!(c, "{indent}{{").unwrap();
+    // Evaluate all values before acquiring the output lock. Nested logs and
+    // panics in these expressions must complete before this log begins.
+    for (index, part) in parts.iter().enumerate() {
+        if let TemplatePart::Value(value) = part {
+            let evaluated = expression(value, context);
+            writeln!(
+                c,
+                "{indent}    const {} suz_log_{id}_{index} = {evaluated};",
+                value.ty.c_name()
+            )
+            .unwrap();
+        }
+    }
     let filename = std::path::Path::new(&context.source_name)
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or(&context.source_name);
-    writeln!(c, "{indent}{{\n{indent}    suz_text_buffer suz_log_{id} = {value};\n{indent}    suz_log_begin({}, {});\n{indent}    suz_log_text(suz_log_{id}.bytes, (size_t)suz_log_{id}.length);\n{indent}    suz_log_end();\n{indent}    suz_text_buffer_dispose(&suz_log_{id});\n{indent}}}", c_string(filename), location.line).unwrap();
+    writeln!(
+        c,
+        "{indent}    suz_log_begin({}, {});",
+        c_string(filename),
+        location.line
+    )
+    .unwrap();
+    for (index, part) in parts.iter().enumerate() {
+        let output = match part {
+            TemplatePart::Text(text) => {
+                format!("suz_log_text({}, {});", c_string(text), text.len())
+            }
+            TemplatePart::Value(value) => {
+                let name = format!("suz_log_{id}_{index}");
+                match value.ty {
+                    Type::Text => format!(
+                        "suz_log_text(suz_text_bytes({name}), (size_t)suz_text_length({name}));"
+                    ),
+                    Type::Bool => format!("suz_log_bool({name});"),
+                    Type::Enum(ty) => {
+                        context.enum_logs.insert(ty.id);
+                        format!(
+                            "suz_log_text(suz_enum_{}_names[{name}], suz_enum_{}_lengths[{name}]);",
+                            ty.id, ty.id
+                        )
+                    }
+                    Type::Integer(ty) => format!(
+                        "suz_log_{}({name});",
+                        if ty.bounds().0 < 0 { "i64" } else { "u64" }
+                    ),
+                    Type::Float(ty) => {
+                        context.float_types.insert(ty);
+                        format!("suz_log_{}({name});", ty.name())
+                    }
+                    _ => unreachable!("interpolation types are checked"),
+                }
+            }
+        };
+        writeln!(c, "{indent}    {output}").unwrap();
+    }
+    writeln!(c, "{indent}    suz_log_end();\n{indent}}}").unwrap();
 }

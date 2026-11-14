@@ -2,7 +2,7 @@ use super::{
     ir::{CheckedExpression, Value},
     scope::Scope,
 };
-use crate::ast::{FloatType, Location, Type};
+use crate::ast::{FloatType, Type};
 use std::{
     ffi::{CString, c_char},
     ptr,
@@ -134,12 +134,7 @@ unsafe extern "C" {
     ) -> bool;
 }
 
-pub(super) fn parse(
-    text: &str,
-    id: usize,
-    location: Location,
-    scope: &Scope,
-) -> Option<CheckedExpression> {
+pub(super) fn parse(text: &str, id: usize, scope: &Scope) -> Option<CheckedExpression> {
     let mut schema = Schema::default();
     let (root, slots) = schema.build(Type::Struct(id), scope);
     let mut values = vec![RawValue::default(); slots];
@@ -151,7 +146,6 @@ pub(super) fn parse(
         ty: Type,
         values: &mut std::slice::Iter<'_, RawValue>,
         text: &str,
-        location: Location,
         scope: &Scope,
     ) -> Option<CheckedExpression> {
         if let Type::Struct(id) = ty {
@@ -159,9 +153,7 @@ pub(super) fn parse(
                 .fields
                 .iter()
                 .enumerate()
-                .map(|(index, field)| {
-                    Some((index, convert(field.ty, values, text, location, scope)?))
-                })
+                .map(|(index, field)| Some((index, convert(field.ty, values, text, scope)?)))
                 .collect::<Option<_>>()?;
             return Some(CheckedExpression {
                 ty,
@@ -199,12 +191,11 @@ pub(super) fn parse(
                 decoded.truncate(length as usize);
                 Value::Text {
                     text: String::from_utf8(decoded).ok()?,
-                    location,
                 }
             }
             _ => unreachable!(),
         };
         Some(CheckedExpression { ty, value })
     }
-    convert(Type::Struct(id), &mut values.iter(), text, location, scope)
+    convert(Type::Struct(id), &mut values.iter(), text, scope)
 }

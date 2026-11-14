@@ -43,6 +43,8 @@ fn generated_bool_values_preserve_negation_and_copies() {
     .enumerate()
     {
         let program = CheckedProgram {
+            constant_texts: Default::default(),
+            main_location: crate::ast::Location { line: 1, column: 1 },
             enums: Vec::new(),
             structs: Vec::new(),
             unhandled_arithmetic: Vec::new(),
@@ -211,6 +213,8 @@ fn comparison_codegen_sequences_and_reuses_operands() {
             });
         }
         let program = CheckedProgram {
+            constant_texts: Default::default(),
+            main_location: crate::ast::Location { line: 1, column: 1 },
             enums: Vec::new(),
             structs: Vec::new(),
             unhandled_arithmetic: Vec::new(),
