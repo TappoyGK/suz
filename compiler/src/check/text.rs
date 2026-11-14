@@ -92,3 +92,27 @@ fn float_format(bits: u64, ty: Type) -> String {
     };
     String::from_utf8(output[..length].to_vec()).expect("numeric formatting produces ASCII")
 }
+
+// Collect during checking, before constant substitution or code generation can
+// discard unused declarations and unselected operands.
+pub(super) fn register_constants(value: &CheckedExpression, scope: &Scope) {
+    match &value.value {
+        Value::Text { text, .. }
+        | Value::Template {
+            constant: Some(text),
+            ..
+        } => {
+            scope.constant_texts.borrow_mut().insert(text.clone());
+        }
+        Value::Struct { fields } => {
+            for (_, field) in fields {
+                register_constants(field, scope);
+            }
+        }
+        Value::CheckedCast {
+            constant_struct: Some(value),
+            ..
+        } => register_constants(value, scope),
+        _ => {}
+    }
+}

@@ -5,7 +5,7 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
     for (text, id) in &context.text_literals {
         writeln!(
             c,
-            "static const char suz_text_literal_{id}[] = {};",
+            "static const char suz_text_literal_{id}[] = {};\nstatic suz_text suz_text_constant_{id};",
             super::expressions::c_string(text)
         )
         .unwrap();

@@ -17,15 +17,11 @@ pub(super) fn position(location: Location, context: &ExpressionContext) -> Strin
     )
 }
 
-pub(super) fn constant(text: &str, location: Location, context: &mut ExpressionContext) -> String {
+pub(super) fn constant(text: &str, context: &mut ExpressionContext) -> String {
     context.uses_text = true;
     let next = context.text_literals.len();
     let id = *context.text_literals.entry(text.into()).or_insert(next);
-    format!(
-        "suz_text_intern(suz_text_literal_{id}, UINT64_C({}), true, {})",
-        text.len(),
-        position(location, context)
-    )
+    format!("suz_text_constant_{id}")
 }
 
 // A helper receives already evaluated values. All side effects are sequenced
@@ -33,7 +29,6 @@ pub(super) fn constant(text: &str, location: Location, context: &mut ExpressionC
 pub(super) fn template(
     parts: &[TemplatePart<CheckedExpression>],
     location: Location,
-    temporary: bool,
     context: &mut ExpressionContext,
 ) -> String {
     context.uses_text = true;
@@ -80,34 +75,22 @@ pub(super) fn template(
             }
         }
     }
-    let result = if temporary {
-        "suz_text_buffer"
-    } else {
-        "suz_text"
-    };
     let parameters = if parameters.is_empty() {
         "void".into()
     } else {
         parameters.join(", ")
     };
     let mut helper = format!(
-        "static inline {result} suz_template_{id}({parameters}) {{\n    suz_text_buffer buffer = {{0}};\n"
+        "static inline suz_text suz_template_{id}({parameters}) {{\n    suz_text_buffer buffer = {{0}};\n"
     );
-    // Empty temporary templates need neither storage nor a source location.
-    if !body.is_empty() || !temporary {
-        writeln!(
-            helper,
-            "    const suz_text_location location = {};",
-            position(location, context)
-        )
-        .unwrap();
-    }
+    writeln!(
+        helper,
+        "    const suz_text_location location = {};",
+        position(location, context)
+    )
+    .unwrap();
     helper.push_str(&body);
-    if temporary {
-        helper.push_str("    return buffer;\n}\n\n");
-    } else {
-        helper.push_str("    suz_text value = suz_text_intern(buffer.bytes, buffer.length, false, location);\n    suz_text_buffer_dispose(&buffer);\n    return value;\n}\n\n");
-    }
+    helper.push_str("    suz_text value = suz_text_intern(buffer.bytes, buffer.length, false, location);\n    suz_text_buffer_dispose(&buffer);\n    return value;\n}\n\n");
     context.functions.push_str(&helper);
     setup.push(format!("suz_template_{id}({})", arguments.join(", ")));
     format!("({})", setup.join(", "))

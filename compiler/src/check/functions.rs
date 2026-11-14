@@ -106,6 +106,8 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     }
     warnings.sort_by_key(|l| (l.line, l.column));
     Ok(CheckedProgram {
+        constant_texts: globals.constant_texts.borrow().clone(),
+        main_location: program.functions[main_id].keyword_location,
         structs: program.structs.clone(),
         enums: program.enums.clone(),
         functions,

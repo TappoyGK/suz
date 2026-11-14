@@ -17,14 +17,14 @@ pub(super) fn c_string(text: &str) -> String {
 
 pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionContext) -> String {
     match expr.value {
-        Value::Text { ref text, location } => super::text::constant(text, location, context),
+        Value::Text { ref text, .. } => super::text::constant(text, context),
         Value::Template {
             ref parts,
             location,
             ref constant,
         } => match constant {
-            Some(text) => super::text::constant(text, location, context),
-            None => super::text::template(parts, location, false, context),
+            Some(text) => super::text::constant(text, context),
+            None => super::text::template(parts, location, context),
         },
         Value::Struct { ref fields } => {
             let crate::ast::Type::Struct(id) = expr.ty else {

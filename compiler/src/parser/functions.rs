@@ -126,6 +126,7 @@ impl Parser<'_, '_> {
     }
 
     pub(super) fn function(&mut self, has_main: bool) -> Result<Function, Diagnostic> {
+        let keyword_location = self.location();
         self.cursor += 1;
         let location = self.location();
         let Kind::Ident(name) = self.token().kind else {
@@ -172,6 +173,7 @@ impl Parser<'_, '_> {
         };
         let (statements, end) = self.block()?;
         Ok(Function {
+            keyword_location,
             name,
             location,
             parameters,

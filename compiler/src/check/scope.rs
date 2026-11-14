@@ -15,6 +15,7 @@ pub(super) struct Signature {
 
 #[derive(Clone)]
 pub(super) struct Scope {
+    pub constant_texts: Rc<std::cell::RefCell<std::collections::BTreeSet<String>>>,
     pub locals: BTreeMap<String, Binding>,
     pub enums: Rc<Vec<crate::ast::EnumDeclaration>>,
     pub structs: Rc<Vec<crate::ast::StructDeclaration>>,
@@ -37,6 +38,7 @@ impl Scope {
 impl Default for Scope {
     fn default() -> Self {
         Self {
+            constant_texts: Rc::default(),
             locals: BTreeMap::new(),
             enums: Rc::default(),
             structs: Rc::default(),

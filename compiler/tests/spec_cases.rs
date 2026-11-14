@@ -67,6 +67,8 @@ mod text_casts;
 mod text_float_casts;
 #[path = "spec_cases/text_runtime.rs"]
 mod text_runtime;
+#[path = "spec_cases/text_startup.rs"]
+mod text_startup;
 #[path = "spec_cases/text_struct_casts.rs"]
 mod text_struct_casts;
 #[path = "spec_cases/text_struct_runtime.rs"]

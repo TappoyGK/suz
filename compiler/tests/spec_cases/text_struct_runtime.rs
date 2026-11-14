@@ -19,6 +19,7 @@ static suz_text input(const char *bytes) {
 int main(int argc, char **argv) {
     assert(argc >= 2);
     uint64_t limit = strcmp(argv[1], "limit") == 0 ? strtoull(argv[2], NULL, 10) : 0;
+    assert(suz_program() == 0);
     suz_text_pool_init(limit);
     suz_text fallback = input("fallback");
     if (strcmp(argv[1], "validation") == 0) {
@@ -124,12 +125,15 @@ fn main() -> u8 {{ return 0 }}
     );
     let driver = r#"
 int main(int argc, char **argv) {
-    suz_text_pool_init(argc > 1 ? strtoull(argv[1], NULL, 10) : 0);
+    assert(suz_program() == 0);
+    uint64_t used = suz_text_pool_used();
+    assert(used < 1000); /* Static payloads are excluded from the pool limit. */
     if (argc == 1) {
-        suz_text_intern("probe", 5, true, (suz_text_location){"driver", 1, 1});
-        printf("%llu\n", (unsigned long long)suz_text_pool_used());
+        printf("%llu\n", (unsigned long long)used);
         return 0;
     }
+    suz_text_pool_init(strtoull(argv[1], NULL, 10));
+    text_fail_after = text_calls;
     suz_text first = suz_fn_0();
     assert(suz_text_length(first) == 1000);
     assert(suz_fn_1() == first);
