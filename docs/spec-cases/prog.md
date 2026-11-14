@@ -110,11 +110,11 @@ fn main() -> u8 {
     return calculate()
 }
 
-const answer: u8 = base + 1
-const base: u8 = 2
+const ANSWER: u8 = BASE + 1
+const BASE: u8 = 2
 
 fn calculate() -> u8 {
-    return answer
+    return ANSWER
 }
 ```
 
@@ -124,7 +124,7 @@ fn calculate() -> u8 {
 |---|---|---:|---:|
 | 通常 | 正常終了 | 3 | 0 |
 
-mainは後にある関数を、定数answerは後にある定数baseを参照できる。
+mainは後にある関数を、定数ANSWERは後にある定数BASEを参照できる。
 
 ### prog-006 トップレベルにfixを宣言する
 
@@ -162,7 +162,7 @@ fixはブロック内で宣言する。
 
 ```suz
 fn main() -> u8 {
-    const value: u8 = 1
+    const VALUE: u8 = 1
     return 0
 }
 ```
@@ -181,17 +181,17 @@ constはトップレベルで宣言する。
 |---|---|---:|---:|
 | 通常 | `[decl.location]` | 2 | 5 |
 
-### prog-008 定数と関数に同じ名前を付ける
+### prog-008 構造体と列挙型に同じ名前を付ける
 
 主根拠：`[decl.duplicate]`。
 
 **ソース：**
 
 ```suz
-const value: u8 = 1
+enum Value: u8 { First }
 
-fn value() -> u8 {
-    return 2
+struct Value {
+    count: u8,
 }
 
 fn main() -> u8 { return 0 }
@@ -209,7 +209,7 @@ fn main() -> u8 { return 0 }
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[decl.duplicate]` | 3 | 4 |
+| 通常 | `[decl.duplicate]` | 3 | 8 |
 
 ### prog-009 独立したブロックで同じ変数名を使う
 
@@ -356,3 +356,123 @@ valueのスコープは内側のブロックの終わりまで。
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
 | 通常 | `[decl.local-scope]` | 5 | 12 |
+
+### prog-014 定数名に小文字を使う
+
+主根拠：`[name.constant]`。
+
+**ソース：**
+
+```suz
+const max_count: u8 = 3
+fn main() -> u8 { return max_count }
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[name.constant]` | 1 | 7 |
+
+### prog-015 関数名に大文字を混ぜる
+
+主根拠：`[name.value]`。
+
+**ソース：**
+
+```suz
+fn readCount() -> u8 { return 0 }
+fn main() -> u8 { return 0 }
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[name.value]` | 1 | 4 |
+
+### prog-016 型名で大文字を連続させる
+
+主根拠：`[name.type]`。
+
+**ソース：**
+
+```suz
+struct IOError { code: u8 }
+fn main() -> u8 { return 0 }
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[name.type]` | 1 | 8 |
+
+### prog-017 列挙子名にアンダースコアを使う
+
+主根拠：`[name.variant]`。
+
+**ソース：**
+
+```suz
+enum State: u8 { Not_Ready }
+fn main() -> u8 { return 0 }
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[name.variant]` | 1 | 18 |
+
+### prog-018 宣言の種類ごとに名前の形を使い分ける
+
+主根拠：`[name.declaration]`。
+
+**ソース：**
+
+```suz
+const MAX_COUNT: u8 = 3
+enum Key: u8 { A, F1, ESC }
+struct Vec2D { x2: u8, key: Key }
+fn read_count(input_value: Vec2D) -> u8 { return input_value.x2 }
+fn main() -> u8 {
+    fix value = Vec2D { x2: MAX_COUNT, key: Key.ESC }
+    var sum: u8 = 0
+    for index in 0..<read_count(value) { sum += index }
+    match sum {
+        3 => { return 0 }
+        _ => { return 1 }
+    }
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |

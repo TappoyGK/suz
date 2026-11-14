@@ -483,11 +483,11 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
-const x: u8 = 3
+fn x() -> u8 { return 3 }
 struct Point { x: u8 }
 
 fn main() -> u8 {
-    fix point = Point { x: x }
+    fix point = Point { x: x() }
     return point.x
 }
 ```
@@ -498,7 +498,7 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | 正常終了 | 3 | 0 |
 
-定数xと構造体のフィールドxは共存できる。初期値のxは定数を参照する。
+関数xと構造体のフィールドxは共存できる。初期値では関数xを呼び出す。
 
 ### type-019 空の構造体
 
@@ -872,16 +872,16 @@ fn main() -> u8 { return 0 }
 **ソース：**
 
 ```suz
-const First: u8 = 9
-enum Left: u8 { First, Second, Third }
-enum Right: u8 { Third, Second, First }
+const FIRST: u8 = 9
+enum Left: u8 { FIRST, Second, Third }
+enum Right: u8 { Third, Second, FIRST }
 
 fn main() -> u8 {
-    fix a = Left.First as u8
+    fix a = Left.FIRST as u8
     fix b = Left.Second as u8
     fix c = Left.Third as u8
-    fix d = Right.First as u8
-    return ifexpr First == 9 && a == 0 && b == 1 && c == 2 && d == 2 { 0 } else { 1 }
+    fix d = Right.FIRST as u8
+    return ifexpr FIRST == 9 && a == 0 && b == 1 && c == 2 && d == 2 { 0 } else { 1 }
 }
 ```
 
