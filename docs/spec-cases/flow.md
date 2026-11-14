@@ -422,10 +422,10 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
-const always = true
+const ALWAYS = true
 
 fn main() -> u8 {
-    while always {
+    while ALWAYS {
         return 3
     }
 }
@@ -581,12 +581,12 @@ info flow-019.suz:9: second
 **ソース：**
 
 ```suz
-const selected: i32 = 2
+const SELECTED: i32 = 2
 
 fn main() -> u8 {
     fix input: i32 = 2
     match input {
-        selected => { return 3 }
+        SELECTED => { return 3 }
         _ => { return 4 }
     }
 }

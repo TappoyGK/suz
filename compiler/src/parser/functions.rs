@@ -75,6 +75,7 @@ impl Parser<'_, '_> {
                 "expected a parameter name [src.ident]",
             ));
         };
+        super::names::check(super::names::Shape::Value, name, location)?;
         let name = name.to_owned();
         self.cursor += 1;
         if self.token().kind != Kind::Symbol(":") {
@@ -133,6 +134,7 @@ impl Parser<'_, '_> {
                 "expected a function name [src.ident]",
             ));
         };
+        super::names::check(super::names::Shape::Value, name, location)?;
         let name = name.to_owned();
         self.cursor += 1;
         let (parameters, result) = if name == "main" {

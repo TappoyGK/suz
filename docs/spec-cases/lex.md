@@ -882,11 +882,11 @@ f32への丸めの結果が無限大になる。
 **ソース：**
 
 ```suz
-const near_max: f64 = 3.4028235e38
+const NEAR_MAX: f64 = 3.4028235e38
 
 fn main() -> u8 {
     fix literal: f32 = 3.4028235e38
-    fix converted = near_max as f32
+    fix converted = NEAR_MAX as f32
     return ifexpr literal == converted { 0 } else { 1 }
 }
 ```

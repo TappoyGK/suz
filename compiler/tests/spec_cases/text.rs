@@ -75,9 +75,9 @@ fn float_templates(values: impl IntoIterator<Item = (String, &'static str)>) {
             literal
         };
         source.push_str(&format!(
-            "const value_{index}: {ty} = {literal}\nconst saved_{index} = `${{value_{index}}}`\n"
+            "const VALUE_{index}: {ty} = {literal}\nconst SAVED_{index} = `${{VALUE_{index}}}`\n"
         ));
-        body.push_str(&format!("{{\nfix dynamic = value_{index}\nif saved_{index} != `${{dynamic}}` {{ log info `mismatch {index}: ${{saved_{index}}} ${{dynamic}}`\nreturn 1 }}\n}}\n"));
+        body.push_str(&format!("{{\nfix dynamic = VALUE_{index}\nif SAVED_{index} != `${{dynamic}}` {{ log info `mismatch {index}: ${{SAVED_{index}}} ${{dynamic}}`\nreturn 1 }}\n}}\n"));
     }
     body.push_str("return 0\n}\n");
     source.push_str(&body);

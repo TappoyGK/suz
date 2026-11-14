@@ -12,10 +12,10 @@
 
 ```suz
 struct Point { x: i32 }
-const origin = Point { x: 1 }
+const ORIGIN = Point { x: 1 }
 
 fn main() -> u8 {
-    origin.x = 2
+    ORIGIN.x = 2
     return 0
 }
 ```
@@ -41,11 +41,11 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
-const first: u8 = second
-const second: u8 = first
+const FIRST: u8 = SECOND
+const SECOND: u8 = FIRST
 
 fn main() -> u8 {
-    return first
+    return FIRST
 }
 ```
 
@@ -73,11 +73,11 @@ fn main() -> u8 {
 
 ```suz
 struct Point { x: i32, y: i32 }
-const origin = Point { x: 1, y: 2 }
-const total = origin.x + origin.y
+const ORIGIN = Point { x: 1, y: 2 }
+const TOTAL = ORIGIN.x + ORIGIN.y
 
 fn main() -> u8 {
-    return total as u8
+    return TOTAL as u8
 }
 ```
 
@@ -102,10 +102,10 @@ fn ready() -> bool {
     return true
 }
 
-const result = true || ready()
+const RESULT = true || ready()
 
 fn main() -> u8 {
-    return ifexpr result { 0 } else { 1 }
+    return ifexpr RESULT { 0 } else { 1 }
 }
 ```
 
@@ -132,10 +132,10 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
-const result: u8 = expr { 3 }
+const RESULT: u8 = expr { 3 }
 
 fn main() -> u8 {
-    return result
+    return RESULT
 }
 ```
 
@@ -160,10 +160,10 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
-const result: u8 = (1 + 2) or (1 / 0)
+const RESULT: u8 = (1 + 2) or (1 / 0)
 
 fn main() -> u8 {
-    return result
+    return RESULT
 }
 ```
 
@@ -184,10 +184,10 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
-const result: u8 = (255 + 1) or 7
+const RESULT: u8 = (255 + 1) or 7
 
 fn main() -> u8 {
-    return result
+    return RESULT
 }
 ```
 
@@ -204,7 +204,7 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
-const value: u8 = 255 + 1
+const VALUE: u8 = 255 + 1
 fn main() -> u8 { return 0 }
 ```
 
@@ -231,7 +231,7 @@ fn main() -> u8 { return 0 }
 **ソース：**
 
 ```suz
-const value: u8 = (1 + 2) or false
+const VALUE: u8 = (1 + 2) or false
 fn main() -> u8 { return 0 }
 ```
 
@@ -285,10 +285,10 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
-const result = true || ((300 as u8 or 0) == 0)
+const RESULT = true || ((300 as u8 or 0) == 0)
 
 fn main() -> u8 {
-    return ifexpr result { 0 } else { 1 }
+    return ifexpr RESULT { 0 } else { 1 }
 }
 ```
 
@@ -309,10 +309,10 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
-const result = true || ((300 as u8) == 0)
+const RESULT = true || ((300 as u8) == 0)
 
 fn main() -> u8 {
-    return ifexpr result { 0 } else { 1 }
+    return ifexpr RESULT { 0 } else { 1 }
 }
 ```
 

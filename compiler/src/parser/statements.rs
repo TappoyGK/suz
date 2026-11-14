@@ -70,6 +70,7 @@ impl Parser<'_, '_> {
                         "expected a loop variable name [src.ident]",
                     ));
                 };
+                super::names::check(super::names::Shape::Value, name, location)?;
                 let name = name.to_owned();
                 self.cursor += 1;
                 self.expect(FixedToken::Keyword("in"))?;
@@ -163,6 +164,7 @@ impl Parser<'_, '_> {
                     }
                 };
                 self.cursor += 1;
+                super::names::check(super::names::Shape::Value, &name, location)?;
                 let annotation = if self.token().kind == Kind::Symbol(":") {
                     self.cursor += 1;
                     let ty = self.parse_type()?;

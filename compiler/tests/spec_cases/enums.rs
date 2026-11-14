@@ -5,7 +5,7 @@ use crate::{integer_bounds::INTEGER_BOUNDS, test_util::compile_and_run_c11};
 fn enum_conversions_use_variant_ranges_and_preserve_integer_boundaries() {
     let mut source = String::from("fn main() -> u8 {\n");
     for (base, _, _) in INTEGER_BOUNDS {
-        source.push_str(&format!("{{\nfix value = Kind_{base}.B\n"));
+        source.push_str(&format!("{{\nfix value = Kind{base}.B\n"));
         for (ty, min, max) in INTEGER_BOUNDS {
             source.push_str(&format!(
                 "fix ordinal_{ty}: {ty} = value as {ty}\nif ordinal_{ty} != 1 {{ return 1 }}\n"
@@ -13,16 +13,16 @@ fn enum_conversions_use_variant_ranges_and_preserve_integer_boundaries() {
             source.push_str(&format!(
                 "fix zero_{ty}: {ty} = 0\nfix one_{ty}: {ty} = 1\nfix max_{ty}: {ty} = {max}\n"
             ));
-            source.push_str(&format!("if (zero_{ty} as Kind_{base} or Kind_{base}.B) != Kind_{base}.A || (one_{ty} as Kind_{base} or Kind_{base}.A) != Kind_{base}.B || (max_{ty} as Kind_{base} or Kind_{base}.A) != Kind_{base}.A {{ return 2 }}\n"));
+            source.push_str(&format!("if (zero_{ty} as Kind{base} or Kind{base}.B) != Kind{base}.A || (one_{ty} as Kind{base} or Kind{base}.A) != Kind{base}.B || (max_{ty} as Kind{base} or Kind{base}.A) != Kind{base}.A {{ return 2 }}\n"));
             if min < 0 {
-                source.push_str(&format!("fix min_{ty}: {ty} = {min}\nif (min_{ty} as Kind_{base} or Kind_{base}.B) != Kind_{base}.B {{ return 3 }}\n"));
+                source.push_str(&format!("fix min_{ty}: {ty} = {min}\nif (min_{ty} as Kind{base} or Kind{base}.B) != Kind{base}.B {{ return 3 }}\n"));
             }
         }
         source.push_str("}\n");
     }
     source.push_str("return 0\n}\n");
     for (base, _, _) in INTEGER_BOUNDS {
-        source.push_str(&format!("enum Kind_{base}: {base} {{ A, B }}\n"));
+        source.push_str(&format!("enum Kind{base}: {base} {{ A, B }}\n"));
     }
     let output = compile_and_run_c11(&source, "enums.suz");
     assert_eq!(output.status.code(), Some(0));
@@ -32,9 +32,9 @@ fn enum_conversions_use_variant_ranges_and_preserve_integer_boundaries() {
 #[test]
 #[ignore = "release check: run scripts/test-release.sh"]
 fn enum_values_work_with_constants_calls_blocks_and_lazy_handlers() {
-    let source = r#"const chosen: Mode = invalid as Mode or Mode.B
-const invalid: u16 = 256
-const equal = chosen == Mode.B == (1 as Mode)
+    let source = r#"const CHOSEN: Mode = INVALID as Mode or Mode.B
+const INVALID: u16 = 256
+const EQUAL = CHOSEN == Mode.B == (1 as Mode)
 fn narrow(raw: i64) -> Mode {
     fix mode = raw as Mode or return Mode.B
     return mode
@@ -55,19 +55,19 @@ fn main() -> u8 {
         visits += 10
         Mode.B
     }
-    if visits != 12 || success != Mode.A || failure != Mode.B || not equal { return 1 }
+    if visits != 12 || success != Mode.A || failure != Mode.B || not EQUAL { return 1 }
     fix first: Mode = narrow(-1)
     var copy = first
     copy = Mode.A
     if first != Mode.B || copy != Mode.A { return 2 }
-    fix selected = matchexpr chosen {
+    fix selected = matchexpr CHOSEN {
         Mode.A => Mode.B
         Mode.B => expr {
             fix inner = narrow(0)
             inner
         }
     }
-    log info `${selected}/${chosen}`
+    log info `${selected}/${CHOSEN}`
     match selected {
         Mode.A => { return 0 }
         Mode.B => { return 3 }
@@ -118,14 +118,14 @@ fn enum_numbering_and_narrowing_cover_signed_and_unsigned_limits() {
         .join(", ");
     let source = format!(
         r#"enum Code: i64 {{ {variants} }}
-const low = Code.V127 as i8
-const high = Code.V128 as i8 or -1
+const LOW = Code.V127 as i8
+const HIGH = Code.V128 as i8 or -1
 fn convert(value: Code) -> i8 {{
     fix ordinal = value as i8 or return -1
     return ordinal
 }}
 fn main() -> u8 {{
-    if low != 127 || high != -1 || convert(Code.V127) != 127 || convert(Code.V128) != -1 {{ return 1 }}
+    if LOW != 127 || HIGH != -1 || convert(Code.V127) != 127 || convert(Code.V128) != -1 {{ return 1 }}
     return 0
 }}
 "#
@@ -154,7 +154,7 @@ fn enum_types_remain_nominal_and_require_checked_conversions() {
         ("First.A as% u8", "expr.as-trunc"),
         ("0 as% First", "expr.as-trunc"),
         ("First.Missing", "enum.access"),
-        ("fix First = 0", "decl.shadowing"),
+        ("fix First = 0", "name.value"),
         (
             "match First.A {\nFirst.A => {}\n0 as First => {}\nFirst.B => {}\n}",
             "match.pattern",
@@ -175,11 +175,7 @@ fn enum_types_remain_nominal_and_require_checked_conversions() {
             assert!(error.message.contains("expected Second, found First"));
         }
     }
-    for declaration in [
-        "const First = 0",
-        "fn First() -> void {}",
-        "enum First: i8 { A }",
-    ] {
+    for declaration in ["struct First { value: u8 }", "enum First: i8 { A }"] {
         let source = format!("{declarations}{declaration}\nfn main() -> u8 {{ return 0 }}");
         assert!(
             suz::compile(source.as_bytes())

@@ -71,6 +71,7 @@ SUZ_TIMINGS=1 ./scripts/test-spec-cases.sh
 - `compiler/tests/spec_cases.rs`：テストの入口、実際の例集の整合検査と実行。
 - `compiler/tests/spec_cases/format.rs`：Markdownの書式・抽出のテスト。
 - `compiler/tests/spec_cases/diagnostics.rs`：診断・警告の期待値と照合のテスト。
+- `compiler/tests/spec_cases/names.rs`：宣言ごとの命名規則、アンダースコアの位置、診断位置、大文字・小文字を区別した参照を検査する。
 - `compiler/tests/spec_cases/syntax_diagnostics.rs`：構文エラーの診断、終了コード、出力ファイルを生成しないこと、途中で切れた入力のテスト。
 - `compiler/tests/spec_cases/invalid_inputs.rs`：既存例の各バイトの削除と、区切り記号の置換・重複による入力の検査。コンパイラがパニックせず、エラー診断のタグが仕様に存在することを確認する。
 - `compiler/tests/spec_cases/panics.rs`：パニック診断の書式・出力照合と実行検証のテスト。

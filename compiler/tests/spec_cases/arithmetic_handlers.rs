@@ -181,7 +181,7 @@ fn arithmetic_handlers_check_types_and_control_transfer_positions() {
         assert!(error.message.contains(rule), "{source}: {error:?}");
     }
     let error =
-        suz::compile(b"const value = 1 + 2 or return 7\nfn main() -> u8 { return 0 }").unwrap_err();
+        suz::compile(b"const VALUE = 1 + 2 or return 7\nfn main() -> u8 { return 0 }").unwrap_err();
     assert!(error.message.contains("const.expression"));
 }
 
@@ -224,6 +224,6 @@ fn negation_handlers_cover_the_operator_but_preserve_operand_diagnostics() {
         .unwrap();
     assert_eq!((error.line, error.column), (4, 15));
     let handled =
-        b"const lo: i8 = -128 or 0\nfn main() -> u8 {\nfix value = -lo or return 7\nreturn 0\n}";
+        b"const LO: i8 = -128 or 0\nfn main() -> u8 {\nfix value = -LO or return 7\nreturn 0\n}";
     assert!(suz::compile_with_mode(handled, suz::ArithmeticMode::Deny).is_ok());
 }

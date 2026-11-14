@@ -27,7 +27,7 @@ fn text_integer_casts_check_every_width_in_constants_and_at_runtime() {
             for (mode, operator, expected) in
                 [("checked", "as", expected), ("wrapped", "as%", wrapped)]
             {
-                let name = format!("{ty}_{mode}_{index}");
+                let name = format!("{ty}_{mode}_{index}").to_ascii_uppercase();
                 source.push_str(&format!("const {name} = `{value}` {operator} {ty} or 7\n"));
                 body.push_str(&format!("{{\nfix input = `{value}`\nfix actual = input {operator} {ty} or 7\nif actual != {expected} || {name} != {expected} {{ return 1 }}\n}}\n"));
             }

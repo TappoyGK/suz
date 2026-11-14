@@ -77,14 +77,14 @@ fn invalid_syntax_reports_source_errors_through_check() {
 fn truncated_programs_are_source_errors_not_unsupported_features() {
     let source = r#"enum Mode: u8 { A, B }
 struct Pair { x: u8, y: u8 }
-const seed = Pair { x: 1, y: 2 }
+const SEED = Pair { x: 1, y: 2 }
 fn add(value: Pair) -> u8 { return value.x + value.y }
 fn main() -> u8 {
     // 日本語のコメント
     var count: u8 = 0
-    for index in 0..<seed.y { count += index }
+    for index in 0..<SEED.y { count += index }
     fix selected = matchexpr Mode.A {
-        Mode.A => ifexpr true { add(seed) } else { 0 }
+        Mode.A => ifexpr true { add(SEED) } else { 0 }
         Mode.B => 0
     }
     return selected + count
@@ -116,9 +116,9 @@ fn main() -> u8 {
 #[test]
 fn list_commas_follow_elements_before_statement_newlines() {
     for source in [
-        "struct P { x: u8\n, y: u8,\n}\nfn main() -> u8 { return 0 }",
-        "enum E: u8 { A\n, B,\n}\nfn main() -> u8 { return 0 }",
-        "struct P { x: u8, y: u8 }\nfn main() -> u8 { fix p = P { x: 1\n, y: 2,\n}\nreturn p.x }",
+        "struct Pair { x: u8\n, y: u8,\n}\nfn main() -> u8 { return 0 }",
+        "enum Mode: u8 { A\n, B,\n}\nfn main() -> u8 { return 0 }",
+        "struct Pair { x: u8, y: u8 }\nfn main() -> u8 { fix p = Pair { x: 1\n, y: 2,\n}\nreturn p.x }",
     ] {
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource);

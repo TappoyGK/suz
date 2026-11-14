@@ -214,29 +214,29 @@ fn integer_arithmetic_failures_panic_at_the_suz_operator_even_when_optimized() {
 
 #[test]
 fn constant_arithmetic_checks_only_evaluated_operations() {
-    let source = br#"const max: u8 = 255
-const sum: u8 = base + 2
-const base: u8 = 3
-const product = sum * 3
-const difference = product - 1
-const short = true || (max + 1 == 0)
-const chain = 2 < 1 < (max + 1)
-const fallback: u8 = 1 as u8 or (max + 1)
-const converted = (1 + 2) as u8
-const handled: u8 = 255 + 1 or 255 * 2 or 7
-const lazy: u8 = 1 + 2 or (255 + 1)
-const minimum: i8 = -128 or 0
-const negated = -minimum or 7
-const direct: i8 = -(1)
-const constant_lazy: i8 = -128 or (1 / 0)
-const quotient: i8 = -7 / 3
-const remainder: i8 = -7 % 3
-const division_fallback: u8 = 7 / 0 or 8
-const remainder_fallback: i8 = -128 % -1 or 9
-const lazy_division: u8 = 1 + 2 or (1 / 0)
-const narrowed = (9223372036854775807 + 1 or 7) as u8
+    let source = br#"const MAX: u8 = 255
+const SUM: u8 = BASE + 2
+const BASE: u8 = 3
+const PRODUCT = SUM * 3
+const DIFFERENCE = PRODUCT - 1
+const SHORT = true || (MAX + 1 == 0)
+const CHAIN = 2 < 1 < (MAX + 1)
+const FALLBACK: u8 = 1 as u8 or (MAX + 1)
+const CONVERTED = (1 + 2) as u8
+const HANDLED: u8 = 255 + 1 or 255 * 2 or 7
+const LAZY: u8 = 1 + 2 or (255 + 1)
+const MINIMUM: i8 = -128 or 0
+const NEGATED = -MINIMUM or 7
+const DIRECT: i8 = -(1)
+const CONSTANT_LAZY: i8 = -128 or (1 / 0)
+const QUOTIENT: i8 = -7 / 3
+const REMAINDER: i8 = -7 % 3
+const DIVISION_FALLBACK: u8 = 7 / 0 or 8
+const REMAINDER_FALLBACK: i8 = -128 % -1 or 9
+const LAZY_DIVISION: u8 = 1 + 2 or (1 / 0)
+const NARROWED = (9223372036854775807 + 1 or 7) as u8
 fn main() -> u8 {
-    return ifexpr difference == 14 && short && not chain && fallback == 1 && converted == 3 && handled == 7 && lazy == 3 && narrowed == 7 && quotient == -2 && remainder == -1 && division_fallback == 8 && remainder_fallback == 9 && lazy_division == 3 && negated == 7 && direct == -1 && constant_lazy == minimum { 0 } else { 1 }
+    return ifexpr DIFFERENCE == 14 && SHORT && not CHAIN && FALLBACK == 1 && CONVERTED == 3 && HANDLED == 7 && LAZY == 3 && NARROWED == 7 && QUOTIENT == -2 && REMAINDER == -1 && DIVISION_FALLBACK == 8 && REMAINDER_FALLBACK == 9 && LAZY_DIVISION == 3 && NEGATED == 7 && DIRECT == -1 && CONSTANT_LAZY == MINIMUM { 0 } else { 1 }
 }
 "#;
     let directory = TemporaryDirectory::new();
@@ -249,21 +249,21 @@ fn main() -> u8 {
         Some(0)
     );
     for source in [
-        "const lo: i8 = -128\nconst bad = -lo\nfn main() -> u8 { return 0 }",
-        "const lo: i8 = -128\nconst bad = -(-lo) or 7\nfn main() -> u8 { return 0 }",
-        "const bad: u8 = 1 / 0\nfn main() -> u8 { return 0 }",
-        "const bad: u8 = 1 % 0\nfn main() -> u8 { return 0 }",
-        "const bad: i8 = -128 / -1\nfn main() -> u8 { return 0 }",
-        "const bad: i8 = -128 % -1\nfn main() -> u8 { return 0 }",
-        "const bad: u8 = (1 / 0) + 1 or 7\nfn main() -> u8 { return 0 }",
-        "const bad: u8 = ((255 + 1) * 0) or 7\nfn main() -> u8 { return 0 }",
-        "const bad: u8 = 255 + 1 or (255 + 1)\nfn main() -> u8 { return 0 }",
-        "const bad: u8 = 255 + 1\nfn main() -> u8 { return 0 }",
-        "const bad: u8 = 0 - 1\nfn main() -> u8 { return 0 }",
-        "const bad: u64 = 18446744073709551615 * 2\nfn main() -> u8 { return 0 }",
-        "const max: u8 = 255\nconst bad = false || (max + 1 == 0)\nfn main() -> u8 { return 0 }",
-        "const bad: u8 = 300 as u8 or (255 + 1)\nfn main() -> u8 { return 0 }",
-        "const max: u8 = 255\nconst bad = (max + 1) as u16\nfn main() -> u8 { return 0 }",
+        "const LO: i8 = -128\nconst BAD = -LO\nfn main() -> u8 { return 0 }",
+        "const LO: i8 = -128\nconst BAD = -(-LO) or 7\nfn main() -> u8 { return 0 }",
+        "const BAD: u8 = 1 / 0\nfn main() -> u8 { return 0 }",
+        "const BAD: u8 = 1 % 0\nfn main() -> u8 { return 0 }",
+        "const BAD: i8 = -128 / -1\nfn main() -> u8 { return 0 }",
+        "const BAD: i8 = -128 % -1\nfn main() -> u8 { return 0 }",
+        "const BAD: u8 = (1 / 0) + 1 or 7\nfn main() -> u8 { return 0 }",
+        "const BAD: u8 = ((255 + 1) * 0) or 7\nfn main() -> u8 { return 0 }",
+        "const BAD: u8 = 255 + 1 or (255 + 1)\nfn main() -> u8 { return 0 }",
+        "const BAD: u8 = 255 + 1\nfn main() -> u8 { return 0 }",
+        "const BAD: u8 = 0 - 1\nfn main() -> u8 { return 0 }",
+        "const BAD: u64 = 18446744073709551615 * 2\nfn main() -> u8 { return 0 }",
+        "const MAX: u8 = 255\nconst BAD = false || (MAX + 1 == 0)\nfn main() -> u8 { return 0 }",
+        "const BAD: u8 = 300 as u8 or (255 + 1)\nfn main() -> u8 { return 0 }",
+        "const MAX: u8 = 255\nconst BAD = (MAX + 1) as u16\nfn main() -> u8 { return 0 }",
     ] {
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
