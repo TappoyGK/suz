@@ -2020,3 +2020,139 @@ fn main() -> u8 {
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
 | 通常 | `[loop.jump-context]` | 2 | 5 |
+
+### flow-068 独立したintとfloat、候補のない呼び出し
+
+主根拠：`[num.fn-resolve]`。
+
+`first` の `int` は `u8`、`float` は `f32` になる。`zero()` は受け取り先の要求型がなければ `i64`、`narrow` の初期値では `u8` になる。`half(4.0)` では受け取り先の `f32` を使う。
+
+**ソース：**
+
+```suz
+fn first(value: int, factor: float) -> int { return value }
+fn zero() -> int { return 0 }
+fn half(value: float) -> float { return value * 0.5 }
+fn main() -> u8 {
+    fix value: u8 = 12
+    fix factor: f32 = 0.5
+    fix picked = first(value, factor)
+    fix plain = zero()
+    fix narrow: u8 = zero()
+    fix scaled: f32 = half(4.0)
+    return ifexpr picked == 12 && plain == 0 && narrow == 0 && scaled == 2.0 { 0 } else { 1 }
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### flow-069 入れ子の呼び出し全体で具体型を決める
+
+主根拠：`[num.fn-nested]`。
+
+`input` の `u8` と受け取り先の `u16` をそろえ、`square` と `clamp` の `int` をともに `u16` にする。二乗はオーバーフローせず、40000を返す。
+
+**ソース：**
+
+```suz
+fn square(value: int) -> int { return value * value }
+fn clamp(value: int, lo: int, hi: int) -> int {
+    return ifexpr value < lo { lo } elif value > hi { hi } else { value }
+}
+fn main() -> u8 {
+    fix input: u8 = 200
+    fix result: u16 = clamp((square(input)), 0, 50_000)
+    return ifexpr result == 40_000 { 0 } else { 1 }
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### flow-070 呼び出しで決まった型が本体の戻り値型に収まらない
+
+主根拠：`[num.fn-body]`。
+
+`small` の `int` は `u16` になる。本体の `return value` は `u8` へ暗黙に縮小できないため、呼び出し位置に診断し、本体の違反位置も示す。
+
+**ソース：**
+
+```suz
+fn small(value: int) -> u8 { return value }
+fn main() -> u8 {
+    fix value: u16 = 300
+    return small(value)
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[num.fn-body]` | 4 | 12 |
+
+### flow-071 未使用の汎用関数から未宣言の名前を参照する
+
+主根拠：`[num.fn-unused]`。
+
+`unused` を呼び出さなくても、`missing` が未宣言であることは検出する。
+
+**ソース：**
+
+```suz
+fn unused(value: int) -> int { return missing }
+fn main() -> u8 { return 0 }
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[decl.local-scope]` | 1 | 39 |
+
+### flow-072 安全な具体型で呼び出してもキャストのorを省略できない
+
+主根拠：`[num.fn-cast]`。
+
+この呼び出しでは `int` が `u8` になるが、他の具体型では変換が失敗しうる。関数本体の `as u8` には `or` が必要である。
+
+**ソース：**
+
+```suz
+fn narrow(value: int) -> u8 { return value as u8 }
+fn main() -> u8 {
+    fix value: u8 = 1
+    return narrow(value)
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[num.fn-body]` | 4 | 12 |
