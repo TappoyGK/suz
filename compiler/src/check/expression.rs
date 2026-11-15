@@ -16,6 +16,20 @@ use crate::{
 // Numeric literals receive a type from the other operand before defaulting.
 // The comparison's bool result never supplies the operand type.
 pub(super) fn operand_type(expr: &Expression, bindings: &Scope) -> Option<Type> {
+    let key = std::ptr::from_ref(expr) as usize;
+    if bindings.hint_depth.get() > 0
+        && let Some(ty) = bindings.type_hints.borrow().get(&key)
+    {
+        return *ty;
+    }
+    let ty = operand_type_inner(expr, bindings);
+    if bindings.hint_depth.get() > 0 {
+        bindings.type_hints.borrow_mut().insert(key, ty);
+    }
+    ty
+}
+
+fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
     match &expr.kind {
         ExpressionKind::Slice { index, .. } => Some(if *index { Type::Char } else { Type::Text }),
         ExpressionKind::Template(_) => Some(Type::Symbol),
@@ -162,12 +176,46 @@ fn float_literal(
     })
 }
 
+// Hints are shared only while checking one live AST expression. Clear them at
+// the boundary so pointer keys cannot outlive their expressions or bindings.
+struct HintSession<'a>(&'a Scope);
+impl<'a> HintSession<'a> {
+    fn new(scope: &'a Scope) -> Self {
+        if scope.hint_depth.get() == 0 {
+            scope.type_hints.borrow_mut().clear();
+        }
+        scope.hint_depth.set(scope.hint_depth.get() + 1);
+        Self(scope)
+    }
+}
+impl Drop for HintSession<'_> {
+    fn drop(&mut self) {
+        self.0.hint_depth.set(self.0.hint_depth.get() - 1);
+        if self.0.hint_depth.get() == 0 {
+            self.0.type_hints.borrow_mut().clear();
+        }
+    }
+}
+
 pub(super) fn expression(
     expr: &Expression,
     expected: Option<Type>,
     bindings: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
-    let checked = expression_inner(expr, expected, bindings)?;
+    let _hints = HintSession::new(bindings);
+    let checked = expression_inner(expr, expected, bindings, false)?;
+    super::text::register_constants(&checked, bindings);
+    Ok(checked)
+}
+
+// Numeric widening is opt-in at the contexts listed in conv.widen-places.
+pub(super) fn coerced(
+    expr: &Expression,
+    expected: Option<Type>,
+    bindings: &Scope,
+) -> Result<CheckedExpression, Diagnostic> {
+    let _hints = HintSession::new(bindings);
+    let checked = expression_inner(expr, expected, bindings, true)?;
     super::text::register_constants(&checked, bindings);
     Ok(checked)
 }
@@ -176,6 +224,7 @@ fn expression_inner(
     expr: &Expression,
     expected: Option<Type>,
     bindings: &Scope,
+    widen: bool,
 ) -> Result<CheckedExpression, Diagnostic> {
     let checked = if super::exact::is_operator(expr) && super::exact::integer(expr, bindings) {
         super::exact::check(expr, expected, bindings, false)?
@@ -232,7 +281,7 @@ fn expression_inner(
             | ExpressionKind::Not(_)
             | ExpressionKind::Logical { .. }
             | ExpressionKind::Comparison { .. } => operators::check(expr, expected, bindings)?,
-            ExpressionKind::Cast { .. } => casts::check(expr, expected, bindings)?,
+            ExpressionKind::Cast { .. } => casts::check(expr, bindings)?,
             ExpressionKind::Float(text) => {
                 let ty = match expected {
                     None => FloatType::F64,
@@ -328,10 +377,11 @@ fn expression_inner(
                     value: Value::Local(binding.id),
                 })
             }
-            ExpressionKind::Group(inner) => expression(inner, expected, bindings)?,
+            ExpressionKind::Group(inner) => expression_inner(inner, expected, bindings, widen)?,
         }
     };
     if let Some(ty) = expected
+        && widen
         && ty != checked.ty
         && super::exact::widening(checked.ty, ty)
     {

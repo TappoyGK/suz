@@ -170,6 +170,14 @@ impl Range {
     pub fn contained(self, min: i128, max: i128) -> bool {
         self.min >= Int::from_i128(min) && self.max <= Int::from_i128(max)
     }
+    pub fn fits_type(self, ty: crate::ast::Type) -> bool {
+        ty.integer_bounds().is_some_and(|(lo, hi)| {
+            self.contained(lo, hi)
+                && (ty != crate::ast::Type::Char
+                    || self.max < Int::from_i128(0xd800)
+                    || self.min > Int::from_i128(0xdfff))
+        })
+    }
     pub fn exact_float(self, single: bool) -> bool {
         if self.min == self.max {
             let n = self.min.magnitude;

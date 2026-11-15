@@ -632,7 +632,7 @@ fix wave = code as Wave or Wave.Sine
 
 ### 7.12 整数演算の失敗処理
 
-**[expr.arithmetic-handler]** パニックしうる整数演算には、`演算式 or 代替値` または `演算式 or return` による失敗処理を付けられる。対象は、整数の `+`、`-`、`*`、単項の `-`、`/`、`%`、`<<`、`>>` である。`or` を省略した場合は 9.2 節のパニックの規則に従う。
+**[expr.arithmetic-handler]** 整数の算術式とシフトには、`式 or 代替値` または `式 or return` による失敗処理を付けられる。算術式では [arith.handler] に従い、式全体のゼロ除算と格納時の範囲超過を処理する。シフトでは、その `<<` または `>>` の失敗を処理する。`or` を省略した場合は9.2節のパニックの規則に従う。
 
 **[expr.arithmetic-fallback]** 演算に成功した場合はその結果を使い、失敗した場合だけ代替値を評価する。代替値には演算結果の型を要求する。`or return` は、失敗した場合に関数から戻り、その戻り値の型と書き方は [expr.cast-return] に従う。`expr` 系内部での制御移動には [expr.jump-prohibited] を適用する。
 
@@ -1115,7 +1115,7 @@ for i in 0..=10 {
 
 ### 9.2 整数の演算
 
-以下の条件を満たした演算に `or` がある場合は、パニックの代わりに [expr.arithmetic-handler] の失敗処理を行う。
+算術式の失敗処理は [arith.handler]、シフトの失敗処理は [expr.arithmetic-handler] に従う。対応する `or` がある場合は、パニックの代わりにその失敗処理を行う。
 
 **[rt.int-overflow]** 整数の算術式は、結果が [arith.store] の格納先の型で表せない場合に失敗する。`or` がなければパニックする。途中の値では検査しない。複合代入の `+=`・`-=`・`*=`・`/=`・`%=` は、代入先の現在値と右辺からなる算術式を計算し、代入先の型へ格納する。
 
@@ -1459,7 +1459,7 @@ Pattern          ::= "_" | ConstExpression
 
 `Condition` は、[expr.struct-in-cond] の制約を付けて `Expression` を読む。`if`、`ifexpr`、`elif`、`while` の条件、`for` と `rev` の反復対象・両端、`match`、`matchexpr` の対象では、構造体リテラルを括弧で囲む。たとえば、`if ready { ... }` の `{` は条件の後のブロックを開き、`ready` に続く構造体リテラルとしては読まない。
 
-`CastHandler` と `ArithmeticHandler` には [expr.cast-binding] と [expr.or-binding] の結合規則を適用する。`ArithmeticHandler` の左側は [expr.arithmetic-handler] の整数演算でなければならない。 両方のハンドラーの `or return` には、[expr.or-return-position] の位置の制約を適用する。`elif` と `else` には [expr.else-line] を適用する。`Pattern` には [match.pattern] の型と値の重複の規則を適用する。`Block` は、`ifexpr` と `matchexpr` の分岐、および `expr` の本体では [block.value] に従い、それ以外では [block.statement] に従う。`IfExpression`、`MatchExpression`、`BlockExpression` の内部全体には、[expr.jump-prohibited] の制約を適用する。
+`CastHandler` と `ArithmeticHandler` には [expr.cast-binding] と [expr.or-binding] の結合規則を適用する。`ArithmeticHandler` の左側は [arith.handler] の整数算術式、または [expr.arithmetic-handler] のシフトでなければならない。両方のハンドラーの `or return` には、[expr.or-return-position] の位置の制約を適用する。`elif` と `else` には [expr.else-line] を適用する。`Pattern` には [match.pattern] の型と値の重複の規則を適用する。`Block` は、`ifexpr` と `matchexpr` の分岐、および `expr` の本体では [block.value] に従い、それ以外では [block.statement] に従う。`IfExpression`、`MatchExpression`、`BlockExpression` の内部全体には、[expr.jump-prohibited] の制約を適用する。
 
 ### A.7 定数式
 

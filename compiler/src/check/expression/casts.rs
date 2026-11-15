@@ -1,6 +1,5 @@
 use super::super::constants::{constant_float, constant_integer, float_to_integer};
 use super::super::ir::{CheckedExpression, Value};
-use super::expression;
 use crate::ast::{FailureHandler, FloatType};
 use crate::check::scope::Scope;
 use crate::{
@@ -8,11 +7,7 @@ use crate::{
     ast::{Expression, ExpressionKind, Type},
 };
 
-pub(super) fn check(
-    expr: &Expression,
-    _expected: Option<Type>,
-    bindings: &Scope,
-) -> Result<CheckedExpression, Diagnostic> {
+pub(super) fn check(expr: &Expression, bindings: &Scope) -> Result<CheckedExpression, Diagnostic> {
     Ok(match &expr.kind {
         ExpressionKind::Cast {
             wrap,
@@ -152,7 +147,7 @@ pub(super) fn check(
             }
             let fallback = match fallback {
                 Some(FailureHandler::Value(value)) => {
-                    Some(expression(value, Some(*target), bindings)?)
+                    Some(super::coerced(value, Some(*target), bindings)?)
                 }
                 None => None,
                 _ => unreachable!(),
@@ -199,12 +194,12 @@ pub(super) fn check(
                     }
                 } else {
                     if !safe {
-                        let (min, max) = target.integer_bounds().unwrap();
                         match constant_integer(&operand)? {
                             Some(value)
-                                if (min..=max).contains(&value)
-                                    && (*target != Type::Char
-                                        || !(0xd800..=0xdfff).contains(&value)) => {}
+                                if crate::numeric::Range::point(
+                                    crate::numeric::Int::from_i128(value),
+                                )
+                                .fits_type(*target) => {}
                             Some(_) => return Err(expr.location.error(
                                 ErrorKind::InvalidSource,
                                 "constant cast is out of range and requires or [const.cast-check]",

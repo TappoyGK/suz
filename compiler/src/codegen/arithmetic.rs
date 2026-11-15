@@ -55,6 +55,22 @@ pub(super) fn integer_parts(
     else {
         unreachable!()
     };
+    // A valid literal count cannot fail. Keep this common unsigned shift in C
+    // instead of calling the checked runtime on every loop iteration.
+    if matches!(operator, BinaryOperator::ShiftRight)
+        && ty.bounds().0 == 0
+        && let Value::Integer { value: count, .. } = right.value
+        && (0..i128::from(ty.bits())).contains(&count)
+    {
+        let index = context.temporaries.len();
+        context.temporaries.push(left.ty);
+        let value = expression(left, context);
+        return (
+            format!("suz_cmp_{index} = {value}"),
+            "true".into(),
+            format!("({})(suz_cmp_{index} >> {count})", ty.c_name()),
+        );
+    }
     let op = match operator {
         BinaryOperator::Add => "add",
         BinaryOperator::Subtract => "sub",

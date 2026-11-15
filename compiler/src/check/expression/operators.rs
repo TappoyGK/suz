@@ -46,14 +46,15 @@ pub(super) fn check(
                     "this operation already has an or handler [expr.arithmetic-handler]",
                 ));
             }
-            *handler = Some(match fallback.as_ref().unwrap() {
-                FailureHandler::Value(value) => {
-                    CheckedHandler::Value(Box::new(expression(value, Some(checked.ty), bindings)?))
-                }
-                FailureHandler::Return { value, .. } => CheckedHandler::Return(Box::new(
-                    crate::check::functions::return_value(value, bindings)?,
-                )),
-            });
+            *handler =
+                Some(match fallback.as_ref().unwrap() {
+                    FailureHandler::Value(value) => CheckedHandler::Value(Box::new(
+                        super::coerced(value, Some(checked.ty), bindings)?,
+                    )),
+                    FailureHandler::Return { value, .. } => CheckedHandler::Return(Box::new(
+                        crate::check::functions::return_value(value, bindings)?,
+                    )),
+                });
             checked
         }
         ExpressionKind::BitNot(_) | ExpressionKind::Negate(_) | ExpressionKind::Binary { .. } => {
@@ -107,7 +108,7 @@ pub(super) fn check(
             }
             let value = match &expr.kind {
                 ExpressionKind::Negate(inner) => {
-                    let operand = Box::new(expression(inner, Some(ty), bindings)?);
+                    let operand = Box::new(numeric_operand(inner, ty, bindings)?);
                     if integer_arithmetic {
                         Value::IntegerArithmetic {
                             operation: IntegerOperation::Negate(operand),
@@ -313,7 +314,11 @@ fn numeric_operand(
             "integer operand is not losslessly convertible; use as [arith.mix]",
         ));
     }
-    let checked = expression(expr, Some(ty), bindings)?;
+    let checked = if matches!(ty, Type::Float(_)) {
+        super::coerced(expr, Some(ty), bindings)?
+    } else {
+        expression(expr, Some(ty), bindings)?
+    };
     if matches!(ty, Type::Float(_))
         && let Value::IntegerArithmetic {
             operation: IntegerOperation::Exact(e),

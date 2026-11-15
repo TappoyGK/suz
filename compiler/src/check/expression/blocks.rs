@@ -1,7 +1,6 @@
 use super::{
     super::ir::{CheckedExpression, Value},
     super::statements,
-    expression,
 };
 use crate::check::scope::Scope;
 use crate::{
@@ -59,7 +58,7 @@ pub(super) fn check(
         .collect();
     let mut local = bindings.clone();
     let (statements, declared) = prefix(input, &mut local)?;
-    let checked_value = expression(value, expected, &local)?;
+    let checked_value = super::coerced(value, expected, &local)?;
     if checked_value.ty == Type::Void {
         return Err(value.location.error(
             crate::ErrorKind::InvalidSource,

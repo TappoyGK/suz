@@ -79,6 +79,12 @@ pub(super) fn patterns<T>(
                 bindings,
             )?
         };
+        if ty == Type::Exact && !matches!(checked.ty, Type::Exact | Type::Integer(_)) {
+            return Err(pattern.location.error(
+                ErrorKind::InvalidSource,
+                "exact match requires integer patterns [arith.match]",
+            ));
+        }
         diagnostics::collect(&checked, &mut warnings);
         let mut value = constants::evaluate(&checked)?.ok_or_else(|| {
             arm.location.error(

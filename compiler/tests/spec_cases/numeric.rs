@@ -89,7 +89,7 @@ fn exact_width_and_storage_rules_reject_invalid_programs() {
             "expr.cast-handler",
         ),
     ] {
-        let source = format!("fn main() -> u8 {{\n{body}\nreturn 0\n}}");
+        let source = format!("const SMALL: u8 = 1\nfn main() -> u8 {{\n{body}\nreturn 0\n}}");
         let err = suz::compile(source.as_bytes()).unwrap_err();
         assert!(
             err.message.contains(&format!("[{rule}]")),
@@ -242,5 +242,83 @@ fn float_literal_comparisons_preserve_precision_through_parentheses() {
         out.status.success(),
         "{}",
         String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn widening_keeps_compound_failure_returns_and_evaluation_order() {
+    let source = r#"fn narrow(y: f64) -> u8 {
+    var x: f64 = 1.0
+    x += y as f32 or return 9
+    return ifexpr x == 3.0 { 1 } else { 2 }
+}
+fn main() -> u8 {
+    fix good = narrow(2.0)
+    fix bad = narrow(1.0e300)
+    var value: u16 = 255
+    value += 1 as u8 or return 8
+    var view: text = `a`
+    view = `abc`[0:1] or return 7
+    return ifexpr good == 1 && bad == 9 && value == 256 && view == `a` { 0 } else { 6 }
+}"#;
+    let output = compile_and_run_c23(source, "widen-return.suz");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn widening_is_not_applied_to_bounds_or_match_patterns() {
+    for body in [
+        "fix a: u16 = 0\nfix b: u8 = 3\nfor i in a..<b {}",
+        "fix a: u16 = 0\nfix b: u8 = 3\nrev i in a..<b {}",
+        "fix a: u16 = 0\nfix b: u8 = 3\nfix t: text = `abc`\nfix part = t[a:b] or `x`",
+        "fix x: u16 = 1\nmatch x { SMALL => {}\n_ => {} }",
+        "fix x: u16 = 1\nfix result = matchexpr x { SMALL => 1\n_ => 2 }",
+    ] {
+        let source = format!("const SMALL: u8 = 1\nfn main() -> u8 {{\n{body}\nreturn 0\n}}");
+        let err = suz::compile(source.as_bytes()).unwrap_err();
+        assert!(err.message.contains("[type.expected]"), "{source}: {err:?}");
+    }
+    for pattern in ["'a'", "Color.Red", "true", "1.0", "`a`"] {
+        for value_match in [false, true] {
+            let arms = if value_match {
+                format!("fix result = matchexpr x + 1 {{ {pattern} => 1\n_ => 2 }}")
+            } else {
+                format!("match x + 1 {{ {pattern} => {{}}\n_ => {{}} }}")
+            };
+            let source = format!(
+                "enum Color: u8 {{ Red }}\nfn main() -> u8 {{\nfix x: u32 = 96\n{arms}\nreturn 0\n}}"
+            );
+            let err = suz::compile(source.as_bytes()).unwrap_err();
+            assert!(err.message.contains("[arith.match]"), "{source}: {err:?}");
+        }
+    }
+}
+
+#[test]
+fn small_integer_arithmetic_uses_native_operations_without_losing_checks() {
+    let source = r#"fn step(value: u32) -> u32 { return value + 1 or 9 }
+fn main() -> u8 {
+    var i: u32 = 0
+    fix limit: u32 = 3
+    while i < limit { i += 1 }
+    fix a: i32 = -2147483648
+    fix c: i32 = a / -1 or 7
+    fix d: i32 = a % -1
+    fix e: i8 = -129 + 0 or 8
+    fix f: i8 = -128 + 0
+    fix max: u32 = 4294967295
+    return ifexpr i == 3 && step(max) == 9 && c == 7 && d == 0 && e == 8 && f == -128 { 0 } else { 1 }
+}"#;
+    let c = suz::compile(source.as_bytes()).unwrap();
+    assert!(!c.contains("suz_exact_"), "{c}");
+    let output = compile_and_run_c23(source, "native.suz");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
     );
 }

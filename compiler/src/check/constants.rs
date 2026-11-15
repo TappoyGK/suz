@@ -107,24 +107,16 @@ fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
                 let value = constant_float_raw(operand)?;
                 return float_to_integer(value, ty).or_else(|| constant_integer_raw(fallback));
             }
-            let (min, max) = expr.ty.integer_bounds()?;
             if operand.ty == Type::Exact {
                 let value = super::exact::constant(operand)?;
-                return if crate::numeric::Range::point(value).contained(min, max)
-                    && (expr.ty != Type::Char
-                        || value < Int::from_i128(0xd800)
-                        || value > Int::from_i128(0xdfff))
-                {
+                return if crate::numeric::Range::point(value).fits_type(expr.ty) {
                     value.to_i128()
                 } else {
                     constant_integer_raw(fallback)
                 };
             }
             let value = constant_integer_raw(operand)?;
-            let (min, max) = expr.ty.integer_bounds()?;
-            if (min..=max).contains(&value)
-                && (expr.ty != Type::Char || !(0xd800..=0xdfff).contains(&value))
-            {
+            if crate::numeric::Range::point(Int::from_i128(value)).fits_type(expr.ty) {
                 Some(value)
             } else {
                 constant_integer_raw(fallback)
@@ -568,23 +560,16 @@ fn cast_succeeds(operand: &CheckedExpression, target: Type, wrap: bool) -> bool 
             if matches!(target, Type::Float(_)) {
                 return true;
             }
-            let (lo, hi) = target.integer_bounds().unwrap();
-            crate::numeric::Range::point(n).contained(lo, hi)
-                && (target != Type::Char
-                    || n < Int::from_i128(0xd800)
-                    || n > Int::from_i128(0xdfff))
+            crate::numeric::Range::point(n).fits_type(target)
         });
     }
 
     if operand.ty.is_text() {
         return text_cast(operand, target, wrap).is_some();
     }
-    if operand.ty.integer_bounds().is_some()
-        && let Some((min, max)) = target.integer_bounds()
-    {
+    if operand.ty.integer_bounds().is_some() && target.integer_bounds().is_some() {
         let value = constant_integer_raw(operand).unwrap();
-        return (min..=max).contains(&value)
-            && (target != Type::Char || !(0xd800..=0xdfff).contains(&value));
+        return crate::numeric::Range::point(Int::from_i128(value)).fits_type(target);
     }
     match (operand.ty, target) {
         (Type::Float(_), Type::Integer(to)) => {

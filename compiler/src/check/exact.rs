@@ -335,13 +335,7 @@ pub(super) fn cast(
     }
     let fits = |r: Range| match target {
         Type::Float(_) => true,
-        _ => {
-            let (lo, hi) = target.integer_bounds().unwrap();
-            r.contained(lo, hi)
-                && (target != Type::Char
-                    || r.max < Int::from_i128(0xd800)
-                    || r.min > Int::from_i128(0xdfff))
-        }
+        _ => r.fits_type(target),
     };
     let safe = value_range(&operand).is_some_and(fits);
     if let Some(handler) = fallback {
@@ -351,7 +345,7 @@ pub(super) fn cast(
                 constant_struct: None,
                 wrap: false,
                 operand: Box::new(operand),
-                fallback: Box::new(super::expression::expression(v, Some(target), bindings)?),
+                fallback: Box::new(super::expression::coerced(v, Some(target), bindings)?),
             },
             FailureHandler::Return { value, .. } => Value::CastReturn {
                 location,

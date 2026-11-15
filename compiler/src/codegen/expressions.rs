@@ -112,6 +112,9 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
         } => {
             let right_index = context.temporaries.len() + 1;
             let (setup, condition, converted) = integer_parts(expr, context);
+            if condition == "true" {
+                return format!("({setup}, {converted})");
+            }
             let fallback = match handler {
                 Some(CheckedHandler::Value(value)) => expression(value, context),
                 Some(CheckedHandler::Return(_)) => {
@@ -340,7 +343,31 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             ref operators,
             ref operands,
         } => {
-            use crate::ast::Type;
+            use crate::ast::{IntegerType, Type};
+            let operands: Vec<_> = operands
+                .iter()
+                .map(|operand| {
+                    if let Value::Exact(e) = &operand.value
+                        && let crate::check::exact::ExactKind::Literal(n) = &e.kind
+                        && let Some(value) = n.to_i128()
+                    {
+                        let ty = if i64::try_from(value).is_ok() {
+                            Some(IntegerType::I64)
+                        } else if u64::try_from(value).is_ok() {
+                            Some(IntegerType::U64)
+                        } else {
+                            None
+                        };
+                        if let Some(ty) = ty {
+                            return CheckedExpression {
+                                ty: Type::Integer(ty),
+                                value: Value::Integer { value, minus: None },
+                            };
+                        }
+                    }
+                    operand.clone()
+                })
+                .collect();
             let unsigned = operands[0]
                 .ty
                 .integer_storage()
@@ -426,14 +453,6 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                         operands[index + 1].ty,
                         &names[index + 1],
                         operators[index],
-                    );
-                }
-                if floating {
-                    return format!(
-                        "{} {} {}",
-                        names[index],
-                        operators[index].symbol(),
-                        names[index + 1]
                     );
                 }
                 format!(

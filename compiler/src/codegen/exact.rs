@@ -1,3 +1,4 @@
+mod native;
 use super::{
     ExpressionContext,
     expressions::{c_string, expression},
@@ -27,11 +28,34 @@ pub(super) fn lift(ty: Type, name: &str) -> String {
         format!("suz_exact_make(false, {name})")
     }
 }
+fn can_fail(e: &Exact) -> bool {
+    match &e.kind {
+        ExactKind::Negate(a) => can_fail(a),
+        ExactKind::Binary(op, a, b) => {
+            can_fail(a)
+                || can_fail(b)
+                || (matches!(
+                    op,
+                    crate::ast::BinaryOperator::Divide | crate::ast::BinaryOperator::Remainder
+                ) && b
+                    .range
+                    .is_none_or(|r| r.min <= Int::ZERO && r.max >= Int::ZERO))
+        }
+        _ => false,
+    }
+}
 pub(super) fn tree(e: &Exact, c: &mut ExpressionContext) -> String {
+    if let Some(ty) = native::ty(e) {
+        return lift(ty, &native::emit(e, ty, c));
+    }
     match &e.kind {
         ExactKind::Literal(n) => literal(*n),
         ExactKind::Leaf(v) => lift(v.ty, &expression(v, c)),
         ExactKind::Negate(v) => {
+            if !can_fail(v) {
+                let value = tree(v, c);
+                return format!("suz_exact_neg({value})");
+            }
             let id = c.temporaries.len();
             c.temporaries.push(Type::Exact);
             let value = tree(v, c);
@@ -43,6 +67,8 @@ pub(super) fn tree(e: &Exact, c: &mut ExpressionContext) -> String {
             let i = c.temporaries.len();
             c.temporaries.extend([Type::Exact, Type::Exact]);
             let j = i + 1;
+            let left_fails = can_fail(a);
+            let right_fails = can_fail(b);
             let a = tree(a, c);
             let b = tree(b, c);
             use crate::ast::BinaryOperator::*;
@@ -63,9 +89,28 @@ pub(super) fn tree(e: &Exact, c: &mut ExpressionContext) -> String {
                 ),
                 _ => unreachable!(),
             };
-            format!(
-                "(suz_cmp_{i} = {a}, suz_cmp_{i}.failed ? suz_cmp_{i} : (suz_cmp_{j} = {b}, suz_cmp_{j}.failed ? suz_cmp_{j} : {result}))"
-            )
+            let result = if let Some(ty) = native::operation_type(e) {
+                let left = converted(ty, &format!("suz_cmp_{i}"), c);
+                let right = converted(ty, &format!("suz_cmp_{j}"), c);
+                let native = lift(ty, &format!("({left} {} {right})", op.c_symbol()));
+                if matches!(op, Divide | Remainder) {
+                    format!("(suz_cmp_{j}.magnitude == 0 ? {result} : {native})")
+                } else {
+                    native
+                }
+            } else {
+                result
+            };
+            let right = if right_fails {
+                format!("(suz_cmp_{j} = {b}, suz_cmp_{j}.failed ? suz_cmp_{j} : {result})")
+            } else {
+                format!("(suz_cmp_{j} = {b}, {result})")
+            };
+            if left_fails {
+                format!("(suz_cmp_{i} = {a}, suz_cmp_{i}.failed ? suz_cmp_{i} : {right})")
+            } else {
+                format!("(suz_cmp_{i} = {a}, {right})")
+            }
         }
     }
 }
@@ -107,12 +152,32 @@ pub(super) fn parts(
         unreachable!()
     };
     let id = c.temporaries.len();
+    if let Some(ty) = native::ty(e) {
+        c.temporaries.push(ty);
+        let name = format!("suz_cmp_{id}");
+        let value = native::emit(e, ty, c);
+        return (
+            format!("{name} = {value}"),
+            native::fits(e.range.unwrap(), ty, expr.ty, &name),
+            format!("({}){name}", expr.ty.c_name()),
+        );
+    }
     c.temporaries.push(Type::Exact);
     let name = format!("suz_cmp_{id}");
     let value = tree(e, c);
     (
         format!("{name} = {value}"),
-        fits(expr.ty, &name),
+        if e.range
+            .is_some_and(|r| matches!(expr.ty, Type::Float(_)) || r.fits_type(expr.ty))
+        {
+            if can_fail(e) {
+                format!("!{name}.failed")
+            } else {
+                "true".into()
+            }
+        } else {
+            fits(expr.ty, &name)
+        },
         converted(expr.ty, &name, c),
     )
 }
@@ -125,9 +190,20 @@ pub(super) fn stored(expr: &CheckedExpression, c: &mut ExpressionContext) -> Str
     };
     let id = c.temporaries.len();
     let (setup, condition, value) = parts(expr, c);
+    if condition == "true" {
+        return format!("({setup}, {value})");
+    }
+    let native = c.temporaries[id] != Type::Exact;
     let fallback = match handler {
         Some(CheckedHandler::Value(v)) => expression(v, c),
         Some(CheckedHandler::Return(_)) => unreachable!(),
+        None if native => format!(
+            "(suz_panic({}, {}, {}, \"integer arithmetic overflow [rt.int-overflow]\"), ({})0)",
+            c_string(&c.source_name),
+            location.line,
+            location.column,
+            expr.ty.c_name()
+        ),
         None => format!(
             "(suz_panic({}, suz_cmp_{id}.failed ? suz_cmp_{id}.line : {}, suz_cmp_{id}.failed ? suz_cmp_{id}.column : {}, suz_cmp_{id}.failed ? \"integer division by zero [rt.div-zero]\" : \"integer arithmetic overflow [rt.int-overflow]\"), ({})0)",
             c_string(&c.source_name),
@@ -147,8 +223,20 @@ pub(super) fn compare(
     op: crate::ast::ComparisonOperator,
 ) -> String {
     use crate::ast::ComparisonOperator::*;
-    if matches!((a, b), (Type::Float(_), Type::Float(_))) {
+    if (a == b && matches!(a, Type::Integer(_)))
+        || matches!((a, b), (Type::Float(_), Type::Float(_)))
+    {
         return format!("{left} {} {right}", op.symbol());
+    }
+    if let (Type::Integer(a), Type::Integer(b)) = (a, b) {
+        let signed_a = a.bounds().0 < 0;
+        let signed_b = b.bounds().0 < 0;
+        if signed_a == signed_b {
+            return format!("{left} {} {right}", op.symbol());
+        }
+        if a.bounds().1 <= i64::MAX as i128 && b.bounds().1 <= i64::MAX as i128 {
+            return format!("(int64_t){left} {} (int64_t){right}", op.symbol());
+        }
     }
     let (call, reverse) = match (a, b) {
         (Type::Float(_), _) => (

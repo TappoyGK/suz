@@ -28,7 +28,7 @@ pub(super) fn check(
             }
             let mut checked = Vec::new();
             for (arm, pattern) in arms.iter().zip(patterns.values) {
-                checked.push((pattern, expression(&arm.body, Some(ty), bindings)?));
+                checked.push((pattern, super::coerced(&arm.body, Some(ty), bindings)?));
             }
             CheckedExpression {
                 ty,
@@ -61,13 +61,16 @@ pub(super) fn check(
                         "ifexpr and elif conditions must be bool [if.condition]",
                     ));
                 }
-                checked.push((checked_condition, expression(value, Some(ty), bindings)?));
+                checked.push((
+                    checked_condition,
+                    super::coerced(value, Some(ty), bindings)?,
+                ));
             }
             CheckedExpression {
                 ty,
                 value: Value::If {
                     branches: checked,
-                    otherwise: Box::new(expression(otherwise, Some(ty), bindings)?),
+                    otherwise: Box::new(super::coerced(otherwise, Some(ty), bindings)?),
                 },
             }
         }

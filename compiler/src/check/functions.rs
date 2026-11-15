@@ -1,6 +1,6 @@
 use super::{
     control, declarations, diagnostics,
-    expression::expression,
+    expression::coerced as expression,
     ir::{CheckedExpression, CheckedFunction, CheckedProgram, Value},
     scope::{Scope, Signature},
     statements::{self, Binding},
