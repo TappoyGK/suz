@@ -24,7 +24,7 @@ jobs:
   work:
     name: work checks
     if: >-
-      (github.event_name == 'pull_request' && startsWith(github.base_ref, 'release/')) ||
+      (github.event_name == 'pull_request' && startsWith(github.event.pull_request.stack.base.ref || github.base_ref, 'release/')) ||
       (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/'))
     runs-on: macos-26
     timeout-minutes: 10
@@ -60,7 +60,7 @@ jobs:
     name: release checks
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' && github.base_ref == 'main') ||
+      (github.event_name == 'pull_request' && (github.event.pull_request.stack.base.ref || github.base_ref) == 'main') ||
       (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: macos-26
     timeout-minutes: 20
