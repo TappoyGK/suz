@@ -1,7 +1,7 @@
 use crate::test_util::compile_and_run_c11;
 
 #[test]
-fn text_float_casts_share_constant_rounding_and_lazy_handlers() {
+fn symbol_float_casts_share_constant_rounding_and_lazy_handlers() {
     let source = r#"const MID = `1.0000000596046447753906250000000000001` as f32 or 7.0
 const HUGE = `1.0e1000` as f64 or 7.0
 const TINY = `-1.0e-1000` as f64 or 7.0
@@ -40,7 +40,7 @@ fn main() -> u8 {
 }
 
 #[test]
-fn text_float_casts_require_handlers_and_check_unselected_values() {
+fn symbol_float_casts_require_handlers_and_check_unselected_values() {
     for (source, rule) in [
         (
             "const A = `1.0` as f32\nfn main() -> u8 { return 0 }",

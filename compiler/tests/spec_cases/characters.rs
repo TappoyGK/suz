@@ -1,4 +1,4 @@
-use super::text_runtime::build_with_environment_optimized;
+use super::symbol_runtime::build_with_environment_optimized;
 use std::process::Command;
 
 #[test]
@@ -141,7 +141,7 @@ const ITEM{value} = `Item {{ ch: '\\u{{{value:x}}}' }}` as Item or Item {{ ch: '
 }
 
 #[test]
-fn text_iteration_and_character_logs_allocate_nothing_after_startup() {
+fn symbol_iteration_and_character_logs_allocate_nothing_after_startup() {
     let source = r#"fn scan(t: symbol) -> u32 {
     var count: u32 = 0
     for ch in t {
@@ -242,7 +242,7 @@ fn unicode_escape_diagnostics_identify_the_failure_in_each_expression_context() 
 }
 
 #[test]
-fn mutable_loop_inputs_have_a_diagnostic_shared_by_text_and_ranges() {
+fn mutable_loop_inputs_have_a_diagnostic_shared_by_symbol_and_ranges() {
     for keyword in ["for", "rev"] {
         for (declaration, input) in [
             ("var value = `abc`", "value"),

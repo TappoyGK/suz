@@ -1,4 +1,4 @@
-use super::text_runtime::build_with_environment;
+use super::symbol_runtime::build_with_environment;
 use std::process::Command;
 
 const SOURCE: &str = r#"struct Inner { name: symbol, count: u8 }
@@ -65,7 +65,7 @@ int main(int argc, char **argv) {
 "#;
 
 #[test]
-fn struct_text_parsing_does_not_intern_failed_inputs_and_frees_temporary_storage() {
+fn struct_symbol_parsing_does_not_intern_failed_inputs_and_frees_temporary_storage() {
     let (_directory, path) = build_with_environment(SOURCE, DRIVER);
     let output = Command::new(&path).arg("validation").output().unwrap();
     assert_eq!(
@@ -110,7 +110,7 @@ fn struct_text_parsing_does_not_intern_failed_inputs_and_frees_temporary_storage
 }
 
 #[test]
-fn constant_struct_text_results_keep_static_payloads_in_bindings_and_constants() {
+fn constant_struct_symbol_results_keep_static_payloads_in_bindings_and_constants() {
     let content = "x".repeat(1000);
     let source = format!(
         r#"struct Label {{ name: symbol }}

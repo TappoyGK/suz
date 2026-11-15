@@ -1,8 +1,8 @@
-use super::text_runtime::{build_with_environment, build_with_environment_optimized};
+use super::symbol_runtime::{build_with_environment, build_with_environment_optimized};
 use std::process::Command;
 
 #[test]
-fn startup_registers_unused_folded_and_pattern_texts_before_direct_access() {
+fn startup_registers_unused_folded_and_pattern_symbols_before_direct_access() {
     let source = r#"const UNUSED = `unused`
 const FOLDED = `${`fold`}${`ed`}`
 fn unused() -> symbol { return `not called` }
@@ -79,7 +79,7 @@ fn startup_failure_points_to_main_keyword_before_main_body_runs() {
 }
 
 #[test]
-fn logs_reference_generated_and_long_text_without_allocating() {
+fn logs_reference_generated_and_long_symbol_without_allocating() {
     let source = r#"fn make_text(count: u8) -> symbol {
     log info `inner: ${count}`
     return `count: ${count}`

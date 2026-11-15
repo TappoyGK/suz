@@ -1,4 +1,4 @@
-use super::text_runtime::build_with_environment_optimized;
+use super::symbol_runtime::build_with_environment_optimized;
 use std::process::Command;
 
 #[test]

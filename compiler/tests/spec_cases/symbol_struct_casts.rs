@@ -1,7 +1,7 @@
 use crate::test_util::compile_and_run_c11;
 
 #[test]
-fn struct_text_casts_preserve_constants_scalar_types_and_lazy_evaluation() {
+fn struct_symbol_casts_preserve_constants_scalar_types_and_lazy_evaluation() {
     let source = r#"enum Mode: u8 { First, Last }
 struct Values { low: i8, high: u64, small: f32, wide: f64, flag: bool, mode: Mode, label: symbol }
 const INPUT = `Values { low: -128, high: 18446744073709551615, small: 1.0000000596046447753906250000000001, wide: -0, flag: true, mode: Mode.Last, label: \`a\\0b\` }`
@@ -36,7 +36,7 @@ fn main() -> u8 {
 }
 
 #[test]
-fn struct_text_casts_check_whole_input_layout_and_all_escape_forms() {
+fn struct_symbol_casts_check_whole_input_layout_and_all_escape_forms() {
     let source = r#"enum Mode: u8 { First, Last }
 struct Label { name: symbol, mode: Mode }
 const DEFAULT = Label { name: `fallback`, mode: Mode.First }
@@ -78,7 +78,7 @@ fn main() -> u8 {
 }
 
 #[test]
-fn struct_text_casts_require_handlers_and_validate_constant_fallbacks() {
+fn struct_symbol_casts_require_handlers_and_validate_constant_fallbacks() {
     for (body, rule) in [
         (
             "const V = `Item { value: 1 }` as Item\nfn main() -> u8 { return 0 }",
