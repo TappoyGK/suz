@@ -2021,6 +2021,37 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | `[loop.jump-context]` | 2 | 5 |
 
+### flow-073 引数・戻り値・ローカル変数を同じ具体型にする
+
+主根拠：`[num.fn-same]`。
+
+補助根拠：`[num.fn-body-type]`、`[num.fn-recursion]`。
+
+`count` の引数・戻り値・`previous` は、最初の呼び出しでは `u8`、次の呼び出しでは `u16` になる。再帰呼び出しでも、それぞれ同じ具体型を使う。
+
+**ソース：**
+
+```suz
+fn count(n: int) -> int {
+    if n == 0 { return 0 }
+    fix previous: int = count(n - 1)
+    return previous + 1
+}
+fn main() -> u8 {
+    fix small: u8 = 3
+    fix large: u16 = 300
+    fix a = count(small)
+    fix b = count(large)
+    return ifexpr a == 3 && b == 300 { 0 } else { 1 }
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
 ### flow-068 独立したintとfloat、候補のない呼び出し
 
 主根拠：`[num.fn-resolve]`。
@@ -2030,9 +2061,15 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
-fn first(value: int, factor: float) -> int { return value }
-fn zero() -> int { return 0 }
-fn half(value: float) -> float { return value * 0.5 }
+fn first(value: int, factor: float) -> int {
+    return value
+}
+fn zero() -> int {
+    return 0
+}
+fn half(value: float) -> float {
+    return value * 0.5
+}
 fn main() -> u8 {
     fix value: u8 = 12
     fix factor: f32 = 0.5
@@ -2050,6 +2087,70 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | 正常終了 | 0 | 0 |
 
+### flow-074 intの結果を浮動小数点型で受け取る
+
+主根拠：`[num.fn-convert]`。
+
+補助根拠：`[num.fn-resolve]`。
+
+`f64` は `int` の型候補に入らない。`identity(input)` は `u8` を返し、その結果を損失なく `f64` に広げる。算術式を渡した呼び出しでは、要求型なしで決まる `u8` を使う。
+
+**ソース：**
+
+```suz
+fn identity(value: int) -> int {
+    return value
+}
+fn main() -> u8 {
+    fix input: u8 = 3
+    fix result: f64 = identity(input)
+    fix sum: u8 = identity(input + input)
+    return ifexpr result == 3.0 && sum == 6 { 0 } else { 1 }
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### flow-075 floatを返す内側の呼び出しをintの引数に渡す
+
+主根拠：`[num.fn-convert]`。
+
+補助根拠：`[num.fn-nested]`。
+
+`half` の戻り値は `f32` であり、`int` の引数には渡せない。種類が異なる呼び出し間では具体型をそろえない。
+
+**ソース：**
+
+```suz
+fn half(value: float) -> float {
+    return value * 0.5
+}
+fn identity(value: int) -> int {
+    return value
+}
+fn main() -> u8 {
+    fix input: f32 = 4.0
+    fix result = identity(half(input))
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[num.fn-convert]` | 9 | 27 |
+
 ### flow-069 入れ子の呼び出し全体で具体型を決める
 
 主根拠：`[num.fn-nested]`。
@@ -2059,7 +2160,9 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
-fn square(value: int) -> int { return value * value }
+fn square(value: int) -> int {
+    return value * value
+}
 fn clamp(value: int, lo: int, hi: int) -> int {
     return ifexpr value < lo { lo } elif value > hi { hi } else { value }
 }
@@ -2085,7 +2188,9 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
-fn small(value: int) -> u8 { return value }
+fn small(value: int) -> u8 {
+    return value
+}
 fn main() -> u8 {
     fix value: u16 = 300
     return small(value)
@@ -2102,7 +2207,7 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[num.fn-body]` | 4 | 12 |
+| 通常 | `[num.fn-body]` | 6 | 12 |
 
 ### flow-071 未使用の汎用関数から未宣言の名前を参照する
 
@@ -2113,8 +2218,12 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
-fn unused(value: int) -> int { return missing }
-fn main() -> u8 { return 0 }
+fn unused(value: int) -> int {
+    return missing
+}
+fn main() -> u8 {
+    return 0
+}
 ```
 
 **期待結果：**
@@ -2127,7 +2236,101 @@ fn main() -> u8 { return 0 }
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[decl.local-scope]` | 1 | 39 |
+| 通常 | `[decl.local-scope]` | 2 | 12 |
+
+### flow-078 未使用関数の型に依存しない誤りを検出する
+
+主根拠：`[num.fn-unused]`。
+
+`narrowed` の初期化は具体型によって成否が変わるが、整数リテラルを `text` にする初期化は具体型によらず誤りである。前の文の型検査に失敗する組み合わせがあっても、後の誤りを見逃さない。
+
+**ソース：**
+
+```suz
+fn unused(value: int) -> u8 {
+    fix narrowed: u8 = value
+    fix message: text = 5
+    return narrowed
+}
+fn main() -> u8 {
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[type.expected]` | 3 | 25 |
+
+### flow-076 未使用関数でもすべての具体型で一定の比較を警告する
+
+主根拠：`[num.fn-warning]`。
+
+`value >= 0` は符号付き整数型では一定にならず、警告しない。`small >= 0` はどの具体型でも常に真になるため、関数を呼ばなくても1回警告する。
+
+**ソース：**
+
+```suz
+fn nonnegative(value: int) -> bool {
+    return value >= 0
+}
+fn always(value: int) -> bool {
+    fix small: u8 = 5
+    return small >= 0
+}
+fn main() -> u8 {
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 1 |
+
+**警告：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[diagnostic.constant-comparison]` | 6 | 18 |
+
+### flow-077 宣言していないfloatを変換先に使う
+
+主根拠：`[num.fn-undeclared]`。
+
+関数の引数型と戻り値型に現れる汎用型は `int` だけである。`float` は関数本体の変換先にも使えない。
+
+**ソース：**
+
+```suz
+fn convert(value: int) -> int {
+    fix converted = value as float
+    return value
+}
+fn main() -> u8 {
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[num.fn-undeclared]` | 2 | 27 |
 
 ### flow-072 安全な具体型で呼び出してもキャストのorを省略できない
 
@@ -2138,7 +2341,9 @@ fn main() -> u8 { return 0 }
 **ソース：**
 
 ```suz
-fn narrow(value: int) -> u8 { return value as u8 }
+fn narrow(value: int) -> u8 {
+    return value as u8
+}
 fn main() -> u8 {
     fix value: u8 = 1
     return narrow(value)
@@ -2155,4 +2360,4 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[num.fn-body]` | 4 | 12 |
+| 通常 | `[num.fn-cast]` | 2 | 18 |

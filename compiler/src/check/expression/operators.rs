@@ -246,7 +246,6 @@ pub(super) fn check(
                 operand_type(operand, bindings).filter(|ty| matches!(ty, Type::Float(_)))
             }))
             .unwrap_or(Type::Float(FloatType::F64));
-            let source_operands = operands;
             let operands = operands
                 .iter()
                 .map(|operand| {
@@ -282,21 +281,9 @@ pub(super) fn check(
                     "ordering comparisons require numeric operands [expr.operator-types]",
                 ));
             }
-            for (index, ((op, pair), location)) in operators
-                .iter()
-                .zip(operands.windows(2))
-                .zip(locations)
-                .enumerate()
-            {
+            for ((op, pair), location) in operators.iter().zip(operands.windows(2)).zip(locations) {
                 if let Some(result) =
                     super::super::exact::constant_comparison(&pair[0], &pair[1], *op)
-                    && super::super::generic::comparison_warning(
-                        &source_operands[index],
-                        &source_operands[index + 1],
-                        *op,
-                        bindings,
-                        result,
-                    )
                 {
                     bindings
                         .comparison_warnings

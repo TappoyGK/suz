@@ -13,12 +13,18 @@ pub(super) struct Signature {
     pub result: Type,
 }
 
+impl Signature {
+    pub fn is_generic(&self) -> bool {
+        self.result.generic() || self.parameters.iter().any(|t| t.generic())
+    }
+}
+
 #[derive(Clone)]
 pub(super) struct Scope {
-    pub generic_result: Option<Type>,
-    pub generic_types: [Option<Type>; 2],
-    pub probing_generic: bool,
-    pub missing_cast_handler: Rc<std::cell::Cell<Option<crate::ast::Location>>>,
+    pub generic_types: super::generic::GenericTypes,
+    pub generic_calls: Vec<crate::ast::Location>,
+    pub analyzing_generic: bool,
+    pub analysis_errors: Rc<std::cell::RefCell<Vec<crate::Diagnostic>>>,
     pub instances: Rc<std::cell::RefCell<super::generic::Instances>>,
     pub type_hints: Rc<std::cell::RefCell<BTreeMap<usize, Option<Type>>>>,
     pub float_hints: Rc<std::cell::RefCell<BTreeMap<usize, bool>>>,
@@ -34,12 +40,26 @@ pub(super) struct Scope {
 }
 impl Scope {
     pub fn resolve_type(&self, ty: Type) -> Type {
-        match ty {
-            Type::GenericInt => self.generic_types[0].expect("declared generic int"),
-            Type::GenericFloat => self.generic_types[1].expect("declared generic float"),
-            _ => ty,
+        self.generic_types.resolve(ty)
+    }
+    pub fn in_generic(&self) -> bool {
+        !self.generic_types.is_empty()
+    }
+    // Isolate all outputs and hint caches during speculative checking.
+    pub fn speculative(&self) -> Self {
+        Self {
+            analysis_errors: Default::default(),
+            instances: Default::default(),
+            type_hints: Default::default(),
+            float_hints: Default::default(),
+            hint_depth: Default::default(),
+            division_warnings: Default::default(),
+            comparison_warnings: Default::default(),
+            constant_texts: Default::default(),
+            ..self.clone()
         }
     }
+
     pub fn type_name(&self, ty: Type) -> &str {
         match ty {
             Type::Enum(ty) => &self.enums[ty.id].name,
@@ -55,10 +75,10 @@ impl Scope {
 impl Default for Scope {
     fn default() -> Self {
         Self {
-            generic_result: None,
-            generic_types: [None, None],
-            probing_generic: false,
-            missing_cast_handler: Rc::default(),
+            generic_types: Default::default(),
+            generic_calls: Vec::new(),
+            analyzing_generic: false,
+            analysis_errors: Default::default(),
             instances: Rc::default(),
             type_hints: Rc::default(),
             hint_depth: Rc::default(),

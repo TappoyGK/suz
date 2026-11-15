@@ -39,16 +39,23 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     let (mut globals, mut warnings) =
         declarations::resolve(&program.constants, &program.enums, &program.structs)?;
     globals.functions = signatures;
-    globals.instances.borrow_mut().next_id = program.functions.len();
+    *globals.instances.borrow_mut() = super::generic::Instances::new(program.functions.len());
+    for function in &program.functions {
+        if globals.functions[&function.name].is_generic() {
+            super::generic::analyze(function, &globals)?;
+        }
+    }
     let mut functions = Vec::new();
     for (id, function) in program.functions.iter().enumerate() {
-        if super::generic::active(&globals.functions[&function.name])
-            .iter()
-            .any(|v| *v)
-        {
+        if globals.functions[&function.name].is_generic() {
             continue;
         }
-        let (checked, found) = check_function(function, &globals, id, [None, None])?;
+        let (checked, found) = check_function(
+            function,
+            &globals,
+            id,
+            super::generic::GenericTypes::default(),
+        )?;
         functions.push(checked);
         warnings.extend(found);
     }
@@ -57,20 +64,33 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
             break;
         };
         let function = &program.functions[instance.function];
-        let (checked, found) = check_function(function, &globals, instance.id, instance.types)
-            .map_err(|e| {
-                instance.call.error(
-                    e.kind,
+        let mut context = globals.clone();
+        context.generic_calls = instance.calls.clone();
+        let (checked, found) = check_function(function, &context, instance.id, instance.types)
+            .map_err(|error| {
+                let mut diagnostic = instance.calls[0].error(
+                    error.kind,
                     format!(
-                        "generic call to '{}' fails at {}:{}: {} [num.fn-body]",
-                        function.name, e.line, e.column, e.message
+                        "generic call to '{}' is invalid for these concrete types [num.fn-body]",
+                        function.name
                     ),
-                )
+                );
+                diagnostic
+                    .related
+                    .extend(instance.calls.iter().skip(1).map(|site| {
+                        site.error(
+                            ErrorKind::InvalidSource,
+                            "instantiated through this call [num.fn-body]",
+                        )
+                    }));
+                diagnostic.related.push(error);
+                diagnostic
             })?;
         functions.push(checked);
         warnings.extend(found);
     }
     warnings.sort_by_key(|l| (l.line, l.column));
+    // [num.fn-warning] One source operation is reported once across instances.
     warnings.dedup_by_key(|l| (l.line, l.column));
     Ok(CheckedProgram {
         division_warnings: globals
@@ -95,20 +115,23 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     })
 }
 
-fn check_function(
+pub(super) fn check_function(
     function: &crate::ast::Function,
     globals: &Scope,
     id: usize,
-    types: [Option<Type>; 2],
+    types: super::generic::GenericTypes,
 ) -> Result<(CheckedFunction, Vec<crate::ast::Location>), Diagnostic> {
     control::validate_return_positions(&function.statements)?;
     let mut warnings = Vec::new();
     let mut scope = globals.clone();
     scope.generic_types = types;
-    scope.generic_result = function.result.generic().then_some(function.result);
+    if scope.in_generic() && !scope.analyzing_generic {
+        scope.comparison_warnings = Default::default();
+        scope.division_warnings = Default::default();
+    }
     scope.result = scope.resolve_type(function.result);
     let mut declared = Vec::new();
-    for (id, parameter) in function.parameters.iter().enumerate() {
+    for (parameter_id, parameter) in function.parameters.iter().enumerate() {
         if declared.contains(&parameter.name) {
             return Err(parameter.location.error(
                 ErrorKind::InvalidSource,
@@ -129,10 +152,9 @@ fn check_function(
         scope.insert(
             parameter.name.clone(),
             Binding {
-                id,
+                id: parameter_id,
                 ty: parameter_type,
-                generic: parameter.ty.generic().then_some(parameter.ty),
-                generic_source: None,
+                generic_dependent: parameter.ty.generic(),
                 mutable: false,
                 parameter: true,
                 loop_variable: false,
@@ -152,7 +174,9 @@ fn check_function(
         0,
         declared,
     )?;
-    if function.result != Type::Void {
+    if function.result != Type::Void
+        && (!scope.analyzing_generic || scope.analysis_errors.borrow().is_empty())
+    {
         if !has_return {
             return Err(function.end.error(ErrorKind::InvalidSource, "a value-returning function requires a return expression [fn.value-return-required]"));
         }
@@ -196,21 +220,34 @@ pub(super) fn call(
             "argument count does not match the function declaration [fn.call]",
         ));
     }
-    let generic = super::generic::active(signature).iter().any(|v| *v);
+    let generic = signature.is_generic();
     let types = super::generic::resolve(signature, arguments, expected, scope, expr.location)?;
-    let concrete = |ty| super::generic::index(ty).map_or(ty, |i| types[i].unwrap());
+    let concrete = |ty| types.resolve(ty);
     let id = if generic {
-        scope
-            .instances
-            .borrow_mut()
-            .request(signature.id, types, expr.location)
+        scope.instances.borrow_mut().request(
+            signature.id,
+            types,
+            scope.generic_calls.clone(),
+            expr.location,
+        )
     } else {
         signature.id
     };
     let arguments = arguments
         .iter()
         .zip(&signature.parameters)
-        .map(|(argument, ty)| expression(argument, Some(concrete(*ty)), scope))
+        .map(|(argument, ty)| {
+            // [num.fn-convert] Report the generic parameter's contract, not
+            // an incidental default type chosen after a family mismatch.
+            expression(argument, Some(concrete(*ty)), scope).map_err(|error| {
+                if generic && error.rule() == "type.expected" {
+                    argument.location.error(ErrorKind::InvalidSource, if *ty == Type::GenericInt &&
+                        (super::expression::has_float_literal(argument, scope) || matches!(super::expression::operand_type(argument, scope), Some(Type::Float(_)))) {
+                        "floating-point values cannot be passed to an int parameter [num.fn-convert]".to_owned()
+                    } else { format!("argument cannot be passed as {} without loss [num.fn-convert]", scope.type_name(concrete(*ty))) })
+                } else { error }
+            })
+        })
         .collect::<Result<_, _>>()?;
     Ok(CheckedExpression {
         ty: concrete(signature.result),

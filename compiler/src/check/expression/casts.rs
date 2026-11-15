@@ -18,8 +18,9 @@ pub(in crate::check) fn check(
             target,
             fallback,
         } => {
-            super::super::generic::validate_cast(expr, bindings)?;
-            let target = &bindings.resolve_type(*target);
+            let generic_dependent = target.generic() || super::generic_dependent(operand, bindings);
+            let concrete_target = bindings.resolve_type(*target);
+            let target = &concrete_target;
             let operand = super::super::exact::use_value(operand, bindings)?;
             if operand.ty == Type::Exact {
                 return super::super::exact::cast(
@@ -29,7 +30,12 @@ pub(in crate::check) fn check(
                     fallback,
                     expr.location,
                     bindings,
-                );
+                )
+                .map_err(|mut error| {
+                    error.generic_cast = generic_dependent
+                        && matches!(error.rule(), "expr.cast-handler" | "const.cast-check");
+                    error
+                });
             }
             if !*wrap && operand.ty == Type::Text && *target == Type::Symbol {
                 if fallback.is_some() {
@@ -136,6 +142,14 @@ pub(in crate::check) fn check(
                     ));
                 }
             };
+            if fallback.is_none() && !operand.ty.is_text() {
+                cast_risk(&operand, concrete_target, safe)?
+                    .require_handler(expr.location)
+                    .map_err(|mut error| {
+                        error.generic_cast = generic_dependent;
+                        error
+                    })?;
+            }
             if let Some(FailureHandler::Return { value, .. }) = fallback {
                 let return_value = crate::check::functions::return_value(value, bindings)?;
                 let checked = CheckedExpression {
@@ -197,35 +211,12 @@ pub(in crate::check) fn check(
                         },
                     }
                 } else {
-                    if !safe {
-                        match constant_integer(&operand)? {
-                            Some(value)
-                                if crate::numeric::Range::point(
-                                    crate::numeric::Int::from_i128(value),
-                                )
-                                .fits_type(*target) => {}
-                            Some(_) => {
-                                return Err(super::super::generic::missing_handler(
-                                    expr.location,
-                                    bindings,
-                                    true,
-                                ));
-                            }
-                            None => {
-                                return Err(super::super::generic::missing_handler(
-                                    expr.location,
-                                    bindings,
-                                    false,
-                                ));
-                            }
-                        }
-                    }
                     CheckedExpression {
                         ty: *target,
                         value: Value::Cast(Box::new(operand)),
                     }
                 }
-            } else if let (Type::Float(_), Type::Integer(to)) = (operand.ty, *target) {
+            } else if let (Type::Float(_), Type::Integer(_)) = (operand.ty, *target) {
                 if let Some(fallback) = fallback {
                     CheckedExpression {
                         ty: *target,
@@ -238,23 +229,6 @@ pub(in crate::check) fn check(
                         },
                     }
                 } else {
-                    match constant_float(&operand)? {
-                        Some(value) if float_to_integer(value, to).is_some() => {}
-                        Some(_) => {
-                            return Err(super::super::generic::missing_handler(
-                                expr.location,
-                                bindings,
-                                true,
-                            ));
-                        }
-                        None => {
-                            return Err(super::super::generic::missing_handler(
-                                expr.location,
-                                bindings,
-                                false,
-                            ));
-                        }
-                    }
                     CheckedExpression {
                         ty: *target,
                         value: Value::Cast(Box::new(operand)),
@@ -275,23 +249,6 @@ pub(in crate::check) fn check(
                         },
                     }
                 } else {
-                    match constant_float(&operand)? {
-                        Some(value) if !value.is_finite() || (value as f32).is_finite() => {}
-                        Some(_) => {
-                            return Err(super::super::generic::missing_handler(
-                                expr.location,
-                                bindings,
-                                true,
-                            ));
-                        }
-                        None => {
-                            return Err(super::super::generic::missing_handler(
-                                expr.location,
-                                bindings,
-                                false,
-                            ));
-                        }
-                    }
                     CheckedExpression {
                         ty: *target,
                         value: Value::Cast(Box::new(operand)),
@@ -315,5 +272,59 @@ pub(in crate::check) fn check(
         }
 
         _ => unreachable!(),
+    })
+}
+
+// [expr.cast-risk], [arith.cast], [const.cast-check]. The ordinary checker
+// and template analysis use this pure classification; no Scope is mutated.
+pub(in crate::check) enum CastRisk {
+    Safe,
+    Dynamic,
+    ConstantOutOfRange,
+}
+impl CastRisk {
+    pub(in crate::check) fn require_handler(
+        self,
+        location: crate::ast::Location,
+    ) -> Result<(), Diagnostic> {
+        match self {
+            Self::Safe => Ok(()),
+            Self::Dynamic => Err(location.error(
+                ErrorKind::InvalidSource,
+                "this cast requires or [expr.cast-handler]",
+            )),
+            Self::ConstantOutOfRange => Err(location.error(
+                ErrorKind::InvalidSource,
+                "constant cast is out of range and requires or [const.cast-check]",
+            )),
+        }
+    }
+}
+pub(in crate::check) fn cast_risk(
+    operand: &CheckedExpression,
+    target: Type,
+    type_safe: bool,
+) -> Result<CastRisk, Diagnostic> {
+    if type_safe {
+        return Ok(CastRisk::Safe);
+    }
+    let constant_fits = if operand.ty == Type::Exact {
+        super::super::exact::constant(operand)
+            .map(|n| crate::numeric::Range::point(n).fits_type(target))
+    } else if matches!(operand.ty, Type::Float(_)) {
+        constant_float(operand)?.map(|n| match target {
+            Type::Integer(to) => float_to_integer(n, to).is_some(),
+            Type::Float(FloatType::F32) => !n.is_finite() || (n as f32).is_finite(),
+            _ => unreachable!("cast target validated before numeric risk classification"),
+        })
+    } else {
+        constant_integer(operand)?.map(|n| {
+            crate::numeric::Range::point(crate::numeric::Int::from_i128(n)).fits_type(target)
+        })
+    };
+    Ok(match constant_fits {
+        Some(true) => CastRisk::Safe,
+        Some(false) => CastRisk::ConstantOutOfRange,
+        None => CastRisk::Dynamic,
     })
 }

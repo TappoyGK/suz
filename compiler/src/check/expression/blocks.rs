@@ -36,11 +36,7 @@ pub(super) fn operand_type(
     bindings: &Scope,
 ) -> Option<Type> {
     // Type discovery must not count speculative assignments or diagnostics.
-    let mut local = bindings.clone();
-    local.instances = Default::default();
-    local.constant_texts = Default::default();
-    local.comparison_warnings = Default::default();
-    local.division_warnings = Default::default();
+    let mut local = bindings.speculative();
     prefix(input, &mut local).ok()?;
     super::operand_type(value, &local)
 }

@@ -145,7 +145,9 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
                     slots,
                 )
             }
-            Type::GenericInt | Type::GenericFloat | Type::Exact | Type::Void => unreachable!(),
+            Type::GenericInt | Type::GenericFloat | Type::Exact | Type::Void => {
+                unreachable!("text conversions only receive resolved, storable types")
+            }
         };
         writeln!(c, "static const suz_parse_type suz_schema_{key} = {{{kind}, {bits}, {}, {name}, {fields}, {count}, {slots}}};", u8::from(signed)).unwrap();
         emitted.insert(key, slots);

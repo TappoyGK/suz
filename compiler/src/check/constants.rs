@@ -324,7 +324,9 @@ fn constant_bool_raw(expr: &CheckedExpression) -> Option<bool> {
                     }
                 } else {
                     match left.ty {
-                        Type::GenericInt | Type::GenericFloat => unreachable!(),
+                        Type::GenericInt | Type::GenericFloat => unreachable!(
+                            "generic annotations are substituted before checking values"
+                        ),
                         Type::Symbol | Type::Text => {
                             let (Value::Text { text: a, .. }, Value::Text { text: b, .. }) =
                                 (&left.value, &right.value)
@@ -422,7 +424,9 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
         return slice_value(expr);
     }
     let value = match expr.ty {
-        Type::GenericInt | Type::GenericFloat => unreachable!(),
+        Type::GenericInt | Type::GenericFloat => {
+            unreachable!("generic annotations are substituted before checking values")
+        }
         Type::Symbol | Type::Text => match &expr.value {
             Value::Text { .. } => expr.value.clone(),
             Value::Template {

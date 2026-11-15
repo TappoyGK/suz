@@ -139,8 +139,7 @@ impl Resolver<'_> {
         self.bindings.insert(
             name.to_owned(),
             Binding {
-                generic: None,
-                generic_source: None,
+                generic_dependent: false,
                 loop_variable: false,
                 // Constants are substituted as evaluated values, not local slots.
                 id: 0,

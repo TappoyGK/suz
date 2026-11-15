@@ -9,78 +9,96 @@ use crate::{
     Diagnostic, ErrorKind,
     ast::{Expression, ExpressionKind, FloatType, IntegerType, Location, Type},
 };
-pub(super) use policy::{comparison_warning, validate_cast};
+pub(super) use policy::analyze;
 use std::collections::{BTreeMap, VecDeque};
 pub(super) use validation::validate;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) struct GenericTypes {
+    pub int: Option<IntegerType>,
+    pub float: Option<FloatType>,
+}
+impl GenericTypes {
+    pub fn resolve(self, ty: Type) -> Type {
+        match ty {
+            Type::GenericInt => Type::Integer(self.int.expect("int declared in signature")),
+            Type::GenericFloat => Type::Float(self.float.expect("float declared in signature")),
+            _ => ty,
+        }
+    }
+    pub fn is_empty(self) -> bool {
+        self.int.is_none() && self.float.is_none()
+    }
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Family {
+    Int,
+    Float,
+}
+impl Family {
+    fn of(ty: Type) -> Option<Self> {
+        match ty {
+            Type::GenericInt => Some(Self::Int),
+            Type::GenericFloat => Some(Self::Float),
+            _ => None,
+        }
+    }
+    fn contains(self, ty: Type) -> bool {
+        matches!(
+            (self, ty),
+            (Self::Int, Type::Integer(_)) | (Self::Float, Type::Float(_))
+        )
+    }
+}
 
 #[derive(Clone)]
 pub(super) struct Instance {
     pub function: usize,
-    pub types: [Option<Type>; 2],
+    pub types: GenericTypes,
     pub id: usize,
-    pub call: Location,
+    pub calls: Vec<Location>,
 }
 #[derive(Default, Clone)]
 pub(super) struct Instances {
-    ids: BTreeMap<(usize, Option<IntegerType>, Option<FloatType>), usize>,
+    ids: BTreeMap<(usize, GenericTypes), usize>,
     pub queue: VecDeque<Instance>,
-    pub next_id: usize,
+    next_id: usize,
 }
 impl Instances {
-    pub fn request(&mut self, function: usize, types: [Option<Type>; 2], call: Location) -> usize {
-        let key = (
-            function,
-            types[0].and_then(|t| {
-                if let Type::Integer(t) = t {
-                    Some(t)
-                } else {
-                    None
-                }
-            }),
-            types[1].and_then(|t| {
-                if let Type::Float(t) = t {
-                    Some(t)
-                } else {
-                    None
-                }
-            }),
-        );
+    // [num.monomorphize] Template IDs occupy the initial range; generated
+    // instances have distinct IDs and identical substitutions share one ID.
+    pub fn new(first_id: usize) -> Self {
+        Self {
+            next_id: first_id,
+            ..Self::default()
+        }
+    }
+    pub fn request(
+        &mut self,
+        function: usize,
+        types: GenericTypes,
+        mut calls: Vec<Location>,
+        call: Location,
+    ) -> usize {
+        let key = (function, types);
         if let Some(id) = self.ids.get(&key) {
             return *id;
         }
         let id = self.next_id;
         self.next_id += 1;
         self.ids.insert(key, id);
+        calls.push(call);
         self.queue.push_back(Instance {
             function,
             types,
             id,
-            call,
+            calls,
         });
         id
     }
 }
 
-pub(super) fn index(ty: Type) -> Option<usize> {
-    match ty {
-        Type::GenericInt => Some(0),
-        Type::GenericFloat => Some(1),
-        _ => None,
-    }
-}
-fn family(ty: Type, slot: usize) -> bool {
-    matches!((ty, slot), (Type::Integer(_), 0) | (Type::Float(_), 1))
-}
-pub(super) fn active(signature: &Signature) -> [bool; 2] {
-    let mut result = [false; 2];
-    for ty in signature.parameters.iter().chain([&signature.result]) {
-        if let Some(i) = index(*ty) {
-            result[i] = true;
-        }
-    }
-    result
-}
-fn ungroup(mut expr: &Expression) -> &Expression {
+fn without_groups(mut expr: &Expression) -> &Expression {
     while let ExpressionKind::Group(inner) = &expr.kind {
         expr = inner;
     }
@@ -89,20 +107,21 @@ fn ungroup(mut expr: &Expression) -> &Expression {
 fn candidates(
     signature: &Signature,
     arguments: &[Expression],
-    slot: usize,
+    family: Family,
     scope: &Scope,
     into: &mut Vec<Type>,
 ) {
     for (parameter, argument) in signature.parameters.iter().zip(arguments) {
-        if index(*parameter) != Some(slot) {
+        if Family::of(*parameter) != Some(family) {
             continue;
         }
-        let argument = ungroup(argument);
+        let argument = without_groups(argument);
         if let ExpressionKind::Call { name, arguments } = &argument.kind
             && let Some(inner) = scope.functions.get(name)
-            && index(inner.result) == Some(slot)
+            && Family::of(inner.result) == Some(family)
         {
-            candidates(inner, arguments, slot, scope, into);
+            // [num.fn-nested] Collect the connected calls before applying defaults.
+            candidates(inner, arguments, family, scope, into);
             continue;
         }
         if matches!(
@@ -121,7 +140,7 @@ fn candidates(
             )
         });
         if let Some(ty) = known
-            && family(ty, slot)
+            && family.contains(ty)
         {
             into.push(ty);
         }
@@ -133,17 +152,22 @@ pub(super) fn resolve(
     expected: Option<Type>,
     scope: &Scope,
     location: Location,
-) -> Result<[Option<Type>; 2], Diagnostic> {
-    let mut result = [None, None];
-    for (slot, used) in active(signature).into_iter().enumerate() {
-        if !used {
+) -> Result<GenericTypes, Diagnostic> {
+    let mut result = GenericTypes::default();
+    for family in [Family::Int, Family::Float] {
+        if !signature
+            .parameters
+            .iter()
+            .chain([&signature.result])
+            .any(|ty| Family::of(*ty) == Some(family))
+        {
             continue;
         }
         let mut types = Vec::new();
-        candidates(signature, arguments, slot, scope, &mut types);
-        if index(signature.result) == Some(slot)
+        candidates(signature, arguments, family, scope, &mut types);
+        if Family::of(signature.result) == Some(family)
             && let Some(ty) = expected
-            && family(ty, slot)
+            && family.contains(ty)
         {
             types.push(ty);
         }
@@ -159,48 +183,35 @@ pub(super) fn resolve(
                 })?,
             });
         }
-        result[slot] = Some(joined.unwrap_or(if slot == 0 {
-            Type::Integer(IntegerType::I64)
-        } else {
-            Type::Float(FloatType::F64)
-        }));
+        match family {
+            Family::Int => {
+                result.int = Some(match joined {
+                    Some(Type::Integer(t)) => t,
+                    None => IntegerType::I64,
+                    _ => unreachable!("integer candidates only"),
+                });
+            }
+            Family::Float => {
+                result.float = Some(match joined {
+                    Some(Type::Float(t)) => t,
+                    None => FloatType::F64,
+                    _ => unreachable!("float candidates only"),
+                });
+            }
+        }
     }
     Ok(result)
 }
-pub(super) fn hint(name: &str, arguments: &[Expression], scope: &Scope) -> Option<Type> {
+pub(super) fn call_operand_type(
+    name: &str,
+    arguments: &[Expression],
+    scope: &Scope,
+) -> Option<Type> {
     let signature = scope.functions.get(name)?;
-    let Some(slot) = index(signature.result) else {
+    let Some(family) = Family::of(signature.result) else {
         return Some(signature.result);
     };
     let mut types = Vec::new();
-    candidates(signature, arguments, slot, scope, &mut types);
+    candidates(signature, arguments, family, scope, &mut types);
     expression::joined_type(types.into_iter().map(Some))
-}
-
-// Retain the source of inferred local types so policy checks can recompute
-// them under each substitution, including the two bounds of a range.
-#[derive(Clone)]
-pub(super) enum BindingSource {
-    Initializer {
-        annotation: Option<Type>,
-        value: Expression,
-    },
-    Range {
-        start: Expression,
-        end: Expression,
-    },
-}
-
-pub(super) fn missing_handler(location: Location, scope: &Scope, constant: bool) -> Diagnostic {
-    if scope.probing_generic {
-        scope.missing_cast_handler.set(Some(location));
-    }
-    location.error(
-        ErrorKind::InvalidSource,
-        if constant {
-            "constant cast is out of range and requires or [const.cast-check]"
-        } else {
-            "this cast requires or [expr.cast-handler]"
-        },
-    )
 }

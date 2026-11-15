@@ -356,13 +356,7 @@ pub(super) fn cast(
         };
         return Ok(CheckedExpression { ty: target, value });
     }
-    if !safe && !constant(&operand).is_some_and(|n| fits(Range::point(n))) {
-        return Err(super::generic::missing_handler(
-            location,
-            bindings,
-            super::constants::is_constant(&operand),
-        ));
-    }
+    super::expression::casts::cast_risk(&operand, target, safe)?.require_handler(location)?;
     Ok(CheckedExpression {
         ty: target,
         value: Value::Cast(Box::new(operand)),

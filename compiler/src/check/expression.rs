@@ -50,7 +50,9 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
             .find(|e| &e.name == enum_name)
             .map(|e| Type::Enum(e.ty)),
         ExpressionKind::Void => Some(Type::Void),
-        ExpressionKind::Call { name, arguments } => super::generic::hint(name, arguments, bindings),
+        ExpressionKind::Call { name, arguments } => {
+            super::generic::call_operand_type(name, arguments, bindings)
+        }
         ExpressionKind::Block { statements, value } => {
             blocks::operand_type(statements, value, bindings)
         }
@@ -426,6 +428,18 @@ fn expression_inner(
         });
     }
     if expected.is_some_and(|ty| ty != checked.ty) {
+        if let ExpressionKind::Call { name, .. } = &expr.kind
+            && bindings.functions.get(name).is_some_and(|f| f.is_generic())
+        {
+            return Err(expr.location.error(
+                ErrorKind::InvalidSource,
+                format!(
+                    "generic result {} cannot be received as {} without loss [num.fn-convert]",
+                    bindings.type_name(checked.ty),
+                    bindings.type_name(expected.unwrap())
+                ),
+            ));
+        }
         return Err(expr.location.error(
             ErrorKind::InvalidSource,
             format!(
@@ -442,4 +456,41 @@ pub(super) fn joined_type(types: impl Iterator<Item = Option<Type>>) -> Option<T
     types
         .flatten()
         .reduce(|a, b| super::exact::join(a, b).unwrap_or(a))
+}
+
+// Track only whether a type depends on template parameters; source ASTs are
+// never copied into bindings. Concrete annotations terminate this dependence.
+pub(super) fn generic_dependent(expr: &Expression, scope: &Scope) -> bool {
+    if !scope.in_generic() {
+        return false;
+    }
+    match &expr.kind {
+        ExpressionKind::Name(name) => scope.get(name).is_some_and(|b| b.generic_dependent),
+        ExpressionKind::Call { name, .. } => scope
+            .functions
+            .get(name)
+            .is_some_and(|f| f.result.generic()),
+        ExpressionKind::Cast { target, .. } => target.generic(),
+        ExpressionKind::Group(e)
+        | ExpressionKind::Negate(e)
+        | ExpressionKind::BitNot(e)
+        | ExpressionKind::ArithmeticHandler { operand: e, .. } => generic_dependent(e, scope),
+        ExpressionKind::Binary { left, right, .. } => {
+            generic_dependent(left, scope) || generic_dependent(right, scope)
+        }
+        ExpressionKind::If {
+            branches,
+            otherwise,
+        } => {
+            branches.iter().any(|(_, e)| generic_dependent(e, scope))
+                || generic_dependent(otherwise, scope)
+        }
+        ExpressionKind::Match { arms, .. } => {
+            arms.iter().any(|a| generic_dependent(&a.body, scope))
+        }
+        // Block-local bindings are checked by the ordinary checker. Conservatively
+        // retain dependence when a block is used as a numeric cast operand.
+        ExpressionKind::Block { .. } => true,
+        _ => false,
+    }
 }

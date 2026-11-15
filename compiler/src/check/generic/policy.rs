@@ -1,11 +1,17 @@
-use super::super::{exact, expression, scope::Scope};
+use super::{
+    super::{functions, scope::Scope},
+    GenericTypes,
+};
 use crate::{
     Diagnostic, ErrorKind,
-    ast::{ComparisonOperator, Expression, ExpressionKind, FloatType, IntegerType, Type},
+    ast::{FloatType, Function, IntegerType, Location},
 };
+use std::collections::{BTreeMap, BTreeSet};
 
-fn variants(scope: &Scope) -> Vec<[Option<Type>; 2]> {
-    let ints = if scope.generic_types[0].is_some() {
+fn substitutions(scope: &Scope, function: &Function) -> Vec<GenericTypes> {
+    let signature = &scope.functions[&function.name];
+    let has = |ty| signature.result == ty || signature.parameters.contains(&ty);
+    let ints = if has(crate::ast::Type::GenericInt) {
         [
             IntegerType::I8,
             IntegerType::I16,
@@ -17,112 +23,69 @@ fn variants(scope: &Scope) -> Vec<[Option<Type>; 2]> {
             IntegerType::U64,
         ]
         .into_iter()
-        .map(|t| Some(Type::Integer(t)))
+        .map(Some)
         .collect()
     } else {
         vec![None]
     };
-    let floats = if scope.generic_types[1].is_some() {
-        vec![
-            Some(Type::Float(FloatType::F32)),
-            Some(Type::Float(FloatType::F64)),
-        ]
+    let floats = if has(crate::ast::Type::GenericFloat) {
+        vec![Some(FloatType::F32), Some(FloatType::F64)]
     } else {
         vec![None]
     };
     ints.into_iter()
-        .flat_map(|i| floats.iter().map(move |f| [i, *f]))
+        .flat_map(|int| floats.iter().map(move |&float| GenericTypes { int, float }))
         .collect()
 }
-// Probes must not create generated functions, register constants, mutate local
-// assignment state, or publish diagnostics. Recompute inferred aliases in order.
-fn probe(scope: &Scope, types: [Option<Type>; 2]) -> Option<Scope> {
-    let mut copy = scope.clone();
-    copy.generic_types = types;
-    if let Some(result) = copy.generic_result {
-        copy.result = copy.resolve_type(result);
-    }
-    copy.probing_generic = true;
-    copy.missing_cast_handler = Default::default();
-    copy.instances = Default::default();
-    copy.comparison_warnings = Default::default();
-    copy.division_warnings = Default::default();
-    copy.constant_texts = Default::default();
-    copy.type_hints = Default::default();
-    copy.float_hints = Default::default();
-    copy.hint_depth = Default::default();
-    let mut bindings: Vec<_> = scope
-        .iter()
-        .map(|(name, b)| (name.clone(), b.clone()))
-        .collect();
-    bindings.sort_by_key(|(_, b)| b.id);
-    for (name, mut binding) in bindings {
-        if let Some(source) = &binding.generic_source {
-            binding.ty = match source.as_ref() {
-                super::BindingSource::Initializer { annotation, value } => {
-                    expression::coerced(value, annotation.map(|t| copy.resolve_type(t)), &copy)
-                        .ok()?
-                        .ty
-                }
-                super::BindingSource::Range { start, end } => {
-                    super::super::ranges::bounds(start, end, &copy).ok()?.0.ty
-                }
-            };
-        } else if let Some(ty) = binding.generic {
-            binding.ty = copy.resolve_type(ty);
-        }
-        copy.insert(name, binding);
-    }
-    Some(copy)
-}
 
-pub(crate) fn validate_cast(expr: &Expression, scope: &Scope) -> Result<(), Diagnostic> {
-    if scope.probing_generic || scope.generic_types.iter().all(Option::is_none) {
-        return Ok(());
-    }
-    let ExpressionKind::Cast { fallback, wrap, .. } = &expr.kind else {
-        unreachable!()
-    };
-    if fallback.is_some() || *wrap {
-        return Ok(());
-    }
-    // The ordinary checker retains the type-specific conversion rules. Applying
-    // it to every substitution also preserves the constant-expression exception.
-    for types in variants(scope) {
-        let Some(copy) = probe(scope, types) else {
-            continue;
-        };
-        let _ = expression::casts::check(expr, &copy);
-        if let Some(location) = copy.missing_cast_handler.get() {
-            return Err(location.error(
-                ErrorKind::InvalidSource,
-                "this conversion can fail for a generic numeric type and requires or [num.fn-cast]",
-            ));
+// [num.fn-unused], [num.fn-cast], [num.fn-warning]. Analyze each substitution
+// once per template, walking its body in order with the ordinary checker.
+// There are at most 16 substitutions, independent of body length or call count.
+// Speculation never schedules emitted instances or registers runtime data.
+pub(crate) fn analyze(function: &Function, globals: &Scope) -> Result<(), Diagnostic> {
+    let mut common_errors: Option<BTreeMap<(usize, usize, String), Diagnostic>> = None;
+    let mut comparisons: Option<BTreeMap<(usize, usize), bool>> = None;
+    let mut divisions = BTreeSet::new();
+    for types in substitutions(globals, function) {
+        let mut scope = globals.speculative();
+        scope.analyzing_generic = true;
+        let result = functions::check_function(function, &scope, 0, types);
+        let mut errors = scope.analysis_errors.borrow().clone();
+        if let Err(error) = result {
+            errors.push(error);
         }
+        let mut found_errors = BTreeMap::new();
+        for error in errors {
+            if error.generic_cast {
+                return Err(Location { line: error.line, column: error.column }.error(ErrorKind::InvalidSource,
+                    "this conversion can fail for a generic numeric type and requires or [num.fn-cast]"));
+            }
+            found_errors.insert((error.line, error.column, error.message.clone()), error);
+        }
+        match &mut common_errors {
+            None => common_errors = Some(found_errors),
+            Some(common) => common.retain(|site, _| found_errors.contains_key(site)),
+        }
+        // A failed substitution cannot establish a universal warning for sites
+        // it never reached. Intersect only diagnostics actually observed in all
+        // substitutions; type-dependent failures remain errors at actual calls.
+        let found = scope.comparison_warnings.borrow();
+        match &mut comparisons {
+            None => comparisons = Some(found.clone()),
+            Some(common) => common.retain(|site, value| found.get(site) == Some(value)),
+        }
+        // [diagnostic.integer-division-to-float] Substitution changes numeric
+        // widths, not integer/float families. A site needs no all-types value
+        // proof; retain it even if another width fails a later conversion.
+        divisions.extend(scope.division_warnings.borrow().iter().copied());
     }
+    if let Some((_, error)) = common_errors.unwrap_or_default().into_iter().next() {
+        return Err(error);
+    }
+    globals
+        .comparison_warnings
+        .borrow_mut()
+        .extend(comparisons.unwrap_or_default());
+    globals.division_warnings.borrow_mut().extend(divisions);
     Ok(())
-}
-
-pub(crate) fn comparison_warning(
-    left: &Expression,
-    right: &Expression,
-    operator: ComparisonOperator,
-    scope: &Scope,
-    result: bool,
-) -> bool {
-    if scope.probing_generic || scope.generic_types.iter().all(Option::is_none) {
-        return true;
-    }
-    variants(scope).into_iter().all(|types| {
-        let Some(copy) = probe(scope, types) else {
-            return false;
-        };
-        let Ok(left) = exact::comparison_value(left, &copy) else {
-            return false;
-        };
-        let Ok(right) = exact::comparison_value(right, &copy) else {
-            return false;
-        };
-        exact::constant_comparison(&left, &right, operator) == Some(result)
-    })
 }

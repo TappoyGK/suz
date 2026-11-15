@@ -79,6 +79,8 @@ pub(crate) fn position(prefix: &str) -> (usize, usize) {
 
 fn error(line: usize, column: usize, kind: ErrorKind, message: impl Into<String>) -> Diagnostic {
     Diagnostic {
+        related: Vec::new(),
+        generic_cast: false,
         kind,
         line,
         column,
