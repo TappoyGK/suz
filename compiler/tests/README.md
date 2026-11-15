@@ -141,9 +141,11 @@ GitHub Actionsの `CI` ワークフローは、`release/*` 向けの作業PRで�
 
 `main` の検査が成功すると、検証済みバイナリ・SHA-256・コミットIDを含むアーカイブをActionsの成果物として30日間保存する。公開には、[リリース手順](../../docs/releasing.md)に従って対象コミットの成果物を使う。
 
-実行環境は `macos-26`（arm64）、Xcode 26.5とする。Rustは `rust-toolchain.toml` に従い、例集とRustのテストはそれぞれ並列数3で実行する。GitHubのランナー更新による環境の違いを確認できるよう、OS・Rust・Clang・SDKのバージョンを実行ログに出力する。
+変更ファイルの判定は `ubuntu-latest`、ビルドとテストは `macos-26`（arm64）、Xcode 26.5で実行する。Rustは `rust-toolchain.toml` に従い、例集とRustのテストはそれぞれ並列数3で実行する。GitHubのランナー更新による環境の違いを確認できるよう、OS・Rust・Clang・SDKのバージョンを実行ログに出力する。
 
 ワークフローは [.github/workflows/ci.yml](../../.github/workflows/ci.yml) で定義する。CIで使う各コマンドは、ローカルでも実行できる。
+
+CIは、ビルドや検証の入力にならないMarkdown文書だけの変更では、変更ファイルの判定のみを行う。対象と例外は[リリース手順](../../docs/releasing.md#ciの実行条件)に従う。判定の回帰テストは `python3 scripts/test-ci-changes.py` で実行する。
 
 ## 例の追加・変更
 
