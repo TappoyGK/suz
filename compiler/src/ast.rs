@@ -265,6 +265,7 @@ pub(crate) enum Statement {
         start: Expression,
         end: Expression,
         inclusive: bool,
+        reverse: bool,
         body: Vec<Statement>,
     },
     Loop {

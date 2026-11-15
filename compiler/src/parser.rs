@@ -46,7 +46,7 @@ impl<'a, 's> Parser<'a, 's> {
         let message = if kind == ErrorKind::InvalidSource
             && matches!(self.token().kind, Kind::Symbol("..<" | "..="))
         {
-            "range notation is only allowed in for [for.range]"
+            "range notation is only allowed in for or rev [for.range]"
         } else {
             message
         };

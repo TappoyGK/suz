@@ -60,6 +60,7 @@ pub(super) fn emit_block(
                 start,
                 end,
                 inclusive,
+                reverse,
                 body,
             } => {
                 let ty = start.ty.c_name();
@@ -67,12 +68,23 @@ pub(super) fn emit_block(
                 let end = expression(end, context);
                 let comparison = if *inclusive { "<=" } else { "<" };
                 writeln!(c, "{indent}{{").unwrap();
-                writeln!(c, "{indent}    {ty} suz_cursor_{id} = {start};").unwrap();
+                writeln!(c, "{indent}    const {ty} suz_start_{id} = {start};").unwrap();
                 writeln!(c, "{indent}    const {ty} suz_end_{id} = {end};").unwrap();
-                writeln!(c, "{indent}    _Bool suz_more_{id} = 1;").unwrap();
-                // The update runs on continue too. Test before incrementing so
-                // an inclusive range ending at the type's maximum cannot overflow.
-                writeln!(c, "{indent}    for (; suz_more_{id} && suz_cursor_{id} {comparison} suz_end_{id}; suz_more_{id} = suz_cursor_{id} < suz_end_{id}, suz_cursor_{id} += suz_more_{id}) {{").unwrap();
+                if *reverse {
+                    writeln!(c, "{indent}    _Bool suz_more_{id} = suz_start_{id} {comparison} suz_end_{id};").unwrap();
+                    writeln!(c, "{indent}    {ty} suz_cursor_{id} = suz_end_{id};").unwrap();
+                    if !inclusive {
+                        // Empty ranges must not subtract from the type's minimum.
+                        writeln!(c, "{indent}    if (suz_more_{id}) --suz_cursor_{id};").unwrap();
+                    }
+                    // Updating in the for clause also handles continue at the minimum.
+                    writeln!(c, "{indent}    for (; suz_more_{id}; suz_more_{id} = suz_cursor_{id} > suz_start_{id}, suz_cursor_{id} -= suz_more_{id}) {{").unwrap();
+                } else {
+                    writeln!(c, "{indent}    {ty} suz_cursor_{id} = suz_start_{id};").unwrap();
+                    writeln!(c, "{indent}    _Bool suz_more_{id} = 1;").unwrap();
+                    // Test before incrementing, including after continue at the maximum.
+                    writeln!(c, "{indent}    for (; suz_more_{id} && suz_cursor_{id} {comparison} suz_end_{id}; suz_more_{id} = suz_cursor_{id} < suz_end_{id}, suz_cursor_{id} += suz_more_{id}) {{").unwrap();
+                }
                 writeln!(
                     c,
                     "{indent}        const {ty} suz_local_{id} = suz_cursor_{id};"
