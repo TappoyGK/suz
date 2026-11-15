@@ -10,6 +10,7 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+import tomllib
 
 
 def run(args, cwd, env, code=0):
@@ -172,9 +173,15 @@ struct Entry {
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path)
-    parser.add_argument("--version", required=True)
+    parser.add_argument(
+        "--version", help="expected version (default: compiler/Cargo.toml)"
+    )
     parser.add_argument("--cc", default="clang")
     args = parser.parse_args()
+    if args.version is None:
+        manifest = Path(__file__).resolve().parent.parent / "compiler/Cargo.toml"
+        with manifest.open("rb") as source:
+            args.version = tomllib.load(source)["package"]["version"]
     binary = args.binary.resolve(strict=True)
     cc = shutil.which(args.cc)
     if cc is None:
