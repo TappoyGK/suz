@@ -48,6 +48,8 @@ mod matches;
 mod names;
 #[path = "spec_cases/native_cli.rs"]
 mod native_cli;
+#[path = "spec_cases/numeric.rs"]
+mod numeric;
 #[path = "spec_cases/panics.rs"]
 mod panics;
 #[path = "spec_cases/ranges.rs"]

@@ -6,6 +6,15 @@ pub(super) fn integer_parts(
     context: &mut ExpressionContext,
 ) -> (String, String, String) {
     use crate::ast::{BinaryOperator, IntegerType, Type};
+    if matches!(
+        expr.value,
+        Value::IntegerArithmetic {
+            operation: IntegerOperation::Exact(_),
+            ..
+        }
+    ) {
+        return super::exact::parts(expr, context);
+    }
     let Value::IntegerArithmetic { operation, .. } = &expr.value else {
         unreachable!()
     };
@@ -67,6 +76,7 @@ pub(super) fn integer_parts(
         .temporaries
         .extend([left.ty, right.ty, Type::Integer(wide)]);
     let left = expression(left, context);
+    let exact_count = right.ty == Type::Exact;
     let right = expression(right, context);
     let limit = ty
         .name()
@@ -83,7 +93,17 @@ pub(super) fn integer_parts(
     // Conversion to uint64_t preserves every valid count and makes negative
     // counts larger than any supported bit width, so the runtime rejects them.
     let right_argument = if operator.is_shift() {
-        format!("(uint64_t)suz_cmp_{}", index + 1)
+        if exact_count {
+            format!(
+                "(suz_cmp_{}.negative || suz_cmp_{}.magnitude >= {} ? UINT64_MAX : (uint64_t)suz_cmp_{}.magnitude)",
+                index + 1,
+                index + 1,
+                ty.bits(),
+                index + 1
+            )
+        } else {
+            format!("(uint64_t)suz_cmp_{}", index + 1)
+        }
     } else {
         format!("suz_cmp_{}", index + 1)
     };

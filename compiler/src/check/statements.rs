@@ -84,7 +84,7 @@ pub(super) fn check_statements(
                 arms,
                 location,
             } => {
-                let target = expression(target, None, bindings)?;
+                let target = crate::check::exact::use_value(target, bindings)?;
                 let patterns = super::matches::patterns(target.ty, arms, *location, bindings)?;
                 let id = *next_id;
                 *next_id += 1;

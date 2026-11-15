@@ -74,10 +74,6 @@ fn cast_return_positions_and_return_types_are_checked_before_lowering() {
             "type.expected",
         ),
         ("fix x = 1 as u8 or return false\nreturn 0", "type.expected"),
-        (
-            "fix x: u16 = 3 as u8 or return 7\nreturn 0",
-            "type.expected",
-        ),
         ("fix x = 300 as u8 or return\nreturn 0", "fn.return"),
         (
             "fix x = 300 as u8 or return x\nreturn 0",

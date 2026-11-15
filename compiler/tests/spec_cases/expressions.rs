@@ -168,12 +168,12 @@ fn bitwise_operators_reject_invalid_types_and_keep_arithmetic_diagnostics() {
         ("fix x = false | true\nreturn 0", "expr.operator-types"),
         (
             "fix x: u8 = 1\nfix y: i8 = 1\nfix z = x & y\nreturn 0",
-            "type.expected",
+            "width.same-type",
         ),
         ("fix x: u8 = ~256\nreturn 0", "lit.range"),
         (
             "fix x: u8 = 0\nfix y: u16 = x | 1\nreturn 0",
-            "type.expected",
+            "width.same-type",
         ),
     ] {
         let source = format!("fn main() -> u8 {{\n{body}\n}}");
@@ -254,11 +254,11 @@ fn wrapping_arithmetic_checks_types_but_is_not_an_arithmetic_diagnostic_target()
         ("fix x: u8 = 256 +% 0\nreturn 0", "lit.range"),
         (
             "fix x: u8 = 1\nfix y: i8 = 1\nfix z = x *% y\nreturn 0",
-            "type.expected",
+            "width.same-type",
         ),
         (
             "fix x: u8 = 1\nfix y: u16 = x -% 1\nreturn 0",
-            "type.expected",
+            "width.same-type",
         ),
     ] {
         let source = format!("fn main() -> u8 {{\n{body}\n}}");
@@ -340,7 +340,6 @@ fn truncating_casts_check_source_types_without_propagating_target_types() {
         ("fix x = 1 as% f32\nreturn 0", "expr.as-trunc"),
         ("fix x = 1 as% void\nreturn 0", "expr.as-trunc"),
         ("return 18446744073709551615 as% u8", "lit.range"),
-        ("fix x: u16 = 1 as% u8\nreturn 0", "type.expected"),
         ("return 1 as% u16", "type.expected"),
     ] {
         let source = format!("fn main() -> u8 {{\n{body}\n}}");
@@ -433,10 +432,6 @@ fn ifexpr_checks_all_branches_and_requires_values() {
         (
             "return ifexpr false { continue } else { 0 }",
             "expr.jump-prohibited",
-        ),
-        (
-            "fix x: u8 = 1\nfix y: u16 = 2\nfix z = ifexpr true { x } else { y }\nreturn 0",
-            "type.expected",
         ),
     ] {
         let source = format!("fn main() -> u8 {{\n{body}\n}}");

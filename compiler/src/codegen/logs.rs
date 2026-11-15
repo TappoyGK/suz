@@ -58,6 +58,7 @@ pub(super) fn emit(
                         let (bytes, length) = super::text::contents(value.ty, &name);
                         format!("suz_log_text({bytes}, (size_t){length});")
                     }
+                    Type::Exact => format!("suz_log_exact({name});"),
                     Type::Char => format!("suz_log_char({name});"),
                     Type::Bool => format!("suz_log_bool({name});"),
                     Type::Enum(ty) => {

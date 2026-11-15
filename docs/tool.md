@@ -98,7 +98,7 @@ cd generated
 | `--deny-unhandled-arithmetic` | 可 | 可 | 可 | 可 | 同じ箇所をコンパイルエラーにする |
 | `--help` | 可 | 可 | 可 | 可 | そのコマンドの使用方法を表示する |
 
-`-O0` と `-O2`、整数演算の警告と強制は、それぞれ排他的である。診断設定の意味は言語仕様の `[diagnostic.arithmetic]` に従う。設定を省略した場合は通常設定である。
+`-O0` と `-O2`、整数演算の警告と強制は、それぞれ排他的である。診断設定の意味は言語仕様の `[diagnostic.arithmetic]` に従う。設定を省略した場合は通常設定である。`[diagnostic.constant-comparison]` と `[diagnostic.integer-division-to-float]` の警告は、これらの整数演算の診断設定にかかわらず有効である。
 
 **[tool.environment]** `--env` のCソースは、ランタイム仕様の環境関数を実装する。`build` と `run` はそのファイルを標準環境層の代わりにリンクする。`emit-c` はその内容を出力先の `runtime/suz_env.c` に収録する。環境層のコンパイルには同梱の `suz_env.h` を使う。
 

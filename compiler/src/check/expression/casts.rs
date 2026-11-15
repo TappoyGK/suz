@@ -10,7 +10,7 @@ use crate::{
 
 pub(super) fn check(
     expr: &Expression,
-    expected: Option<Type>,
+    _expected: Option<Type>,
     bindings: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
     Ok(match &expr.kind {
@@ -20,7 +20,17 @@ pub(super) fn check(
             target,
             fallback,
         } => {
-            let operand = expression(operand, None, bindings)?;
+            let operand = super::super::exact::use_value(operand, bindings)?;
+            if operand.ty == Type::Exact {
+                return super::super::exact::cast(
+                    operand,
+                    *target,
+                    *wrap,
+                    fallback,
+                    expr.location,
+                    bindings,
+                );
+            }
             if !*wrap && operand.ty == Type::Text && *target == Type::Symbol {
                 if fallback.is_some() {
                     return Err(expr.location.error(
@@ -138,12 +148,6 @@ pub(super) fn check(
                         return_value: Box::new(return_value),
                     },
                 };
-                if expected.is_some_and(|ty| ty != *target) {
-                    return Err(expr.location.error(
-                        ErrorKind::InvalidSource,
-                        "cast result does not match the expected type [type.expected]",
-                    ));
-                }
                 return Ok(checked);
             }
             let fallback = match fallback {

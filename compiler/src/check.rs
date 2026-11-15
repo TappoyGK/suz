@@ -2,6 +2,7 @@ mod constants;
 mod control;
 mod declarations;
 mod diagnostics;
+pub(crate) mod exact;
 mod expression;
 mod functions;
 pub(crate) mod ir;

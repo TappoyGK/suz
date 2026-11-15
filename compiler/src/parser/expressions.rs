@@ -84,6 +84,7 @@ impl Parser<'_, '_> {
         let location = self.location();
         let mut operands = vec![first];
         let mut operators = Vec::new();
+        let mut locations = Vec::new();
         let mut direction = None;
         let mut not_equal = false;
         while let Kind::Symbol(symbol) = self.token().kind {
@@ -107,6 +108,7 @@ impl Parser<'_, '_> {
                 }
                 direction = Some(next);
             }
+            locations.push(self.location());
             not_equal = matches!(operator, ComparisonOperator::NotEqual);
             self.cursor += 1;
             operands.push(self.binary(0)?);
@@ -117,6 +119,7 @@ impl Parser<'_, '_> {
         }
         Ok(Expression {
             kind: ExpressionKind::Comparison {
+                locations,
                 operators,
                 operands,
             },

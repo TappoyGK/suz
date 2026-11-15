@@ -252,7 +252,7 @@ fn compound_assignments_check_mutability_types_and_statement_position() {
         ("var value: u8 = 0\nvalue +%= 256\nreturn 0", "lit.range"),
         (
             "var value: u8 = 0\nfix other: i8 = 1\nvalue ^= other\nreturn 0",
-            "type.expected",
+            "width.same-type",
         ),
         (
             "var value = false\nvalue &= true\nreturn 0",

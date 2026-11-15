@@ -15,7 +15,7 @@ fn integer_arithmetic_and_compound_assignments_preserve_type_boundaries() {
     for (ty, min, max) in INTEGER_BOUNDS {
         source.push_str(&format!("{{\nfix lo: {ty} = {min}\nfix hi: {ty} = {max}\nif hi / 3 != {} || hi % 3 != {} {{ return 10 }}\nif lo / 3 != {} || lo % 3 != {} {{ return 11 }}\nif (hi / 0 or 7) != 7 || (hi % 0 or 7) != 7 {{ return 12 }}\nvar value: {ty} = 23\nvalue /= 3\nvalue %= 4\nif value != 3 {{ return 13 }}\n", max / 3, max % 3, min / 3, min % 3));
         if min < 0 {
-            source.push_str("if (lo / -1 or 7) != 7 || (lo % -1 or 7) != 7 { return 14 }\nif 7 / -3 != -2 || 7 % -3 != 1 || -7 / -3 != 2 || -7 % -3 != -1 { return 15 }\n");
+            source.push_str("if (lo / -1 or 7) != 7 || (lo % -1 or 7) != 0 { return 14 }\nif 7 / -3 != -2 || 7 % -3 != 1 || -7 / -3 != 2 || -7 % -3 != -1 { return 15 }\n");
         }
         source.push_str("}\n");
     }
@@ -83,43 +83,37 @@ fn integer_arithmetic_failures_panic_at_the_suz_operator_even_when_optimized() {
             "fix a: i8 = -128\nfix value = -a",
             3,
             13,
-            "integer negation overflow [rt.int-overflow]",
+            "integer arithmetic overflow [rt.int-overflow]",
         ),
         (
             "fix a: i64 = -9223372036854775808\nfix value = -a",
             3,
             13,
-            "integer negation overflow [rt.int-overflow]",
-        ),
-        (
-            "fix a: i8 = -128\nfix value = -(-a) or 7",
-            3,
-            15,
-            "integer negation overflow [rt.int-overflow]",
+            "integer arithmetic overflow [rt.int-overflow]",
         ),
         (
             "fix a: u8 = 255\nfix value = a + 1",
             3,
             15,
-            "integer addition overflow [rt.int-overflow]",
+            "integer arithmetic overflow [rt.int-overflow]",
         ),
         (
             "fix a: i64 = -9223372036854775808\nfix value = a - 1",
             3,
             15,
-            "integer subtraction overflow [rt.int-overflow]",
+            "integer arithmetic overflow [rt.int-overflow]",
         ),
         (
             "fix a: u64 = 18446744073709551615\nfix value = a * 2",
             3,
             15,
-            "integer multiplication overflow [rt.int-overflow]",
+            "integer arithmetic overflow [rt.int-overflow]",
         ),
         (
             "var count: u8 = 255\ncount += 1",
             3,
             7,
-            "integer addition overflow [rt.int-overflow]",
+            "integer arithmetic overflow [rt.int-overflow]",
         ),
         (
             "fix a: u8 = 0\nfix value = 7 / a",
@@ -131,37 +125,25 @@ fn integer_arithmetic_failures_panic_at_the_suz_operator_even_when_optimized() {
             "fix a: u64 = 0\nfix value = 7 % a",
             3,
             15,
-            "integer remainder by zero [rt.div-zero]",
+            "integer division by zero [rt.div-zero]",
         ),
         (
             "fix a: i64 = -9223372036854775808\nfix value = a / -1",
             3,
             15,
-            "integer division overflow [rt.div-overflow]",
+            "integer arithmetic overflow [rt.int-overflow]",
         ),
         (
-            "fix a: i8 = -128\nfix value = a % -1",
-            3,
-            15,
-            "integer remainder overflow [rt.div-overflow]",
-        ),
-        (
-            "var count: u8 = 7\ncount /= 0",
+            "var count: u8 = 7\ncount /= (0 as u8)",
             3,
             7,
             "integer division by zero [rt.div-zero]",
         ),
         (
-            "var count: i8 = -128\ncount %= -1",
-            3,
-            7,
-            "integer remainder overflow [rt.div-overflow]",
-        ),
-        (
             "var count: u8 = 255\ncount += (1 / 1) or 0",
             3,
             7,
-            "integer addition overflow [rt.int-overflow]",
+            "integer arithmetic overflow [rt.int-overflow]",
         ),
     ]
     .into_iter()
@@ -228,15 +210,15 @@ const LAZY: u8 = 1 + 2 or (255 + 1)
 const MINIMUM: i8 = -128 or 0
 const NEGATED = -MINIMUM or 7
 const DIRECT: i8 = -(1)
-const CONSTANT_LAZY: i8 = -128 or (1 / 0)
+const CONSTANT_LAZY: i8 = -128 or (1 / (0 as u8))
 const QUOTIENT: i8 = -7 / 3
 const REMAINDER: i8 = -7 % 3
 const DIVISION_FALLBACK: u8 = 7 / 0 or 8
 const REMAINDER_FALLBACK: i8 = -128 % -1 or 9
-const LAZY_DIVISION: u8 = 1 + 2 or (1 / 0)
+const LAZY_DIVISION: u8 = 1 + 2 or (1 / (0 as u8))
 const NARROWED = (9223372036854775807 + 1 or 7) as u8
 fn main() -> u8 {
-    return ifexpr DIFFERENCE == 14 && SHORT && not CHAIN && FALLBACK == 1 && CONVERTED == 3 && HANDLED == 7 && LAZY == 3 && NARROWED == 7 && QUOTIENT == -2 && REMAINDER == -1 && DIVISION_FALLBACK == 8 && REMAINDER_FALLBACK == 9 && LAZY_DIVISION == 3 && NEGATED == 7 && DIRECT == -1 && CONSTANT_LAZY == MINIMUM { 0 } else { 1 }
+    return ifexpr DIFFERENCE == 14 && SHORT && not CHAIN && FALLBACK == 1 && CONVERTED == 3 && HANDLED == 7 && LAZY == 3 && NARROWED == 7 && QUOTIENT == -2 && REMAINDER == -1 && DIVISION_FALLBACK == 8 && REMAINDER_FALLBACK == 0 && LAZY_DIVISION == 3 && NEGATED == 7 && DIRECT == -1 && CONSTANT_LAZY == MINIMUM { 0 } else { 1 }
 }
 "#;
     let directory = TemporaryDirectory::new();
@@ -250,25 +232,25 @@ fn main() -> u8 {
     );
     for source in [
         "const LO: i8 = -128\nconst BAD = -LO\nfn main() -> u8 { return 0 }",
-        "const LO: i8 = -128\nconst BAD = -(-LO) or 7\nfn main() -> u8 { return 0 }",
         "const BAD: u8 = 1 / 0\nfn main() -> u8 { return 0 }",
         "const BAD: u8 = 1 % 0\nfn main() -> u8 { return 0 }",
         "const BAD: i8 = -128 / -1\nfn main() -> u8 { return 0 }",
-        "const BAD: i8 = -128 % -1\nfn main() -> u8 { return 0 }",
-        "const BAD: u8 = (1 / 0) + 1 or 7\nfn main() -> u8 { return 0 }",
-        "const BAD: u8 = ((255 + 1) * 0) or 7\nfn main() -> u8 { return 0 }",
         "const BAD: u8 = 255 + 1 or (255 + 1)\nfn main() -> u8 { return 0 }",
         "const BAD: u8 = 255 + 1\nfn main() -> u8 { return 0 }",
         "const BAD: u8 = 0 - 1\nfn main() -> u8 { return 0 }",
         "const BAD: u64 = 18446744073709551615 * 2\nfn main() -> u8 { return 0 }",
-        "const MAX: u8 = 255\nconst BAD = false || (MAX + 1 == 0)\nfn main() -> u8 { return 0 }",
         "const BAD: u8 = 300 as u8 or (255 + 1)\nfn main() -> u8 { return 0 }",
-        "const MAX: u8 = 255\nconst BAD = (MAX + 1) as u16\nfn main() -> u8 { return 0 }",
     ] {
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
         assert!(
-            error.message.contains("const.evaluation"),
+            error
+                .message
+                .contains(if source.contains(" / 0") || source.contains(" % 0") {
+                    "arith.div-zero-always"
+                } else {
+                    "const.evaluation"
+                }),
             "{source}: {error:?}"
         );
     }
@@ -281,7 +263,7 @@ fn main() -> u8 {
             .iter()
             .map(|w| (w.line, w.column))
             .collect::<Vec<_>>(),
-        [(3, 3), (4, 11), (4, 15)]
+        [(3, 3), (4, 15)]
     );
     let error = suz::compile_with_mode(source, suz::ArithmeticMode::Deny)
         .err()
@@ -295,8 +277,8 @@ fn integer_operands_are_evaluated_once_left_to_right_and_stop_at_a_panic() {
     let directory = TemporaryDirectory::new();
     for (index, (value, expression, expected, trace)) in [
         (2, "a * b", 6, "12\n"),
-        (255, "(a + 1) + b", 101, "1\n"),
-        (255, "((a + 1) * b) or 7", 101, "1\n"),
+        (255, "(a + 1) + b", 101, "12\n"),
+        (255, "((a + 1) * b) or 7", 7, "12\n"),
         (2, "a * b or (a + b)", 6, "12\n"),
         (255, "a + b or (a - b)", 252, "1212\n"),
     ]

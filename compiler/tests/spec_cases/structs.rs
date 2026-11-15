@@ -41,7 +41,7 @@ fn failing() -> u8 {
     var value = Box { pair: Pair { x: 255, y: 0 } }
     value.pair.x += expr {
         value.pair.y = 7
-        255
+        255 as u8
     } + 1 or return expr {
         ifexpr value.pair.x == 255 && value.pair.y == 7 { 0 } else { 1 }
     }
@@ -133,7 +133,7 @@ fn struct_fields_reject_invalid_declarations_access_and_overlapping_writes() {
         (
             "struct Item { x: u8 }\nconst P = Item { x: 1 / 0 }",
             "",
-            "const.evaluation",
+            "arith.div-zero-always",
         ),
         (
             "struct Item { x: u8 }\nconst P = Item { x: P.x }",

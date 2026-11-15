@@ -36,8 +36,10 @@ pub(super) fn operand_type(
     value: &Expression,
     bindings: &Scope,
 ) -> Option<Type> {
-    // Type discovery must not count speculative assignments in the real scope.
+    // Type discovery must not count speculative assignments or diagnostics.
     let mut local = bindings.clone();
+    local.comparison_warnings = Default::default();
+    local.division_warnings = Default::default();
     prefix(input, &mut local).ok()?;
     super::operand_type(value, &local)
 }

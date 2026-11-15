@@ -62,9 +62,9 @@ fn symbol_casts_reject_incomplete_formats_and_preserve_lazy_constant_evaluation(
         "１",
     ];
     let mut source = String::from(
-        r#"const GOOD = `1` as u8 or (1 / 0)
+        r#"const GOOD = `1` as u8 or (1 / (0 as u8))
 const BAD = `bad` as u8 or 7
-const WRAPPED = `-1` as% u8 or (1 / 0)
+const WRAPPED = `-1` as% u8 or (1 / (0 as u8))
 const YES = `true` as bool or false
 const NO = `false` as bool or true
 fn main() -> u8 {
@@ -120,7 +120,7 @@ fn symbol_cast_handlers_obey_type_and_control_constraints() {
         ),
         (
             "const N = `bad` as% u8 or (1 / 0)\nfn main() -> u8 { return N }",
-            "const.evaluation",
+            "arith.div-zero-always",
         ),
     ] {
         let error = suz::compile(source.as_bytes()).unwrap_err();

@@ -24,10 +24,40 @@ impl AllowScope {
 
 pub(crate) fn collect(
     locations: &[Location],
+    comparisons: &[(Location, bool)],
+    divisions: &[Location],
     scopes: &[AllowScope],
     mode: ArithmeticMode,
     log_allow: bool,
 ) -> Result<Vec<Warning>, Diagnostic> {
+    let mut candidates: Vec<_> = locations
+        .iter()
+        .map(|&location| {
+            (
+                location,
+                "diagnostic.arithmetic",
+                "integer arithmetic has no 'or' handler".to_string(),
+                mode == ArithmeticMode::Warn,
+            )
+        })
+        .collect();
+    candidates.extend(comparisons.iter().map(|&(location, value)| {
+        (
+            location,
+            "diagnostic.constant-comparison",
+            format!("comparison is always {value}"),
+            true,
+        )
+    }));
+    candidates.extend(divisions.iter().map(|&location| {
+        (
+            location,
+            "diagnostic.integer-division-to-float",
+            "integer division truncates before floating-point arithmetic".to_string(),
+            true,
+        )
+    }));
+    candidates.sort_by_key(|(location, ..)| position(*location));
     for scope in scopes {
         for item in &scope.items {
             if scopes.iter().any(|outer| {
@@ -40,7 +70,10 @@ pub(crate) fn collect(
                     "an enclosing allow already suppresses this rule [allow.nested]",
                 ));
             }
-            if !locations.iter().any(|location| scope.contains(*location)) {
+            if !candidates
+                .iter()
+                .any(|(location, rule, ..)| *rule == item.rule && scope.contains(*location))
+            {
                 return Err(item.location.error(
                     ErrorKind::InvalidSource,
                     "allow has no matching warning sites [allow.unused]",
@@ -48,29 +81,33 @@ pub(crate) fn collect(
             }
         }
     }
-    let message = "integer arithmetic has no 'or' handler [diagnostic.arithmetic]";
     if mode == ArithmeticMode::Deny
         && let Some(location) = locations.first()
     {
-        return Err(location.error(ErrorKind::InvalidSource, message));
+        return Err(location.error(
+            ErrorKind::InvalidSource,
+            "integer arithmetic has no 'or' handler [diagnostic.arithmetic]",
+        ));
     }
-    if mode != ArithmeticMode::Warn {
-        return Ok(Vec::new());
-    }
-    Ok(locations
-        .iter()
-        .filter_map(|location| {
+    Ok(candidates
+        .into_iter()
+        .filter_map(|(location, rule, message, enabled)| {
+            if !enabled {
+                return None;
+            }
             let reason = scopes
                 .iter()
-                .find(|scope| scope.contains(*location))
-                .map(|scope| scope.items[0].reason.clone());
+                .filter(|scope| scope.contains(location))
+                .flat_map(|scope| &scope.items)
+                .find(|item| item.rule == rule)
+                .map(|item| item.reason.clone());
             if reason.is_some() && !log_allow {
                 return None;
             }
             Some(Warning {
                 line: location.line,
                 column: location.column,
-                message: message.into(),
+                message: format!("{message} [{rule}]"),
                 allowed_reason: reason,
             })
         })

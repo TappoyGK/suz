@@ -63,6 +63,7 @@ pub(super) fn template(
                         let (bytes, length) = contents(value.ty, &name);
                         writeln!(body, "    suz_text_buffer_append(&buffer, {bytes}, {length}, location);").unwrap();
                     },
+                    Type::Exact => writeln!(body, "    {{ char digits[40]; size_t length = suz_format_exact({name}, digits); suz_text_buffer_append(&buffer, digits, length, location); }}").unwrap(),
                     Type::Char => writeln!(body, "    {{ char bytes[4]; size_t length = suz_char_encode({name}, bytes); suz_text_buffer_append(&buffer, bytes, length, location); }}").unwrap(),
                     Type::Bool => writeln!(body, "    suz_text_buffer_append(&buffer, {name} ? \"true\" : \"false\", {name} ? 4 : 5, location);").unwrap(),
                     Type::Enum(ty) => {

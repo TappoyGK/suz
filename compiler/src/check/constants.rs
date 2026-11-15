@@ -1,5 +1,6 @@
 use super::ir::{CheckedExpression, CheckedHandler, IntegerOperation, Value};
 use crate::ast::{BinaryOperator, FloatType, IntegerType, Type};
+use crate::numeric::Int;
 use crate::{Diagnostic, ErrorKind};
 
 // Rust's saturating float-to-i128 conversion is used only for the range
@@ -35,6 +36,12 @@ fn integer_result(operator: BinaryOperator, a: i128, b: i128, ty: IntegerType) -
 
 fn operation_result(operation: &IntegerOperation, ty: IntegerType) -> Option<i128> {
     match operation {
+        IntegerOperation::Exact(e) => {
+            let value = super::exact::evaluate(e)?.ok()?;
+            let n = value.to_i128()?;
+            let (lo, hi) = ty.bounds();
+            (lo..=hi).contains(&n).then_some(n)
+        }
         IntegerOperation::Binary {
             operator,
             left,
@@ -57,6 +64,9 @@ fn operation_result(operation: &IntegerOperation, ty: IntegerType) -> Option<i12
 // Evaluate the integer constant-expression forms supported by the checker.
 // Local bindings and value blocks are not constant expressions.
 fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
+    if expr.ty == Type::Exact {
+        return super::exact::constant(expr)?.to_i128();
+    }
     if let Value::Field { target, index } = &expr.value {
         return constant_integer_raw(&constant_field(target, *index)?);
     }
@@ -77,6 +87,7 @@ fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
         }),
         Value::Integer { value, .. } => Some(*value),
         Value::Cast(inner) => match inner.ty {
+            Type::Exact => super::exact::constant(inner)?.to_i128(),
             Type::Float(_) => float_to_integer(constant_float_raw(inner)?, ty),
             _ => constant_integer_raw(inner),
         },
@@ -96,6 +107,19 @@ fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
                 let value = constant_float_raw(operand)?;
                 return float_to_integer(value, ty).or_else(|| constant_integer_raw(fallback));
             }
+            let (min, max) = expr.ty.integer_bounds()?;
+            if operand.ty == Type::Exact {
+                let value = super::exact::constant(operand)?;
+                return if crate::numeric::Range::point(value).contained(min, max)
+                    && (expr.ty != Type::Char
+                        || value < Int::from_i128(0xd800)
+                        || value > Int::from_i128(0xdfff))
+                {
+                    value.to_i128()
+                } else {
+                    constant_integer_raw(fallback)
+                };
+            }
             let value = constant_integer_raw(operand)?;
             let (min, max) = expr.ty.integer_bounds()?;
             if (min..=max).contains(&value)
@@ -106,7 +130,26 @@ fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
                 constant_integer_raw(fallback)
             }
         }
-        Value::Truncate(inner) => Some(wrap(constant_integer_raw(inner)?)),
+        Value::Truncate(inner) => {
+            if inner.ty == Type::Exact {
+                let n = super::exact::constant(inner)?;
+                let bits = ty.bits();
+                let mask = (1u128 << bits) - 1;
+                let low = if n.negative {
+                    0u128.wrapping_sub(n.magnitude)
+                } else {
+                    n.magnitude
+                } & mask;
+                let value = low as i128;
+                Some(if ty.bounds().0 < 0 && low & (1u128 << (bits - 1)) != 0 {
+                    value - (1i128 << bits)
+                } else {
+                    value
+                })
+            } else {
+                Some(wrap(constant_integer_raw(inner)?))
+            }
+        }
         Value::BitNot(inner) => Some(wrap(!constant_integer_raw(inner)?)),
         Value::Binary {
             operator,
@@ -146,6 +189,17 @@ fn constant_float_raw(expr: &CheckedExpression) -> Option<f64> {
         return None;
     };
     let value = match &expr.value {
+        Value::IntegerArithmetic {
+            operation: IntegerOperation::Exact(e),
+            handler,
+            ..
+        } => match super::exact::evaluate(e)? {
+            Ok(n) => n.float(ty == FloatType::F32),
+            Err(_) => match handler {
+                Some(CheckedHandler::Value(v)) => constant_float_raw(v)?,
+                _ => return None,
+            },
+        },
         Value::Float(bits) => {
             return Some(match ty {
                 FloatType::F32 => f32::from_bits(*bits as u32) as f64,
@@ -154,6 +208,7 @@ fn constant_float_raw(expr: &CheckedExpression) -> Option<f64> {
         }
         Value::Negate(inner) => -constant_float_raw(inner)?,
         Value::Cast(inner) => match inner.ty {
+            Type::Exact => super::exact::constant(inner)?.float(ty == FloatType::F32),
             Type::Integer(_) => {
                 let integer = constant_integer_raw(inner)?;
                 return Some(integer_as_float(integer, ty));
@@ -172,6 +227,9 @@ fn constant_float_raw(expr: &CheckedExpression) -> Option<f64> {
                 return text_cast(operand, expr.ty, false)
                     .and_then(|value| constant_float_raw(&value))
                     .or_else(|| constant_float_raw(fallback));
+            }
+            if operand.ty == Type::Exact {
+                return Some(super::exact::constant(operand)?.float(ty == FloatType::F32));
             }
             if matches!(operand.ty, Type::Integer(_)) {
                 let integer = constant_integer_raw(operand)?;
@@ -256,36 +314,56 @@ fn constant_bool_raw(expr: &CheckedExpression) -> Option<bool> {
             let mut left = evaluate_raw(operands.first()?)?;
             for (operator, operand) in operators.iter().zip(operands.iter().skip(1)) {
                 let right = evaluate_raw(operand)?;
-                let order = match left.ty {
-                    Type::Symbol | Type::Text => {
-                        let (Value::Text { text: a, .. }, Value::Text { text: b, .. }) =
-                            (&left.value, &right.value)
-                        else {
-                            return None;
-                        };
-                        Some(a.cmp(b))
-                    }
-                    Type::Struct(_) => {
-                        let equal = equal_structs(&left, &right)?;
-                        let matches = match operator {
-                            Op::Equal => equal,
-                            Op::NotEqual => !equal,
-                            _ => return None,
-                        };
-                        if !matches {
-                            return Some(false);
+                let numeric = matches!(left.ty, Type::Integer(_) | Type::Float(_) | Type::Exact)
+                    && matches!(right.ty, Type::Integer(_) | Type::Float(_) | Type::Exact);
+                let order = if numeric {
+                    match (left.ty, right.ty) {
+                        (Type::Float(_), Type::Float(_)) => {
+                            constant_float_raw(&left)?.partial_cmp(&constant_float_raw(&right)?)
                         }
-                        left = right;
-                        continue;
+                        (Type::Float(_), _) => super::exact::constant(&right)?
+                            .compare_float(constant_float_raw(&left)?)
+                            .map(|o| o.reverse()),
+                        (_, Type::Float(_)) => super::exact::constant(&left)?
+                            .compare_float(constant_float_raw(&right)?),
+                        _ => Some(
+                            super::exact::constant(&left)?.cmp(&super::exact::constant(&right)?),
+                        ),
                     }
-                    Type::Void => return None,
-                    Type::Integer(_) | Type::Enum(_) | Type::Char => {
-                        Some(constant_integer_raw(&left)?.cmp(&constant_integer_raw(&right)?))
+                } else {
+                    match left.ty {
+                        Type::Symbol | Type::Text => {
+                            let (Value::Text { text: a, .. }, Value::Text { text: b, .. }) =
+                                (&left.value, &right.value)
+                            else {
+                                return None;
+                            };
+                            Some(a.cmp(b))
+                        }
+                        Type::Struct(_) => {
+                            let equal = equal_structs(&left, &right)?;
+                            let matches = match operator {
+                                Op::Equal => equal,
+                                Op::NotEqual => !equal,
+                                _ => return None,
+                            };
+                            if !matches {
+                                return Some(false);
+                            }
+                            left = right;
+                            continue;
+                        }
+                        Type::Void | Type::Exact => return None,
+                        Type::Integer(_) | Type::Enum(_) | Type::Char => {
+                            Some(constant_integer_raw(&left)?.cmp(&constant_integer_raw(&right)?))
+                        }
+                        Type::Float(_) => {
+                            constant_float_raw(&left)?.partial_cmp(&constant_float_raw(&right)?)
+                        }
+                        Type::Bool => {
+                            Some(constant_bool_raw(&left)?.cmp(&constant_bool_raw(&right)?))
+                        }
                     }
-                    Type::Float(_) => {
-                        constant_float_raw(&left)?.partial_cmp(&constant_float_raw(&right)?)
-                    }
-                    Type::Bool => Some(constant_bool_raw(&left)?.cmp(&constant_bool_raw(&right)?)),
                 };
                 let matches = match operator {
                     Op::Equal => order == Some(Equal),
@@ -381,6 +459,18 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
                     .collect::<Option<_>>()?,
             }
         }
+        Type::Exact => {
+            let Value::Exact(e) = &expr.value else {
+                return None;
+            };
+            let n = super::exact::evaluate(e)?.ok()?;
+            Value::Exact(Box::new(super::exact::Exact {
+                arithmetic: false,
+                kind: super::exact::ExactKind::Literal(n),
+                range: Some(crate::numeric::Range::point(n)),
+                location: e.location,
+            }))
+        }
         Type::Void => return None,
         Type::Integer(_) | Type::Enum(_) | Type::Char => Value::Integer {
             value: constant_integer_raw(expr)?,
@@ -401,6 +491,23 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
 // Grammar and type checking cover unselected operands too; evaluation below
 // visits only the selected path and reports the first failing operation.
 pub(super) fn is_constant(expr: &CheckedExpression) -> bool {
+    if let Value::Exact(e)
+    | Value::IntegerArithmetic {
+        operation: IntegerOperation::Exact(e),
+        ..
+    } = &expr.value
+    {
+        let mut constant = true;
+        e.leaves(&mut |v| constant &= is_constant(v));
+        if let Value::IntegerArithmetic {
+            handler: Some(CheckedHandler::Value(v)),
+            ..
+        } = &expr.value
+        {
+            constant &= is_constant(v);
+        }
+        return constant;
+    }
     match &expr.value {
         Value::TextView(inner) | Value::Intern { operand: inner, .. } => is_constant(inner),
         Value::Slice {
@@ -456,6 +563,19 @@ pub(super) fn is_constant(expr: &CheckedExpression) -> bool {
 }
 
 fn cast_succeeds(operand: &CheckedExpression, target: Type, wrap: bool) -> bool {
+    if operand.ty == Type::Exact {
+        return super::exact::constant(operand).is_some_and(|n| {
+            if matches!(target, Type::Float(_)) {
+                return true;
+            }
+            let (lo, hi) = target.integer_bounds().unwrap();
+            crate::numeric::Range::point(n).contained(lo, hi)
+                && (target != Type::Char
+                    || n < Int::from_i128(0xd800)
+                    || n > Int::from_i128(0xdfff))
+        });
+    }
+
     if operand.ty.is_text() {
         return text_cast(operand, target, wrap).is_some();
     }
@@ -478,7 +598,59 @@ fn cast_succeeds(operand: &CheckedExpression, target: Type, wrap: bool) -> bool 
     }
 }
 
+// A handled arithmetic failure does not catch failures in stored operands.
+// Stop visiting when the exact expression has already failed.
+fn validate_exact_leaves(e: &super::exact::Exact) -> Result<(), Diagnostic> {
+    use super::exact::ExactKind;
+    match &e.kind {
+        ExactKind::Leaf(v) => validate_evaluation(v)?,
+        ExactKind::Negate(v) => validate_exact_leaves(v)?,
+        ExactKind::Binary(_, a, b) => {
+            validate_exact_leaves(a)?;
+            if !matches!(super::exact::evaluate(a), Some(Err(_))) {
+                validate_exact_leaves(b)?;
+            }
+        }
+        ExactKind::Literal(_) => {}
+    }
+    Ok(())
+}
+
 fn validate_evaluation(expr: &CheckedExpression) -> Result<(), Diagnostic> {
+    if let Value::Exact(e)
+    | Value::IntegerArithmetic {
+        operation: IntegerOperation::Exact(e),
+        ..
+    } = &expr.value
+    {
+        validate_exact_leaves(e)?;
+        let failed = match super::exact::evaluate(e) {
+            Some(Err(l)) => Some(l),
+            Some(Ok(n)) => {
+                if let Some((lo, hi)) = expr.ty.integer_bounds() {
+                    (!crate::numeric::Range::point(n).contained(lo, hi)).then_some(e.location)
+                } else {
+                    None
+                }
+            }
+            None => None,
+        };
+        if let Some(location) = failed {
+            if let Value::IntegerArithmetic {
+                handler: Some(CheckedHandler::Value(v)),
+                ..
+            } = &expr.value
+            {
+                return validate_evaluation(v);
+            }
+            return Err(location.error(
+                ErrorKind::InvalidSource,
+                "constant integer arithmetic failed [const.evaluation]",
+            ));
+        }
+        return Ok(());
+    }
+
     match &expr.value {
         Value::TextView(inner) | Value::Intern { operand: inner, .. } => {
             validate_evaluation(inner)?

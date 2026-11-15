@@ -183,6 +183,9 @@ pub(super) fn lower_return_handler(
     statements: &mut Vec<CheckedStatement>,
     next_id: &mut usize,
 ) -> bool {
+    if let Value::Cast(inner) = &mut expr.value {
+        return lower_return_handler(inner, statements, next_id);
+    }
     if matches!(
         &expr.value,
         Value::Slice {
@@ -219,6 +222,44 @@ pub(super) fn lower_return_handler(
             }
         });
         return true;
+    }
+    if let Value::IntegerArithmetic {
+        operation: IntegerOperation::Exact(exact),
+        ..
+    } = &mut expr.value
+        && let super::exact::ExactKind::Binary(_, left, right) = &mut exact.kind
+        && let super::exact::ExactKind::Leaf(rhs) = &mut right.kind
+        && matches!(
+            rhs.value,
+            Value::CastReturn { .. }
+                | Value::IntegerArithmetic {
+                    handler: Some(CheckedHandler::Return(_)),
+                    ..
+                }
+        )
+    {
+        let id = *next_id;
+        *next_id += 1;
+        let replacement = super::exact::Exact {
+            arithmetic: false,
+            kind: super::exact::ExactKind::Leaf(Box::new(CheckedExpression {
+                ty: crate::ast::Type::Exact,
+                value: Value::Local(id),
+            })),
+            range: left.range,
+            location: left.location,
+        };
+        let old = std::mem::replace(left, Box::new(replacement));
+        statements.push(CheckedStatement::Binding {
+            mutable: false,
+            id,
+            ty: crate::ast::Type::Exact,
+            initializer: CheckedExpression {
+                ty: crate::ast::Type::Exact,
+                value: Value::Exact(old),
+            },
+        });
+        return lower_return_handler(rhs, statements, next_id);
     }
     if let Value::Binary { left, right, .. }
     | Value::IntegerArithmetic {

@@ -16,7 +16,13 @@ pub(super) fn check(
 ) -> Result<CheckedExpression, Diagnostic> {
     Ok(match &expr.kind {
         ExpressionKind::ArithmeticHandler { operand, fallback } => {
-            let mut checked = expression(operand, expected, bindings)?;
+            let mut checked = if super::super::exact::is_operator(operand)
+                && super::super::exact::integer(operand, bindings)
+            {
+                super::super::exact::check(operand, expected, bindings, true)?
+            } else {
+                expression(operand, expected, bindings)?
+            };
             if let Value::Integer {
                 value,
                 minus: Some(location),
@@ -54,6 +60,14 @@ pub(super) fn check(
             let ty = expected
                 .or_else(|| operand_type(expr, bindings))
                 .unwrap_or_else(|| default_type(expr));
+            let ty = if matches!(ty, Type::Float(_)) {
+                match operand_type(expr, bindings) {
+                    Some(known @ Type::Float(_)) => super::super::exact::join(ty, known).unwrap(),
+                    _ => ty,
+                }
+            } else {
+                ty
+            };
             let arithmetic = matches!(&expr.kind, ExpressionKind::Negate(_))
                 || matches!(&expr.kind, ExpressionKind::Binary { operator, .. } if operator.is_arithmetic());
             let integer_arithmetic = arithmetic && matches!(ty, Type::Integer(_));
@@ -105,6 +119,14 @@ pub(super) fn check(
                     }
                 }
                 ExpressionKind::BitNot(inner) => {
+                    if operand_type(inner, bindings).is_some_and(|known| known != ty)
+                        && !super::super::exact::is_operator(inner)
+                    {
+                        return Err(inner.location.error(
+                            ErrorKind::InvalidSource,
+                            "bit-width operands must have the same integer type [width.same-type]",
+                        ));
+                    }
                     Value::BitNot(Box::new(expression(inner, Some(ty), bindings)?))
                 }
                 ExpressionKind::Binary {
@@ -112,13 +134,27 @@ pub(super) fn check(
                     left,
                     right,
                 } => {
-                    let left = Box::new(expression(left, Some(ty), bindings)?);
-                    let right = Box::new(expression(
-                        right,
-                        if operator.is_shift() { None } else { Some(ty) },
-                        bindings,
-                    )?);
-                    if operator.is_shift() && !matches!(right.ty, Type::Integer(_)) {
+                    let typed_left = operand_type(left, bindings);
+                    let typed_right = operand_type(right, bindings);
+                    if matches!(ty, Type::Integer(_)) {
+                        for (operand, known) in [(left, typed_left), (right, typed_right)] {
+                            if operator.is_shift() && std::ptr::eq(operand, right) {
+                                continue;
+                            }
+                            if known.is_some_and(|t| t != ty)
+                                && !super::super::exact::is_operator(operand)
+                            {
+                                return Err(operand.location.error(ErrorKind::InvalidSource,"bit-width operands must have the same integer type [width.same-type]"));
+                            }
+                        }
+                    }
+                    let left = Box::new(numeric_operand(left, ty, bindings)?);
+                    let right = Box::new(if operator.is_shift() {
+                        super::super::exact::use_value(right, bindings)?
+                    } else {
+                        numeric_operand(right, ty, bindings)?
+                    });
+                    if operator.is_shift() && !matches!(right.ty, Type::Integer(_) | Type::Exact) {
                         return Err(expr.location.error(
                             ErrorKind::InvalidSource,
                             "shift count requires an integer type [expr.operator-types]",
@@ -185,6 +221,7 @@ pub(super) fn check(
             }
         }
         ExpressionKind::Comparison {
+            locations,
             operators,
             operands,
         } => {
@@ -200,10 +237,35 @@ pub(super) fn check(
                     Type::Integer(IntegerType::I64)
                 }
             });
+            let numeric = matches!(ty, Type::Integer(_) | Type::Float(_));
+            let float_type = super::joined_type(operands.iter().map(|operand| {
+                operand_type(operand, bindings).filter(|ty| matches!(ty, Type::Float(_)))
+            }))
+            .unwrap_or(Type::Float(FloatType::F64));
             let operands = operands
                 .iter()
-                .map(|operand| expression(operand, Some(ty), bindings))
+                .map(|operand| {
+                    if numeric {
+                        if operand_type(operand, bindings).is_none() && has_float_literal(operand) {
+                            expression(operand, Some(float_type), bindings)
+                        } else {
+                            super::super::exact::comparison_value(operand, bindings)
+                        }
+                    } else {
+                        expression(operand, Some(ty), bindings)
+                    }
+                })
                 .collect::<Result<Vec<_>, _>>()?;
+            if numeric
+                && operands
+                    .iter()
+                    .any(|v| !matches!(v.ty, Type::Integer(_) | Type::Float(_) | Type::Exact))
+            {
+                return Err(expr.location.error(
+                    ErrorKind::InvalidSource,
+                    "numeric comparison requires numeric operands [expr.operator-types]",
+                ));
+            }
             if ty == Type::Void
                 || (matches!(ty, Type::Bool | Type::Enum(_) | Type::Struct(_))
                     && operators.iter().any(|operator| !operator.is_equality()))
@@ -212,6 +274,16 @@ pub(super) fn check(
                     ErrorKind::InvalidSource,
                     "ordering comparisons require numeric operands [expr.operator-types]",
                 ));
+            }
+            for ((op, pair), location) in operators.iter().zip(operands.windows(2)).zip(locations) {
+                if let Some(result) =
+                    super::super::exact::constant_comparison(&pair[0], &pair[1], *op)
+                {
+                    bindings
+                        .comparison_warnings
+                        .borrow_mut()
+                        .insert((location.line, location.column), result);
+                }
             }
             CheckedExpression {
                 ty: Type::Bool,
@@ -223,4 +295,49 @@ pub(super) fn check(
         }
         _ => unreachable!(),
     })
+}
+
+// An integer subtree retains exact integer division even inside float arithmetic.
+fn numeric_operand(
+    expr: &Expression,
+    ty: Type,
+    bindings: &Scope,
+) -> Result<CheckedExpression, Diagnostic> {
+    if matches!(ty, Type::Float(_))
+        && !super::super::exact::is_operator(expr)
+        && let Some(from @ Type::Integer(_)) = operand_type(expr, bindings)
+        && !super::super::exact::widening(from, ty)
+    {
+        return Err(expr.location.error(
+            ErrorKind::InvalidSource,
+            "integer operand is not losslessly convertible; use as [arith.mix]",
+        ));
+    }
+    let checked = expression(expr, Some(ty), bindings)?;
+    if matches!(ty, Type::Float(_))
+        && let Value::IntegerArithmetic {
+            operation: IntegerOperation::Exact(e),
+            ..
+        } = &checked.value
+    {
+        fn divisions(e: &super::super::exact::Exact, bindings: &Scope) {
+            use super::super::exact::ExactKind;
+            match &e.kind {
+                ExactKind::Binary(op, a, b) => {
+                    if matches!(op, BinaryOperator::Divide) {
+                        bindings
+                            .division_warnings
+                            .borrow_mut()
+                            .insert((e.location.line, e.location.column));
+                    }
+                    divisions(a, bindings);
+                    divisions(b, bindings);
+                }
+                ExactKind::Negate(v) => divisions(v, bindings),
+                _ => {}
+            }
+        }
+        divisions(e, bindings);
+    }
+    Ok(checked)
 }

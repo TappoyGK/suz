@@ -5,7 +5,7 @@ fn symbol_float_casts_share_constant_rounding_and_lazy_handlers() {
     let source = r#"const MID = `1.0000000596046447753906250000000000001` as f32 or 7.0
 const HUGE = `1.0e1000` as f64 or 7.0
 const TINY = `-1.0e-1000` as f64 or 7.0
-const GOOD = `1.5` as f32 or ((1 as i64) / 0) as f32
+const GOOD = `1.5` as f32 or ((1 as i64) / (0 as u8)) as f32
 fn source(value: symbol) -> symbol {
     log info `source`
     return value
@@ -56,7 +56,7 @@ fn symbol_float_casts_require_handlers_and_check_unselected_values() {
         ),
         (
             "const A = `bad` as f32 or ((1 as i64) / 0) as f32\nfn main() -> u8 { return 0 }",
-            "const.evaluation",
+            "arith.div-zero-always",
         ),
     ] {
         let error = suz::compile(source.as_bytes()).unwrap_err();

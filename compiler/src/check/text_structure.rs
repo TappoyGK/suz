@@ -109,7 +109,7 @@ impl Schema {
                 entry.count = fields.len();
                 self.fields.push(fields);
             }
-            Type::Void => unreachable!(),
+            Type::Exact | Type::Void => unreachable!(),
         }
         let entry = Box::new(entry);
         let pointer = entry.as_ref() as *const RawType;

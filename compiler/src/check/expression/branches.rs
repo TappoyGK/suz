@@ -15,7 +15,7 @@ pub(super) fn check(
 ) -> Result<CheckedExpression, Diagnostic> {
     Ok(match &expr.kind {
         ExpressionKind::Match { target, arms } => {
-            let target = expression(target, None, bindings)?;
+            let target = crate::check::exact::use_value(target, bindings)?;
             let patterns = matches::patterns(target.ty, arms, expr.location, bindings)?;
             let ty = expected
                 .or_else(|| operand_type(expr, bindings))

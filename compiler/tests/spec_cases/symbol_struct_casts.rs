@@ -8,7 +8,7 @@ const INPUT = `Values { low: -128, high: 18446744073709551615, small: 1.00000005
 const FALLBACK = Values { low: 0, high: 0, small: 0.0, wide: 0.0, flag: false, mode: Mode.First, label: `` }
 const SAVED = INPUT as Values or FALLBACK
 const FAILED = `bad` as Values or SAVED
-const SHORT = false && ((`bad` as Values or Values { low: 1 / 0, high: 0, small: 0.0, wide: 0.0, flag: false, mode: Mode.First, label: `` }).flag)
+const SHORT = false && ((`bad` as Values or Values { low: 1 / (0 as u8), high: 0, small: 0.0, wide: 0.0, flag: false, mode: Mode.First, label: `` }).flag)
 fn source(value: symbol) -> symbol { log info `source`
     return value
 }
@@ -94,7 +94,7 @@ fn struct_symbol_casts_require_handlers_and_validate_constant_fallbacks() {
         ),
         (
             "const V = `bad` as Item or Item { value: 1 / 0 }\nfn main() -> u8 { return 0 }",
-            "const.evaluation",
+            "arith.div-zero-always",
         ),
         (
             "fn main() -> u8 { fix v = expr { `bad` as Item or return 1 }\nreturn 0 }",

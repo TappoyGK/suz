@@ -45,7 +45,7 @@ pub struct Run {
     pub stdout: Option<String>,
     pub stderr: Option<String>,
     pub stderr_prefix: Option<String>,
-    pub arithmetic_warnings: usize,
+    pub warning_count: usize,
     pub diagnostic: Option<ExpectedDiagnostic>,
     pub panic_diagnostic: Option<ExpectedDiagnostic>,
     pub warnings: Vec<ExpectedDiagnostic>,

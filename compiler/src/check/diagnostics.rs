@@ -3,6 +3,12 @@ use crate::ast::Location;
 
 pub(super) fn collect(expr: &CheckedExpression, locations: &mut Vec<Location>) {
     match &expr.value {
+        Value::Exact(e) => {
+            if e.arithmetic {
+                locations.push(e.location);
+            }
+            e.leaves(&mut |v| collect(v, locations));
+        }
         Value::TextView(inner) | Value::Intern { operand: inner, .. } => collect(inner, locations),
         Value::Slice {
             target,
@@ -70,6 +76,9 @@ pub(super) fn collect(expr: &CheckedExpression, locations: &mut Vec<Location>) {
                         unreachable!("failure returns must be lowered to statements")
                     }
                 }
+            }
+            if let super::ir::IntegerOperation::Exact(e) = operation {
+                e.leaves(&mut |v| collect(v, locations));
             }
             for operand in operation.operands() {
                 collect(operand, locations);
@@ -161,6 +170,9 @@ fn collect_statements(statements: &[CheckedStatement], locations: &mut Vec<Locat
                 let Value::IntegerArithmetic { operation, .. } = &operation.value else {
                     unreachable!()
                 };
+                if let super::ir::IntegerOperation::Exact(e) = operation {
+                    e.leaves(&mut |v| collect(v, locations));
+                }
                 for operand in operation.operands() {
                     collect(operand, locations);
                 }

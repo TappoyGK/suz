@@ -23,7 +23,13 @@ pub(super) fn patterns<T>(
 ) -> Result<Patterns, Diagnostic> {
     if !matches!(
         ty,
-        Type::Char | Type::Integer(_) | Type::Bool | Type::Enum(_) | Type::Symbol | Type::Text
+        Type::Exact
+            | Type::Char
+            | Type::Integer(_)
+            | Type::Bool
+            | Type::Enum(_)
+            | Type::Symbol
+            | Type::Text
     ) {
         return Err(location.error(
             ErrorKind::InvalidSource,
@@ -38,7 +44,7 @@ pub(super) fn patterns<T>(
         let Some(pattern) = &arm.pattern else {
             if !matches!(
                 ty,
-                Type::Char | Type::Integer(_) | Type::Symbol | Type::Text
+                Type::Exact | Type::Char | Type::Integer(_) | Type::Symbol | Type::Text
             ) || wildcard
                 || index + 1 != arms.len()
             {
@@ -64,11 +70,15 @@ pub(super) fn patterns<T>(
                 ));
             }
         }
-        let checked = expression(
-            pattern,
-            Some(if ty == Type::Symbol { Type::Text } else { ty }),
-            bindings,
-        )?;
+        let checked = if ty == Type::Exact {
+            super::exact::comparison_value(pattern, bindings)?
+        } else {
+            expression(
+                pattern,
+                Some(if ty == Type::Symbol { Type::Text } else { ty }),
+                bindings,
+            )?
+        };
         diagnostics::collect(&checked, &mut warnings);
         let mut value = constants::evaluate(&checked)?.ok_or_else(|| {
             arm.location.error(
@@ -76,12 +86,30 @@ pub(super) fn patterns<T>(
                 "match pattern must be constant [const.expression]",
             )
         })?;
+        if ty == Type::Exact && value.ty != Type::Exact {
+            let n = super::exact::constant(&value).ok_or_else(|| {
+                arm.location.error(
+                    ErrorKind::InvalidSource,
+                    "exact match requires integer patterns [match.pattern]",
+                )
+            })?;
+            value = CheckedExpression {
+                ty: Type::Exact,
+                value: Value::Exact(Box::new(super::exact::Exact {
+                    arithmetic: false,
+                    kind: super::exact::ExactKind::Literal(n),
+                    range: Some(crate::numeric::Range::point(n)),
+                    location: arm.location,
+                })),
+            };
+        }
         if ty == Type::Symbol {
             value.ty = Type::Symbol;
             super::text::register_constants(&value, bindings);
         }
         let key = match &value.value {
             Value::Integer { value, .. } => value.to_string(),
+            Value::Exact(e) => super::exact::evaluate(e).unwrap().unwrap().to_string(),
             Value::Bool(value) => value.to_string(),
             Value::Text { text, .. } => text.clone(),
             _ => unreachable!(),

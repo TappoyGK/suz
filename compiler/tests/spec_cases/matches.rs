@@ -179,7 +179,7 @@ fn match_patterns_check_constant_forms_types_and_arithmetic_diagnostics() {
         ),
         (
             "match 0 { 1 / 0 => {}\n_ => {} }\nreturn 0",
-            "const.evaluation",
+            "arith.div-zero-always",
         ),
         (
             "fix n: u8 = 0\nmatch n { 256 => {}\n_ => {} }\nreturn 0",
