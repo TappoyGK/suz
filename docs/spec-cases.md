@@ -113,16 +113,16 @@ IDは分野の接頭辞と番号で構成し、期待結果の種類を含めな
 
 | 分野 | ID接頭辞 | 対応する仕様 | 件数 |
 |---|---|---|---:|
-| [字句](spec-cases/lex.md) | `lex` | 第3章 | 32 |
+| [字句](spec-cases/lex.md) | `lex` | 第3章 | 35 |
 | [プログラムの構造](spec-cases/prog.md) | `prog` | 第4章 | 18 |
-| [型](spec-cases/type.md) | `type` | 第5章 | 31 |
+| [型](spec-cases/type.md) | `type` | 第5章 | 32 |
 | [text](spec-cases/text.md) | `text` | 第5・6・7・8・10章 | 25 |
 | [定数・変数・代入](spec-cases/bind.md) | `bind` | 第6章 | 29 |
-| [式](spec-cases/expr.md) | `expr` | 第7章 | 70 |
-| [関数と制御](spec-cases/flow.md) | `flow` | 第8章 | 63 |
+| [式](spec-cases/expr.md) | `expr` | 第7章 | 73 |
+| [関数と制御](spec-cases/flow.md) | `flow` | 第8章 | 67 |
 | [実行時の検査](spec-cases/runtime.md) | `runtime` | 第9章 | 18 |
 | [ログ](spec-cases/log.md) | `log` | 第10章 | 10 |
 | [整数演算の診断設定](spec-cases/diag.md) | `diag` | 第11章 | 9 |
-| 合計 | | | 305 |
+| 合計 | | | 316 |
 
-結果別：受理129例、コンパイルエラー152例、実行時パニック15例、診断設定の比較9例。バイト列による4例も、それぞれの期待結果に含めている。
+結果別：受理137例、コンパイルエラー155例、実行時パニック15例、診断設定の比較9例。バイト列による4例も、それぞれの期待結果に含めている。

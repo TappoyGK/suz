@@ -81,7 +81,13 @@ static bool structure(reader *r, const suz_parse_type *type, suz_parsed_value *o
 static bool value(reader *r, const suz_parse_type *type, suz_parsed_value *output) {
     if (!space(r) || r->index == r->length) return false;
     if (type->kind == SUZ_PARSE_STRUCT) return structure(r, type, output);
-    if (type->kind == SUZ_PARSE_TEXT) {
+    if (type->kind == SUZ_PARSE_CHAR) {
+        uint32_t scalar;
+        uint64_t consumed;
+        if (!suz_parse_char_literal(r->bytes + r->index, r->length - r->index, &scalar, &consumed)) return false;
+        r->index += consumed;
+        output->bits = scalar;
+    } else if (type->kind == SUZ_PARSE_TEXT) {
         uint64_t consumed, decoded;
         if (!suz_parse_string(r->bytes + r->index, r->length - r->index, &consumed, NULL, &decoded)) return false;
         output->start = r->index;

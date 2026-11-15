@@ -110,7 +110,9 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
                 start, end, body, ..
             } => {
                 visit(start, false, in_value)?;
-                visit(end, false, in_value)?;
+                if let Some(end) = end {
+                    visit(end, false, in_value)?;
+                }
                 validate_statements(body, in_value)?;
             }
             Statement::Binding { initializer, .. } => visit(initializer, true, in_value)?,

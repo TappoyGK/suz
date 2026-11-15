@@ -95,7 +95,9 @@ fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
             }
             let value = constant_integer_raw(operand)?;
             let (min, max) = expr.ty.integer_bounds()?;
-            if (min..=max).contains(&value) {
+            if (min..=max).contains(&value)
+                && (expr.ty != Type::Char || !(0xd800..=0xdfff).contains(&value))
+            {
                 Some(value)
             } else {
                 constant_integer_raw(fallback)
@@ -274,7 +276,7 @@ fn constant_bool_raw(expr: &CheckedExpression) -> Option<bool> {
                         continue;
                     }
                     Type::Void => return None,
-                    Type::Integer(_) | Type::Enum(_) => {
+                    Type::Integer(_) | Type::Enum(_) | Type::Char => {
                         Some(constant_integer_raw(&left)?.cmp(&constant_integer_raw(&right)?))
                     }
                     Type::Float(_) => {
@@ -369,7 +371,7 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
             }
         }
         Type::Void => return None,
-        Type::Integer(_) | Type::Enum(_) => Value::Integer {
+        Type::Integer(_) | Type::Enum(_) | Type::Char => Value::Integer {
             value: constant_integer_raw(expr)?,
             minus: None,
         },
@@ -430,7 +432,9 @@ fn cast_succeeds(operand: &CheckedExpression, target: Type, wrap: bool) -> bool 
     if operand.ty.integer_bounds().is_some()
         && let Some((min, max)) = target.integer_bounds()
     {
-        return (min..=max).contains(&constant_integer_raw(operand).unwrap());
+        let value = constant_integer_raw(operand).unwrap();
+        return (min..=max).contains(&value)
+            && (target != Type::Char || !(0xd800..=0xdfff).contains(&value));
     }
     match (operand.ty, target) {
         (Type::Float(_), Type::Integer(to)) => {

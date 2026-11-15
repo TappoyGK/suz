@@ -49,6 +49,7 @@ pub(super) fn template(
                     Value::Text { text, .. } => text,
                     Value::Bool(value) => value.to_string(),
                     Value::Integer { value, .. } => match evaluated.ty {
+                        Type::Char => char::from_u32(value as u32).unwrap().to_string(),
                         Type::Enum(ty) => bindings.enums[ty.id].variants[value as usize].clone(),
                         _ => value.to_string(),
                     },

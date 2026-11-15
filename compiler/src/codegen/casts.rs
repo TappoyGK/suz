@@ -43,6 +43,12 @@ pub(super) fn cast_parts(
                 String::new(),
                 format!("suz_cmp_{output}"),
             ),
+            Type::Char => (
+                Type::Char,
+                "suz_parse_char",
+                String::new(),
+                format!("suz_cmp_{output}"),
+            ),
             Type::Bool => (
                 Type::Bool,
                 "suz_parse_bool",
@@ -95,6 +101,9 @@ pub(super) fn cast_parts(
             let (from_min, from_max) = from.integer_bounds().unwrap();
             let (to_min, to_max) = to.integer_bounds().unwrap();
             let mut conditions = Vec::new();
+            if to == Type::Char {
+                conditions.push(format!("({local} < 0xd800 || {local} > 0xdfff)"));
+            }
             if from_min < to_min {
                 conditions.push(format!("{local} >= INT64_C({to_min})"));
             }

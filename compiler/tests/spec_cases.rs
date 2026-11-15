@@ -10,6 +10,8 @@ mod c_build;
 mod cast_returns;
 #[path = "spec_cases/casts.rs"]
 mod casts;
+#[path = "spec_cases/characters.rs"]
+mod characters;
 #[path = "spec_cases/cli.rs"]
 mod cli;
 #[path = "spec_cases/constants.rs"]

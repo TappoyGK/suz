@@ -133,12 +133,14 @@ pub(crate) enum Type {
     Float(FloatType),
     Integer(IntegerType),
     Bool,
+    Char,
     Text,
 }
 
 impl Type {
     pub fn integer_bounds(self) -> Option<(i128, i128)> {
         match self {
+            Self::Char => Some((0, 0x10ffff)),
             Self::Integer(ty) => Some(ty.bounds()),
             Self::Enum(ty) => Some((0, ty.count as i128 - 1)),
             _ => None,
@@ -146,13 +148,16 @@ impl Type {
     }
     pub fn integer_storage(self) -> Option<IntegerType> {
         match self {
+            Self::Char => Some(IntegerType::U32),
             Self::Integer(ty) => Some(ty),
             Self::Enum(ty) => Some(ty.base),
             _ => None,
         }
     }
     pub fn from_name(name: &str) -> Option<Self> {
-        if name == "text" {
+        if name == "char" {
+            Some(Self::Char)
+        } else if name == "text" {
             Some(Self::Text)
         } else if name == "void" {
             Some(Self::Void)
@@ -170,6 +175,7 @@ impl Type {
         match self {
             Self::Integer(ty) => ty.name(),
             Self::Float(ty) => ty.name(),
+            Self::Char => "char",
             Self::Text => "text",
             Self::Bool => "bool",
             Self::Void => "void",
@@ -182,6 +188,7 @@ impl Type {
             Self::Struct(id) => format!("suz_struct_{id}"),
             Self::Integer(ty) => ty.c_name().into(),
             Self::Float(ty) => ty.c_name().into(),
+            Self::Char => "uint32_t".into(),
             Self::Text => "suz_text".into(),
             Self::Bool => "_Bool".into(),
             Self::Void => "void".into(),
@@ -263,7 +270,7 @@ pub(crate) enum Statement {
         name: String,
         location: Location,
         start: Expression,
-        end: Expression,
+        end: Option<Expression>,
         inclusive: bool,
         reverse: bool,
         body: Vec<Statement>,
@@ -452,6 +459,7 @@ pub(crate) enum FailureHandler {
 }
 
 pub(crate) enum ExpressionKind {
+    Char(u32),
     Template(Vec<TemplatePart<Expression>>),
     Struct {
         id: usize,

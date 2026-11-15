@@ -57,6 +57,12 @@ pub(crate) fn scan(
                                 "template must fit on one source line [text.template-line]",
                             ));
                         }
+                        b'\'' => {
+                            let (_, length) = super::char_literal(&source[cursor..])
+                                .map_err(|message| fail(cursor, message))?;
+                            cursor += length;
+                            continue;
+                        }
                         b'`' => {
                             let nested_column = column + source[..cursor].chars().count();
                             cursor += scan(&source[cursor..], line, nested_column)?.0;

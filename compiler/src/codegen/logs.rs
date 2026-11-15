@@ -53,6 +53,7 @@ pub(super) fn emit(
                     Type::Text => format!(
                         "suz_log_text(suz_text_bytes({name}), (size_t)suz_text_length({name}));"
                     ),
+                    Type::Char => format!("suz_log_char({name});"),
                     Type::Bool => format!("suz_log_bool({name});"),
                     Type::Enum(ty) => {
                         context.enum_logs.insert(ty.id);

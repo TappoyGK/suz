@@ -67,6 +67,15 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
                 0,
                 1,
             ),
+            Type::Char => (
+                "SUZ_PARSE_CHAR",
+                0,
+                false,
+                "NULL".into(),
+                "NULL".into(),
+                0,
+                1,
+            ),
             Type::Bool => (
                 "SUZ_PARSE_BOOL",
                 0,
@@ -159,7 +168,9 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
         *slot += 1;
         let value = match ty {
             Type::Integer(ty) => format!("suz_bits_{}(values[{index}].bits)", ty.name()),
-            Type::Enum(_) | Type::Bool => format!("({})(values[{index}].bits)", ty.c_name()),
+            Type::Enum(_) | Type::Bool | Type::Char => {
+                format!("({})(values[{index}].bits)", ty.c_name())
+            }
             Type::Float(ty) => format!("suz_parsed_{}(values[{index}].bits)", ty.name()),
             Type::Text => format!(
                 "suz_text_from_parsed(bytes + values[{index}].start, values[{index}].length, location)"

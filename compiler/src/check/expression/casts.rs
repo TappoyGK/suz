@@ -27,7 +27,11 @@ pub(super) fn check(
                 } else {
                     matches!(
                         target,
-                        Type::Integer(_) | Type::Float(_) | Type::Bool | Type::Struct(_)
+                        Type::Integer(_)
+                            | Type::Float(_)
+                            | Type::Bool
+                            | Type::Char
+                            | Type::Struct(_)
                     )
                 };
                 if !valid {
@@ -66,6 +70,11 @@ pub(super) fn check(
             }
             let safe = match (operand.ty, *target) {
                 (Type::Text, _) => false,
+                (Type::Char, Type::Integer(to)) => to.bounds().1 >= 0x10ffff,
+                (Type::Integer(from), Type::Char) => {
+                    let (min, max) = from.bounds();
+                    min >= 0 && max < 0xd800
+                }
                 (Type::Integer(from), Type::Integer(to)) => {
                     let (from_min, from_max) = from.bounds();
                     let (to_min, to_max) = to.bounds();
@@ -153,7 +162,10 @@ pub(super) fn check(
                     if !safe {
                         let (min, max) = target.integer_bounds().unwrap();
                         match constant_integer(&operand)? {
-                            Some(value) if (min..=max).contains(&value) => {}
+                            Some(value)
+                                if (min..=max).contains(&value)
+                                    && (*target != Type::Char
+                                        || !(0xd800..=0xdfff).contains(&value)) => {}
                             Some(_) => return Err(expr.location.error(
                                 ErrorKind::InvalidSource,
                                 "constant cast is out of range and requires or [const.cast-check]",

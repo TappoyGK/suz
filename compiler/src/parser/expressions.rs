@@ -213,6 +213,10 @@ impl Parser<'_, '_> {
                 self.cursor += 1;
                 ExpressionKind::Float(text.to_owned())
             }
+            Kind::Char(value) => {
+                self.cursor += 1;
+                ExpressionKind::Char(value)
+            }
             Kind::Integer(text) => {
                 self.cursor += 1;
                 ExpressionKind::Integer {

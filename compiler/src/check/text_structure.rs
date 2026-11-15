@@ -69,6 +69,7 @@ impl Schema {
                 entry.kind = 1;
                 entry.bits = if ty == FloatType::F32 { 32 } else { 64 };
             }
+            Type::Char => entry.kind = 6,
             Type::Bool => entry.kind = 2,
             Type::Text => entry.kind = 3,
             Type::Enum(ty) => {
@@ -163,7 +164,7 @@ pub(super) fn parse(text: &str, id: usize, scope: &Scope) -> Option<CheckedExpre
         let raw = values.next()?;
         let value = match ty {
             Type::Integer(ty) => super::text_parse::integer_value(raw.bits, ty),
-            Type::Enum(_) => Value::Integer {
+            Type::Enum(_) | Type::Char => Value::Integer {
                 value: i128::from(raw.bits),
                 minus: None,
             },

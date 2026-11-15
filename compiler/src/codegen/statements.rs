@@ -63,6 +63,20 @@ pub(super) fn emit_block(
                 reverse,
                 body,
             } => {
+                let Some(end) = end else {
+                    super::characters::emit_text_loop(
+                        c,
+                        *id,
+                        start,
+                        *reverse,
+                        body,
+                        depth,
+                        next_assignment,
+                        context,
+                    );
+                    continue;
+                };
+                let character = start.ty == crate::ast::Type::Char;
                 let ty = start.ty.c_name();
                 let start = expression(start, context);
                 let end = expression(end, context);
@@ -73,17 +87,33 @@ pub(super) fn emit_block(
                 if *reverse {
                     writeln!(c, "{indent}    _Bool suz_more_{id} = suz_start_{id} {comparison} suz_end_{id};").unwrap();
                     writeln!(c, "{indent}    {ty} suz_cursor_{id} = suz_end_{id};").unwrap();
-                    if !inclusive {
+                    if !inclusive && character {
+                        writeln!(c, "{indent}    if (suz_more_{id}) suz_cursor_{id} = suz_cursor_{id} == 0xe000 ? 0xd7ff : suz_cursor_{id} - 1;").unwrap();
+                    } else if !inclusive {
                         // Empty ranges must not subtract from the type's minimum.
                         writeln!(c, "{indent}    if (suz_more_{id}) --suz_cursor_{id};").unwrap();
                     }
                     // Updating in the for clause also handles continue at the minimum.
-                    writeln!(c, "{indent}    for (; suz_more_{id}; suz_more_{id} = suz_cursor_{id} > suz_start_{id}, suz_cursor_{id} -= suz_more_{id}) {{").unwrap();
+                    let step = if character {
+                        format!(
+                            "suz_cursor_{id} -= suz_more_{id} ? (suz_cursor_{id} == 0xe000 ? 0x801 : 1) : 0"
+                        )
+                    } else {
+                        format!("suz_cursor_{id} -= suz_more_{id}")
+                    };
+                    writeln!(c, "{indent}    for (; suz_more_{id}; suz_more_{id} = suz_cursor_{id} > suz_start_{id}, {step}) {{").unwrap();
                 } else {
                     writeln!(c, "{indent}    {ty} suz_cursor_{id} = suz_start_{id};").unwrap();
                     writeln!(c, "{indent}    _Bool suz_more_{id} = 1;").unwrap();
                     // Test before incrementing, including after continue at the maximum.
-                    writeln!(c, "{indent}    for (; suz_more_{id} && suz_cursor_{id} {comparison} suz_end_{id}; suz_more_{id} = suz_cursor_{id} < suz_end_{id}, suz_cursor_{id} += suz_more_{id}) {{").unwrap();
+                    let step = if character {
+                        format!(
+                            "suz_cursor_{id} += suz_more_{id} ? (suz_cursor_{id} == 0xd7ff ? 0x801 : 1) : 0"
+                        )
+                    } else {
+                        format!("suz_cursor_{id} += suz_more_{id}")
+                    };
+                    writeln!(c, "{indent}    for (; suz_more_{id} && suz_cursor_{id} {comparison} suz_end_{id}; suz_more_{id} = suz_cursor_{id} < suz_end_{id}, {step}) {{").unwrap();
                 }
                 writeln!(
                     c,

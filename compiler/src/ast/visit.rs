@@ -95,6 +95,7 @@ pub(crate) fn walk_expression<V: Visitor + ?Sized>(
         ExpressionKind::Name(_)
         | ExpressionKind::Integer { .. }
         | ExpressionKind::Float(_)
+        | ExpressionKind::Char(_)
         | ExpressionKind::Bool(_) => {}
     }
     Ok(())
@@ -127,7 +128,9 @@ pub(crate) fn walk_statement<V: Visitor + ?Sized>(
             start, end, body, ..
         } => {
             visitor.expression(start)?;
-            visitor.expression(end)?;
+            if let Some(end) = end {
+                visitor.expression(end)?;
+            }
             visitor.scope(body, None)?;
         }
         Statement::If {

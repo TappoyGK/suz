@@ -27,6 +27,7 @@ pub(super) fn dependencies(
         ExpressionKind::Name(name) => names.push((name.clone(), expr.location)),
         ExpressionKind::Integer { .. }
         | ExpressionKind::Float(_)
+        | ExpressionKind::Char(_)
         | ExpressionKind::Bool(_)
         | ExpressionKind::Variant { .. } => {}
         ExpressionKind::Group(inner)

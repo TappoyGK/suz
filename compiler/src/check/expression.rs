@@ -49,6 +49,7 @@ pub(super) fn operand_type(expr: &Expression, bindings: &Scope) -> Option<Type> 
             .iter()
             .find_map(|(_, value)| operand_type(value, bindings))
             .or_else(|| operand_type(otherwise, bindings)),
+        ExpressionKind::Char(_) => Some(Type::Char),
         ExpressionKind::Integer { .. } | ExpressionKind::Float(_) => None,
         ExpressionKind::Name(name) => bindings.get(name).map(|binding| binding.ty),
         ExpressionKind::ArithmeticHandler { operand: inner, .. }
@@ -231,7 +232,14 @@ fn expression_inner(
             }
             let ty = match expected {
                 Some(Type::Float(_)) => unreachable!(),
-                Some(Type::Bool | Type::Void | Type::Enum(_) | Type::Struct(_) | Type::Text) => {
+                Some(
+                    Type::Char
+                    | Type::Bool
+                    | Type::Void
+                    | Type::Enum(_)
+                    | Type::Struct(_)
+                    | Type::Text,
+                ) => {
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
                         "an integer literal requires a numeric type [type.expected]",
@@ -269,6 +277,13 @@ fn expression_inner(
                 },
             }
         }
+        ExpressionKind::Char(value) => CheckedExpression {
+            ty: Type::Char,
+            value: Value::Integer {
+                value: i128::from(*value),
+                minus: None,
+            },
+        },
         ExpressionKind::Bool(value) => CheckedExpression {
             ty: Type::Bool,
             value: Value::Bool(*value),

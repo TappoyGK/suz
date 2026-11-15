@@ -34,7 +34,8 @@ const KEYWORDS: &[&str] = &[
     "inf",
 ];
 const TYPES: &[&str] = &[
-    "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "bool", "text", "void",
+    "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "bool", "char", "text",
+    "void",
 ];
 const SYMBOLS: &[&str] = &[
     "(", ")", "{", "}", ",", ":", ".", "->", "=>", "=", "+=", "-=", "*=", "/=", "%=", "+%=", "-%=",
@@ -44,6 +45,7 @@ const SYMBOLS: &[&str] = &[
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Kind<'a> {
+    Char(u32),
     Template(&'a str),
     Ident(&'a str),
     Keyword(&'a str),
@@ -242,6 +244,20 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
                 column = 1;
                 continue;
             }
+            '\'' => {
+                let (value, length) = char_literal(rest)
+                    .map_err(|message| error(line, column, ErrorKind::InvalidSource, message))?;
+                tokens.push(Token {
+                    kind: Kind::Char(value),
+                    line,
+                    column,
+                    span: offset..offset + length,
+                });
+                offset += length;
+                column += rest[..length].chars().count();
+                continuation = false;
+                continue;
+            }
             '`' => {
                 let length = templates::scan(rest, line, column)?.0;
                 tokens.push(Token {
@@ -355,6 +371,37 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
         }
     }
     Ok(tokens)
+}
+
+// Share literal parsing with text-to-structure conversion at runtime.
+pub(crate) fn char_literal(input: &str) -> Result<(u32, usize), &'static str> {
+    unsafe extern "C" {
+        fn suz_parse_char_literal_status(
+            bytes: *const u8,
+            length: u64,
+            output: *mut u32,
+            consumed: *mut u64,
+        ) -> u32;
+    }
+    let (mut value, mut consumed) = (0, 0);
+    // Status codes follow suz_char_literal_status. Input and outputs remain live
+    // for this bounded, allocation-free call.
+    let status = unsafe {
+        suz_parse_char_literal_status(
+            input.as_ptr(),
+            input.len() as u64,
+            &mut value,
+            &mut consumed,
+        )
+    };
+    match status {
+        0 => Ok((value, consumed as usize)),
+        2 => Err("Unicode escape requires at least one hexadecimal digit [char.literal]"),
+        3 => Err("Unicode escape accepts at most six hexadecimal digits [char.literal]"),
+        4 => Err("Unicode escape cannot represent a surrogate (U+D800..U+DFFF) [char.literal]"),
+        5 => Err("Unicode escape exceeds U+10FFFF [char.literal]"),
+        _ => Err("expected one Unicode scalar in a character literal [char.literal]"),
+    }
 }
 
 #[cfg(test)]

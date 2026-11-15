@@ -2,6 +2,7 @@
 #define SUZ_RUNTIME_H
 
 #include "suz_config.h"
+#include "suz_char.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -46,6 +47,11 @@ void suz_log_text(const char *text, size_t len);
 void suz_log_i64(int64_t value);
 void suz_log_u64(uint64_t value);
 void suz_log_bool(bool value);
+static inline void suz_log_char(uint32_t value) {
+    char bytes[4];
+    size_t length = suz_char_encode(value, bytes);
+    suz_log_text(bytes, length);
+}
 /* Output needs 32 bytes; return the length without a terminating NUL. */
 size_t suz_format_f32(float value, char output[32]);
 size_t suz_format_f64(double value, char output[32]);

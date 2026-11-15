@@ -1,6 +1,7 @@
 #ifndef SUZ_PARSE_H
 #define SUZ_PARSE_H
 
+#include "suz_char.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -24,4 +25,17 @@ bool suz_parse_f64(const char *bytes, uint64_t length, double *output);
 bool suz_parse_string(const char *bytes, uint64_t length, uint64_t *consumed,
                        char *output, uint64_t *decoded_length);
 
+/* Parse one scalar from the entire text, or one quoted literal prefix.
+   Ignore outputs on failure. Neither function allocates. */
+bool suz_parse_char(const char *bytes, uint64_t length, uint32_t *output);
+enum suz_char_literal_status {
+    SUZ_CHAR_LITERAL_OK, SUZ_CHAR_LITERAL_SYNTAX, SUZ_CHAR_LITERAL_EMPTY_ESCAPE,
+    SUZ_CHAR_LITERAL_TOO_MANY_DIGITS, SUZ_CHAR_LITERAL_SURROGATE,
+    SUZ_CHAR_LITERAL_OUT_OF_RANGE
+};
+/* Same parser, with a status code for compiler diagnostics. */
+uint32_t suz_parse_char_literal_status(const char *bytes, uint64_t length,
+                                       uint32_t *output, uint64_t *consumed);
+bool suz_parse_char_literal(const char *bytes, uint64_t length,
+                             uint32_t *output, uint64_t *consumed);
 #endif
