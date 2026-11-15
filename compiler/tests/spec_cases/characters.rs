@@ -206,3 +206,58 @@ int main(void) {
         assert!(output.stderr.contains(&0));
     }
 }
+
+#[test]
+fn unicode_escape_diagnostics_identify_the_failure_in_each_expression_context() {
+    for (literal, reason) in [
+        (
+            r"'\u{D800}'",
+            "Unicode escape cannot represent a surrogate (U+D800..U+DFFF)",
+        ),
+        (r"'\u{110000}'", "Unicode escape exceeds U+10FFFF"),
+        (
+            r"'\u{0000041}'",
+            "Unicode escape accepts at most six hexadecimal digits",
+        ),
+        (
+            r"'\u{}'",
+            "Unicode escape requires at least one hexadecimal digit",
+        ),
+    ] {
+        for (prefix, suffix) in [("    fix ch = ", ""), ("    log info `${", "}`")] {
+            let source = format!("fn main() -> u8 {{\n{prefix}{literal}{suffix}\nreturn 0 }}");
+            let error = suz::compile(source.as_bytes()).unwrap_err();
+            assert_eq!(
+                error.message,
+                format!("{reason} [char.literal]"),
+                "{source}"
+            );
+            assert_eq!(
+                (error.line, error.column),
+                (2, prefix.len() + 1),
+                "{source}"
+            );
+        }
+    }
+}
+
+#[test]
+fn mutable_loop_inputs_have_a_diagnostic_shared_by_text_and_ranges() {
+    for keyword in ["for", "rev"] {
+        for (declaration, input) in [
+            ("var value = `abc`", "value"),
+            ("var value = 3", "0..<value"),
+        ] {
+            let source = format!(
+                "fn main() -> u8 {{\n{declaration}\n{keyword} ch in {input} {{}}\nreturn 0 }}"
+            );
+            let error = suz::compile(source.as_bytes()).unwrap_err();
+            assert_eq!(
+                error.message,
+                "loop inputs cannot reference var bindings [for.bound-reference]"
+            );
+            assert_eq!(error.line, 3);
+            assert_eq!(error.column, if input == "value" { 11 } else { 15 });
+        }
+    }
+}

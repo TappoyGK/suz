@@ -85,9 +85,9 @@ bool suz_parse_char(const char *bytes, uint64_t length, uint32_t *output) {
     return true;
 }
 
-bool suz_parse_char_literal(const char *bytes, uint64_t length,
+uint32_t suz_parse_char_literal_status(const char *bytes, uint64_t length,
                              uint32_t *output, uint64_t *consumed) {
-    if (length < 3 || bytes[0] != '\'') return false;
+    if (length < 3 || bytes[0] != '\'') return SUZ_CHAR_LITERAL_SYNTAX;
     uint64_t index = 1;
     uint32_t value;
     if (bytes[index] == '\\') {
@@ -100,7 +100,7 @@ bool suz_parse_char_literal(const char *bytes, uint64_t length,
             case '\\': value = '\\'; break;
             case '\'': value = '\''; break;
             case 'u': {
-                if (index >= length || bytes[index++] != '{') return false;
+                if (index >= length || bytes[index++] != '{') return SUZ_CHAR_LITERAL_SYNTAX;
                 value = 0;
                 unsigned digits = 0;
                 while (index < length && bytes[index] != '}') {
@@ -109,24 +109,32 @@ bool suz_parse_char_literal(const char *bytes, uint64_t length,
                     if (c >= '0' && c <= '9') digit = c - '0';
                     else if (c >= 'a' && c <= 'f') digit = c - 'a' + 10;
                     else if (c >= 'A' && c <= 'F') digit = c - 'A' + 10;
-                    else return false;
-                    if (++digits > 6) return false;
+                    else return SUZ_CHAR_LITERAL_SYNTAX;
+                    if (++digits > 6) return SUZ_CHAR_LITERAL_TOO_MANY_DIGITS;
                     value = (value << 4) | digit;
                 }
-                if (!digits || index >= length || !suz_char_valid(value)) return false;
+                if (!digits) return SUZ_CHAR_LITERAL_EMPTY_ESCAPE;
+                if (index >= length) return SUZ_CHAR_LITERAL_SYNTAX;
+                if (value >= 0xd800 && value <= 0xdfff) return SUZ_CHAR_LITERAL_SURROGATE;
+                if (value > 0x10ffff) return SUZ_CHAR_LITERAL_OUT_OF_RANGE;
                 ++index;
                 break;
             }
-            default: return false;
+            default: return SUZ_CHAR_LITERAL_SYNTAX;
         }
     } else {
-        if (bytes[index] == '\'' || bytes[index] == '\n' || bytes[index] == '\r') return false;
+        if (bytes[index] == '\'' || bytes[index] == '\n' || bytes[index] == '\r') return SUZ_CHAR_LITERAL_SYNTAX;
         uint64_t count;
-        if (!suz_char_decode(bytes + index, length - index, &value, &count)) return false;
+        if (!suz_char_decode(bytes + index, length - index, &value, &count)) return SUZ_CHAR_LITERAL_SYNTAX;
         index += count;
     }
-    if (index >= length || bytes[index++] != '\'') return false;
+    if (index >= length || bytes[index++] != '\'') return SUZ_CHAR_LITERAL_SYNTAX;
     *output = value;
     *consumed = index;
-    return true;
+    return SUZ_CHAR_LITERAL_OK;
+}
+
+bool suz_parse_char_literal(const char *bytes, uint64_t length,
+                             uint32_t *output, uint64_t *consumed) {
+    return suz_parse_char_literal_status(bytes, length, output, consumed) == SUZ_CHAR_LITERAL_OK;
 }

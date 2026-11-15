@@ -245,14 +245,8 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
                 continue;
             }
             '\'' => {
-                let (value, length) = char_literal(rest).ok_or_else(|| {
-                    error(
-                        line,
-                        column,
-                        ErrorKind::InvalidSource,
-                        "expected one Unicode scalar in a character literal [char.literal]",
-                    )
-                })?;
+                let (value, length) = char_literal(rest)
+                    .map_err(|message| error(line, column, ErrorKind::InvalidSource, message))?;
                 tokens.push(Token {
                     kind: Kind::Char(value),
                     line,
@@ -380,28 +374,33 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
 }
 
 // Share literal parsing with text-to-structure conversion at runtime.
-pub(crate) fn char_literal(input: &str) -> Option<(u32, usize)> {
+pub(crate) fn char_literal(input: &str) -> Result<(u32, usize), &'static str> {
     unsafe extern "C" {
-        fn suz_parse_char_literal(
+        fn suz_parse_char_literal_status(
             bytes: *const u8,
             length: u64,
             output: *mut u32,
             consumed: *mut u64,
-        ) -> bool;
+        ) -> u32;
     }
     let (mut value, mut consumed) = (0, 0);
-    // Input and outputs remain live for this bounded, allocation-free call.
-    if unsafe {
-        suz_parse_char_literal(
+    // Status codes follow suz_char_literal_status. Input and outputs remain live
+    // for this bounded, allocation-free call.
+    let status = unsafe {
+        suz_parse_char_literal_status(
             input.as_ptr(),
             input.len() as u64,
             &mut value,
             &mut consumed,
         )
-    } {
-        Some((value, consumed as usize))
-    } else {
-        None
+    };
+    match status {
+        0 => Ok((value, consumed as usize)),
+        2 => Err("Unicode escape requires at least one hexadecimal digit [char.literal]"),
+        3 => Err("Unicode escape accepts at most six hexadecimal digits [char.literal]"),
+        4 => Err("Unicode escape cannot represent a surrogate (U+D800..U+DFFF) [char.literal]"),
+        5 => Err("Unicode escape exceeds U+10FFFF [char.literal]"),
+        _ => Err("expected one Unicode scalar in a character literal [char.literal]"),
     }
 }
 

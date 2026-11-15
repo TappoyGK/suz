@@ -58,7 +58,8 @@ pub(crate) fn scan(
                             ));
                         }
                         b'\'' => {
-                            let (_, length) = super::char_literal(&source[cursor..]).ok_or_else(|| fail(cursor, "expected one Unicode scalar in a character literal [char.literal]"))?;
+                            let (_, length) = super::char_literal(&source[cursor..])
+                                .map_err(|message| fail(cursor, message))?;
                             cursor += length;
                             continue;
                         }

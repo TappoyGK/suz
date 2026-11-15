@@ -17,7 +17,7 @@ impl crate::ast::visit::Visitor for References {
         {
             return Err(expr.location.error(
                 ErrorKind::InvalidSource,
-                "range bounds cannot reference var bindings [for.bound-reference]",
+                "loop inputs cannot reference var bindings [for.bound-reference]",
             ));
         }
         crate::ast::visit::walk_expression(self, expr)
