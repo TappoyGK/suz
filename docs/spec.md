@@ -41,7 +41,7 @@ Suzは次のものを含む。
 
 **[src.comment]** テンプレートの本文と文字リテラル以外では、`//` から行の終わりまではコメントである。コメントの末尾の改行は、通常の改行規則に従う。
 
-**[src.ident]** 識別子は、ASCII の英字か `_` で始まり、ASCII の英字、数字、`_` が続く。宣言する名前には4.2節の名前の形を適用する。大文字と小文字を区別する。キーワードと組み込み型名は識別子に使えない。`_` 単独は `match` と `matchexpr` のワイルドカードとして使う。
+**[src.ident]** 識別子は、ASCII の英字か `_` で始まり、ASCII の英字、数字、`_` が続く。宣言する名前には4.2節の命名規則を適用する。大文字と小文字を区別する。キーワードと組み込み型名は識別子に使えない。`_` 単独は `match` と `matchexpr` のワイルドカードとして使う。
 
 **[src.whitespace]** テンプレートの本文と文字リテラル以外では、スペースとタブはトークンの区切りとして扱う。`for` と `rev` の範囲演算子との境界には、[for.range-spacing] の隣接規則を適用する。
 
@@ -170,7 +170,7 @@ fn main() -> u8 {
 
 **[decl.local-scope]** ローカル変数は、宣言のあとから、その宣言を含むブロックの終わりまで参照できる。自分自身の初期値の式では、その変数を参照できない。
 
-### 4.2 名前の形
+### 4.2 命名規則
 
 **[name.constant]** `const` の名前はASCIIの大文字で始まり、大文字・数字・`_` だけからなる。`_` は末尾に置かず、連続させない。例は `MAX_COUNT`、`N`、`LIMIT_2` である。
 
@@ -180,7 +180,7 @@ fn main() -> u8 {
 
 **[name.variant]** 列挙子の名前はASCIIの大文字で始まり、英字と数字だけからなる。例は `Ready`、`A`、`F1`、`ESC` である。
 
-**[name.declaration]** 名前の形は宣言する種類に従って検査し、違反は宣言した名前の位置でコンパイルエラーとする。名前を参照するときは宣言と同じ綴りを使い、大文字・小文字の補正は行わない。`match` と `matchexpr` のワイルドカード `_` は名前の宣言ではない。
+**[name.declaration]** 命名規則は宣言する種類に従って検査し、違反は宣言した名前の位置でコンパイルエラーとする。名前を参照するときは宣言と同じ綴りを使い、大文字・小文字の補正は行わない。`match` と `matchexpr` のワイルドカード `_` は名前の宣言ではない。
 
 ## 5. 型
 
@@ -357,7 +357,11 @@ fix empty = joined == ``
 
 **[const.evaluation]** 定数式は、通常の式と同じ型、演算、評価順序、短絡評価の規則でコンパイル時に評価する。評価中にパニックの条件を満たし、その演算に対応する `or` による失敗処理がなければコンパイルエラーである。整数演算に対応する `or` がある場合は、演算に失敗したときだけ代替値を評価する。成功した場合は演算結果を使う。評価しない部分にも、定数式の構成と型の規則、および [const.cast-check] と [expr.cast-handler] と [symbol.cast-handler] の `or` を要求する規則を適用する。
 
-**[const.cast-check]** `text` から `symbol` への変換は [text.to-symbol] に従う。数値型・`bool`・`char`・構造体型への変換元が `symbol` または `text` の場合は [const.symbol-cast] と [symbol.cast-handler] に従う。それ以外の定数式の場合、コンパイル時に変換を検査する。成功を確認できれば `or` を省略できる。失敗する変換に `or` がなければコンパイルエラーである。定数式の中では、失敗時の代替値も定数式とし、変換に失敗した場合だけ評価する。短絡評価で評価しない箇所にも、キャストに `or` が必要かどうかの検査を適用する。たとえば、`true || ((300 as u8) == 0)` はコンパイルエラーであり、`true || ((300 as u8 or 0) == 0)` は受理する。式の評価順序と短絡評価には [const.evaluation] を適用する。実行時に値が決まる変換は、9.4 節に従って検査する。
+**[const.cast-check]** `text` から `symbol` への変換は [text.to-symbol] に従う。数値型・`bool`・`char`・構造体型への変換元が `symbol` または `text` の場合は [const.symbol-cast] と [symbol.cast-handler] に従う。
+
+それ以外の定数式の場合、コンパイル時に変換を検査する。成功を確認できれば `or` を省略できる。失敗する変換に `or` がなければコンパイルエラーである。定数式の中では、失敗時の代替値も定数式とし、変換に失敗した場合だけ評価する。
+
+短絡評価で評価しない箇所にも、キャストに `or` が必要かどうかの検査を適用する。たとえば、`true || ((300 as u8) == 0)` はコンパイルエラーであり、`true || ((300 as u8 or 0) == 0)` は受理する。式の評価順序と短絡評価には [const.evaluation] を適用する。実行時に値が決まる変換は、9.4 節に従って検査する。
 
 ```suz
 const LARGE: f64 = 1.0e40
@@ -370,7 +374,7 @@ const SAMPLE_RATE: i32 = 48_000
 const CHANNELS = 2
 ```
 
-**[const.symbol]** 定数テンプレートは、実行時と同じエスケープと値の表示規則で評価する。数値リテラルの型は通常の型決定規則に従う。定数名を参照する規則を `fix` の値の参照には適用しない。ユーザー定義関数の呼び出しには [const.expression] の制約を適用する。
+**[const.symbol]** 定数テンプレートは、実行時と同じエスケープと値の表示規則で評価する。数値リテラルの型は通常の型決定規則に従う。定数名は参照できるが、`fix` の値の参照は定数式にならない。ユーザー定義関数の呼び出しには [const.expression] の制約を適用する。
 
 ```suz
 const PRODUCT: symbol = `Suz`
@@ -378,7 +382,7 @@ const MAJOR: u8 = 1
 const LABEL = `${PRODUCT} ${MAJOR}`
 ```
 
-`LABEL` の内容は `Suz 1` となる。定数の埋め込みも、実行時と同じエスケープと値の表示規則で評価する。数値の型が定まらない場合は、既存の数値リテラルの型決定規則を適用する。
+`LABEL` の内容は `Suz 1` となる。
 
 **[const.symbol-cast]** 定数式の `symbol` からの `as` と `as%` は定数式として評価できる。`or` の代替値も定数式とし、実行時と同じ形式・範囲・丸め・ラップの規則で判定する。構造体への変換も対象とし、フィールドを再帰的に検査する。成功した結果の `symbol` フィールドはconstant symbolとして配置する。変換が失敗した場合は代替値を使う。成功する変換であっても [symbol.cast-handler] に従って `or` を必須とする。
 
@@ -504,7 +508,7 @@ if p == (Vec2 { x: 0.0, y: 0.0 }) {
 
 ### 7.5 論理否定
 
-**[expr.not]** 論理否定は `not` と書く。`bool` 型の式を受け取り、`true` なら `false`、`false` なら `true` を返す。結果の型は `bool` である。`bool` 以外に使うとコンパイルエラーである。`!` は論理否定の演算子として使えない。`not` はキーワードであり、識別子には使えない。
+**[expr.not]** 論理否定は `not` と書く。`bool` 型の式を受け取り、`true` なら `false`、`false` なら `true` を返す。結果の型は `bool` である。`bool` 以外に使うとコンパイルエラーである。
 
 **[expr.not-precedence]** `not` は単項演算子であり、単項の `-` と同じ優先順位である。関数呼び出しとフィールド参照より弱く、二項演算より強く結合する。`not not ready` は `not (not ready)` と解釈する。
 
@@ -681,7 +685,7 @@ fix generated = `${name}`
 fix same = name == generated
 ```
 
-`same` は `true` となり、`generated` の生成によって `Suz` の実体が追加されることはない。型の一致、型推論、関数の引数と戻り値、構造体フィールドへの格納には、既存の値の規則を適用する。
+`same` は `true` となり、`generated` の生成によって `Suz` の実体が追加されることはない。
 
 ### 7.14 テンプレートの記法と値の表示
 
@@ -725,7 +729,7 @@ fix different = with_nul != `a`
 log info `${with_nul}`
 ```
 
-`empty` のバイト長は0、`with_nul` のバイト長は3、`different` は `true` となる。ログ本文は `a`、NUL、`b` の3バイトであり、ログの接頭辞と末尾のLFは既存の規則どおり付く。
+`empty` のバイト長は0、`with_nul` のバイト長は3、`different` は `true` となる。ログ本文は `a`、NUL、`b` の3バイトであり、ログの接頭辞と末尾のLFは [log.output] に従って付く。
 
 ### 7.15 symbolからの型変換
 
@@ -1029,9 +1033,9 @@ fn status_code(status: symbol) -> u8 {
 
 **[branch.statement]** `if` と `match` は、分岐を実行する文である。選んだ分岐の結果は捨てるため、分岐間で結果の型を一致させる必要はない。`return`、`break`、`continue` による制御の移動には従う。
 
-**[block.statement]** 単独の `{ ... }` は、スコープを作る文である。文として実行するブロックでは、式を順に評価し、その結果を捨てる。関数本体、ループ本体、`if` と `match` の分岐ブロックも同じである。`return`、`break`、`continue` による制御の移動には従う。
+**[block.statement]** 単独の `{ ... }` は、スコープを作る文である。文として実行するブロックでは、文を順に実行し、式文の結果を捨てる。関数本体、ループ本体、`if` と `match` の分岐ブロックも同じである。`return`、`break`、`continue` による制御の移動には従う。
 
-**[block.value]** `ifexpr` と `matchexpr` の分岐ブロック、および `expr` のブロックでは、途中の式の結果を捨て、末尾の式の値を結果にする。末尾には、`void` 以外の型の式が必要である。この条件を満たさないブロックはコンパイルエラーである。
+**[block.value]** `ifexpr` と `matchexpr` の分岐ブロック、および `expr` のブロックでは、文を順に実行し、末尾の式の値を結果にする。途中の式文の結果は捨てる。末尾には、`void` 以外の型の式が必要である。この条件を満たさないブロックはコンパイルエラーである。
 
 **[expr.else-line]** `elif` と `else` は、直前の `}` と同じ行に書く。別の行に書くとコンパイルエラーである。
 
@@ -1053,7 +1057,7 @@ fix sign = ifexpr x < 0 {
 
 **[while.loop]** `while 条件 { ... }` は、各反復の前に条件を評価し、`true` の間、ブロックを実行する。条件の型が `bool` でなければコンパイルエラーである。`while` は値を返さない。
 
-**[loop.unconditional]** `loop { ... }` は、`while true { ... }` と同じ意味である。条件を書かずにブロックを繰り返し、値は返さない。`loop` はキーワードであり、識別子には使えない。
+**[loop.unconditional]** `loop { ... }` は、`while true { ... }` と同じ意味である。条件を書かずにブロックを繰り返し、値は返さない。
 
 ### 8.5 for と rev
 
@@ -1459,7 +1463,17 @@ Pattern          ::= "_" | ConstExpression
 
 `Condition` は、[expr.struct-in-cond] の制約を付けて `Expression` を読む。`if`、`ifexpr`、`elif`、`while` の条件、`for` と `rev` の反復対象・両端、`match`、`matchexpr` の対象では、構造体リテラルを括弧で囲む。たとえば、`if ready { ... }` の `{` は条件の後のブロックを開き、`ready` に続く構造体リテラルとしては読まない。
 
-`CastHandler` と `ArithmeticHandler` には [expr.cast-binding] と [expr.or-binding] の結合規則を適用する。`ArithmeticHandler` の左側は [arith.handler] の整数算術式、または [expr.arithmetic-handler] のシフトでなければならない。両方のハンドラーの `or return` には、[expr.or-return-position] の位置の制約を適用する。`elif` と `else` には [expr.else-line] を適用する。`Pattern` には [match.pattern] の型と値の重複の規則を適用する。`Block` は、`ifexpr` と `matchexpr` の分岐、および `expr` の本体では [block.value] に従い、それ以外では [block.statement] に従う。`IfExpression`、`MatchExpression`、`BlockExpression` の内部全体には、[expr.jump-prohibited] の制約を適用する。
+構文だけでは表せない制約は、次の規則に従う。
+
+| 構文 | 適用する規則 |
+|---|---|
+| `CastHandler` | [expr.cast-binding] の結合規則 |
+| `ArithmeticHandler` | [expr.or-binding] の結合規則。左側は [arith.handler] の整数算術式、または [expr.arithmetic-handler] のシフトとする |
+| 両ハンドラーの `or return` | [expr.or-return-position] の位置の制約 |
+| `elif` と `else` | [expr.else-line] の改行規則 |
+| `Pattern` | [match.pattern] の型と値の重複の規則 |
+| `Block` | `ifexpr` と `matchexpr` の分岐、および `expr` の本体では [block.value]。それ以外では [block.statement] |
+| `IfExpression`、`MatchExpression`、`BlockExpression` の内部全体 | [expr.jump-prohibited] の制御の移動の制約 |
 
 ### A.7 定数式
 
