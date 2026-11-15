@@ -28,9 +28,25 @@
 
 整理の前後でファイルの内容が変わっていないことを確認し、コミットごとの差分とPR全体の差分を確認する。内容も変更した場合は、その変更に必要な検査を再実行する。
 
-作業ブランチをpushし、`release/vVERSION` 向けのPRを作成する。CIの結果と差分は人間が確認し、レビュー後にマージする。CIの成功だけでは自動マージしない。
+独立した作業ブランチをpushし、`release/vVERSION` 向けのPRを作成する。CIの結果と差分は人間が確認し、レビュー後にマージする。CIの成功だけでは自動マージしない。
 
 イシューの修正は作業PRで関連付ける。リリースブランチ向けPRではGitHubの自動クローズを前提にせず、main向けのリリースPRに `Closes #番号` を記載する。
+
+### 作業PRのスタック
+
+取り込み順がある作業PRは、GitHubのスタックとして管理できる。スタックの基点を `release/vVERSION` とし、基本ルールの変更、機能追加・修正、リリース準備の順に積む。main向けのリリースPRはこのスタックに含めない。
+
+GitHub CLIの公式拡張 `github/gh-stack` を使う。既存のブランチを採用する場合は、各ブランチを直下のブランチの上へ載せ替え、下から順に指定する。
+
+```sh
+gh extension install github/gh-stack
+gh stack init --base release/vVERSION rules changes prepare
+gh stack submit
+```
+
+リリース準備のPRは最後に置く。途中に作業を追加する場合は `gh stack modify` で準備PRの前にブランチを挿入し、`gh stack submit` でpushとPRの関連付けを更新する。下段を修正した場合は `gh stack rebase` と `gh stack push` で上段にも反映する。スタック内の各PRは、直下のブランチとの差分としてレビューする。
+
+スタックの保護ルールとCIは、その基点に従う。ワークフローのジョブ判定でも `github.event.pull_request.stack.base.ref` を使い、スタック外では通常のPRのマージ先を使う。CIの結果確認とマージは人間が行う。
 
 ## 3. リリース準備とリリースPR
 
