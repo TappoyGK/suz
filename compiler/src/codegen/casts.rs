@@ -20,16 +20,21 @@ pub(super) fn cast_parts(
     context.temporaries.push(operand.ty);
     let source = expression(operand, context);
     let local = format!("suz_cmp_{index}");
-    if operand.ty == Type::Text {
+    if operand.ty.is_text() {
         context.uses_text = true;
         let output = context.temporaries.len();
         if let Type::Struct(id) = target {
             context.struct_parsers.insert(id);
             context.temporaries.push(target);
             let position = super::text::position(location, context);
+            let input = if operand.ty == Type::Symbol {
+                format!("suz_text_as_view({local})")
+            } else {
+                local.clone()
+            };
             return (
                 format!("{local} = {source}"),
-                format!("suz_parse_struct_{id}({local}, &suz_cmp_{output}, {position})"),
+                format!("suz_parse_struct_{id}({input}, &suz_cmp_{output}, {position})"),
                 format!("suz_cmp_{output}"),
             );
         }
@@ -40,6 +45,12 @@ pub(super) fn cast_parts(
                     FloatType::F32 => "suz_parse_f32",
                     FloatType::F64 => "suz_parse_f64",
                 },
+                String::new(),
+                format!("suz_cmp_{output}"),
+            ),
+            Type::Char => (
+                Type::Char,
+                "suz_parse_char",
                 String::new(),
                 format!("suz_cmp_{output}"),
             ),
@@ -66,9 +77,8 @@ pub(super) fn cast_parts(
             _ => unreachable!(),
         };
         context.temporaries.push(result_type);
-        let condition = format!(
-            "{function}(suz_text_bytes({local}), suz_text_length({local}){arguments}, &suz_cmp_{output})"
-        );
+        let (bytes, length) = super::text::contents(operand.ty, &local);
+        let condition = format!("{function}({bytes}, {length}{arguments}, &suz_cmp_{output})");
         return (format!("{local} = {source}"), condition, converted);
     }
     let mut converted = format!("({}){local}", target.c_name());
@@ -95,6 +105,9 @@ pub(super) fn cast_parts(
             let (from_min, from_max) = from.integer_bounds().unwrap();
             let (to_min, to_max) = to.integer_bounds().unwrap();
             let mut conditions = Vec::new();
+            if to == Type::Char {
+                conditions.push(format!("({local} < 0xd800 || {local} > 0xdfff)"));
+            }
             if from_min < to_min {
                 conditions.push(format!("{local} >= INT64_C({to_min})"));
             }

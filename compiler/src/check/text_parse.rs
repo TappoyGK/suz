@@ -21,6 +21,14 @@ pub(super) fn parse(text: &str, target: Type, wrap: bool) -> Option<CheckedExpre
         fn suz_parse_bool(bytes: *const u8, length: u64, output: *mut bool) -> bool;
     }
     let value = match target {
+        Type::Char => {
+            let mut chars = text.chars();
+            let value = chars.next()? as i128;
+            if chars.next().is_some() {
+                return None;
+            }
+            Value::Integer { value, minus: None }
+        }
         Type::Integer(ty) => {
             let mut bits = 0_u64;
             let signed = ty.bounds().0 < 0;

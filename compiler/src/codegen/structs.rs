@@ -70,11 +70,11 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
             .iter()
             .enumerate()
             .map(|(index, field)| {
-                if let Type::Struct(child) = field.ty {
-                    format!("suz_equal_{child}(left.suz_field_{index}, right.suz_field_{index})")
-                } else {
-                    format!("left.suz_field_{index} == right.suz_field_{index}")
-                }
+                super::expressions::equality(
+                    field.ty,
+                    &format!("left.suz_field_{index}"),
+                    &format!("right.suz_field_{index}"),
+                )
             })
             .collect::<Vec<_>>()
             .join(" && ");

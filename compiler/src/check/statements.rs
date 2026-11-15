@@ -103,9 +103,24 @@ pub(super) fn check_statements(
                 start,
                 end,
                 inclusive,
+                reverse,
                 body,
             } => {
-                let (start, end) = super::ranges::bounds(start, end, bindings)?;
+                let (start, end, variable_type) = if let Some(end) = end {
+                    let (start, end) = super::ranges::bounds(start, end, bindings)?;
+                    let ty = start.ty;
+                    (start, Some(end), ty)
+                } else {
+                    super::ranges::check_references(start, bindings)?;
+                    let value = expression(start, None, bindings)?;
+                    if !value.ty.is_text() {
+                        return Err(start.location.error(
+                            ErrorKind::InvalidSource,
+                            "iteration without a range requires text [char.for-type]",
+                        ));
+                    }
+                    (value, None, Type::Char)
+                };
                 if bindings.functions.contains_key(name)
                     || bindings.is_type_name(name)
                     || bindings.contains_key(name)
@@ -123,7 +138,7 @@ pub(super) fn check_statements(
                         constant: None,
                         parameter: false,
                         id,
-                        ty: start.ty,
+                        ty: variable_type,
                         mutable: false,
                         loop_variable: true,
                         assigned: Default::default(),
@@ -143,6 +158,7 @@ pub(super) fn check_statements(
                     start,
                     end,
                     inclusive: *inclusive,
+                    reverse: *reverse,
                     body,
                 });
             }

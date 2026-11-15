@@ -1,10 +1,12 @@
 mod arithmetic;
 mod blocks;
 mod casts;
+mod characters;
 mod expressions;
 mod functions;
 mod helpers;
 mod logs;
+mod slices;
 mod statements;
 mod structs;
 #[cfg(test)]

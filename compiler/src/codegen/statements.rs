@@ -42,11 +42,16 @@ pub(super) fn emit_block(
                         writeln!(c, "{indent}    {}{{", if index == 0 { "" } else { "else " })
                             .unwrap();
                     } else {
+                        let pattern = expression(pattern.as_ref().unwrap(), context);
+                        let condition = super::expressions::equality(
+                            target.ty,
+                            &format!("suz_match_{id}"),
+                            &pattern,
+                        );
                         writeln!(
                             c,
-                            "{indent}    {}if (suz_match_{id} == {}) {{",
-                            if index == 0 { "" } else { "else " },
-                            expression(pattern.as_ref().unwrap(), context)
+                            "{indent}    {}if ({condition}) {{",
+                            if index == 0 { "" } else { "else " }
                         )
                         .unwrap();
                     }
@@ -60,19 +65,61 @@ pub(super) fn emit_block(
                 start,
                 end,
                 inclusive,
+                reverse,
                 body,
             } => {
+                let Some(end) = end else {
+                    super::characters::emit_text_loop(
+                        c,
+                        *id,
+                        start,
+                        *reverse,
+                        body,
+                        depth,
+                        next_assignment,
+                        context,
+                    );
+                    continue;
+                };
+                let character = start.ty == crate::ast::Type::Char;
                 let ty = start.ty.c_name();
                 let start = expression(start, context);
                 let end = expression(end, context);
                 let comparison = if *inclusive { "<=" } else { "<" };
                 writeln!(c, "{indent}{{").unwrap();
-                writeln!(c, "{indent}    {ty} suz_cursor_{id} = {start};").unwrap();
+                writeln!(c, "{indent}    const {ty} suz_start_{id} = {start};").unwrap();
                 writeln!(c, "{indent}    const {ty} suz_end_{id} = {end};").unwrap();
-                writeln!(c, "{indent}    _Bool suz_more_{id} = 1;").unwrap();
-                // The update runs on continue too. Test before incrementing so
-                // an inclusive range ending at the type's maximum cannot overflow.
-                writeln!(c, "{indent}    for (; suz_more_{id} && suz_cursor_{id} {comparison} suz_end_{id}; suz_more_{id} = suz_cursor_{id} < suz_end_{id}, suz_cursor_{id} += suz_more_{id}) {{").unwrap();
+                if *reverse {
+                    writeln!(c, "{indent}    _Bool suz_more_{id} = suz_start_{id} {comparison} suz_end_{id};").unwrap();
+                    writeln!(c, "{indent}    {ty} suz_cursor_{id} = suz_end_{id};").unwrap();
+                    if !inclusive && character {
+                        writeln!(c, "{indent}    if (suz_more_{id}) suz_cursor_{id} = suz_cursor_{id} == 0xe000 ? 0xd7ff : suz_cursor_{id} - 1;").unwrap();
+                    } else if !inclusive {
+                        // Empty ranges must not subtract from the type's minimum.
+                        writeln!(c, "{indent}    if (suz_more_{id}) --suz_cursor_{id};").unwrap();
+                    }
+                    // Updating in the for clause also handles continue at the minimum.
+                    let step = if character {
+                        format!(
+                            "suz_cursor_{id} -= suz_more_{id} ? (suz_cursor_{id} == 0xe000 ? 0x801 : 1) : 0"
+                        )
+                    } else {
+                        format!("suz_cursor_{id} -= suz_more_{id}")
+                    };
+                    writeln!(c, "{indent}    for (; suz_more_{id}; suz_more_{id} = suz_cursor_{id} > suz_start_{id}, {step}) {{").unwrap();
+                } else {
+                    writeln!(c, "{indent}    {ty} suz_cursor_{id} = suz_start_{id};").unwrap();
+                    writeln!(c, "{indent}    _Bool suz_more_{id} = 1;").unwrap();
+                    // Test before incrementing, including after continue at the maximum.
+                    let step = if character {
+                        format!(
+                            "suz_cursor_{id} += suz_more_{id} ? (suz_cursor_{id} == 0xd7ff ? 0x801 : 1) : 0"
+                        )
+                    } else {
+                        format!("suz_cursor_{id} += suz_more_{id}")
+                    };
+                    writeln!(c, "{indent}    for (; suz_more_{id} && suz_cursor_{id} {comparison} suz_end_{id}; suz_more_{id} = suz_cursor_{id} < suz_end_{id}, {step}) {{").unwrap();
+                }
                 writeln!(
                     c,
                     "{indent}        const {ty} suz_local_{id} = suz_cursor_{id};"
@@ -82,13 +129,19 @@ pub(super) fn emit_block(
                 emit_block(c, body, depth + 2, next_assignment, context);
                 writeln!(c, "{indent}    }}\n{indent}}}").unwrap();
             }
-            CheckedStatement::ArithmeticReturn {
+            CheckedStatement::SliceReturn {
+                id, return_value, ..
+            }
+            | CheckedStatement::ArithmeticReturn {
                 id, return_value, ..
             }
             | CheckedStatement::CastReturn {
                 id, return_value, ..
             } => {
                 let (ty, (setup, condition, converted)) = match statement {
+                    CheckedStatement::SliceReturn { operation, .. } => {
+                        (operation.ty, super::slices::parts(operation, context))
+                    }
                     CheckedStatement::ArithmeticReturn { operation, .. } => {
                         (operation.ty, integer_parts(operation, context))
                     }

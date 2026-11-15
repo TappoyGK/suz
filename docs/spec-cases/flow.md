@@ -333,6 +333,30 @@ elseがなく、末尾へ進みうる。
 |---|---|---:|---:|
 | 通常 | `[fn.fallthrough]` | 5 | 1 |
 
+### flow-059 revの内部だけでreturnして関数末尾に到達する
+
+主根拠：`[fn.fallthrough]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    rev i in 0..<1 { return 3 }
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[fn.fallthrough]` | 3 | 1 |
+
 ### flow-012 if trueでもelseがなければ末尾へ進みうる
 
 主根拠：`[fn.fallthrough]`。
@@ -570,6 +594,37 @@ subjectを1回呼び、値2に対応する腕だけを実行する。
 ```text
 info flow-019.suz:2: subject
 info flow-019.suz:9: second
+```
+
+### flow-064 charのmatchと比較の連鎖を使う
+
+主根拠：`[match.target]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix ch = '5'
+    fix kind = matchexpr ch {
+        ' ' => 1
+        '5' => 2
+        _ => 0
+    }
+    log info `${kind} ${'0' <= ch <= '9'}`
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+**標準エラー：**
+
+```text
+info flow-064.suz:8: 2 true
 ```
 
 ### flow-020 整数matchの定数パターンとワイルドカード
@@ -1262,7 +1317,7 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | 正常終了 | 3 | 0 |
 
-### flow-043 for専用の範囲記法を変数に保存する
+### flow-043 forとrev専用の範囲記法を変数に保存する
 
 主根拠：`[for.range]`。
 
@@ -1288,6 +1343,132 @@ fn main() -> u8 {
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
 | 通常 | `[for.range]` | 2 | 18 |
+
+### flow-060 両端を左から評価し、範囲を逆順に繰り返す
+
+主根拠：`[rev.range]`。
+
+**ソース：**
+
+```suz
+fn low() -> u8 { log info `low`
+return 1 }
+fn high() -> u8 { log info `high`
+return 3 }
+fn main() -> u8 {
+    rev i in low()..<high() { log info `${i}` }
+    rev i in 1..=3 { log info `${i}` }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+**標準エラー：**
+
+```text
+info flow-060.suz:1: low
+info flow-060.suz:3: high
+info flow-060.suz:6: 2
+info flow-060.suz:6: 1
+info flow-060.suz:7: 3
+info flow-060.suz:7: 2
+info flow-060.suz:7: 1
+```
+
+### flow-061 空の範囲では減算せず、両端を含む同値の範囲は1回繰り返す
+
+主根拠：`[rev.bounds]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix low: i8 = -128
+    rev i in low..<low { return 1 }
+    rev i in 1..<0 { return 2 }
+    rev i in 1..=0 { return 3 }
+    var count: u8 = 0
+    rev i in low..=low { count += 1 }
+    return count
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 1 | 0 |
+
+### flow-062 型の全範囲を逆順に進み、最小値でcontinueする
+
+主根拠：`[rev.bounds]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix low: i8 = -128
+    fix high: i8 = 127
+    var count: u16 = 0
+    var last: i8 = 0
+    rev i in low..=high {
+        count += 1
+        last = i
+        continue
+    }
+    log info `${count} ${last}`
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+**標準エラー：**
+
+```text
+info flow-062.suz:11: 256 -128
+```
+
+### flow-065 文字範囲でサロゲートを飛ばし、両端でcontinueする
+
+主根拠：`[char.range]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    for ch in '\u{D7FF}'..='\u{E000}' { log info `${ch as u32}` }
+    rev ch in '\u{D7FF}'..='\u{E000}' { log info `${ch as u32}` }
+    for ch in '\u{10FFFF}'..='\u{10FFFF}' { continue }
+    rev ch in '\0'..='\0' { continue }
+    rev ch in '\0'..<'\0' { return 1 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+**標準エラー：**
+
+```text
+info flow-065.suz:2: 55295
+info flow-065.suz:2: 57344
+info flow-065.suz:3: 57344
+info flow-065.suz:3: 55295
+```
 
 ### flow-044 範囲演算子の前後の空白
 
@@ -1601,6 +1782,32 @@ limitsのフィールドへの参照もvarからの参照として扱う。
 |---|---|---:|---:|
 | 通常 | `[for.bound-reference]` | 5 | 18 |
 
+### flow-067 textの反復対象でvarを参照する
+
+主根拠：`[for.bound-reference]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    var message = `abc`
+    for ch in message {}
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[for.bound-reference]` | 3 | 15 |
+
 ### flow-054 ループ変数への代入
 
 主根拠：`[for.variable]`。
@@ -1658,6 +1865,55 @@ iを参照できるのはループ本体の中だけ。
 |---|---|---:|---:|
 | 通常 | `[decl.local-scope]` | 4 | 12 |
 
+### flow-066 textをスカラー値単位で前後に反復する
+
+主根拠：`[char.for]`。
+
+**ソース：**
+
+```suz
+fn read(value: symbol) -> symbol {
+    log info `read`
+    return value
+}
+fn main() -> u8 {
+    var message = `aあ😀`
+    fix target = message
+    for ch in read(target) {
+        log info `${ch}`
+        message = `changed`
+        continue
+    }
+    rev ch in read(target) {
+        if ch == 'a' { break }
+        log info `${ch}`
+    }
+    for ch in `` { return 1 }
+    rev ch in `` { return 2 }
+    log info `${message}`
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+**標準エラー：**
+
+```text
+info flow-066.suz:2: read
+info flow-066.suz:9: a
+info flow-066.suz:9: あ
+info flow-066.suz:9: 😀
+info flow-066.suz:2: read
+info flow-066.suz:15: 😀
+info flow-066.suz:15: あ
+info flow-066.suz:19: changed
+```
+
 ### flow-056 forのcontinueは次の値へ進む
 
 主根拠：`[loop.continue]`。
@@ -1687,6 +1943,32 @@ fn main() -> u8 {
 | 通常 | 正常終了 | 4 | 0 |
 
 iが2の反復では加算を飛ばす。1と3を加えた結果は4になる。
+
+### flow-063 入れ子のrevからbreakし、外側のforを続ける
+
+主根拠：`[loop.break]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    var count: u8 = 0
+    for outer in 0..<2 {
+        rev inner in 0..<4 {
+            if inner == 1 { break }
+            if inner == 2 { continue }
+            count += 1
+        }
+    }
+    return count
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 2 | 0 |
 
 ### flow-057 ループの外にbreakを書く
 

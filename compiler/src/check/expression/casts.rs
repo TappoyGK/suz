@@ -21,36 +21,75 @@ pub(super) fn check(
             fallback,
         } => {
             let operand = expression(operand, None, bindings)?;
-            if operand.ty == Type::Text {
+            if !*wrap && operand.ty == Type::Text && *target == Type::Symbol {
+                if fallback.is_some() {
+                    return Err(expr.location.error(
+                        ErrorKind::InvalidSource,
+                        "text interning does not accept or [text.to-symbol]",
+                    ));
+                }
+                let constant = super::super::constants::evaluate(&operand)
+                    .ok()
+                    .flatten()
+                    .and_then(|value| {
+                        if let Value::Text { text } = value.value {
+                            Some(text)
+                        } else {
+                            None
+                        }
+                    });
+                return Ok(CheckedExpression {
+                    ty: Type::Symbol,
+                    value: Value::Intern {
+                        constant,
+                        operand: Box::new(operand),
+                        location: expr.location,
+                    },
+                });
+            }
+            if operand.ty.is_text() {
                 let valid = if *wrap {
                     matches!(target, Type::Integer(_))
                 } else {
                     matches!(
                         target,
-                        Type::Integer(_) | Type::Float(_) | Type::Bool | Type::Struct(_)
+                        Type::Integer(_)
+                            | Type::Float(_)
+                            | Type::Bool
+                            | Type::Char
+                            | Type::Struct(_)
                     )
                 };
                 if !valid {
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
                         if *wrap {
-                            "text as% requires an integer target [text.cast-wrap]"
+                            format!(
+                                "{} as% requires an integer target [symbol.cast-wrap]",
+                                operand.ty.name()
+                            )
                         } else {
-                            "unsupported text conversion target [text.cast]"
+                            format!(
+                                "unsupported {} conversion target [symbol.cast]",
+                                operand.ty.name()
+                            )
                         },
                     ));
                 }
                 if fallback.is_none() {
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
-                        "text conversion requires or [text.cast-handler]",
+                        format!(
+                            "{} conversion requires or [symbol.cast-handler]",
+                            operand.ty.name()
+                        ),
                     ));
                 }
             } else if *wrap {
                 if fallback.is_some() {
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
-                        "integer as% does not accept or [text.cast-wrap-handler-syntax]",
+                        "integer as% does not accept or [expr.cast-wrap-handler-syntax]",
                     ));
                 }
                 if !matches!((operand.ty, target), (Type::Integer(_), Type::Integer(_))) {
@@ -65,7 +104,12 @@ pub(super) fn check(
                 });
             }
             let safe = match (operand.ty, *target) {
-                (Type::Text, _) => false,
+                (Type::Symbol | Type::Text, _) => false,
+                (Type::Char, Type::Integer(to)) => to.bounds().1 >= 0x10ffff,
+                (Type::Integer(from), Type::Char) => {
+                    let (min, max) = from.bounds();
+                    min >= 0 && max < 0xd800
+                }
                 (Type::Integer(from), Type::Integer(to)) => {
                     let (from_min, from_max) = from.bounds();
                     let (to_min, to_max) = to.bounds();
@@ -109,7 +153,7 @@ pub(super) fn check(
                 None => None,
                 _ => unreachable!(),
             };
-            if operand.ty == Type::Text {
+            if operand.ty.is_text() {
                 let constant_struct = if let Type::Struct(id) = target
                     && super::super::constants::is_constant(fallback.as_ref().unwrap())
                 {
@@ -153,7 +197,10 @@ pub(super) fn check(
                     if !safe {
                         let (min, max) = target.integer_bounds().unwrap();
                         match constant_integer(&operand)? {
-                            Some(value) if (min..=max).contains(&value) => {}
+                            Some(value)
+                                if (min..=max).contains(&value)
+                                    && (*target != Type::Char
+                                        || !(0xd800..=0xdfff).contains(&value)) => {}
                             Some(_) => return Err(expr.location.error(
                                 ErrorKind::InvalidSource,
                                 "constant cast is out of range and requires or [const.cast-check]",

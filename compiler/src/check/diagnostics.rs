@@ -3,6 +3,22 @@ use crate::ast::Location;
 
 pub(super) fn collect(expr: &CheckedExpression, locations: &mut Vec<Location>) {
     match &expr.value {
+        Value::TextView(inner) | Value::Intern { operand: inner, .. } => collect(inner, locations),
+        Value::Slice {
+            target,
+            start,
+            end,
+            handler,
+            ..
+        } => {
+            collect(target, locations);
+            for bound in [start, end].into_iter().flatten() {
+                collect(bound, locations);
+            }
+            if let Some(CheckedHandler::Value(value)) = handler {
+                collect(value, locations);
+            }
+        }
         Value::Template { parts, .. } => {
             for part in parts {
                 if let crate::ast::TemplatePart::Value(value) = part {
@@ -100,6 +116,14 @@ pub(super) fn collect(expr: &CheckedExpression, locations: &mut Vec<Location>) {
 fn collect_statements(statements: &[CheckedStatement], locations: &mut Vec<Location>) {
     for statement in statements {
         match statement {
+            CheckedStatement::SliceReturn {
+                operation,
+                return_value,
+                ..
+            } => {
+                collect(operation, locations);
+                collect(return_value, locations);
+            }
             CheckedStatement::Log { parts, .. } => {
                 for part in parts {
                     if let crate::ast::TemplatePart::Value(value) = part {
@@ -124,7 +148,9 @@ fn collect_statements(statements: &[CheckedStatement], locations: &mut Vec<Locat
                 start, end, body, ..
             } => {
                 collect(start, locations);
-                collect(end, locations);
+                if let Some(end) = end {
+                    collect(end, locations);
+                }
                 collect_statements(body, locations);
             }
             CheckedStatement::ArithmeticReturn {

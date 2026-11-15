@@ -57,14 +57,14 @@ impl Parser<'_, '_> {
                     if parser.token().kind == Kind::End {
                         return Err(parser.error(
                             ErrorKind::InvalidSource,
-                            "empty interpolation [text.interpolation]",
+                            "empty interpolation [symbol.interpolation]",
                         ));
                     }
                     let value = parser.expression()?;
                     if parser.token().kind != Kind::End {
                         return Err(parser.error(
                             ErrorKind::InvalidSource,
-                            "expected one interpolation expression [text.interpolation]",
+                            "expected one interpolation expression [symbol.interpolation]",
                         ));
                     }
                     parts.push(TemplatePart::Value(value));

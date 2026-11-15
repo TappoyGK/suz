@@ -61,7 +61,8 @@ impl Parser<'_, '_> {
                     location,
                 })
             }
-            Kind::Keyword("for") => {
+            Kind::Keyword("for" | "rev") => {
+                let reverse = self.token().kind == Kind::Keyword("rev");
                 self.cursor += 1;
                 let location = self.location();
                 let Kind::Ident(name) = self.token().kind else {
@@ -75,18 +76,26 @@ impl Parser<'_, '_> {
                 self.cursor += 1;
                 self.expect(FixedToken::Keyword("in"))?;
                 let start = self.condition()?;
-                let inclusive = match self.token().kind {
-                    Kind::Symbol("..<") => false,
-                    Kind::Symbol("..=") => true,
+                let range_location = self.location();
+                let (inclusive, end) = match self.token().kind {
+                    Kind::Symbol(operator @ ("..<" | "..=")) => {
+                        self.cursor += 1;
+                        if self.token().kind == Kind::End {
+                            return Err(range_location.error(
+                                ErrorKind::InvalidSource,
+                                "expected an end bound after the range operator [for.range]",
+                            ));
+                        }
+                        (operator == "..=", Some(self.condition()?))
+                    }
+                    Kind::Symbol("{") => (false, None),
                     _ => {
                         return Err(self.error(
                             ErrorKind::InvalidSource,
-                            "expected a range operator [for.range]",
+                            "expected a range operator or loop body [for.range]",
                         ));
                     }
                 };
-                self.cursor += 1;
-                let end = self.condition()?;
                 let (body, _) = self.block()?;
                 Ok(Statement::For {
                     name,
@@ -94,6 +103,7 @@ impl Parser<'_, '_> {
                     start,
                     end,
                     inclusive,
+                    reverse,
                     body,
                 })
             }
@@ -275,19 +285,14 @@ impl Parser<'_, '_> {
             match self.token().kind {
                 Kind::Newline => self.newlines(),
                 Kind::Symbol("}") => {}
-                Kind::Symbol("..<" | "..=") => {
-                    return Err(self.error(
-                        ErrorKind::InvalidSource,
-                        "range notation is only allowed in for [for.range]",
-                    ));
-                }
                 Kind::Keyword(
-                    "fix" | "var" | "return" | "if" | "while" | "loop" | "for" | "break"
+                    "fix" | "var" | "return" | "if" | "while" | "loop" | "for" | "rev" | "break"
                     | "continue" | "log" | "match" | "matchexpr" | "ifexpr" | "true" | "false"
                     | "not" | "nan" | "inf" | "expr",
                 )
                 | Kind::Ident(_)
                 | Kind::Template(_)
+                | Kind::Char(_)
                 | Kind::Integer(_)
                 | Kind::Float(_)
                 | Kind::Symbol("{" | "~") => {

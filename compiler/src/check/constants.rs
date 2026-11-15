@@ -60,6 +60,9 @@ fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
     if let Value::Field { target, index } = &expr.value {
         return constant_integer_raw(&constant_field(target, *index)?);
     }
+    if let Value::Slice { .. } = &expr.value {
+        return constant_integer_raw(&slice_value(expr)?);
+    }
     let ty = expr.ty.integer_storage()?;
     let wrap = |value: i128| {
         let (min, max) = ty.bounds();
@@ -83,7 +86,7 @@ fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
             wrap,
             ..
         } => {
-            if operand.ty == Type::Text {
+            if operand.ty.is_text() {
                 return text_cast(operand, expr.ty, *wrap)
                     .and_then(|value| constant_integer_raw(&value))
                     .or_else(|| constant_integer_raw(fallback));
@@ -95,7 +98,9 @@ fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
             }
             let value = constant_integer_raw(operand)?;
             let (min, max) = expr.ty.integer_bounds()?;
-            if (min..=max).contains(&value) {
+            if (min..=max).contains(&value)
+                && (expr.ty != Type::Char || !(0xd800..=0xdfff).contains(&value))
+            {
                 Some(value)
             } else {
                 constant_integer_raw(fallback)
@@ -163,7 +168,7 @@ fn constant_float_raw(expr: &CheckedExpression) -> Option<f64> {
             ..
         } => {
             debug_assert!(!wrap);
-            if operand.ty == Type::Text {
+            if operand.ty.is_text() {
                 return text_cast(operand, expr.ty, false)
                     .and_then(|value| constant_float_raw(&value))
                     .or_else(|| constant_float_raw(fallback));
@@ -229,7 +234,7 @@ fn constant_bool_raw(expr: &CheckedExpression) -> Option<bool> {
             fallback,
             wrap,
             ..
-        } if operand.ty == Type::Text => text_cast(operand, Type::Bool, *wrap)
+        } if operand.ty.is_text() => text_cast(operand, Type::Bool, *wrap)
             .and_then(|value| constant_bool_raw(&value))
             .or_else(|| constant_bool_raw(fallback)),
         Value::Not(inner) => Some(!constant_bool_raw(inner)?),
@@ -252,7 +257,7 @@ fn constant_bool_raw(expr: &CheckedExpression) -> Option<bool> {
             for (operator, operand) in operators.iter().zip(operands.iter().skip(1)) {
                 let right = evaluate_raw(operand)?;
                 let order = match left.ty {
-                    Type::Text => {
+                    Type::Symbol | Type::Text => {
                         let (Value::Text { text: a, .. }, Value::Text { text: b, .. }) =
                             (&left.value, &right.value)
                         else {
@@ -274,7 +279,7 @@ fn constant_bool_raw(expr: &CheckedExpression) -> Option<bool> {
                         continue;
                     }
                     Type::Void => return None,
-                    Type::Integer(_) | Type::Enum(_) => {
+                    Type::Integer(_) | Type::Enum(_) | Type::Char => {
                         Some(constant_integer_raw(&left)?.cmp(&constant_integer_raw(&right)?))
                     }
                     Type::Float(_) => {
@@ -337,8 +342,16 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
     if let Value::Field { target, index } = &expr.value {
         return constant_field(target, *index);
     }
+    if let Value::TextView(inner) | Value::Intern { operand: inner, .. } = &expr.value {
+        let mut value = evaluate_raw(inner)?;
+        value.ty = expr.ty;
+        return Some(value);
+    }
+    if let Value::Slice { .. } = &expr.value {
+        return slice_value(expr);
+    }
     let value = match expr.ty {
-        Type::Text => match &expr.value {
+        Type::Symbol | Type::Text => match &expr.value {
             Value::Text { .. } => expr.value.clone(),
             Value::Template {
                 constant: Some(text),
@@ -369,7 +382,7 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
             }
         }
         Type::Void => return None,
-        Type::Integer(_) | Type::Enum(_) => Value::Integer {
+        Type::Integer(_) | Type::Enum(_) | Type::Char => Value::Integer {
             value: constant_integer_raw(expr)?,
             minus: None,
         },
@@ -389,6 +402,25 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
 // visits only the selected path and reports the first failing operation.
 pub(super) fn is_constant(expr: &CheckedExpression) -> bool {
     match &expr.value {
+        Value::TextView(inner) | Value::Intern { operand: inner, .. } => is_constant(inner),
+        Value::Slice {
+            target,
+            start,
+            end,
+            handler,
+            ..
+        } => {
+            is_constant(target)
+                && [start, end]
+                    .into_iter()
+                    .flatten()
+                    .all(|value| is_constant(value))
+                && match handler {
+                    None => true,
+                    Some(CheckedHandler::Value(value)) => is_constant(value),
+                    _ => false,
+                }
+        }
         Value::Struct { fields } => fields.iter().all(|(_, value)| is_constant(value)),
         Value::Field { target, .. } => is_constant(target),
         Value::Text { .. } => true,
@@ -424,13 +456,15 @@ pub(super) fn is_constant(expr: &CheckedExpression) -> bool {
 }
 
 fn cast_succeeds(operand: &CheckedExpression, target: Type, wrap: bool) -> bool {
-    if operand.ty == Type::Text {
+    if operand.ty.is_text() {
         return text_cast(operand, target, wrap).is_some();
     }
     if operand.ty.integer_bounds().is_some()
         && let Some((min, max)) = target.integer_bounds()
     {
-        return (min..=max).contains(&constant_integer_raw(operand).unwrap());
+        let value = constant_integer_raw(operand).unwrap();
+        return (min..=max).contains(&value)
+            && (target != Type::Char || !(0xd800..=0xdfff).contains(&value));
     }
     match (operand.ty, target) {
         (Type::Float(_), Type::Integer(to)) => {
@@ -446,6 +480,26 @@ fn cast_succeeds(operand: &CheckedExpression, target: Type, wrap: bool) -> bool 
 
 fn validate_evaluation(expr: &CheckedExpression) -> Result<(), Diagnostic> {
     match &expr.value {
+        Value::TextView(inner) | Value::Intern { operand: inner, .. } => {
+            validate_evaluation(inner)?
+        }
+        Value::Slice {
+            target,
+            start,
+            end,
+            handler,
+            ..
+        } => {
+            validate_evaluation(target)?;
+            for bound in [start, end].into_iter().flatten() {
+                validate_evaluation(bound)?;
+            }
+            if slice_result(expr).is_none()
+                && let Some(CheckedHandler::Value(value)) = handler
+            {
+                validate_evaluation(value)?;
+            }
+        }
         Value::Template { parts, .. } => {
             for part in parts {
                 if let crate::ast::TemplatePart::Value(value) = part {
@@ -566,4 +620,60 @@ fn text_cast(operand: &CheckedExpression, target: Type, wrap: bool) -> Option<Ch
         return None;
     };
     super::text_parse::parse(&text, target, wrap)
+}
+
+fn slice_result(expr: &CheckedExpression) -> Option<CheckedExpression> {
+    let Value::Slice {
+        target,
+        start,
+        end,
+        index,
+        ..
+    } = &expr.value
+    else {
+        unreachable!()
+    };
+    let Value::Text { text } = evaluate_raw(target)?.value else {
+        return None;
+    };
+    let positions: Vec<_> = text
+        .char_indices()
+        .map(|(pos, _)| pos)
+        .chain(std::iter::once(text.len()))
+        .collect();
+    let bound = |value: &Option<Box<CheckedExpression>>, default: usize| -> Option<usize> {
+        match value {
+            Some(value) => usize::try_from(constant_integer_raw(value)?).ok(),
+            None => Some(default),
+        }
+    };
+    let first = bound(start, 0)?;
+    let value = if *index {
+        let byte = *positions.get(first)?;
+        Value::Integer {
+            value: i128::from(text[byte..].chars().next()? as u32),
+            minus: None,
+        }
+    } else {
+        let last = bound(end, positions.len() - 1)?;
+        if first > last {
+            return None;
+        }
+        Value::Text {
+            text: text[*positions.get(first)?..*positions.get(last)?].to_owned(),
+        }
+    };
+    Some(CheckedExpression { ty: expr.ty, value })
+}
+fn slice_value(expr: &CheckedExpression) -> Option<CheckedExpression> {
+    slice_result(expr).or_else(|| {
+        let Value::Slice {
+            handler: Some(CheckedHandler::Value(value)),
+            ..
+        } = &expr.value
+        else {
+            return None;
+        };
+        evaluate_raw(value)
+    })
 }

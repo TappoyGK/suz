@@ -340,6 +340,34 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | `[expr.jump-prohibited]` | 4 | 13 |
 
+### expr-070 値を作るブロック内のrevからcontinueする
+
+主根拠：`[expr.jump-prohibited]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix value = expr {
+        rev i in 0..<1 { continue }
+        0
+    }
+    return value
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[expr.jump-prohibited]` | 3 | 26 |
+
 ### expr-012 ifexprで選ばれない分岐の演算は実行しない
 
 主根拠：`[expr.if-value]`。
@@ -1264,6 +1292,37 @@ enum同士の直接変換は許可されない。orを付けても許可され�
 |---|---|---:|---:|
 | 通常 | `[expr.as]` | 6 | 24 |
 
+### expr-071 整数とcharの変換で成功範囲と代替値を扱う
+
+主根拠：`[char.cast]`。
+
+**ソース：**
+
+```suz
+fn scalar(n: i32) -> char { return n as char or '?' }
+fn main() -> u8 {
+    fix byte: u8 = 65
+    fix ch = byte as char
+    fix narrow: u8 = 'あ' as u8 or 7
+    log info `${ch} ${ch as u32} ${narrow}`
+    log info `${scalar(55296)} ${scalar(-1)} ${scalar(1114112)}`
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+**標準エラー：**
+
+```text
+info expr-071.suz:6: A 65 7
+info expr-071.suz:7: ? ? ?
+```
+
 ### expr-045 必ず成功する変換と定数式の変換
 
 主根拠：`[expr.cast-risk]`。
@@ -1988,3 +2047,57 @@ fn main() -> u8 {
 | 通常 | 正常終了 | 7 | 0 |
 
 最初の加算が失敗すると、代替値の加算とその失敗処理を評価する。両方の加算が失敗し、最後の7になる。
+### expr-072 text全体を1つのスカラー値に変換する
+
+主根拠：`[char.cast-symbol]`。
+
+**ソース：**
+
+```suz
+fn parse(input: symbol) -> char { return input as char or '?' }
+fn main() -> u8 {
+    log info `${parse(`😀`)} ${parse(``)} ${parse(`ab`)} ${parse(`'a'`)}`
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+**標準エラー：**
+
+```text
+info expr-072.suz:3: 😀 ? ? ?
+```
+
+### expr-073 構造体のcharフィールドを文字リテラルとして読む
+
+主根拠：`[symbol.cast-struct-field]`。
+
+**ソース：**
+
+```suz
+struct Letter { ch: char }
+fn read(input: symbol) -> Letter { return input as Letter or Letter { ch: '?' } }
+fn main() -> u8 {
+    fix good = read(`Letter { ch: '\\u{1F600}' }`)
+    fix bad = read(`Letter { ch: 'ab' }`)
+    log info `${good.ch} ${bad.ch}`
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+**標準エラー：**
+
+```text
+info expr-073.suz:6: 😀 ?
+```

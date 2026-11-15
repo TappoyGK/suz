@@ -69,8 +69,9 @@ impl Schema {
                 entry.kind = 1;
                 entry.bits = if ty == FloatType::F32 { 32 } else { 64 };
             }
+            Type::Char => entry.kind = 6,
             Type::Bool => entry.kind = 2,
-            Type::Text => entry.kind = 3,
+            Type::Symbol | Type::Text => entry.kind = 3,
             Type::Enum(ty) => {
                 entry.kind = 4;
                 let declaration = &scope.enums[ty.id];
@@ -163,13 +164,13 @@ pub(super) fn parse(text: &str, id: usize, scope: &Scope) -> Option<CheckedExpre
         let raw = values.next()?;
         let value = match ty {
             Type::Integer(ty) => super::text_parse::integer_value(raw.bits, ty),
-            Type::Enum(_) => Value::Integer {
+            Type::Enum(_) | Type::Char => Value::Integer {
                 value: i128::from(raw.bits),
                 minus: None,
             },
             Type::Float(_) => Value::Float(raw.bits),
             Type::Bool => Value::Bool(raw.bits != 0),
-            Type::Text => {
+            Type::Symbol | Type::Text => {
                 let input = text
                     .as_bytes()
                     .get(raw.start as usize..(raw.start + raw.length) as usize)?;
@@ -195,6 +196,15 @@ pub(super) fn parse(text: &str, id: usize, scope: &Scope) -> Option<CheckedExpre
             }
             _ => unreachable!(),
         };
+        if ty == Type::Text {
+            return Some(CheckedExpression {
+                ty,
+                value: Value::TextView(Box::new(CheckedExpression {
+                    ty: Type::Symbol,
+                    value,
+                })),
+            });
+        }
         Some(CheckedExpression { ty, value })
     }
     convert(Type::Struct(id), &mut values.iter(), text, scope)

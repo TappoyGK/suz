@@ -28,6 +28,23 @@ pub(crate) fn walk_expression<V: Visitor + ?Sized>(
     expr: &Expression,
 ) -> Result<(), Diagnostic> {
     match &expr.kind {
+        ExpressionKind::Slice {
+            target,
+            start,
+            end,
+            fallback,
+            ..
+        } => {
+            visitor.expression(target)?;
+            for bound in [start, end].into_iter().flatten() {
+                visitor.expression(bound)?;
+            }
+            if let Some(FailureHandler::Value(value) | FailureHandler::Return { value, .. }) =
+                fallback
+            {
+                visitor.expression(value)?;
+            }
+        }
         ExpressionKind::Template(parts) => {
             for part in parts {
                 if let TemplatePart::Value(value) = part {
@@ -95,6 +112,7 @@ pub(crate) fn walk_expression<V: Visitor + ?Sized>(
         ExpressionKind::Name(_)
         | ExpressionKind::Integer { .. }
         | ExpressionKind::Float(_)
+        | ExpressionKind::Char(_)
         | ExpressionKind::Bool(_) => {}
     }
     Ok(())
@@ -127,7 +145,9 @@ pub(crate) fn walk_statement<V: Visitor + ?Sized>(
             start, end, body, ..
         } => {
             visitor.expression(start)?;
-            visitor.expression(end)?;
+            if let Some(end) = end {
+                visitor.expression(end)?;
+            }
             visitor.scope(body, None)?;
         }
         Statement::If {

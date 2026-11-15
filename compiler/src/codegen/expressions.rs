@@ -17,7 +17,56 @@ pub(super) fn c_string(text: &str) -> String {
 
 pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionContext) -> String {
     match expr.value {
-        Value::Text { ref text, .. } => super::text::constant(text, context),
+        Value::TextView(ref inner) => format!("suz_text_as_view({})", expression(inner, context)),
+        Value::Intern {
+            ref operand,
+            location,
+            ref constant,
+        } => {
+            if let Some(text) = constant {
+                return super::text::constant(text, context);
+            }
+            context.uses_text = true;
+            let id = context.temporaries.len();
+            context.temporaries.push(operand.ty);
+            let value = expression(operand, context);
+            format!(
+                "(suz_cmp_{id} = {value}, suz_text_intern(suz_cmp_{id}.bytes, suz_cmp_{id}.length, false, {}))",
+                super::text::position(location, context)
+            )
+        }
+        Value::Slice {
+            ref target,
+            ref start,
+            ref end,
+            ref handler,
+            index,
+        } => {
+            if !index && start.is_none() && end.is_none() {
+                return expression(target, context);
+            }
+            let (setup, condition, converted) = super::slices::parts(expr, context);
+            let Some(CheckedHandler::Value(fallback)) = handler else {
+                unreachable!("slice returns are lowered")
+            };
+            format!(
+                "({setup}, {condition} ? {converted} : ({}))",
+                expression(fallback, context)
+            )
+        }
+        Value::Text { ref text, .. } => {
+            if expr.ty == crate::ast::Type::Text {
+                context.uses_text = true;
+                format!(
+                    "(suz_text_view){{{}, UINT64_C({}), UINT64_C({})}}",
+                    c_string(text),
+                    text.len(),
+                    text.chars().count()
+                )
+            } else {
+                super::text::constant(text, context)
+            }
+        }
         Value::Template {
             ref parts,
             location,
@@ -163,14 +212,13 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             let index = context.temporaries.len();
             context.temporaries.push(target.ty);
             let name = format!("suz_cmp_{index}");
+            let ty = target.ty;
             let target = expression(target, context);
             let mut result = expression(&arms.last().unwrap().1, context);
             for (pattern, value) in arms[..arms.len() - 1].iter().rev() {
-                result = format!(
-                    "({name} == {} ? {} : {result})",
-                    expression(pattern.as_ref().unwrap(), context),
-                    expression(value, context)
-                );
+                let pattern = expression(pattern.as_ref().unwrap(), context);
+                let condition = super::expressions::equality(ty, &name, &pattern);
+                result = format!("({condition} ? {} : {result})", expression(value, context));
             }
             format!("({name} = {target}, {result})")
         }
@@ -264,7 +312,8 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                 .ty
                 .integer_storage()
                 .is_some_and(|ty| ty.bounds().0 == 0);
-            let text = operands[0].ty == Type::Text;
+            let text = operands[0].ty.is_text();
+            let view = operands[0].ty == Type::Text;
             let floating = matches!(operands[0].ty, Type::Float(_));
             let structure = if let Type::Struct(id) = operands[0].ty {
                 context.struct_equals.insert(id);
@@ -303,21 +352,32 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                     );
                 }
                 if text {
-                    return if operators[index].is_equality() {
-                        format!(
-                            "{} {} {}",
-                            names[index],
-                            operators[index].symbol(),
-                            names[index + 1]
-                        )
+                    if operators[index].is_equality() {
+                        let equal = super::expressions::equality(
+                            operands[index].ty,
+                            &names[index],
+                            &names[index + 1],
+                        );
+                        return if matches!(
+                            operators[index],
+                            crate::ast::ComparisonOperator::NotEqual
+                        ) {
+                            format!("!({equal})")
+                        } else {
+                            equal
+                        };
+                    }
+                    let function = if view {
+                        "suz_text_view_compare"
                     } else {
-                        format!(
-                            "suz_text_compare({}, {}) {} 0",
-                            names[index],
-                            names[index + 1],
-                            operators[index].symbol()
-                        )
+                        "suz_text_compare"
                     };
+                    return format!(
+                        "{function}({}, {}) {} 0",
+                        names[index],
+                        names[index + 1],
+                        operators[index].symbol()
+                    );
                 }
                 if floating {
                     return format!(
@@ -366,5 +426,14 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             format!("(-INT64_C({}))", -value)
         }
         Value::Integer { value, .. } => value.to_string(),
+    }
+}
+
+pub(super) fn equality(ty: crate::ast::Type, left: &str, right: &str) -> String {
+    use crate::ast::Type;
+    match ty {
+        Type::Text => format!("suz_text_view_equal({left}, {right})"),
+        Type::Struct(id) => format!("suz_equal_{id}({left}, {right})"),
+        _ => format!("{left} == {right}"),
     }
 }

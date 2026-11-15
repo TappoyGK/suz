@@ -83,13 +83,14 @@ SUZ_TIMINGS=1 ./scripts/test-spec-cases.sh
 - `compiler/tests/spec_cases/value_blocks.rs`：値ブロックのスコープ、外側の変数の更新、評価順序、制御移動と代入先の制約のテスト。
 - `compiler/tests/spec_cases/arithmetic.rs`：整数の算術、境界値、パニック、定数評価のテスト。
 - `compiler/tests/spec_cases/logs.rs`：テンプレート、整数・boolの表示、評価中のパニック、ログ出力のアトミック性のテスト。
-- `compiler/tests/spec_cases/text_float_casts.rs`：浮動小数点への変換、定数と実行時の丸め、失敗処理を検査する。解析処理の境界値とRustの数値解析との比較は `compiler/src/check/text_parse_tests.rs` に置く。
-- `compiler/tests/spec_cases/text_struct_casts.rs`：構造体変換の入れ子、フィールド型、エスケープ、改行、定数評価と失敗処理を検査する。
-- `compiler/tests/spec_cases/text_struct_runtime.rs`：失敗した構造体変換がプールを増やさないこと、一時領域の解放、確保失敗の位置、定数結果の静的配置を検査する。
-- `compiler/tests/spec_cases/text_casts.rs`：整数・真偽値への変換、整数のラップ変換、定数評価、失敗処理の型と制御移動を検査する。
-- `compiler/tests/spec_cases/text.rs`：テンプレートの定数依存、入れ子のスコープ、診断、定数と実行時の浮動小数点表示の一致を検査する。
-- `compiler/tests/spec_cases/text_startup.rs`：未使用の定数を含む起動時の一括登録、初期化失敗の位置、定数参照とログ出力の追加確保の有無を検査する。
-- `compiler/tests/spec_cases/text_runtime.rs`・`text_runtime.c`：環境層の確保・解放の記録によるテキストプールの共有実体、容量計測、上限、確保失敗、一時バッファの検査。プール単体のCプログラムはテスト起動ごとに最適化設定別で1回ビルドし、Cargoの出力ディレクトリに置いた同じ実行ファイルを各検査から別プロセスで起動する。検査結果は再利用しない。`text_environment.c` は生成プログラムの確保要求を記録し、ログの確保要求がないこと、確保失敗時のソース位置、NULを含む出力を検査する。textのC実行テストは、通常の開発プロファイルでは動作を検査し、リリースプロファイルではサニタイザーも有効にする。最適化ありのプール検査は、プロファイルによらずサニタイザーを有効にする。
+- `compiler/tests/spec_cases/symbol_float_casts.rs`：浮動小数点への変換、定数と実行時の丸め、失敗処理を検査する。解析処理の境界値とRustの数値解析との比較は `compiler/src/check/text_parse_tests.rs` に置く。
+- `compiler/tests/spec_cases/symbol_struct_casts.rs`：構造体変換の入れ子、フィールド型、エスケープ、改行、定数評価と失敗処理を検査する。
+- `compiler/tests/spec_cases/symbol_struct_runtime.rs`：失敗した構造体変換がプールを増やさないこと、一時領域の解放、確保失敗の位置、定数結果の静的配置を検査する。
+- `compiler/tests/spec_cases/symbol_casts.rs`：整数・真偽値への変換、整数のラップ変換、定数評価、失敗処理の型と制御移動を検査する。
+- `compiler/tests/spec_cases/text_views.rs`：型変換と失敗処理の制約、Unicodeの全境界での切り出し・添字、範囲の保持、確保なしの読み取りと明示的なインターン化を検査する。
+- `compiler/tests/spec_cases/symbol.rs`：テンプレートの定数依存、入れ子のスコープ、診断、定数と実行時の浮動小数点表示の一致を検査する。
+- `compiler/tests/spec_cases/symbol_startup.rs`：未使用の定数を含む起動時の一括登録、初期化失敗の位置、定数参照とログ出力の追加確保の有無を検査する。
+- `compiler/tests/spec_cases/symbol_runtime.rs`・`symbol_runtime.c`：環境層の確保・解放の記録によるテキストプールの共有実体、容量計測、上限、確保失敗、一時バッファの検査。プール単体のCプログラムはテスト起動ごとに最適化設定別で1回ビルドし、Cargoの出力ディレクトリに置いた同じ実行ファイルを各検査から別プロセスで起動する。検査結果は再利用しない。`text_environment.c` は生成プログラムの確保要求を記録し、ログの確保要求がないこと、確保失敗時のソース位置、NULを含む出力を検査する。textのC実行テストは、通常の開発プロファイルでは動作を検査し、リリースプロファイルではサニタイザーも有効にする。最適化ありのプール検査は、プロファイルによらずサニタイザーを有効にする。
 - `compiler/tests/spec_cases/matches.rs`：整数・boolのmatchとmatchexpr、定数パターン、制御移動、式の結果を捨てる場合のテスト。
 - `compiler/tests/spec_cases/ranges.rs`：forの整数境界、入れ子の制御、範囲の参照・スコープ・診断のテスト。
 - `compiler/tests/spec_cases/shifts.rs`：シフトの型・境界値・定数評価のテスト。
@@ -137,13 +138,15 @@ SUZ_TIMINGS=1 ./scripts/test-spec-cases.sh
 
 ## CI
 
-GitHub Actionsの `CI` ワークフローは、`main` 向けのすべてのPR、`main` へのpush、手動実行で、書式・Clippy・全テスト・配布バイナリ検査を実行する。`main` へのマージには `macOS checks` の成功を必須とする。ローカルでは通常テストとリリース検査を使い分ける。
+GitHub Actionsの `CI` ワークフローは、`release/*` 向けの作業PRでは `work checks` として書式・Clippy・通常テストを実行し、リリースブランチへのpushでは通常テストを実行する。main向けのリリースPRとmainへのpushでは `release checks` として全検査・配布検査を実行する。手動実行でも選択したブランチの全検査を行う。起動条件とマージ手順は[リリース手順](../../docs/releasing.md)に従う。
 
 `main` の検査が成功すると、検証済みバイナリ・SHA-256・コミットIDを含むアーカイブをActionsの成果物として30日間保存する。公開には、[リリース手順](../../docs/releasing.md)に従って対象コミットの成果物を使う。
 
-実行環境は `macos-26`（arm64）、Xcode 26.5とする。Rustは `rust-toolchain.toml` に従い、例集とRustのテストはそれぞれ並列数3で実行する。GitHubのランナー更新による環境の違いを確認できるよう、OS・Rust・Clang・SDKのバージョンを実行ログに出力する。
+変更ファイルの判定は `ubuntu-latest`、ビルドとテストは `macos-26`（arm64）、Xcode 26.5で実行する。Rustは `rust-toolchain.toml` に従い、例集とRustのテストはそれぞれ並列数3で実行する。GitHubのランナー更新による環境の違いを確認できるよう、OS・Rust・Clang・SDKのバージョンを実行ログに出力する。
 
 ワークフローは [.github/workflows/ci.yml](../../.github/workflows/ci.yml) で定義する。CIで使う各コマンドは、ローカルでも実行できる。
+
+CIは、ビルドや検証の入力にならないMarkdown文書だけの変更では、変更ファイルの判定のみを行う。対象と例外は[リリース手順](../../docs/releasing.md#ciの実行条件)に従う。判定の回帰テストは `python3 scripts/test-ci-changes.py` で実行する。
 
 ## 例の追加・変更
 

@@ -10,6 +10,7 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+import tomllib
 
 
 def run(args, cwd, env, code=0):
@@ -51,6 +52,10 @@ def verify(binary, version, cc, directory):
     fix wrapped = `257` as% u8 or return 6
     fix enabled = `true` as bool or return 6
     if wrapped != 1 || not enabled { return 6 }
+    fix view = `xあ😀y`[1:3] or return 8
+    if (view[1] or '?') != '😀' { return 9 }
+    if (view as symbol) != `あ😀` { return 10 }
+    if view != `あ😀` { return 11 }
     return 7
 }
 enum Mode: u8 { First, Last }
@@ -119,7 +124,7 @@ struct Entry {
             directory, env, expected,
         )
         if expected == 101:
-            require(b"[rt.text-allocation]" in result.stderr, "missing text pool diagnostic")
+            require(b"[rt.symbol-allocation]" in result.stderr, "missing text pool diagnostic")
         limited_export = directory / f"exported-{limit}"
         run(
             [copied, "emit-c", source, "-o", limited_export, "--text-pool-limit", limit],
@@ -131,7 +136,7 @@ struct Entry {
         )
         result = run([limited_export / "program"], directory, env, expected)
         if expected == 101:
-            require(b"[rt.text-allocation]" in result.stderr, "missing exported text pool diagnostic")
+            require(b"[rt.symbol-allocation]" in result.stderr, "missing exported text pool diagnostic")
 
     # A custom compiler path exercises actual missing SDK/linker failures without
     # modifying the developer's Xcode installation or system search paths.
@@ -172,9 +177,15 @@ struct Entry {
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path)
-    parser.add_argument("--version", required=True)
+    parser.add_argument(
+        "--version", help="expected version (default: compiler/Cargo.toml)"
+    )
     parser.add_argument("--cc", default="clang")
     args = parser.parse_args()
+    if args.version is None:
+        manifest = Path(__file__).resolve().parent.parent / "compiler/Cargo.toml"
+        with manifest.open("rb") as source:
+            args.version = tomllib.load(source)["package"]["version"]
     binary = args.binary.resolve(strict=True)
     cc = shutil.which(args.cc)
     if cc is None:

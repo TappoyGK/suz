@@ -4,7 +4,7 @@
 
 ### log-001 テンプレートを変数に保存
 
-主根拠：`[text.template]`。
+主根拠：`[symbol.template]`。
 
 **ソース：**
 
@@ -32,7 +32,7 @@ info log-001.suz:3: hello
 
 ### log-002 テンプレートをソース上で複数行にする
 
-主根拠：`[text.template-line]`。
+主根拠：`[symbol.template-line]`。
 
 **ソース：**
 
@@ -56,11 +56,11 @@ second`
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[text.template-line]` | 2 | 20 |
+| 通常 | `[symbol.template-line]` | 2 | 20 |
 
 ### log-003 ログに構造体を埋め込む
 
-主根拠：`[text.interpolation]`。
+主根拠：`[symbol.interpolation]`。
 
 **ソース：**
 
@@ -85,11 +85,11 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[text.interpolation]` | 4 | 17 |
+| 通常 | `[symbol.interpolation]` | 4 | 17 |
 
 ### log-004 voidの式をログに埋め込む
 
-主根拠：`[text.interpolation]`。
+主根拠：`[symbol.interpolation]`。
 
 **ソース：**
 
@@ -114,7 +114,7 @@ voidはログに埋め込める型ではない。
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[text.interpolation]` | 4 | 17 |
+| 通常 | `[symbol.interpolation]` | 4 | 17 |
 
 ### log-005 埋め込み式から別のログを出力する
 
@@ -195,7 +195,7 @@ info log-006.suz:2: inner
 
 ### log-007 定義されていないテンプレートのエスケープ
 
-主根拠：`[text.escape]`。
+主根拠：`[symbol.escape]`。
 
 **ソース：**
 
@@ -218,13 +218,13 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[text.escape]` | 2 | 24 |
+| 通常 | `[symbol.escape]` | 2 | 24 |
 
 ### log-008 ログのエスケープと本文のコメント記号
 
-主根拠：`[text.escape]`。
+主根拠：`[symbol.escape]`。
 
-補助根拠：`[log.output]`、`[text.template-text]`。
+補助根拠：`[log.output]`、`[symbol.template-text]`。
 
 **ソース：**
 
@@ -250,7 +250,7 @@ next
 
 ### log-009 bool・enum・整数のログ表示
 
-主根拠：`[text.value-format]`。
+主根拠：`[symbol.value-format]`。
 
 補助根拠：`[log.output]`。
 
@@ -281,9 +281,9 @@ info log-009.suz:4: true false Saw 1234 -7
 
 ### log-010 浮動小数点の通常表記と小さい値の指数表記
 
-主根拠：`[text.float-format]`。
+主根拠：`[symbol.float-format]`。
 
-補助根拠：`[text.value-format]`。
+補助根拠：`[symbol.value-format]`。
 
 **ソース：**
 

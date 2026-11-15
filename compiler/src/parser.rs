@@ -41,6 +41,15 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     fn error(&self, kind: ErrorKind, message: &str) -> Diagnostic {
+        // Valid range operators are consumed by the for header. If parsing
+        // fails at one, report its restricted use instead of a missing token.
+        let message = if kind == ErrorKind::InvalidSource
+            && matches!(self.token().kind, Kind::Symbol("..<" | "..="))
+        {
+            "range notation is only allowed in for or rev [for.range]"
+        } else {
+            message
+        };
         self.location().error(kind, message)
     }
 

@@ -67,6 +67,15 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
                 0,
                 1,
             ),
+            Type::Char => (
+                "SUZ_PARSE_CHAR",
+                0,
+                false,
+                "NULL".into(),
+                "NULL".into(),
+                0,
+                1,
+            ),
             Type::Bool => (
                 "SUZ_PARSE_BOOL",
                 0,
@@ -76,7 +85,7 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
                 0,
                 1,
             ),
-            Type::Text => (
+            Type::Symbol | Type::Text => (
                 "SUZ_PARSE_TEXT",
                 0,
                 false,
@@ -159,12 +168,19 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
         *slot += 1;
         let value = match ty {
             Type::Integer(ty) => format!("suz_bits_{}(values[{index}].bits)", ty.name()),
-            Type::Enum(_) | Type::Bool => format!("({})(values[{index}].bits)", ty.c_name()),
+            Type::Enum(_) | Type::Bool | Type::Char => {
+                format!("({})(values[{index}].bits)", ty.c_name())
+            }
             Type::Float(ty) => format!("suz_parsed_{}(values[{index}].bits)", ty.name()),
-            Type::Text => format!(
+            Type::Symbol | Type::Text => format!(
                 "suz_text_from_parsed(bytes + values[{index}].start, values[{index}].length, location)"
             ),
             _ => unreachable!(),
+        };
+        let value = if ty == Type::Text {
+            format!("suz_text_as_view({value})")
+        } else {
+            value
         };
         writeln!(c, "    {path} = {value};").unwrap();
     }
@@ -172,7 +188,7 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
     for id in &context.struct_parsers {
         let ty = Type::Struct(*id);
         let slots = schema(c, ty, context, &mut emitted);
-        writeln!(c, "static inline _Bool suz_parse_struct_{id}(suz_text input, suz_struct_{id} *output, suz_text_location location) {{\n    const char *bytes = suz_text_bytes(input);\n    suz_parsed_value values[{slots}];\n    if (!suz_parse_struct(bytes, suz_text_length(input), &suz_schema_struct_{id}, values)) return 0;\n    suz_struct_{id} result;").unwrap();
+        writeln!(c, "static inline _Bool suz_parse_struct_{id}(suz_text_view input, suz_struct_{id} *output, suz_text_location location) {{\n    const char *bytes = suz_view_bytes(input);\n    suz_parsed_value values[{slots}];\n    if (!suz_parse_struct(bytes, suz_view_length(input), &suz_schema_struct_{id}, values)) return 0;\n    suz_struct_{id} result;").unwrap();
         // Structures without text fields still use the same cast helper signature.
         c.push_str("    (void)location;\n");
         assign(c, ty, "result", &mut 0, context);

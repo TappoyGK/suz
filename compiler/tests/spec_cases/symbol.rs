@@ -6,7 +6,7 @@ fn templates_preserve_constant_dependencies_and_nested_value_scopes() {
 const PRODUCT = `Suz`
 const COUNT: u8 = 3
 const READY = true
-struct Label { value: text }
+struct Label { value: symbol }
 const ITEM = Label { value: LABEL }
 const SAME = ITEM == Label { value: `Suz 3 true` }
 fn main() -> u8 {

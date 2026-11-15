@@ -4,7 +4,7 @@
 #include <stddef.h>
 
 enum suz_parse_kind { SUZ_PARSE_INTEGER, SUZ_PARSE_FLOAT, SUZ_PARSE_BOOL,
-                      SUZ_PARSE_TEXT, SUZ_PARSE_ENUM, SUZ_PARSE_STRUCT };
+                      SUZ_PARSE_TEXT, SUZ_PARSE_ENUM, SUZ_PARSE_STRUCT, SUZ_PARSE_CHAR };
 
 typedef struct suz_parse_type suz_parse_type;
 typedef struct {

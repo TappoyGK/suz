@@ -1,9 +1,9 @@
-use super::text_runtime::build_with_environment;
+use super::symbol_runtime::build_with_environment;
 use std::process::Command;
 
-const SOURCE: &str = r#"struct Inner { name: text, count: u8 }
+const SOURCE: &str = r#"struct Inner { name: symbol, count: u8 }
 struct Item { inner: Inner, valid: bool }
-fn convert(input: text) -> text {
+fn convert(input: symbol) -> symbol {
     fix item = input as Item or return `fallback`
     return item.inner.name
 }
@@ -65,7 +65,7 @@ int main(int argc, char **argv) {
 "#;
 
 #[test]
-fn struct_text_parsing_does_not_intern_failed_inputs_and_frees_temporary_storage() {
+fn struct_symbol_parsing_does_not_intern_failed_inputs_and_frees_temporary_storage() {
     let (_directory, path) = build_with_environment(SOURCE, DRIVER);
     let output = Command::new(&path).arg("validation").output().unwrap();
     assert_eq!(
@@ -92,7 +92,7 @@ fn struct_text_parsing_does_not_intern_failed_inputs_and_frees_temporary_storage
             "{diagnostic}"
         );
         assert!(
-            diagnostic.ends_with(" [rt.text-allocation]\n"),
+            diagnostic.ends_with(" [rt.symbol-allocation]\n"),
             "{diagnostic}"
         );
         if mode == "limit" {
@@ -102,7 +102,7 @@ fn struct_text_parsing_does_not_intern_failed_inputs_and_frees_temporary_storage
             );
         } else {
             assert!(
-                diagnostic.contains("text memory allocation failed"),
+                diagnostic.contains("symbol memory allocation failed"),
                 "{diagnostic}"
             );
         }
@@ -110,13 +110,13 @@ fn struct_text_parsing_does_not_intern_failed_inputs_and_frees_temporary_storage
 }
 
 #[test]
-fn constant_struct_text_results_keep_static_payloads_in_bindings_and_constants() {
+fn constant_struct_symbol_results_keep_static_payloads_in_bindings_and_constants() {
     let content = "x".repeat(1000);
     let source = format!(
-        r#"struct Label {{ name: text }}
+        r#"struct Label {{ name: symbol }}
 const ITEM = `Label {{ name: \`{content}\` }}` as Label or Label {{ name: `` }}
-fn from_const() -> text {{ return ITEM.name }}
-fn from_expression() -> text {{
+fn from_const() -> symbol {{ return ITEM.name }}
+fn from_expression() -> symbol {{
     fix item = `Label {{ name: \`{content}\` }}` as Label or Label {{ name: `` }}
     return item.name
 }}

@@ -16,6 +16,7 @@ const KEYWORDS: &[&str] = &[
     "while",
     "loop",
     "for",
+    "rev",
     "in",
     "break",
     "continue",
@@ -33,16 +34,18 @@ const KEYWORDS: &[&str] = &[
     "inf",
 ];
 const TYPES: &[&str] = &[
-    "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "bool", "text", "void",
+    "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "bool", "char", "text",
+    "symbol", "void",
 ];
 const SYMBOLS: &[&str] = &[
-    "(", ")", "{", "}", ",", ":", ".", "->", "=>", "=", "+=", "-=", "*=", "/=", "%=", "+%=", "-%=",
-    "*%=", "&=", "|=", "^=", "<<=", ">>=", "+", "-", "*", "/", "%", "+%", "-%", "*%", "&", "|",
-    "^", "~", "<<", ">>", "==", "!=", "<", "<=", ">", ">=", "&&", "||", "..<", "..=",
+    "(", ")", "[", "]", "{", "}", ",", ":", ".", "->", "=>", "=", "+=", "-=", "*=", "/=", "%=",
+    "+%=", "-%=", "*%=", "&=", "|=", "^=", "<<=", ">>=", "+", "-", "*", "/", "%", "+%", "-%", "*%",
+    "&", "|", "^", "~", "<<", ">>", "==", "!=", "<", "<=", ">", ">=", "&&", "||", "..<", "..=",
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Kind<'a> {
+    Char(u32),
     Template(&'a str),
     Ident(&'a str),
     Keyword(&'a str),
@@ -157,7 +160,7 @@ fn can_end_operand(kind: Option<Kind<'_>>) -> bool {
                 | Kind::Integer(_)
                 | Kind::Float(_)
                 | Kind::Keyword("true" | "false" | "nan" | "inf")
-                | Kind::Symbol(")" | "}")
+                | Kind::Symbol(")" | "]" | "}")
         )
     )
 }
@@ -228,7 +231,7 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
                 continue;
             }
             '\n' => {
-                if delimiters.last() != Some(&"(") && !continuation {
+                if !matches!(delimiters.last(), Some(&"(" | &"[")) && !continuation {
                     tokens.push(Token {
                         kind: Kind::Newline,
                         line,
@@ -239,6 +242,20 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
                 offset += 1;
                 line += 1;
                 column = 1;
+                continue;
+            }
+            '\'' => {
+                let (value, length) = char_literal(rest)
+                    .map_err(|message| error(line, column, ErrorKind::InvalidSource, message))?;
+                tokens.push(Token {
+                    kind: Kind::Char(value),
+                    line,
+                    column,
+                    span: offset..offset + length,
+                });
+                offset += length;
+                column += rest[..length].chars().count();
+                continuation = false;
                 continue;
             }
             '`' => {
@@ -302,10 +319,13 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
         };
         continuation = continues_line(kind, tokens.last().map(|token| token.kind));
         match kind {
-            Kind::Symbol("(" | "{") => {
+            Kind::Symbol("(" | "[" | "{") => {
                 if let Kind::Symbol(symbol) = kind {
                     delimiters.push(symbol);
                 }
+            }
+            Kind::Symbol("]") if delimiters.last() == Some(&"[") => {
+                delimiters.pop();
             }
             Kind::Symbol(")") if delimiters.last() == Some(&"(") => {
                 delimiters.pop();
@@ -332,11 +352,16 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
     });
     for (index, token) in tokens.iter().enumerate() {
         if matches!(token.kind, Kind::Symbol("..<" | "..=")) {
-            let touches_left = index > 0
-                && !matches!(tokens[index - 1].kind, Kind::Newline | Kind::End)
-                && tokens[index - 1].span.end == token.span.start;
+            // Input boundaries are not whitespace. Missing bounds are syntax
+            // errors for the parser, including in isolated interpolations.
+            let touches_left = if index == 0 {
+                token.span.start == 0
+            } else {
+                !matches!(tokens[index - 1].kind, Kind::Newline | Kind::End)
+                    && tokens[index - 1].span.end == token.span.start
+            };
             let touches_right = tokens.get(index + 1).is_some_and(|next| {
-                !matches!(next.kind, Kind::Newline | Kind::End) && next.span.start == token.span.end
+                next.kind != Kind::Newline && next.span.start == token.span.end
             });
             if !touches_left || !touches_right {
                 return Err(error(
@@ -349,6 +374,37 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
         }
     }
     Ok(tokens)
+}
+
+// Share literal parsing with text-to-structure conversion at runtime.
+pub(crate) fn char_literal(input: &str) -> Result<(u32, usize), &'static str> {
+    unsafe extern "C" {
+        fn suz_parse_char_literal_status(
+            bytes: *const u8,
+            length: u64,
+            output: *mut u32,
+            consumed: *mut u64,
+        ) -> u32;
+    }
+    let (mut value, mut consumed) = (0, 0);
+    // Status codes follow suz_char_literal_status. Input and outputs remain live
+    // for this bounded, allocation-free call.
+    let status = unsafe {
+        suz_parse_char_literal_status(
+            input.as_ptr(),
+            input.len() as u64,
+            &mut value,
+            &mut consumed,
+        )
+    };
+    match status {
+        0 => Ok((value, consumed as usize)),
+        2 => Err("Unicode escape requires at least one hexadecimal digit [char.literal]"),
+        3 => Err("Unicode escape accepts at most six hexadecimal digits [char.literal]"),
+        4 => Err("Unicode escape cannot represent a surrogate (U+D800..U+DFFF) [char.literal]"),
+        5 => Err("Unicode escape exceeds U+10FFFF [char.literal]"),
+        _ => Err("expected one Unicode scalar in a character literal [char.literal]"),
+    }
 }
 
 #[cfg(test)]
@@ -581,20 +637,28 @@ mod tests {
 
     #[test]
     fn ranges_require_adjacent_bounds_even_across_suppressed_newlines() {
-        for source in [
-            "a ..<b",
-            "a..< b",
-            "a\n..<b",
-            "a..<\nb",
-            "(a\n..<b)",
-            "(a..<\nb)",
-            "a..<// comment\nb",
-        ] {
-            let error = lex(source).unwrap_err();
-            assert_eq!(error.kind, ErrorKind::InvalidSource, "{source}");
-            assert!(error.message.contains("for.range-spacing"), "{source}");
+        for operator in ["..<", "..="] {
+            for template in [
+                "a ..<b",
+                "a..< b",
+                "a\n..<b",
+                "a..<\nb",
+                "(a\n..<b)",
+                "(a..<\nb)",
+                "a..<// comment\nb",
+                " ..<b",
+                "a..< ",
+            ] {
+                let source = template.replace("..<", operator);
+                let error = lex(&source).unwrap_err();
+                assert_eq!(error.kind, ErrorKind::InvalidSource, "{source}");
+                assert!(error.message.contains("for.range-spacing"), "{source}");
+            }
+            for template in ["(a+1)..<(b+2)", "..<b", "a..<", "..<"] {
+                let source = template.replace("..<", operator);
+                assert!(lex(&source).is_ok(), "{source}");
+            }
         }
-        assert!(lex("(a+1)..<(b+2)").is_ok());
     }
 
     #[test]
