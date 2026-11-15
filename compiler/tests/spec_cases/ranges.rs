@@ -33,6 +33,64 @@ fn ranges_used_as_values_report_the_range_rule_at_the_operator() {
 }
 
 #[test]
+fn range_misuse_is_diagnosed_in_other_expression_contexts() {
+    for operator in ["..<", "..="] {
+        for template in [
+            "const VALUE = 0RANGE3\nfn main() -> u8 { return 0 }",
+            "struct Item { value: u8 }\nfn main() -> u8 { fix item = Item { value: 0RANGE3 }\nreturn 0 }",
+            "fn main() -> u8 { if 0RANGE3 {}\nreturn 0 }",
+            "fn main() -> u8 { while 0RANGE3 {}\nreturn 0 }",
+            "fn main() -> u8 { match 0RANGE3 { _ => {} }\nreturn 0 }",
+            "fn main() -> u8 { match 0 { 0RANGE3 => {}\n_ => {} }\nreturn 0 }",
+            "fn main() -> u8 { return matchexpr 0 { _ => 0RANGE3 } }",
+            "fn main() -> u8 { log info `${0RANGE3}`\nreturn 0 }",
+            "fn main() -> u8 { fix message = `${0RANGE3}`\nreturn 0 }",
+            "fn main() -> u8 { return expr { 0RANGE3 } }",
+            "fn main() -> u8 { return ifexpr true { 0RANGE3 } else { 0 } }",
+            "fn main() -> u8 { for i in 0..<3RANGE4 {}\nreturn 0 }",
+            "fn main() -> u8 { fix value = 1 / 0 or 0RANGE3\nreturn 0 }",
+            "fn main() -> u8 { fix value = 256 as u8 or 0RANGE3\nreturn 0 }",
+        ] {
+            let (before, _) = template.split_once("RANGE").unwrap();
+            let source = template.replace("RANGE", operator);
+            let error = suz::compile(source.as_bytes()).unwrap_err();
+            assert_eq!(error.kind, suz::ErrorKind::InvalidSource, "{source}");
+            assert_eq!(
+                (error.line, error.column),
+                (
+                    before.lines().count(),
+                    before.rsplit('\n').next().unwrap().len() + 1
+                ),
+                "{source}"
+            );
+            assert_eq!(
+                error.message, "range notation is only allowed in for [for.range]",
+                "{source}"
+            );
+        }
+    }
+}
+
+#[test]
+fn range_delimiters_follow_complete_start_bounds() {
+    for operator in ["..<", "..="] {
+        for start in [
+            "(identity(0))",
+            "expr { fix value: u8 = 0\nvalue }",
+            "ifexpr true { 0 } else { 1 }",
+            "1 / 0 or 0",
+            "256 as u8 or 0",
+            "256 as u8 or 1 / 0 or 0",
+        ] {
+            let source = format!(
+                "fn identity(value: u8) -> u8 {{ return value }}\nfn main() -> u8 {{ for i in {start}{operator}(identity(3)) {{}}\nreturn 0 }}"
+            );
+            suz::compile(source.as_bytes()).unwrap_or_else(|error| panic!("{source}: {error}"));
+        }
+    }
+}
+
+#[test]
 #[ignore = "release check: run scripts/test-release.sh"]
 fn ranges_handle_integer_extremes_and_nested_control_without_overflow() {
     let mut source = String::from("fn main() -> u8 {\n");

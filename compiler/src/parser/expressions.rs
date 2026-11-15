@@ -10,6 +10,14 @@ use crate::{
 
 impl Parser<'_, '_> {
     pub(super) fn expression(&mut self) -> Result<Expression, Diagnostic> {
+        let expression = self.expression_prefix()?;
+        self.reject_range_value()?;
+        Ok(expression)
+    }
+
+    // The for start bound ends at a range operator. Enclosed expressions still
+    // use expression(), which rejects range notation used as a value.
+    pub(super) fn expression_prefix(&mut self) -> Result<Expression, Diagnostic> {
         let operand = self.logical(LogicalOperator::Or)?;
         if self.token().kind != Kind::Keyword("or") {
             return Ok(operand);
@@ -49,11 +57,11 @@ impl Parser<'_, '_> {
                 });
             }
             Ok(FailureHandler::Return {
-                value: Box::new(self.expression()?),
+                value: Box::new(self.expression_prefix()?),
                 location,
             })
         } else {
-            Ok(FailureHandler::Value(Box::new(self.expression()?)))
+            Ok(FailureHandler::Value(Box::new(self.expression_prefix()?)))
         }
     }
 

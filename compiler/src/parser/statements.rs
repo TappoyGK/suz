@@ -74,7 +74,7 @@ impl Parser<'_, '_> {
                 let name = name.to_owned();
                 self.cursor += 1;
                 self.expect(FixedToken::Keyword("in"))?;
-                let start = self.condition()?;
+                let start = self.condition_prefix()?;
                 let inclusive = match self.token().kind {
                     Kind::Symbol("..<") => false,
                     Kind::Symbol("..=") => true,

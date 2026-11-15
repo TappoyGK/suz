@@ -8,9 +8,15 @@ use std::collections::BTreeSet;
 
 impl Parser<'_, '_> {
     pub(super) fn condition(&mut self) -> Result<Expression, Diagnostic> {
+        let expression = self.condition_prefix()?;
+        self.reject_range_value()?;
+        Ok(expression)
+    }
+
+    pub(super) fn condition_prefix(&mut self) -> Result<Expression, Diagnostic> {
         let previous = self.restricted_condition;
         self.restricted_condition = true;
-        let result = self.expression();
+        let result = self.expression_prefix();
         self.restricted_condition = previous;
         result
     }
@@ -19,9 +25,7 @@ impl Parser<'_, '_> {
         self.restricted_condition = false;
         let result = self.expression();
         self.restricted_condition = previous;
-        let expression = result?;
-        self.reject_range_value()?;
-        Ok(expression)
+        result
     }
     fn field_declaration(&mut self) -> Result<StructField, Diagnostic> {
         let location = self.location();
