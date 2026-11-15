@@ -74,7 +74,7 @@ fn startup_failure_points_to_main_keyword_before_main_body_runs() {
     assert_eq!(result.status.code(), Some(101));
     assert_eq!(
         result.stderr,
-        b"panic text.suz:2:3: text memory allocation failed [rt.symbol-allocation]\n"
+        b"panic text.suz:2:3: symbol memory allocation failed [rt.symbol-allocation]\n"
     );
 }
 

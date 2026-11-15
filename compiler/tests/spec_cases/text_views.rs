@@ -34,7 +34,9 @@ fn views_reject_missing_handlers_wrong_types_and_hidden_returns() {
             "fix a: u8 = 0\nfix b: u16 = 1\nfix x = `abc`[a:b] or ``",
             "type.expected",
         ),
-        ("fix x = `abc`[0..<1] or ``", "for.range"),
+        ("fix x = `abc`[0..<1] or ``", "text.slice-omit"),
+        ("fix x = `abc`[..=1] or ``", "text.slice-omit"),
+        ("fix x = `abc`[:1..=2] or ``", "text.slice-omit"),
     ] {
         let source = format!("fn main() -> u8 {{\n{body}\nreturn 0 }}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
@@ -126,12 +128,11 @@ int main(void) {
 
 #[test]
 fn view_slicing_matches_unicode_boundaries_for_every_pair_of_positions() {
-    let sample = "aéあ😀\0z";
-    let scalars: Vec<char> = sample.chars().collect();
     let source = r#"fn slice(value: text, start: i64, end: i64) -> text {
     return value[start:end] or `invalid`
 }
 fn at(value: text, pos: i64) -> char { return value[pos] or '?' }
+fn equal(left: text, right: text) -> bool { return left == right && not (left != right) }
 fn main() -> u8 { return 0 }
 "#;
     let mut driver = String::from(
@@ -140,39 +141,57 @@ fn main() -> u8 { return 0 }
 int main(void) {
     assert(suz_program() == 0);
     suz_text_location location = {"test", 1, 1};
-    suz_text value = suz_text_intern("a\xc3\xa9\xe3\x81\x82\xf0\x9f\x98\x80\0z", 12, true, location);
-    suz_text_view view = suz_text_as_view(value);
-    size_t calls = text_calls;
-    text_fail_after = calls;
 "#,
     );
-    for start in -1..=scalars.len() as i64 + 1 {
-        for end in -1..=scalars.len() as i64 + 1 {
-            let expected: String = if 0 <= start && start <= end && end <= scalars.len() as i64 {
-                scalars[start as usize..end as usize].iter().collect()
-            } else {
-                "invalid".into()
-            };
-            let bytes: String = expected
-                .bytes()
-                .map(|byte| format!("\\{byte:03o}"))
-                .collect();
+    for sample in ["", "abc\0z", "aéあ😀\0z"] {
+        let scalars: Vec<char> = sample.chars().collect();
+        let bytes: String = sample.bytes().map(|byte| format!("\\{byte:03o}")).collect();
+        driver.push_str(&format!(
+            "{{ suz_text value = suz_text_intern(\"{bytes}\", {}, true, location);\n",
+            sample.len()
+        ));
+        driver.push_str("suz_text_view view = suz_text_as_view(value); size_t calls = text_calls; text_fail_after = calls;\n");
+        for start in -1..=scalars.len() as i64 + 1 {
+            for end in -1..=scalars.len() as i64 + 1 {
+                let expected: String = if 0 <= start && start <= end && end <= scalars.len() as i64
+                {
+                    scalars[start as usize..end as usize].iter().collect()
+                } else {
+                    "invalid".into()
+                };
+                let bytes: String = expected
+                    .bytes()
+                    .map(|byte| format!("\\{byte:03o}"))
+                    .collect();
+                let length = expected.len();
+                let count = expected.chars().count();
+                let same = u8::from(expected == sample);
+                driver.push_str(&format!(
+                    r#"{{
+    suz_text_view result = suz_fn_0(view, {start}, {end});
+    suz_text_view expected = {{"{bytes}", {length}, {count}}};
+    assert(result.length == {length});
+    assert(result.scalars == {count});
+    assert(memcmp(result.bytes, "{bytes}", {length}) == 0);
+    assert(suz_fn_2(result, expected));
+    assert(suz_fn_2(result, view) == {same});
+}}
+"#
+                ));
+            }
+            let expected = usize::try_from(start)
+                .ok()
+                .and_then(|i| scalars.get(i))
+                .copied()
+                .unwrap_or('?');
             driver.push_str(&format!(
-                "{{ suz_text_view result = suz_fn_0(view, {start}, {end}); assert(result.length == {}); assert(result.scalars == {}); assert(memcmp(result.bytes, \"{bytes}\", {}) == 0); }}\n",
-                expected.len(), expected.chars().count(), expected.len()
+                "assert(suz_fn_1(view, {start}) == {});\n",
+                expected as u32
             ));
         }
-        let expected = usize::try_from(start)
-            .ok()
-            .and_then(|i| scalars.get(i))
-            .copied()
-            .unwrap_or('?');
-        driver.push_str(&format!(
-            "assert(suz_fn_1(view, {start}) == {});\n",
-            expected as u32
-        ));
+        driver.push_str("assert(text_calls == calls); text_fail_after = SIZE_MAX; }\n");
     }
-    driver.push_str("assert(text_calls == calls); return 0; }\n");
+    driver.push_str("return 0; }\n");
     for optimized in [false, true]
         .into_iter()
         .filter(|v| !v || !cfg!(debug_assertions))
@@ -209,4 +228,34 @@ fn constant_views_preserve_diagnostics_and_lazy_failure_evaluation() {
     )
     .unwrap_err();
     assert!(error.message.contains("[const.evaluation]"));
+}
+
+#[test]
+fn conversion_diagnostics_identify_the_source_type() {
+    for (value, ty) in [("`abc`", "symbol"), ("`abc`[:]", "text")] {
+        for (conversion, message) in [
+            (
+                "as u8",
+                format!("{ty} conversion requires or [symbol.cast-handler]"),
+            ),
+            (
+                "as% bool or false",
+                format!("{ty} as% requires an integer target [symbol.cast-wrap]"),
+            ),
+            (
+                "as symbol",
+                format!("unsupported {ty} conversion target [symbol.cast]"),
+            ),
+        ] {
+            if ty == "text" && conversion == "as symbol" {
+                continue;
+            }
+            let source =
+                format!("fn main() -> u8 {{ fix value = ({value}) {conversion}\nreturn 0 }}");
+            assert_eq!(
+                suz::compile(source.as_bytes()).unwrap_err().message,
+                message
+            );
+        }
+    }
 }

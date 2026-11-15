@@ -59,7 +59,10 @@ pub(super) fn template(
                 let name = format!("value_{index}");
                 parameters.push(format!("{} {name}", value.ty.c_name()));
                 match value.ty {
-                    Type::Symbol | Type::Text => writeln!(body, "    suz_text_buffer_append(&buffer, suz_text_bytes({name}), suz_text_length({name}), location);").unwrap(),
+                    Type::Symbol | Type::Text => {
+                        let (bytes, length) = contents(value.ty, &name);
+                        writeln!(body, "    suz_text_buffer_append(&buffer, {bytes}, {length}, location);").unwrap();
+                    },
                     Type::Char => writeln!(body, "    {{ char bytes[4]; size_t length = suz_char_encode({name}, bytes); suz_text_buffer_append(&buffer, bytes, length, location); }}").unwrap(),
                     Type::Bool => writeln!(body, "    suz_text_buffer_append(&buffer, {name} ? \"true\" : \"false\", {name} ? 4 : 5, location);").unwrap(),
                     Type::Enum(ty) => {
@@ -95,4 +98,18 @@ pub(super) fn template(
     context.functions.push_str(&helper);
     setup.push(format!("suz_template_{id}({})", arguments.join(", ")));
     format!("({})", setup.join(", "))
+}
+
+// Callers pass an already evaluated local so selecting its byte span cannot
+// duplicate expression evaluation. The generated C needs no generic dispatch.
+pub(super) fn contents(ty: Type, name: &str) -> (String, String) {
+    let prefix = match ty {
+        Type::Symbol => "suz_text",
+        Type::Text => "suz_view",
+        _ => unreachable!(),
+    };
+    (
+        format!("{prefix}_bytes({name})"),
+        format!("{prefix}_length({name})"),
+    )
 }

@@ -102,7 +102,7 @@ fn struct_symbol_parsing_does_not_intern_failed_inputs_and_frees_temporary_stora
             );
         } else {
             assert!(
-                diagnostic.contains("text memory allocation failed"),
+                diagnostic.contains("symbol memory allocation failed"),
                 "{diagnostic}"
             );
         }

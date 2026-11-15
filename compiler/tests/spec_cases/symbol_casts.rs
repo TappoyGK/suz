@@ -96,7 +96,7 @@ fn symbol_cast_handlers_obey_type_and_control_constraints() {
     for (source, rule) in [
         (
             "fn main() -> u8 { fix n = 1 as% u8 or 0\nreturn n }",
-            "symbol.cast-wrap-handler-syntax",
+            "expr.cast-wrap-handler-syntax",
         ),
         (
             "fn main() -> u8 { fix n = `1` as u8 or false\nreturn n }",

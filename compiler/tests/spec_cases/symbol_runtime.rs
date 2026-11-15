@@ -146,7 +146,7 @@ fn allocation_failures_preserve_accounting_and_do_not_allocate_for_diagnostics()
         run(false, "oom", call, 101);
     }
     let output = run(false, "overflow", "0", 101);
-    assert!(String::from_utf8_lossy(&output.stderr).contains("text length exceeds"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("symbol length exceeds"));
 }
 
 #[test]
@@ -290,7 +290,7 @@ fn allocation_failures_report_the_operation_location() {
         assert_eq!(
             String::from_utf8_lossy(&result.stderr),
             format!(
-                "panic text.suz:{line}:{column}: text memory allocation failed [rt.symbol-allocation]\n"
+                "panic text.suz:{line}:{column}: symbol memory allocation failed [rt.symbol-allocation]\n"
             )
         );
     }

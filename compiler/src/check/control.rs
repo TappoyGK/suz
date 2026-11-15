@@ -11,6 +11,25 @@ pub(super) fn validate_return_positions(statements: &[Statement]) -> Result<(), 
 }
 
 fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), Diagnostic> {
+    fn visit_handler(
+        fallback: &Option<FailureHandler>,
+        allowed: bool,
+        in_value: bool,
+    ) -> Result<(), Diagnostic> {
+        match fallback {
+            Some(FailureHandler::Return { value, location }) => {
+                if in_value || !allowed {
+                    return Err(location.error(ErrorKind::InvalidSource, if in_value {
+                        "control transfers are forbidden inside value expressions [expr.jump-prohibited]"
+                    } else { "or return must apply to the entire initializer or assignment RHS [expr.or-return-position]" }));
+                }
+                visit(value, false, in_value)?;
+            }
+            Some(FailureHandler::Value(value)) => visit(value, false, in_value)?,
+            None => {}
+        }
+        Ok(())
+    }
     fn visit(expr: &Expression, allowed: bool, in_value: bool) -> Result<(), Diagnostic> {
         match &expr.kind {
             ExpressionKind::Slice {
@@ -24,18 +43,7 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
                 for bound in [start, end].into_iter().flatten() {
                     visit(bound, false, in_value)?;
                 }
-                match fallback {
-                    Some(FailureHandler::Return { value, location }) => {
-                        if in_value || !allowed {
-                            return Err(location.error(ErrorKind::InvalidSource,
-                            if in_value { "control transfers are forbidden inside value expressions [expr.jump-prohibited]" }
-                            else { "or return must apply to the entire initializer or assignment RHS [expr.or-return-position]" }));
-                        }
-                        visit(value, false, in_value)?;
-                    }
-                    Some(FailureHandler::Value(value)) => visit(value, false, in_value)?,
-                    None => {}
-                }
+                visit_handler(fallback, allowed, in_value)?;
             }
             ExpressionKind::Template(parts) => {
                 for part in parts {
@@ -71,18 +79,7 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
                 operand, fallback, ..
             } => {
                 visit(operand, false, in_value)?;
-                match fallback {
-                    Some(FailureHandler::Return { value, location }) => {
-                        if in_value || !allowed {
-                            return Err(location.error(ErrorKind::InvalidSource, if in_value {
-                                "control transfers are forbidden inside value expressions [expr.jump-prohibited]"
-                            } else { "or return must apply to the entire initializer or assignment RHS [expr.or-return-position]" }));
-                        }
-                        visit(value, false, in_value)?;
-                    }
-                    Some(FailureHandler::Value(value)) => visit(value, false, in_value)?,
-                    None => {}
-                }
+                visit_handler(fallback, allowed, in_value)?;
             }
             ExpressionKind::If {
                 branches,
@@ -186,47 +183,40 @@ pub(super) fn lower_return_handler(
     statements: &mut Vec<CheckedStatement>,
     next_id: &mut usize,
 ) -> bool {
-    if let Value::Slice {
-        handler: Some(CheckedHandler::Return(_)),
-        ..
-    } = &expr.value
-    {
+    if matches!(
+        &expr.value,
+        Value::Slice {
+            handler: Some(CheckedHandler::Return(_)),
+            ..
+        } | Value::IntegerArithmetic {
+            handler: Some(CheckedHandler::Return(_)),
+            ..
+        }
+    ) {
         let id = *next_id;
         *next_id += 1;
         let value = std::mem::replace(&mut expr.value, Value::Local(id));
         let mut operation = CheckedExpression { ty: expr.ty, value };
-        let Value::Slice { handler, .. } = &mut operation.value else {
-            unreachable!()
+        let (handler, slice) = match &mut operation.value {
+            Value::Slice { handler, .. } => (handler, true),
+            Value::IntegerArithmetic { handler, .. } => (handler, false),
+            _ => unreachable!(),
         };
         let Some(CheckedHandler::Return(return_value)) = handler.take() else {
             unreachable!()
         };
-        statements.push(CheckedStatement::SliceReturn {
-            id,
-            operation,
-            return_value: *return_value,
-        });
-        return true;
-    }
-    if let Value::IntegerArithmetic {
-        handler: Some(CheckedHandler::Return(_)),
-        ..
-    } = &expr.value
-    {
-        let id = *next_id;
-        *next_id += 1;
-        let value = std::mem::replace(&mut expr.value, Value::Local(id));
-        let mut operation = CheckedExpression { ty: expr.ty, value };
-        let Value::IntegerArithmetic { handler, .. } = &mut operation.value else {
-            unreachable!()
-        };
-        let Some(CheckedHandler::Return(return_value)) = handler.take() else {
-            unreachable!()
-        };
-        statements.push(CheckedStatement::ArithmeticReturn {
-            id,
-            operation,
-            return_value: *return_value,
+        statements.push(if slice {
+            CheckedStatement::SliceReturn {
+                id,
+                operation,
+                return_value: *return_value,
+            }
+        } else {
+            CheckedStatement::ArithmeticReturn {
+                id,
+                operation,
+                return_value: *return_value,
+            }
         });
         return true;
     }
@@ -239,10 +229,6 @@ pub(super) fn lower_return_handler(
         if !matches!(
             right.value,
             Value::CastReturn { .. }
-                | Value::Slice {
-                    handler: Some(CheckedHandler::Return(_)),
-                    ..
-                }
                 | Value::IntegerArithmetic {
                     handler: Some(CheckedHandler::Return(_)),
                     ..

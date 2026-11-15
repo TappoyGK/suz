@@ -212,16 +212,12 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             let index = context.temporaries.len();
             context.temporaries.push(target.ty);
             let name = format!("suz_cmp_{index}");
-            let view = target.ty == crate::ast::Type::Text;
+            let ty = target.ty;
             let target = expression(target, context);
             let mut result = expression(&arms.last().unwrap().1, context);
             for (pattern, value) in arms[..arms.len() - 1].iter().rev() {
                 let pattern = expression(pattern.as_ref().unwrap(), context);
-                let condition = if view {
-                    format!("suz_text_view_compare({name}, {pattern}) == 0")
-                } else {
-                    format!("{name} == {pattern}")
-                };
+                let condition = super::expressions::equality(ty, &name, &pattern);
                 result = format!("({condition} ? {} : {result})", expression(value, context));
             }
             format!("({name} = {target}, {result})")
@@ -356,28 +352,32 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                     );
                 }
                 if text {
-                    return if view {
-                        format!(
-                            "suz_text_view_compare({}, {}) {} 0",
-                            names[index],
-                            names[index + 1],
-                            operators[index].symbol()
-                        )
-                    } else if operators[index].is_equality() {
-                        format!(
-                            "{} {} {}",
-                            names[index],
-                            operators[index].symbol(),
-                            names[index + 1]
-                        )
+                    if operators[index].is_equality() {
+                        let equal = super::expressions::equality(
+                            operands[index].ty,
+                            &names[index],
+                            &names[index + 1],
+                        );
+                        return if matches!(
+                            operators[index],
+                            crate::ast::ComparisonOperator::NotEqual
+                        ) {
+                            format!("!({equal})")
+                        } else {
+                            equal
+                        };
+                    }
+                    let function = if view {
+                        "suz_text_view_compare"
                     } else {
-                        format!(
-                            "suz_text_compare({}, {}) {} 0",
-                            names[index],
-                            names[index + 1],
-                            operators[index].symbol()
-                        )
+                        "suz_text_compare"
                     };
+                    return format!(
+                        "{function}({}, {}) {} 0",
+                        names[index],
+                        names[index + 1],
+                        operators[index].symbol()
+                    );
                 }
                 if floating {
                     return format!(
@@ -426,5 +426,14 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             format!("(-INT64_C({}))", -value)
         }
         Value::Integer { value, .. } => value.to_string(),
+    }
+}
+
+pub(super) fn equality(ty: crate::ast::Type, left: &str, right: &str) -> String {
+    use crate::ast::Type;
+    match ty {
+        Type::Text => format!("suz_text_view_equal({left}, {right})"),
+        Type::Struct(id) => format!("suz_equal_{id}({left}, {right})"),
+        _ => format!("{left} == {right}"),
     }
 }

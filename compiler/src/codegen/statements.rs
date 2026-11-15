@@ -14,26 +14,6 @@ pub(super) fn emit_block(
     let indent = "    ".repeat(depth);
     for statement in statements {
         match statement {
-            CheckedStatement::SliceReturn {
-                id,
-                operation,
-                return_value,
-            } => {
-                let (setup, condition, converted) = super::slices::parts(operation, context);
-                writeln!(c, "{indent}{setup};").unwrap();
-                writeln!(
-                    c,
-                    "{indent}if (!({condition})) return {};",
-                    expression(return_value, context)
-                )
-                .unwrap();
-                writeln!(
-                    c,
-                    "{indent}const {} suz_local_{id} = {converted};\n{indent}(void)suz_local_{id};",
-                    operation.ty.c_name()
-                )
-                .unwrap();
-            }
             CheckedStatement::Log { parts, location } => {
                 let id = *next_assignment;
                 *next_assignment += 1;
@@ -63,11 +43,11 @@ pub(super) fn emit_block(
                             .unwrap();
                     } else {
                         let pattern = expression(pattern.as_ref().unwrap(), context);
-                        let condition = if target.ty == crate::ast::Type::Text {
-                            format!("suz_text_view_compare(suz_match_{id}, {pattern}) == 0")
-                        } else {
-                            format!("suz_match_{id} == {pattern}")
-                        };
+                        let condition = super::expressions::equality(
+                            target.ty,
+                            &format!("suz_match_{id}"),
+                            &pattern,
+                        );
                         writeln!(
                             c,
                             "{indent}    {}if ({condition}) {{",
@@ -149,13 +129,19 @@ pub(super) fn emit_block(
                 emit_block(c, body, depth + 2, next_assignment, context);
                 writeln!(c, "{indent}    }}\n{indent}}}").unwrap();
             }
-            CheckedStatement::ArithmeticReturn {
+            CheckedStatement::SliceReturn {
+                id, return_value, ..
+            }
+            | CheckedStatement::ArithmeticReturn {
                 id, return_value, ..
             }
             | CheckedStatement::CastReturn {
                 id, return_value, ..
             } => {
                 let (ty, (setup, condition, converted)) = match statement {
+                    CheckedStatement::SliceReturn { operation, .. } => {
+                        (operation.ty, super::slices::parts(operation, context))
+                    }
                     CheckedStatement::ArithmeticReturn { operation, .. } => {
                         (operation.ty, integer_parts(operation, context))
                     }

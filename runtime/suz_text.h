@@ -39,14 +39,11 @@ suz_text_view suz_text_as_view(suz_text value);
 bool suz_text_slice(suz_text_view value, uint64_t start, uint64_t end,
                     suz_text_view *output);
 bool suz_text_index(suz_text_view value, uint64_t index, uint32_t *output);
+bool suz_text_view_equal(suz_text_view left, suz_text_view right);
 int suz_text_view_compare(suz_text_view left, suz_text_view right);
 
 static inline const char *suz_view_bytes(suz_text_view value) { return value.bytes; }
 static inline uint64_t suz_view_length(suz_text_view value) { return value.length; }
-/* The generic selector is unevaluated; the selected call evaluates value once. */
-#define suz_text_bytes(value) _Generic((value), suz_text_view: suz_view_bytes, default: suz_text_bytes)(value)
-#define suz_text_length(value) _Generic((value), suz_text_view: suz_view_length, default: suz_text_length)(value)
-
 /* Runtime accounting, not a Suz language API. */
 uint64_t suz_text_pool_used(void);
 

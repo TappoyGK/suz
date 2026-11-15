@@ -175,6 +175,23 @@ impl Parser<'_, '_> {
         Ok(operand)
     }
 
+    fn slice_bound(&mut self) -> Result<Expression, Diagnostic> {
+        let reject_range = |parser: &Self| {
+            if matches!(parser.token().kind, Kind::Symbol("..<" | "..=")) {
+                Err(parser.location().error(
+                    ErrorKind::InvalidSource,
+                    "text extraction uses ':' instead of a range operator [text.slice-omit]",
+                ))
+            } else {
+                Ok(())
+            }
+        };
+        reject_range(self)?;
+        let value = self.expression()?;
+        reject_range(self)?;
+        Ok(value)
+    }
+
     fn unary(&mut self) -> Result<Expression, Diagnostic> {
         if self.constant_expression
             && matches!(
@@ -329,7 +346,7 @@ impl Parser<'_, '_> {
                 let start = if self.token().kind == Kind::Symbol(":") {
                     None
                 } else {
-                    Some(Box::new(self.expression()?))
+                    Some(Box::new(self.slice_bound()?))
                 };
                 let index = self.token().kind != Kind::Symbol(":");
                 let end = if !index {
@@ -337,7 +354,7 @@ impl Parser<'_, '_> {
                     if self.token().kind == Kind::Symbol("]") {
                         None
                     } else {
-                        Some(Box::new(self.expression()?))
+                        Some(Box::new(self.slice_bound()?))
                     }
                 } else {
                     None

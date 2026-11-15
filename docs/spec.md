@@ -627,7 +627,7 @@ fix shifted = (value << count) or return expr {
 
 ### 7.13 テンプレート式
 
-**[symbol.template]** バッククォートで囲むテンプレートを式として使うと、`symbol` 型の値を生成する。エスケープ、本文、埋め込み、1行の制約、値の表示は [symbol.escape]、[symbol.template-symbol]、[symbol.interpolation]、[symbol.template-line]、[symbol.value-format] に従う。空のテンプレートは空文字列を表す。ログ文に直接書くテンプレートは [log.fragments] に従う。
+**[symbol.template]** バッククォートで囲むテンプレートを式として使うと、`symbol` 型の値を生成する。エスケープ、本文、埋め込み、1行の制約、値の表示は [symbol.escape]、[symbol.template-text]、[symbol.interpolation]、[symbol.template-line]、[symbol.value-format] に従う。空のテンプレートは空文字列を表す。ログ文に直接書くテンプレートは [log.fragments] に従う。
 
 **[symbol.template-evaluation]** テンプレート中の式は左から右へ1回ずつ評価する。内容を組み立てた後、同じ内容の実体があれば再利用し、なければ新たに保存する。生成中にパニックした場合は値を返さない。
 
@@ -663,7 +663,7 @@ fix same = name == generated
 
 **[symbol.template-line]** テンプレートは、開くバッククォートから閉じるバッククォートまで、ソース上の1行に書く。内容に改行を含める場合は `\n` を使う。
 
-**[symbol.template-symbol]** テンプレートの本文では、`//` は文字として扱う。`${` は埋め込みを開始する。文字として `${` を含める場合は `\${` と書く。埋め込み式の中は通常の式の字句規則に従う。
+**[symbol.template-text]** テンプレートの本文では、`//` は文字として扱う。`${` は埋め込みを開始する。文字として `${` を含める場合は `\${` と書く。埋め込み式の中は通常の式の字句規則に従う。
 
 **[symbol.interpolation]** `${式}` は、式を評価した値の表示に置き換える。埋め込み式は左から右に、それぞれ1回評価する。埋め込める値の型は整数型、浮動小数点型、`bool`、`char`、列挙型、`symbol`、`text` である。それ以外の型を埋め込むとコンパイルエラーである。既存の `symbol` を埋め込んでも、その実体の保持期間は変わらない。
 
@@ -789,7 +789,7 @@ fn main() -> u8 {
 
 値の位置に、変数名、定数名、関数呼び出し、算術式、型変換などを書いた入力は変換失敗とする。入れ子も値の表記として読み、Suzの式として実行しない。
 
-**[symbol.cast-struct-symbol]** `symbol` フィールドの文字列には [symbol.escape] と [symbol.template-line] の形式を適用する。変換入力中の不正なエスケープや改行は、コンパイルエラーではなく変換失敗として扱い、`or` の処理へ進む。定数式からの変換でも同じとする。Suzのソース自体に書いたテンプレートの字句検査とは区別する。エスケープを展開した内容は、入力全体の検査後に [symbol.cast-struct-result] に従ってインターン化する。エスケープされていない `${` がある場合は変換失敗とする。文字として `${` を含める場合は `\${` と書く。バッククォートは `` \` ``、NULは `\0` で表す。
+**[symbol.cast-struct-symbol]** `symbol`・`text` フィールドの文字列には [symbol.escape] と [symbol.template-line] の形式を適用する。変換入力中の不正なエスケープや改行は、コンパイルエラーではなく変換失敗として扱い、`or` の処理へ進む。定数式からの変換でも同じとする。Suzのソース自体に書いたテンプレートの字句検査とは区別する。エスケープを展開した内容は、入力全体の検査後に [symbol.cast-struct-result] に従ってインターン化する。エスケープされていない `${` がある場合は変換失敗とする。文字として `${` を含める場合は `\${` と書く。バッククォートは `` \` ``、NULは `\0` で表す。
 
 次は、変換元の `symbol` の内容である。
 
@@ -1065,7 +1065,7 @@ fix b = top + 1     // パニックする
 
 ## 10. ログ
 
-**[log.syntax]** ログは、`log info` のあとにテンプレートを1つ書く。テンプレートの記法、埋め込み、値の表示は [symbol.template-line]、[symbol.template-symbol]、[symbol.escape]、[symbol.interpolation]、[symbol.value-format]、[symbol.float-format] に従う。
+**[log.syntax]** ログは、`log info` のあとにテンプレートを1つ書く。テンプレートの記法、埋め込み、値の表示は [symbol.template-line]、[symbol.template-text]、[symbol.escape]、[symbol.interpolation]、[symbol.value-format]、[symbol.float-format] に従う。
 
 **[log.output]** ログは、`info ファイル名:行番号: メッセージ` の形式で標準エラー出力へ書く。ファイル名と行番号は、そのログ文のソース位置を示す。行番号は 1 から数える。メッセージの末尾に改行を 1 つ追加する。
 
@@ -1155,7 +1155,7 @@ CharEscape ::= "\" ( "0" | "n" | "r" | "t" | "\" | "'"
 演算子と区切り記号は、次のトークンである。
 
 ```text
-( ) { } , : . -> =>
+( ) [ ] { } , : . -> =>
 = += -= *= /= %= +%= -%= *%= &= |= ^= <<= >>=
 + - * / % +% -% *% & | ^ ~ << >>
 == != < <= > >= && || as% ..< ..=
@@ -1269,7 +1269,7 @@ Initializer      ::= IDENT ":" Expression
 
 `IDENT` と `FunctionCall`、`StructLiteral` は、後続の `(`、`{` を含めて区別する。列挙子の `Wave.Sine` とフィールド参照の `p.x` は、名前を解決して区別する。
 
-**[symbol.cast-wrap-handler-syntax]** `as%` の `CastHandler` は、変換元が `symbol` または `text` の場合に必須とする。変換元が整数型の場合に付けるとコンパイルエラーである。整数型から整数型への `as%` は [expr.as-trunc] に従う。
+**[expr.cast-wrap-handler-syntax]** `as%` の `CastHandler` は、変換元が `symbol` または `text` の場合に必須とする。変換元が整数型の場合に付けるとコンパイルエラーである。整数型から整数型への `as%` は [expr.as-trunc] に従う。
 
 ### A.6 条件と分岐
 

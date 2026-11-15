@@ -224,7 +224,7 @@ fn main() -> u8 {
 
 主根拠：`[symbol.escape]`。
 
-補助根拠：`[log.output]`、`[symbol.template-symbol]`。
+補助根拠：`[log.output]`、`[symbol.template-text]`。
 
 **ソース：**
 

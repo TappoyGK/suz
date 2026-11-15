@@ -77,9 +77,8 @@ pub(super) fn cast_parts(
             _ => unreachable!(),
         };
         context.temporaries.push(result_type);
-        let condition = format!(
-            "{function}(suz_text_bytes({local}), suz_text_length({local}){arguments}, &suz_cmp_{output})"
-        );
+        let (bytes, length) = super::text::contents(operand.ty, &local);
+        let condition = format!("{function}({bytes}, {length}{arguments}, &suz_cmp_{output})");
         return (format!("{local} = {source}"), condition, converted);
     }
     let mut converted = format!("({}){local}", target.c_name());

@@ -64,23 +64,32 @@ pub(super) fn check(
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
                         if *wrap {
-                            "text as% requires an integer target [symbol.cast-wrap]"
+                            format!(
+                                "{} as% requires an integer target [symbol.cast-wrap]",
+                                operand.ty.name()
+                            )
                         } else {
-                            "unsupported text conversion target [symbol.cast]"
+                            format!(
+                                "unsupported {} conversion target [symbol.cast]",
+                                operand.ty.name()
+                            )
                         },
                     ));
                 }
                 if fallback.is_none() {
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
-                        "text conversion requires or [symbol.cast-handler]",
+                        format!(
+                            "{} conversion requires or [symbol.cast-handler]",
+                            operand.ty.name()
+                        ),
                     ));
                 }
             } else if *wrap {
                 if fallback.is_some() {
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
-                        "integer as% does not accept or [symbol.cast-wrap-handler-syntax]",
+                        "integer as% does not accept or [expr.cast-wrap-handler-syntax]",
                     ));
                 }
                 if !matches!((operand.ty, target), (Type::Integer(_), Type::Integer(_))) {
