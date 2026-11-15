@@ -20,7 +20,10 @@ impl Visitor for Writes<'_> {
         {
             return Err(location.error(
                 ErrorKind::InvalidSource,
-                "assignment RHS writes to the assignment target [assign.rhs-write]",
+                crate::diagnostic!(
+                    "assign.rhs-write",
+                    "assignment RHS writes to the assignment target"
+                ),
             ));
         }
         visit::walk_statement(self, statement)

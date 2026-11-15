@@ -37,13 +37,19 @@ pub(super) fn check(
             let Value::IntegerArithmetic { handler, .. } = &mut checked.value else {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
-                    "or requires a fallible integer operation [expr.arithmetic-handler]",
+                    crate::diagnostic!(
+                        "expr.arithmetic-handler",
+                        "or requires a fallible integer operation"
+                    ),
                 ));
             };
             if handler.is_some() {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
-                    "this operation already has an or handler [expr.arithmetic-handler]",
+                    crate::diagnostic!(
+                        "expr.arithmetic-handler",
+                        "this operation already has an or handler"
+                    ),
                 ));
             }
             *handler =
@@ -61,9 +67,11 @@ pub(super) fn check(
             let ty = expected
                 .or_else(|| operand_type(expr, bindings))
                 .unwrap_or_else(|| default_type(expr, bindings));
-            let ty = if matches!(ty, Type::Float(_)) {
+            let ty = if ty.is_float() {
                 match operand_type(expr, bindings) {
-                    Some(known @ Type::Float(_)) => super::super::exact::join(ty, known).unwrap(),
+                    Some(known) if known.is_float() => {
+                        super::super::exact::join(ty, known).unwrap()
+                    }
                     _ => ty,
                 }
             } else {
@@ -71,13 +79,16 @@ pub(super) fn check(
             };
             let arithmetic = matches!(&expr.kind, ExpressionKind::Negate(_))
                 || matches!(&expr.kind, ExpressionKind::Binary { operator, .. } if operator.is_arithmetic());
-            let integer_arithmetic = arithmetic && matches!(ty, Type::Integer(_));
+            let integer_arithmetic = arithmetic && ty.is_integer();
             if matches!(&expr.kind, ExpressionKind::Negate(_))
                 && matches!(ty, Type::Integer(integer) if integer.bounds().0 == 0)
             {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
-                    "integer negation requires a signed type [expr.operator-types]",
+                    crate::diagnostic!(
+                        "expr.operator-types",
+                        "integer negation requires a signed type"
+                    ),
                 ));
             }
             let integer_only = matches!(
@@ -89,20 +100,26 @@ pub(super) fn check(
                     ..
                 }
             );
-            if (integer_only && !matches!(ty, Type::Integer(_)))
-                || !matches!(
-                    (arithmetic, ty),
-                    (true, Type::Float(_) | Type::Integer(_)) | (false, Type::Integer(_))
-                )
+            if (integer_only && !ty.is_integer())
+                || !(ty.is_integer() || (arithmetic && ty.is_float()))
             {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
                     if ty == Type::Text {
-                        "text does not support arithmetic or bitwise operations [text.operations]"
+                        crate::diagnostic!(
+                            "text.operations",
+                            "text does not support arithmetic or bitwise operations"
+                        )
                     } else if ty == Type::Symbol {
-                        "symbol does not support arithmetic or bitwise operations [symbol.operations]"
+                        crate::diagnostic!(
+                            "symbol.operations",
+                            "symbol does not support arithmetic or bitwise operations"
+                        )
                     } else {
-                        "invalid operand type for this operator [expr.operator-types]"
+                        crate::diagnostic!(
+                            "expr.operator-types",
+                            "invalid operand type for this operator"
+                        )
                     },
                 ));
             }
@@ -120,12 +137,16 @@ pub(super) fn check(
                     }
                 }
                 ExpressionKind::BitNot(inner) => {
-                    if operand_type(inner, bindings).is_some_and(|known| known != ty)
+                    if operand_type(inner, bindings)
+                        .is_some_and(|known| !super::super::generic::domain::same(known, ty))
                         && !super::super::exact::is_operator(inner)
                     {
                         return Err(inner.location.error(
                             ErrorKind::InvalidSource,
-                            "bit-width operands must have the same integer type [width.same-type]",
+                            crate::diagnostic!(
+                                "width.same-type",
+                                "bit-width operands must have the same integer type"
+                            ),
                         ));
                     }
                     Value::BitNot(Box::new(expression(inner, Some(ty), bindings)?))
@@ -137,15 +158,21 @@ pub(super) fn check(
                 } => {
                     let typed_left = operand_type(left, bindings);
                     let typed_right = operand_type(right, bindings);
-                    if matches!(ty, Type::Integer(_)) {
+                    if ty.is_integer() {
                         for (operand, known) in [(left, typed_left), (right, typed_right)] {
                             if operator.is_shift() && std::ptr::eq(operand, right) {
                                 continue;
                             }
-                            if known.is_some_and(|t| t != ty)
+                            if known.is_some_and(|t| !super::super::generic::domain::same(t, ty))
                                 && !super::super::exact::is_operator(operand)
                             {
-                                return Err(operand.location.error(ErrorKind::InvalidSource,"bit-width operands must have the same integer type [width.same-type]"));
+                                return Err(operand.location.error(
+                                    ErrorKind::InvalidSource,
+                                    crate::diagnostic!(
+                                        "width.same-type",
+                                        "bit-width operands must have the same integer type"
+                                    ),
+                                ));
                             }
                         }
                     }
@@ -155,10 +182,13 @@ pub(super) fn check(
                     } else {
                         numeric_operand(right, ty, bindings)?
                     });
-                    if operator.is_shift() && !matches!(right.ty, Type::Integer(_) | Type::Exact) {
+                    if operator.is_shift() && !(right.ty.is_integer() || right.ty == Type::Exact) {
                         return Err(expr.location.error(
                             ErrorKind::InvalidSource,
-                            "shift count requires an integer type [expr.operator-types]",
+                            crate::diagnostic!(
+                                "expr.operator-types",
+                                "shift count requires an integer type"
+                            ),
                         ));
                     }
                     if integer_arithmetic {
@@ -188,7 +218,7 @@ pub(super) fn check(
             if operand.ty != Type::Bool {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
-                    "not requires a bool operand [expr.not]",
+                    crate::diagnostic!("expr.not", "not requires a bool operand"),
                 ));
             }
             CheckedExpression {
@@ -206,8 +236,9 @@ pub(super) fn check(
             if left.ty != Type::Bool || right.ty != Type::Bool {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
-                    format!(
-                        "{} requires bool operands [expr.operator-types]",
+                    crate::diagnostic!(
+                        "expr.operator-types",
+                        "{} requires bool operands",
                         operator.symbol()
                     ),
                 ));
@@ -241,10 +272,12 @@ pub(super) fn check(
                     Type::Integer(IntegerType::I64)
                 }
             });
-            let numeric = matches!(ty, Type::Integer(_) | Type::Float(_));
-            let float_type = super::joined_type(operands.iter().map(|operand| {
-                operand_type(operand, bindings).filter(|ty| matches!(ty, Type::Float(_)))
-            }))
+            let numeric = ty.is_numeric();
+            let float_type = super::joined_type(
+                operands
+                    .iter()
+                    .map(|operand| operand_type(operand, bindings).filter(|ty| ty.is_float())),
+            )
             .unwrap_or(Type::Float(FloatType::F64));
             let operands = operands
                 .iter()
@@ -265,11 +298,14 @@ pub(super) fn check(
             if numeric
                 && operands
                     .iter()
-                    .any(|v| !matches!(v.ty, Type::Integer(_) | Type::Float(_) | Type::Exact))
+                    .any(|v| !(v.ty.is_numeric() || v.ty == Type::Exact))
             {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
-                    "numeric comparison requires numeric operands [expr.operator-types]",
+                    crate::diagnostic!(
+                        "expr.operator-types",
+                        "numeric comparison requires numeric operands"
+                    ),
                 ));
             }
             if ty == Type::Void
@@ -278,7 +314,10 @@ pub(super) fn check(
             {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
-                    "ordering comparisons require numeric operands [expr.operator-types]",
+                    crate::diagnostic!(
+                        "expr.operator-types",
+                        "ordering comparisons require numeric operands"
+                    ),
                 ));
             }
             for ((op, pair), location) in operators.iter().zip(operands.windows(2)).zip(locations) {
@@ -286,7 +325,8 @@ pub(super) fn check(
                     super::super::exact::constant_comparison(&pair[0], &pair[1], *op)
                 {
                     bindings
-                        .comparison_warnings
+                        .outputs
+                        .comparisons
                         .borrow_mut()
                         .insert((location.line, location.column), result);
                 }
@@ -309,22 +349,26 @@ fn numeric_operand(
     ty: Type,
     bindings: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
-    if matches!(ty, Type::Float(_))
+    if ty.is_float()
         && !super::super::exact::is_operator(expr)
-        && let Some(from @ Type::Integer(_)) = operand_type(expr, bindings)
+        && let Some(from) = operand_type(expr, bindings)
+        && from.is_integer()
         && !super::super::exact::widening(from, ty)
     {
         return Err(expr.location.error(
             ErrorKind::InvalidSource,
-            "integer operand is not losslessly convertible; use as [arith.mix]",
+            crate::diagnostic!(
+                "arith.mix",
+                "integer operand is not losslessly convertible; use as"
+            ),
         ));
     }
-    let checked = if matches!(ty, Type::Float(_)) {
+    let checked = if ty.is_float() {
         super::coerced(expr, Some(ty), bindings)?
     } else {
         expression(expr, Some(ty), bindings)?
     };
-    if matches!(ty, Type::Float(_))
+    if ty.is_float()
         && let Value::IntegerArithmetic {
             operation: IntegerOperation::Exact(e),
             ..
@@ -336,7 +380,8 @@ fn numeric_operand(
                 ExactKind::Binary(op, a, b) => {
                     if matches!(op, BinaryOperator::Divide) {
                         bindings
-                            .division_warnings
+                            .outputs
+                            .divisions
                             .borrow_mut()
                             .insert((e.location.line, e.location.column));
                     }

@@ -25,7 +25,7 @@ pub struct Diagnostic {
     pub line: usize,
     pub column: usize,
     pub message: String,
-    pub(crate) rule_id: String,
+    pub rule_id: String,
 }
 
 impl fmt::Display for Diagnostic {
@@ -39,27 +39,40 @@ impl fmt::Display for Diagnostic {
 }
 
 impl Diagnostic {
-    pub fn new(kind: ErrorKind, line: usize, column: usize, message: impl Into<String>) -> Self {
-        let message = message.into();
-        let rule_id = message
-            .rsplit_once('[')
-            .and_then(|(_, rule)| rule.strip_suffix(']'))
-            .unwrap_or("")
-            .to_owned();
+    pub fn new(
+        kind: ErrorKind,
+        line: usize,
+        column: usize,
+        rule: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        let rule_id = rule.into();
         Self {
             related: Vec::new(),
             kind,
             line,
             column,
-            message,
+            message: format!("{} [{}]", message.into(), rule_id),
             rule_id,
         }
     }
-    /// Specification rule attached when this diagnostic was constructed.
+    /// The structured rule identifier, independent of the rendered message.
     pub fn rule(&self) -> &str {
         &self.rule_id
     }
 }
+
+#[derive(Clone)]
+pub(crate) struct DiagnosticMessage {
+    pub rule: &'static str,
+    pub text: String,
+}
+macro_rules! diagnostic {
+    ($rule:expr, $($message:tt)*) => {
+        $crate::DiagnosticMessage { rule: $rule, text: format!($($message)*) }
+    };
+}
+pub(crate) use diagnostic;
 
 impl std::error::Error for Diagnostic {}
 
@@ -180,7 +193,8 @@ fn analyze(
             ErrorKind::InvalidSource,
             line,
             column,
-            "source is not valid UTF-8 [src.encoding]",
+            "src.encoding",
+            "source is not valid UTF-8",
         )
     })?;
     for (offset, _) in source.match_indices('\r') {
@@ -190,7 +204,8 @@ fn analyze(
                 ErrorKind::InvalidSource,
                 line,
                 column,
-                "CR must be followed by LF [src.newline]",
+                "src.newline",
+                "CR must be followed by LF",
             ));
         }
     }

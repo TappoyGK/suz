@@ -9,8 +9,8 @@ pub(crate) struct Location {
 }
 
 impl Location {
-    pub fn error(self, kind: ErrorKind, message: impl Into<String>) -> Diagnostic {
-        Diagnostic::new(kind, self.line, self.column, message)
+    pub fn error(self, kind: ErrorKind, message: crate::DiagnosticMessage) -> Diagnostic {
+        Diagnostic::new(kind, self.line, self.column, message.rule, message.text)
     }
 }
 
@@ -121,9 +121,16 @@ pub(crate) struct EnumDeclaration {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ScalarType {
+    Integer(IntegerType),
+    Float(FloatType),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Type {
     GenericInt,
     GenericFloat,
+    Numeric([Option<ScalarType>; 16]), // Internal type function of int and float.
     Exact, // Internal mathematical integer; never a source-level storage type.
     Struct(usize),
     Enum(EnumType),
@@ -139,6 +146,32 @@ pub(crate) enum Type {
 impl Type {
     pub fn generic(self) -> bool {
         matches!(self, Self::GenericInt | Self::GenericFloat)
+    }
+    pub fn symbolic(self) -> bool {
+        self.generic() || matches!(self, Self::Numeric(_))
+    }
+    pub fn is_integer(self) -> bool {
+        match self {
+            Self::Integer(_) | Self::GenericInt => true,
+            Self::Numeric(types) => types
+                .iter()
+                .flatten()
+                .all(|ty| matches!(ty, ScalarType::Integer(_))),
+            _ => false,
+        }
+    }
+    pub fn is_float(self) -> bool {
+        match self {
+            Self::Float(_) | Self::GenericFloat => true,
+            Self::Numeric(types) => types
+                .iter()
+                .flatten()
+                .all(|ty| matches!(ty, ScalarType::Float(_))),
+            _ => false,
+        }
+    }
+    pub fn is_numeric(self) -> bool {
+        self.is_integer() || self.is_float()
     }
     pub fn is_text(self) -> bool {
         matches!(self, Self::Symbol | Self::Text)
@@ -187,6 +220,13 @@ impl Type {
             Self::Exact => "exact integer",
             Self::GenericInt => "int",
             Self::GenericFloat => "float",
+            Self::Numeric(_) => {
+                if self.is_integer() {
+                    "int"
+                } else {
+                    "float"
+                }
+            }
             Self::Integer(ty) => ty.name(),
             Self::Float(ty) => ty.name(),
             Self::Char => "char",
@@ -201,7 +241,7 @@ impl Type {
     pub fn c_name(self) -> String {
         match self {
             Self::Exact => "suz_exact".into(),
-            Self::GenericInt | Self::GenericFloat => {
+            Self::GenericInt | Self::GenericFloat | Self::Numeric(_) => {
                 unreachable!("generic types are resolved before code generation")
             }
             Self::Struct(id) => format!("suz_struct_{id}"),
@@ -269,6 +309,12 @@ pub(crate) struct Function {
     pub result: Type,
     pub statements: Vec<Statement>,
     pub end: Location,
+}
+
+impl Function {
+    pub fn declares_numeric(&self, ty: Type) -> bool {
+        self.result == ty || self.parameters.iter().any(|parameter| parameter.ty == ty)
+    }
 }
 
 #[derive(Clone)]

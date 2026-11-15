@@ -19,14 +19,13 @@ fn prefix(
     bindings: &mut Scope,
 ) -> Result<(Vec<super::super::ir::CheckedStatement>, Vec<String>), Diagnostic> {
     let mut next_id = bindings
+        .locals
         .values()
-        .filter(|b| b.constant.is_none())
         .map(|b| b.id + 1)
         .max()
         .unwrap_or(0);
     let mut declared = Vec::new();
-    let checked =
-        statements::check_statements(input, bindings, &mut next_id, &mut false, 0, &mut declared)?;
+    let checked = statements::check_statements(input, bindings, &mut next_id, 0, &mut declared)?;
     Ok((checked, declared))
 }
 
@@ -50,8 +49,9 @@ pub(super) fn check(
     let mut references = References(BTreeSet::new());
     references.scope(input, Some(value))?;
     let captures = bindings
+        .locals
         .iter()
-        .filter(|(name, b)| b.constant.is_none() && references.0.contains(name.as_str()))
+        .filter(|(name, _)| references.0.contains(name.as_str()))
         .map(|(_, b)| (b.id, b.ty, b.mutable))
         .collect();
     let mut local = bindings.clone();
@@ -60,12 +60,15 @@ pub(super) fn check(
     if checked_value.ty == Type::Void {
         return Err(value.location.error(
             crate::ErrorKind::InvalidSource,
-            "value block must end in a non-void expression [block.value]",
+            crate::diagnostic!(
+                "block.value",
+                "value block must end in a non-void expression"
+            ),
         ));
     }
     let value = checked_value;
     statements::finish_scope(&mut local, declared)?;
-    for (name, binding) in bindings.iter() {
+    for (name, binding) in bindings.locals.iter() {
         if local[name].assigned.get() {
             binding.assigned.set(true);
         }

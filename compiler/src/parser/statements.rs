@@ -48,14 +48,20 @@ impl Parser<'_, '_> {
         {
             return Err(self.error(
                 ErrorKind::InvalidSource,
-                "control transfers are forbidden inside value expressions [expr.jump-prohibited]",
+                crate::diagnostic!(
+                    "expr.jump-prohibited",
+                    "control transfers are forbidden inside value expressions"
+                ),
             ));
         }
         match self.token().kind {
             Kind::Keyword("allow") => self.allow_block(),
             Kind::Keyword("or") => Err(self.error(
                 ErrorKind::InvalidSource,
-                "or cannot start a statement or continue the preceding line [src.or-line]",
+                crate::diagnostic!(
+                    "src.or-line",
+                    "or cannot start a statement or continue the preceding line"
+                ),
             )),
             Kind::Keyword("log") => self.log(),
             Kind::Keyword("match") => {
@@ -76,7 +82,7 @@ impl Parser<'_, '_> {
                 let Kind::Ident(name) = self.token().kind else {
                     return Err(self.error(
                         ErrorKind::InvalidSource,
-                        "expected a loop variable name [src.ident]",
+                        crate::diagnostic!("src.ident", "expected a loop variable name"),
                     ));
                 };
                 super::names::check(super::names::Shape::Value, name, location)?;
@@ -91,7 +97,10 @@ impl Parser<'_, '_> {
                         if self.token().kind == Kind::End {
                             return Err(range_location.error(
                                 ErrorKind::InvalidSource,
-                                "expected an end bound after the range operator [for.range]",
+                                crate::diagnostic!(
+                                    "for.range",
+                                    "expected an end bound after the range operator"
+                                ),
                             ));
                         }
                         (operator == "..=", Some(self.condition()?))
@@ -100,7 +109,10 @@ impl Parser<'_, '_> {
                     _ => {
                         return Err(self.error(
                             ErrorKind::InvalidSource,
-                            "expected a range operator or loop body [for.range]",
+                            crate::diagnostic!(
+                                "for.range",
+                                "expected a range operator or loop body"
+                            ),
                         ));
                     }
                 };
@@ -117,7 +129,10 @@ impl Parser<'_, '_> {
             }
             Kind::Keyword("const" | "fn" | "enum" | "struct") => Err(self.error(
                 ErrorKind::InvalidSource,
-                "constants and functions must be declared at top level [decl.location]",
+                crate::diagnostic!(
+                    "decl.location",
+                    "constants and functions must be declared at top level"
+                ),
             )),
             Kind::Keyword("while" | "loop") => {
                 let conditional = self.token().kind == Kind::Keyword("while");
@@ -141,9 +156,9 @@ impl Parser<'_, '_> {
                     return Err(self.error(
                         ErrorKind::InvalidSource,
                         if is_break {
-                            "break does not accept a value [loop.break]"
+                            crate::diagnostic!("loop.break", "break does not accept a value")
                         } else {
-                            "continue does not accept a value [loop.continue]"
+                            crate::diagnostic!("loop.continue", "continue does not accept a value")
                         },
                     ));
                 }
@@ -156,7 +171,7 @@ impl Parser<'_, '_> {
             Kind::Keyword("if") => self.if_statement(),
             Kind::Keyword("elif" | "else") => Err(self.error(
                 ErrorKind::InvalidSource,
-                "unexpected branch clause [if.elif]",
+                crate::diagnostic!("if.elif", "unexpected branch clause"),
             )),
             Kind::Symbol("{") => {
                 let (statements, _) = self.block()?;
@@ -171,13 +186,13 @@ impl Parser<'_, '_> {
                     Kind::Keyword(_) | Kind::TypeName(_) | Kind::Wildcard => {
                         return Err(self.error(
                             ErrorKind::InvalidSource,
-                            "expected a non-reserved identifier [src.ident]",
+                            crate::diagnostic!("src.ident", "expected a non-reserved identifier"),
                         ));
                     }
                     _ => {
                         return Err(self.error(
                             ErrorKind::InvalidSource,
-                            "expected a binding name [var.decl]",
+                            crate::diagnostic!("var.decl", "expected a binding name"),
                         ));
                     }
                 };
@@ -189,7 +204,7 @@ impl Parser<'_, '_> {
                     if ty == Type::Void {
                         return Err(self.error(
                             ErrorKind::InvalidSource,
-                            "bindings cannot have type void [type.void]",
+                            crate::diagnostic!("type.void", "bindings cannot have type void"),
                         ));
                     }
                     Some(ty)
@@ -199,7 +214,7 @@ impl Parser<'_, '_> {
                 if self.token().kind != Kind::Symbol("=") {
                     return Err(self.error(
                         ErrorKind::InvalidSource,
-                        "a binding requires an initializer [var.initializer]",
+                        crate::diagnostic!("var.initializer", "a binding requires an initializer"),
                     ));
                 }
                 self.cursor += 1;
@@ -286,7 +301,7 @@ impl Parser<'_, '_> {
             if self.token().kind == Kind::End {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
-                    "expected '}' to close the block [syntax.grammar]",
+                    crate::diagnostic!("syntax.grammar", "expected '}}' to close the block"),
                 ));
             }
             statements.push(self.statement()?);
@@ -306,19 +321,25 @@ impl Parser<'_, '_> {
                 | Kind::Symbol("{" | "~") => {
                     return Err(self.error(
                         ErrorKind::InvalidSource,
-                        "statements must be separated by a newline [src.statement-end]",
+                        crate::diagnostic!(
+                            "src.statement-end",
+                            "statements must be separated by a newline"
+                        ),
                     ));
                 }
                 Kind::Keyword("elif" | "else") => {
                     return Err(self.error(
                         ErrorKind::InvalidSource,
-                        "unexpected branch clause [if.elif]",
+                        crate::diagnostic!("if.elif", "unexpected branch clause"),
                     ));
                 }
                 _ => {
                     return Err(self.error(
                         ErrorKind::InvalidSource,
-                        "expected a newline or '}' after the statement [src.statement-end]",
+                        crate::diagnostic!(
+                            "src.statement-end",
+                            "expected a newline or '}}' after the statement"
+                        ),
                     ));
                 }
             }

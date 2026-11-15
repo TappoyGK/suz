@@ -71,7 +71,10 @@ pub(super) fn dependencies(
         | ExpressionKind::Match { .. } => {
             return Err(expr.location.error(
                 ErrorKind::InvalidSource,
-                "value blocks are not constant expressions [const.expression]",
+                crate::diagnostic!(
+                    "const.expression",
+                    "value blocks are not constant expressions"
+                ),
             ));
         }
     }
@@ -86,7 +89,10 @@ fn handler_dependencies(
         Some(FailureHandler::Value(value)) => dependencies(value, names),
         Some(FailureHandler::Return { location, .. }) => Err(location.error(
             ErrorKind::InvalidSource,
-            "control transfers are not constant expressions [const.expression]",
+            crate::diagnostic!(
+                "const.expression",
+                "control transfers are not constant expressions"
+            ),
         )),
         None => Ok(()),
     }
@@ -107,13 +113,13 @@ impl Resolver<'_> {
         let declaration = *self.declarations.get(name).ok_or_else(|| {
             location.error(
                 ErrorKind::InvalidSource,
-                format!("'{name}' is not a constant [const.expression]"),
+                crate::diagnostic!("const.expression", "'{name}' is not a constant"),
             )
         })?;
         if !self.visiting.insert(name.to_owned()) {
             return Err(location.error(
                 ErrorKind::InvalidSource,
-                "cyclic constant dependency [const.initializer]",
+                crate::diagnostic!("const.initializer", "cyclic constant dependency"),
             ));
         }
         // Resolve every dependency, even in an unselected branch. Constant
@@ -132,14 +138,16 @@ impl Resolver<'_> {
         let value = constants::evaluate(&checked)?.ok_or_else(|| {
             declaration.location.error(
                 ErrorKind::Unsupported,
-                "this constant expression is not implemented",
+                crate::diagnostic!(
+                    "const.initializer",
+                    "this constant expression is not implemented"
+                ),
             )
         })?;
         super::text::register_constants(&value, &self.bindings);
-        self.bindings.insert(
+        self.bindings.locals.insert(
             name.to_owned(),
             Binding {
-                generic_dependent: false,
                 loop_variable: false,
                 // Constants are substituted as evaluated values, not local slots.
                 id: 0,
@@ -182,8 +190,9 @@ pub(super) fn resolve(
         {
             return Err(declaration.location.error(
                 ErrorKind::InvalidSource,
-                format!(
-                    "duplicate declaration '{}' [decl.duplicate]",
+                crate::diagnostic!(
+                    "decl.duplicate",
+                    "duplicate declaration '{}'",
                     declaration.name
                 ),
             ));

@@ -29,10 +29,13 @@ pub(super) fn check(expr: &Expression, bindings: &Scope) -> Result<CheckedExpres
         });
     let bound = |value: &Expression| -> Result<Box<CheckedExpression>, Diagnostic> {
         let checked = expression(value, bound_type, bindings)?;
-        if !matches!(checked.ty, Type::Integer(_)) {
+        if !checked.ty.is_integer() {
             return Err(value.location.error(
                 ErrorKind::InvalidSource,
-                "text positions require integer operands [text.slice-bounds]",
+                crate::diagnostic!(
+                    "text.slice-bounds",
+                    "text positions require integer operands"
+                ),
             ));
         }
         Ok(Box::new(checked))
@@ -44,9 +47,9 @@ pub(super) fn check(expr: &Expression, bindings: &Scope) -> Result<CheckedExpres
         return Err(expr.location.error(
             ErrorKind::InvalidSource,
             if fallible {
-                "text extraction requires or [text.slice-handler]"
+                crate::diagnostic!("text.slice-handler", "text extraction requires or")
             } else {
-                "full text view does not accept or [text.slice-handler]"
+                crate::diagnostic!("text.slice-handler", "full text view does not accept or")
             },
         ));
     }

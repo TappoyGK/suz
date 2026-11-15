@@ -1,10 +1,6 @@
 use super::statements::Binding;
 use crate::ast::{IntegerType, Type};
-use std::{
-    collections::BTreeMap,
-    ops::{Deref, DerefMut},
-    rc::Rc,
-};
+use std::{collections::BTreeMap, rc::Rc};
 
 #[derive(Clone)]
 pub(super) struct Signature {
@@ -25,29 +21,28 @@ impl Signature {
     }
 }
 
+// Diagnostics and runtime constants share their destinations across lexical scopes.
 #[derive(Clone, Default)]
-pub(super) struct TemplateAnalysis {
-    pub errors: Rc<std::cell::RefCell<Vec<crate::Diagnostic>>>,
-    pub casts:
-        Rc<std::cell::RefCell<Vec<(crate::ast::Location, super::expression::casts::CastRisk)>>>,
+pub(super) struct Outputs {
+    pub divisions: Rc<std::cell::RefCell<std::collections::BTreeSet<(usize, usize)>>>,
+    pub comparisons: Rc<std::cell::RefCell<BTreeMap<(usize, usize), bool>>>,
+    pub constant_texts: Rc<std::cell::RefCell<std::collections::BTreeSet<String>>>,
 }
 
 #[derive(Clone)]
 pub(super) struct Scope {
+    // Concrete substitution, used only while constructing an emitted instance.
     pub generic_types: super::generic::GenericTypes,
+    // Persistent path from the initiating call to this instance.
     pub generic_calls: Option<Rc<super::generic::CallTrace>>,
+    // The shared checker uses symbolic int/float types in the generic pass.
     pub analyzing_generic: bool,
-    // Template observations are shared by nested scopes, isolated by speculation.
-    pub analysis: TemplateAnalysis,
     pub instances: Rc<std::cell::RefCell<super::generic::Instances>>,
     // Expression-pointer caches live for one hint session and one substitution.
     pub type_hints: Rc<std::cell::RefCell<BTreeMap<usize, Option<Type>>>>,
     pub float_hints: Rc<std::cell::RefCell<BTreeMap<usize, bool>>>,
     pub hint_depth: Rc<std::cell::Cell<usize>>,
-    // Collected outputs for diagnostics and constant registration.
-    pub division_warnings: Rc<std::cell::RefCell<std::collections::BTreeSet<(usize, usize)>>>,
-    pub comparison_warnings: Rc<std::cell::RefCell<BTreeMap<(usize, usize), bool>>>,
-    pub constant_texts: Rc<std::cell::RefCell<std::collections::BTreeSet<String>>>,
+    pub outputs: Outputs,
     pub locals: BTreeMap<String, Binding>,
     // Immutable declarations are shared; only local binding state is copied.
     pub constants: Rc<BTreeMap<String, Binding>>,
@@ -64,19 +59,21 @@ impl Scope {
         self.get(name).is_some()
     }
     pub fn resolve_type(&self, ty: Type) -> Type {
-        self.generic_types.resolve(ty)
+        if self.analyzing_generic {
+            ty
+        } else {
+            self.generic_types.resolve(ty)
+        }
     }
     pub fn in_generic(&self) -> bool {
         !self.generic_types.is_empty()
     }
-    // Isolate outputs while preserving caches for the same type substitution.
+    // Type discovery isolates effects while retaining the current type caches.
+    // This is a read-only probe of an expression, not a generic checking mode.
     pub fn speculative(&self) -> Self {
         Self {
-            analysis: Default::default(),
             instances: Default::default(),
-            division_warnings: Default::default(),
-            comparison_warnings: Default::default(),
-            constant_texts: Default::default(),
+            outputs: Default::default(),
             ..self.clone()
         }
     }
@@ -99,14 +96,11 @@ impl Default for Scope {
             generic_types: Default::default(),
             generic_calls: None,
             analyzing_generic: false,
-            analysis: Default::default(),
             instances: Rc::default(),
             type_hints: Rc::default(),
             hint_depth: Rc::default(),
             float_hints: Rc::default(),
-            division_warnings: Rc::default(),
-            comparison_warnings: Rc::default(),
-            constant_texts: Rc::default(),
+            outputs: Default::default(),
             locals: BTreeMap::new(),
             constants: Rc::default(),
             enums: Rc::default(),
@@ -116,18 +110,6 @@ impl Default for Scope {
         }
     }
 }
-impl Deref for Scope {
-    type Target = BTreeMap<String, Binding>;
-    fn deref(&self) -> &Self::Target {
-        &self.locals
-    }
-}
-impl DerefMut for Scope {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.locals
-    }
-}
-
 impl std::ops::Index<&str> for Scope {
     type Output = Binding;
     fn index(&self, name: &str) -> &Binding {

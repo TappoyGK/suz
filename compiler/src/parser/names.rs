@@ -51,7 +51,7 @@ pub(super) fn check(shape: Shape, name: &str, location: Location) -> Result<(), 
     } else {
         Err(location.error(
             ErrorKind::InvalidSource,
-            format!("invalid name '{name}': {description} [{rule}]"),
+            crate::diagnostic!(rule, "invalid name '{name}': {description}"),
         ))
     }
 }

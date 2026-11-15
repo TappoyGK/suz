@@ -30,6 +30,8 @@ pub(super) fn operand_type(expr: &Expression, bindings: &Scope) -> Option<Type> 
 }
 
 fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
+    #[cfg(test)]
+    super::generic::work();
     match &expr.kind {
         ExpressionKind::Slice { index, .. } => Some(if *index { Type::Char } else { Type::Text }),
         ExpressionKind::Template(_) => Some(Type::Symbol),
@@ -87,10 +89,7 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
                 return a;
             }
             if operator.is_arithmetic() {
-                let floats = [a, b]
-                    .into_iter()
-                    .flatten()
-                    .filter(|t| matches!(t, Type::Float(_)));
+                let floats = [a, b].into_iter().flatten().filter(|t| t.is_float());
                 if let Some(ty) = joined_type(floats.map(Some)) {
                     return Some(ty);
                 }
@@ -111,6 +110,7 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
     }
 }
 
+// Float literals and generic float results select floating-point arithmetic.
 // Only result-producing operands participate; conditions and cast sources do not.
 pub(super) fn has_float_source(expr: &Expression, bindings: &Scope) -> bool {
     let key = std::ptr::from_ref(expr) as usize;
@@ -168,7 +168,7 @@ fn default_type(expr: &Expression, bindings: &Scope) -> Type {
         Type::Integer(IntegerType::I64)
     }
 }
-fn float_literal(
+pub(in crate::check) fn float_literal(
     text: &str,
     ty: FloatType,
     location: Location,
@@ -176,31 +176,36 @@ fn float_literal(
     let invalid = || {
         location.error(
             ErrorKind::InvalidSource,
-            "floating-point literal is out of range [lit.float-range]",
+            crate::diagnostic!("lit.float-range", "floating-point literal is out of range"),
         )
     };
-    let special = matches!(text, "nan" | "-nan" | "inf" | "-inf");
-    let text = text.replace('_', "");
-    let bits = match ty {
-        FloatType::F32 => {
-            let value = text.parse::<f32>().map_err(|_| invalid())?;
-            if value.is_infinite() && !special {
-                return Err(invalid());
-            }
-            u64::from(value.to_bits())
-        }
-        FloatType::F64 => {
-            let value = text.parse::<f64>().map_err(|_| invalid())?;
-            if value.is_infinite() && !special {
-                return Err(invalid());
-            }
-            value.to_bits()
-        }
-    };
+    let bits = float_bits(text, ty).ok_or_else(invalid)?;
     Ok(CheckedExpression {
         ty: Type::Float(ty),
         value: Value::Float(bits),
     })
+}
+
+pub(in crate::check) fn float_bits(text: &str, ty: FloatType) -> Option<u64> {
+    let special = matches!(text, "nan" | "-nan" | "inf" | "-inf");
+    let text = text.replace('_', "");
+    let bits = match ty {
+        FloatType::F32 => {
+            let value = text.parse::<f32>().ok()?;
+            if value.is_infinite() && !special {
+                return None;
+            }
+            u64::from(value.to_bits())
+        }
+        FloatType::F64 => {
+            let value = text.parse::<f64>().ok()?;
+            if value.is_infinite() && !special {
+                return None;
+            }
+            value.to_bits()
+        }
+    };
+    Some(bits)
 }
 
 // Hints are shared only while checking one live AST expression. Clear them at
@@ -249,7 +254,8 @@ pub(super) fn coerced(
     Ok(checked)
 }
 
-// This context belongs only to the argument boundary, never to its subexpressions.
+// This context belongs only to the argument boundary. Parentheses preserve
+// that boundary; other subexpressions use their own ordinary checking context.
 pub(super) fn generic_argument(
     expr: &Expression,
     expected: Type,
@@ -272,16 +278,16 @@ fn expression_inner(
     let required = expected;
     // Infer an incompatible family independently so that the outer parameter
     // owns the conversion diagnostic, including for nested generic calls.
-    let expected = if argument == Some(super::generic::Family::Int)
+    let inference_hint = if argument == Some(super::generic::Family::Int)
         && (has_float_source(expr, bindings)
-            || matches!(operand_type(expr, bindings), Some(Type::Float(_))))
+            || operand_type(expr, bindings).is_some_and(Type::is_float))
     {
         None
     } else {
         expected
     };
     let checked = if super::exact::is_operator(expr) && super::exact::integer(expr, bindings) {
-        super::exact::check(expr, expected, bindings, false)?
+        super::exact::check(expr, inference_hint, bindings, false)?
     } else {
         match &expr.kind {
             ExpressionKind::Slice { .. } => slices::check(expr, bindings)?,
@@ -297,8 +303,10 @@ fn expression_inner(
                     .iter()
                     .find(|e| &e.name == enum_name)
                     .ok_or_else(|| {
-                        expr.location
-                            .error(ErrorKind::InvalidSource, "unknown enum type [enum.access]")
+                        expr.location.error(
+                            ErrorKind::InvalidSource,
+                            crate::diagnostic!("enum.access", "unknown enum type"),
+                        )
                     })?;
                 let value = decl
                     .variants
@@ -307,7 +315,7 @@ fn expression_inner(
                     .ok_or_else(|| {
                         expr.location.error(
                             ErrorKind::InvalidSource,
-                            "unknown enum variant [enum.access]",
+                            crate::diagnostic!("enum.access", "unknown enum variant"),
                         )
                     })?;
                 CheckedExpression {
@@ -323,10 +331,10 @@ fn expression_inner(
                 value: Value::Void,
             },
             ExpressionKind::Call { name, arguments } => {
-                super::functions::call(expr, name, arguments, expected, bindings)?
+                super::functions::call(expr, name, arguments, inference_hint, bindings)?
             }
             ExpressionKind::Block { statements, value } => {
-                blocks::check(statements, value, expected, bindings)?
+                blocks::check(statements, value, inference_hint, bindings)?
             }
             ExpressionKind::ArithmeticHandler { .. }
             | ExpressionKind::BitNot(_)
@@ -334,24 +342,49 @@ fn expression_inner(
             | ExpressionKind::Binary { .. }
             | ExpressionKind::Not(_)
             | ExpressionKind::Logical { .. }
-            | ExpressionKind::Comparison { .. } => operators::check(expr, expected, bindings)?,
+            | ExpressionKind::Comparison { .. } => {
+                operators::check(expr, inference_hint, bindings)?
+            }
             ExpressionKind::Cast { .. } => casts::check(expr, bindings)?,
+            ExpressionKind::Float(text) if inference_hint.is_some_and(Type::symbolic) => {
+                let ty = inference_hint.unwrap();
+                if !ty.is_float() {
+                    return Err(expr.location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "type.expected",
+                            "a floating-point literal requires a floating-point type"
+                        ),
+                    ));
+                }
+                symbolic_literal(text, false, ty, expr.location)?
+            }
             ExpressionKind::Float(text) => {
-                let ty = match expected {
+                let ty = match inference_hint {
                     None => FloatType::F64,
                     Some(Type::Float(ty)) => ty,
-                    _ => return Err(expr.location.error(
-                        ErrorKind::InvalidSource,
-                        "a floating-point literal requires a floating-point type [type.expected]",
-                    )),
+                    _ => {
+                        return Err(expr.location.error(
+                            ErrorKind::InvalidSource,
+                            crate::diagnostic!(
+                                "type.expected",
+                                "a floating-point literal requires a floating-point type"
+                            ),
+                        ));
+                    }
                 };
                 float_literal(text, ty, expr.location)?
             }
             ExpressionKind::Match { .. } | ExpressionKind::If { .. } => {
-                branches::check(expr, expected, bindings)?
+                branches::check(expr, inference_hint, bindings)?
+            }
+            ExpressionKind::Integer { digits, negative }
+                if inference_hint.is_some_and(Type::symbolic) =>
+            {
+                symbolic_literal(digits, *negative, inference_hint.unwrap(), expr.location)?
             }
             ExpressionKind::Integer { digits, negative } => {
-                if let Some(Type::Float(ty)) = expected {
+                if let Some(Type::Float(ty)) = inference_hint {
                     let text = if *negative {
                         format!("-{digits}")
                     } else {
@@ -359,10 +392,11 @@ fn expression_inner(
                     };
                     return float_literal(&text, ty, expr.location);
                 }
-                let ty = match expected {
+                let ty = match inference_hint {
                     Some(Type::Float(_)) => unreachable!(),
                     Some(
-                        Type::GenericInt
+                        Type::Numeric(_)
+                        | Type::GenericInt
                         | Type::GenericFloat
                         | Type::Exact
                         | Type::Char
@@ -375,7 +409,10 @@ fn expression_inner(
                     ) => {
                         return Err(expr.location.error(
                             ErrorKind::InvalidSource,
-                            "an integer literal requires a numeric type [type.expected]",
+                            crate::diagnostic!(
+                                "type.expected",
+                                "an integer literal requires a numeric type"
+                            ),
                         ));
                     }
                     Some(Type::Integer(ty)) => ty,
@@ -384,8 +421,9 @@ fn expression_inner(
                 let fail = || {
                     expr.location.error(
                         ErrorKind::InvalidSource,
-                        format!(
-                            "integer literal is out of range for {} [lit.range]",
+                        crate::diagnostic!(
+                            "lit.range",
+                            "integer literal is out of range for {}",
                             ty.name()
                         ),
                     )
@@ -399,7 +437,10 @@ fn expression_inner(
                 if *negative && min == 0 {
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
-                        "integer negation requires a signed type [expr.operator-types]",
+                        crate::diagnostic!(
+                            "expr.operator-types",
+                            "integer negation requires a signed type"
+                        ),
                     ));
                 }
                 CheckedExpression {
@@ -425,7 +466,7 @@ fn expression_inner(
                 let binding = bindings.get(name).ok_or_else(|| {
                     expr.location.error(
                         ErrorKind::InvalidSource,
-                        format!("binding '{name}' is not in scope [decl.local-scope]"),
+                        crate::diagnostic!("decl.local-scope", "binding '{name}' is not in scope"),
                     )
                 })?;
                 binding.constant.clone().unwrap_or(CheckedExpression {
@@ -438,8 +479,8 @@ fn expression_inner(
             }
         }
     };
-    let expected = required;
-    if let Some(ty) = expected
+
+    if let Some(ty) = required
         && widen
         && ty != checked.ty
         && super::exact::widening(checked.ty, ty)
@@ -449,44 +490,53 @@ fn expression_inner(
             value: Value::Cast(Box::new(checked)),
         });
     }
-    if expected == Some(Type::Text) && checked.ty == Type::Symbol {
+    if required == Some(Type::Text) && checked.ty == Type::Symbol {
         return Ok(CheckedExpression {
             ty: Type::Text,
             value: Value::TextView(Box::new(checked)),
         });
     }
-    if expected.is_some_and(|ty| ty != checked.ty) {
-        let numeric = |ty| matches!(ty, Type::Integer(_) | Type::Float(_));
+    if required.is_some_and(|ty| !super::generic::domain::same(ty, checked.ty)) {
+        let numeric = Type::is_numeric;
         let generic_result = matches!(&expr.kind, ExpressionKind::Call { name, .. }
-            if bindings.functions.get(name).is_some_and(|f| f.is_generic()));
+            if bindings.functions.get(name).is_some_and(|f| f.result.generic()));
         if numeric(checked.ty)
-            && numeric(expected.unwrap())
+            && numeric(required.unwrap())
             && (argument.is_some() || generic_result)
         {
-            let message = if argument == Some(super::generic::Family::Int)
-                && matches!(checked.ty, Type::Float(_))
+            let message = if argument == Some(super::generic::Family::Int) && checked.ty.is_float()
             {
-                "floating-point values cannot be passed to an int parameter [num.fn-convert]"
-                    .to_owned()
+                crate::diagnostic!(
+                    "num.fn-convert",
+                    "floating-point values cannot be passed to an int parameter"
+                )
+                .to_owned()
             } else {
-                format!(
-                    "{} {} cannot be received as {} without loss [num.fn-convert]",
+                crate::diagnostic!(
+                    "num.fn-convert",
+                    "{} {} cannot be {} as {} without loss",
                     if argument.is_some() {
                         "argument"
                     } else {
                         "generic result"
                     },
                     bindings.type_name(checked.ty),
-                    bindings.type_name(expected.unwrap())
+                    if argument.is_some() {
+                        "passed"
+                    } else {
+                        "received"
+                    },
+                    bindings.type_name(required.unwrap())
                 )
             };
             return Err(expr.location.error(ErrorKind::InvalidSource, message));
         }
         return Err(expr.location.error(
             ErrorKind::InvalidSource,
-            format!(
-                "expected {}, found {} [type.expected]",
-                bindings.type_name(expected.unwrap()),
+            crate::diagnostic!(
+                "type.expected",
+                "expected {}, found {}",
+                bindings.type_name(required.unwrap()),
                 bindings.type_name(checked.ty)
             ),
         ));
@@ -500,51 +550,62 @@ pub(super) fn joined_type(types: impl Iterator<Item = Option<Type>>) -> Option<T
         .reduce(|a, b| super::exact::join(a, b).unwrap_or(a))
 }
 
-// Track only whether a type depends on template parameters; source ASTs are
-// never copied into bindings. Concrete annotations terminate this dependence.
-pub(super) fn generic_dependent(expr: &Expression, scope: &Scope) -> bool {
-    if !scope.in_generic() {
-        return false;
+// A literal is checked once. Width-dependent range failures are deferred;
+// the value keeps its symbolic type for the enclosing rule.
+fn symbolic_literal(
+    text: &str,
+    negative: bool,
+    ty: Type,
+    location: Location,
+) -> Result<CheckedExpression, Diagnostic> {
+    use super::generic::domain::{at, judge};
+    if ty.is_integer() {
+        let value = text
+            .parse::<i128>()
+            .ok()
+            .and_then(|n| if negative { n.checked_neg() } else { Some(n) });
+        if let Some(value) = value
+            && judge(ty, ty, |t, _| {
+                let (lo, hi) = t.integer_bounds().unwrap();
+                value >= lo && value <= hi && (!negative || lo < 0)
+            })
+            .possible()
+        {
+            return Ok(CheckedExpression {
+                ty,
+                value: Value::Integer {
+                    value,
+                    minus: negative.then_some(location),
+                },
+            });
+        }
+        return Err(location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!("lit.range", "integer literal is out of range for int"),
+        ));
     }
-    match &expr.kind {
-        ExpressionKind::Name(name) => scope.get(name).is_some_and(|b| b.generic_dependent),
-        ExpressionKind::Call { name, .. } => scope
-            .functions
-            .get(name)
-            .is_some_and(|f| f.result.generic()),
-        ExpressionKind::Cast { target, .. } => target.generic(),
-        ExpressionKind::Group(e)
-        | ExpressionKind::Negate(e)
-        | ExpressionKind::BitNot(e)
-        | ExpressionKind::ArithmeticHandler { operand: e, .. } => generic_dependent(e, scope),
-        ExpressionKind::Binary { left, right, .. } => {
-            generic_dependent(left, scope) || generic_dependent(right, scope)
+    if ty.is_float() {
+        let text = if negative {
+            format!("-{text}")
+        } else {
+            text.to_owned()
+        };
+        for i in 0..16 {
+            if let Some(Type::Float(t)) = at(ty, i)
+                && let Ok(mut value) = float_literal(&text, t, location)
+            {
+                value.ty = ty;
+                value.value = Value::GenericFloatLiteral(text.clone());
+                return Ok(value);
+            }
         }
-        ExpressionKind::If {
-            branches,
-            otherwise,
-        } => {
-            branches.iter().any(|(_, e)| generic_dependent(e, scope))
-                || generic_dependent(otherwise, scope)
-        }
-        ExpressionKind::Match { arms, .. } => {
-            arms.iter().any(|a| generic_dependent(&a.body, scope))
-        }
-        // Block-local bindings are checked by the ordinary checker. Conservatively
-        // retain dependence when a block is used as a numeric cast operand.
-        ExpressionKind::Block { .. } => true,
-        ExpressionKind::Void
-        | ExpressionKind::Integer { .. }
-        | ExpressionKind::Float(_)
-        | ExpressionKind::Bool(_)
-        | ExpressionKind::Char(_)
-        | ExpressionKind::Template(_)
-        | ExpressionKind::Struct { .. }
-        | ExpressionKind::Field { .. }
-        | ExpressionKind::Variant { .. }
-        | ExpressionKind::Slice { .. }
-        | ExpressionKind::Not(_)
-        | ExpressionKind::Logical { .. }
-        | ExpressionKind::Comparison { .. } => false,
+        return Err(location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "lit.float-range",
+                "floating-point literal is out of range for float"
+            ),
+        ));
     }
+    unreachable!("symbolic numeric type")
 }

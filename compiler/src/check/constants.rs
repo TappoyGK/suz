@@ -1,3 +1,4 @@
+pub(super) mod generic;
 use super::ir::{CheckedExpression, CheckedHandler, IntegerOperation, Value};
 use crate::ast::{BinaryOperator, FloatType, IntegerType, Type};
 use crate::numeric::Int;
@@ -324,9 +325,7 @@ fn constant_bool_raw(expr: &CheckedExpression) -> Option<bool> {
                     }
                 } else {
                     match left.ty {
-                        Type::GenericInt | Type::GenericFloat => unreachable!(
-                            "generic annotations are substituted before checking values"
-                        ),
+                        Type::GenericInt | Type::GenericFloat | Type::Numeric(_) => return None,
                         Type::Symbol | Type::Text => {
                             let (Value::Text { text: a, .. }, Value::Text { text: b, .. }) =
                                 (&left.value, &right.value)
@@ -424,9 +423,7 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
         return slice_value(expr);
     }
     let value = match expr.ty {
-        Type::GenericInt | Type::GenericFloat => {
-            unreachable!("generic annotations are substituted before checking values")
-        }
+        Type::GenericInt | Type::GenericFloat | Type::Numeric(_) => return None,
         Type::Symbol | Type::Text => match &expr.value {
             Value::Text { .. } => expr.value.clone(),
             Value::Template {
@@ -463,6 +460,7 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
             };
             let n = super::exact::evaluate(e)?.ok()?;
             Value::Exact(Box::new(super::exact::Exact {
+                domains: None,
                 arithmetic: false,
                 kind: super::exact::ExactKind::Literal(n),
                 range: Some(crate::numeric::Range::point(n)),
@@ -533,7 +531,10 @@ pub(super) fn is_constant(expr: &CheckedExpression) -> bool {
             crate::ast::TemplatePart::Text(_) => true,
             crate::ast::TemplatePart::Value(value) => is_constant(value),
         }),
-        Value::Integer { .. } | Value::Float(_) | Value::Bool(_) => true,
+        Value::GenericFloatLiteral(_)
+        | Value::Integer { .. }
+        | Value::Float(_)
+        | Value::Bool(_) => true,
         Value::Cast(inner)
         | Value::Negate(inner)
         | Value::Truncate(inner)
@@ -636,7 +637,7 @@ fn validate_evaluation(expr: &CheckedExpression) -> Result<(), Diagnostic> {
             }
             return Err(location.error(
                 ErrorKind::InvalidSource,
-                "constant integer arithmetic failed [const.evaluation]",
+                crate::diagnostic!("const.evaluation", "constant integer arithmetic failed"),
             ));
         }
         return Ok(());
@@ -693,7 +694,7 @@ fn validate_evaluation(expr: &CheckedExpression) -> Result<(), Diagnostic> {
                 }
                 return Err(location.error(
                     ErrorKind::InvalidSource,
-                    "constant integer arithmetic failed [const.evaluation]",
+                    crate::diagnostic!("const.evaluation", "constant integer arithmetic failed"),
                 ));
             }
         }

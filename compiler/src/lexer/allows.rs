@@ -12,7 +12,10 @@ pub(crate) fn scan(source: &str, line: usize, column: usize) -> Result<usize, Di
                 line,
                 column + source[..offset].chars().count(),
                 ErrorKind::InvalidSource,
-                "control characters are forbidden in an allow item [allow.reason]",
+                crate::diagnostic!(
+                    "allow.reason",
+                    "control characters are forbidden in an allow item"
+                ),
             ));
         }
     }
@@ -20,6 +23,6 @@ pub(crate) fn scan(source: &str, line: usize, column: usize) -> Result<usize, Di
         line,
         column,
         ErrorKind::InvalidSource,
-        "unclosed allow item [allow.item]",
+        crate::diagnostic!("allow.item", "unclosed allow item"),
     ))
 }

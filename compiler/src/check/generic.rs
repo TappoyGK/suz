@@ -1,3 +1,4 @@
+pub(crate) mod domain;
 mod policy;
 mod validation;
 
@@ -44,10 +45,10 @@ impl Family {
         }
     }
     fn contains(self, ty: Type) -> bool {
-        matches!(
-            (self, ty),
-            (Self::Int, Type::Integer(_)) | (Self::Float, Type::Float(_))
-        )
+        match self {
+            Self::Int => ty.is_integer(),
+            Self::Float => ty.is_float(),
+        }
     }
 }
 
@@ -120,6 +121,32 @@ impl Instances {
     }
 }
 
+pub(super) struct ResolvedTypes {
+    int: Option<Type>,
+    float: Option<Type>,
+}
+impl ResolvedTypes {
+    pub fn resolve(&self, ty: Type) -> Type {
+        match ty {
+            Type::GenericInt => self.int.unwrap(),
+            Type::GenericFloat => self.float.unwrap(),
+            _ => ty,
+        }
+    }
+    pub fn concrete(&self) -> GenericTypes {
+        GenericTypes {
+            int: self.int.map(|ty| match ty {
+                Type::Integer(t) => t,
+                _ => unreachable!("instantiation requires concrete types"),
+            }),
+            float: self.float.map(|ty| match ty {
+                Type::Float(t) => t,
+                _ => unreachable!("instantiation requires concrete types"),
+            }),
+        }
+    }
+}
+
 fn without_groups(mut expr: &Expression) -> &Expression {
     while let ExpressionKind::Group(inner) = &expr.kind {
         expr = inner;
@@ -174,8 +201,11 @@ pub(super) fn resolve(
     expected: Option<Type>,
     scope: &Scope,
     location: Location,
-) -> Result<GenericTypes, Diagnostic> {
-    let mut result = GenericTypes::default();
+) -> Result<ResolvedTypes, Diagnostic> {
+    let mut result = ResolvedTypes {
+        int: None,
+        float: None,
+    };
     for family in [Family::Int, Family::Float] {
         if !signature.declares(family) {
             continue;
@@ -195,26 +225,17 @@ pub(super) fn resolve(
                 Some(from) => super::exact::join(from, ty).ok_or_else(|| {
                     location.error(
                         ErrorKind::InvalidSource,
-                        "generic arguments have no common numeric type [num.fn-resolve]",
+                        crate::diagnostic!(
+                            "num.fn-resolve",
+                            "generic arguments have no common numeric type"
+                        ),
                     )
                 })?,
             });
         }
         match family {
-            Family::Int => {
-                result.int = Some(match joined {
-                    Some(Type::Integer(t)) => t,
-                    None => IntegerType::I64,
-                    _ => unreachable!("integer candidates only"),
-                });
-            }
-            Family::Float => {
-                result.float = Some(match joined {
-                    Some(Type::Float(t)) => t,
-                    None => FloatType::F64,
-                    _ => unreachable!("float candidates only"),
-                });
-            }
+            Family::Int => result.int = Some(joined.unwrap_or(Type::Integer(IntegerType::I64))),
+            Family::Float => result.float = Some(joined.unwrap_or(Type::Float(FloatType::F64))),
         }
     }
     Ok(result)
@@ -231,4 +252,30 @@ pub(super) fn call_operand_type(
     let mut types = Vec::new();
     candidates(signature, arguments, family, scope, &mut types);
     expression::joined_type(types.into_iter().map(Some))
+}
+
+#[cfg(test)]
+thread_local! { static WORK_BUDGET: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) }; }
+#[cfg(test)]
+pub(super) fn work() {
+    WORK_BUDGET.with(|budget| {
+        if let Some(left) = budget.get() {
+            budget.set(Some(
+                left.checked_sub(1)
+                    .expect("generic checking exceeded its traversal budget"),
+            ));
+        }
+    });
+}
+#[cfg(test)]
+pub(super) fn with_work_budget<T>(budget: usize, run: impl FnOnce() -> T) -> T {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            WORK_BUDGET.with(|budget| budget.set(None));
+        }
+    }
+    WORK_BUDGET.with(|value| value.set(Some(budget)));
+    let _reset = Reset;
+    run()
 }

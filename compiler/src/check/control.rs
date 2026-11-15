@@ -19,9 +19,20 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
         match fallback {
             Some(FailureHandler::Return { value, location }) => {
                 if in_value || !allowed {
-                    return Err(location.error(ErrorKind::InvalidSource, if in_value {
-                        "control transfers are forbidden inside value expressions [expr.jump-prohibited]"
-                    } else { "or return must apply to the entire initializer or assignment RHS [expr.or-return-position]" }));
+                    return Err(location.error(
+                        ErrorKind::InvalidSource,
+                        if in_value {
+                            crate::diagnostic!(
+                                "expr.jump-prohibited",
+                                "control transfers are forbidden inside value expressions"
+                            )
+                        } else {
+                            crate::diagnostic!(
+                                "expr.or-return-position",
+                                "or return must apply to the entire initializer or assignment RHS"
+                            )
+                        },
+                    ));
                 }
                 visit(value, false, in_value)?;
             }
@@ -250,6 +261,7 @@ pub(super) fn lower_return_handler(
         let id = *next_id;
         *next_id += 1;
         let replacement = super::exact::Exact {
+            domains: None,
             arithmetic: false,
             kind: super::exact::ExactKind::Leaf(Box::new(CheckedExpression {
                 ty: crate::ast::Type::Exact,
@@ -386,13 +398,19 @@ pub(super) fn check_return_shape(function: &crate::ast::Function) -> Result<(), 
     if !returns.0 {
         return Err(function.end.error(
             ErrorKind::InvalidSource,
-            "a value-returning function requires a return expression [fn.value-return-required]",
+            crate::diagnostic!(
+                "fn.value-return-required",
+                "a value-returning function requires a return expression"
+            ),
         ));
     }
     if !stops(&function.statements) {
         return Err(function.end.error(
             ErrorKind::InvalidSource,
-            "a value-returning function may reach its end [fn.fallthrough]",
+            crate::diagnostic!(
+                "fn.fallthrough",
+                "a value-returning function may reach its end"
+            ),
         ));
     }
     Ok(())

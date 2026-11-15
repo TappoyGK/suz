@@ -22,7 +22,7 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
         {
             return Err(function.location.error(
                 ErrorKind::InvalidSource,
-                "duplicate top-level name [decl.duplicate]",
+                crate::diagnostic!("decl.duplicate", "duplicate top-level name"),
             ));
         }
         signatures.insert(
@@ -40,14 +40,10 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
         declarations::resolve(&program.constants, &program.enums, &program.structs)?;
     globals.functions = signatures;
     *globals.instances.borrow_mut() = super::generic::Instances::new(program.functions.len());
-    for function in &program.functions {
-        if globals.functions[&function.name].is_generic() {
-            warnings.extend(super::generic::analyze(function, &globals)?);
-        }
-    }
     let mut functions = Vec::new();
     for (id, function) in program.functions.iter().enumerate() {
         if globals.functions[&function.name].is_generic() {
+            warnings.extend(super::generic::analyze(function, &globals)?);
             continue;
         }
         let (checked, found) = check_function(
@@ -71,15 +67,16 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
                 let calls = instance.calls.locations();
                 let mut diagnostic = calls[0].error(
                     error.kind,
-                    format!(
-                        "generic call to '{}' is invalid for these concrete types [num.fn-body]",
+                    crate::diagnostic!(
+                        "num.fn-body",
+                        "generic call to '{}' is invalid for these concrete types",
                         function.name
                     ),
                 );
                 diagnostic.related.extend(calls.iter().skip(1).map(|site| {
                     site.error(
                         ErrorKind::InvalidSource,
-                        "instantiated through this call [num.fn-body]",
+                        crate::diagnostic!("num.fn-body", "instantiated through this call"),
                     )
                 }));
                 diagnostic.related.push(error);
@@ -93,18 +90,20 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     warnings.dedup_by_key(|l| (l.line, l.column));
     Ok(CheckedProgram {
         division_warnings: globals
-            .division_warnings
+            .outputs
+            .divisions
             .borrow()
             .iter()
             .map(|&(line, column)| crate::ast::Location { line, column })
             .collect(),
         comparison_warnings: globals
-            .comparison_warnings
+            .outputs
+            .comparisons
             .borrow()
             .iter()
             .map(|(&(line, column), &value)| (crate::ast::Location { line, column }, value))
             .collect(),
-        constant_texts: globals.constant_texts.borrow().clone(),
+        constant_texts: globals.outputs.constant_texts.borrow().clone(),
         main_location: program.functions[main_id].keyword_location,
         structs: program.structs.clone(),
         enums: program.enums.clone(),
@@ -125,9 +124,11 @@ pub(super) fn check_function(
     // [num.fn-same], [num.fn-body-type], [num.fn-recursion]: a single
     // substitution applies to all annotations in this function instance.
     scope.generic_types = types;
+    // Generic diagnostics were collected once with symbolic types. Instances
+    // retain constant registrations, but cannot add type-specific warnings.
     if scope.in_generic() && !scope.analyzing_generic {
-        scope.comparison_warnings = Default::default();
-        scope.division_warnings = Default::default();
+        scope.outputs.comparisons = Default::default();
+        scope.outputs.divisions = Default::default();
     }
     scope.result = scope.resolve_type(function.result);
     let mut declared = Vec::new();
@@ -135,7 +136,7 @@ pub(super) fn check_function(
         if declared.contains(&parameter.name) {
             return Err(parameter.location.error(
                 ErrorKind::InvalidSource,
-                "duplicate parameter name [fn.parameter-scope]",
+                crate::diagnostic!("fn.parameter-scope", "duplicate parameter name"),
             ));
         }
         if scope.contains_key(&parameter.name)
@@ -144,17 +145,16 @@ pub(super) fn check_function(
         {
             return Err(parameter.location.error(
                 ErrorKind::InvalidSource,
-                "parameter shadows a top-level name [decl.shadowing]",
+                crate::diagnostic!("decl.shadowing", "parameter shadows a top-level name"),
             ));
         }
         declared.push(parameter.name.clone());
         let parameter_type = scope.resolve_type(parameter.ty);
-        scope.insert(
+        scope.locals.insert(
             parameter.name.clone(),
             Binding {
                 id: parameter_id,
                 ty: parameter_type,
-                generic_dependent: parameter.ty.generic(),
                 mutable: false,
                 parameter: true,
                 loop_variable: false,
@@ -164,13 +164,11 @@ pub(super) fn check_function(
             },
         );
     }
-    let mut has_return = false;
     let mut next_id = function.parameters.len();
     let statements = statements::block_with_bindings(
         &function.statements,
         &mut scope,
         &mut next_id,
-        &mut has_return,
         0,
         declared,
     )?;
@@ -199,22 +197,27 @@ pub(super) fn call(
     scope: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
     let signature = scope.functions.get(name).ok_or_else(|| {
-        expr.location
-            .error(ErrorKind::InvalidSource, "unknown function [fn.call]")
+        expr.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!("fn.call", "unknown function"),
+        )
     })?;
     if arguments.len() != signature.parameters.len() {
         return Err(expr.location.error(
             ErrorKind::InvalidSource,
-            "argument count does not match the function declaration [fn.call]",
+            crate::diagnostic!(
+                "fn.call",
+                "argument count does not match the function declaration"
+            ),
         ));
     }
     let generic = signature.is_generic();
     let types = super::generic::resolve(signature, arguments, expected, scope, expr.location)?;
     let concrete = |ty| types.resolve(ty);
-    let id = if generic {
+    let id = if generic && !scope.analyzing_generic {
         scope.instances.borrow_mut().request(
             signature.id,
-            types,
+            types.concrete(),
             &scope.generic_calls,
             expr.location,
         )
@@ -246,7 +249,10 @@ pub(super) fn return_value(
     if (scope.result == Type::Void) != bare {
         return Err(value.location.error(
             ErrorKind::InvalidSource,
-            "return must have a value exactly when the function returns a value [fn.return]",
+            crate::diagnostic!(
+                "fn.return",
+                "return must have a value exactly when the function returns a value"
+            ),
         ));
     }
     expression(value, Some(scope.result), scope)

@@ -21,36 +21,34 @@ pub(super) fn patterns<T>(
     location: Location,
     bindings: &Scope,
 ) -> Result<Patterns, Diagnostic> {
-    if !matches!(
-        ty,
-        Type::Exact
-            | Type::Char
-            | Type::Integer(_)
-            | Type::Bool
-            | Type::Enum(_)
-            | Type::Symbol
-            | Type::Text
-    ) {
+    if !(ty.is_integer()
+        || matches!(
+            ty,
+            Type::Exact | Type::Char | Type::Bool | Type::Enum(_) | Type::Symbol | Type::Text
+        ))
+    {
         return Err(location.error(
             ErrorKind::InvalidSource,
-            "match requires an integer, char, bool, enum, symbol or text target [match.target]",
+            crate::diagnostic!(
+                "match.target",
+                "match requires an integer, char, bool, enum, symbol or text target"
+            ),
         ));
     }
-    let mut seen = BTreeSet::new();
+    let mut seen = vec![BTreeSet::new(); if bindings.analyzing_generic { 16 } else { 1 }];
     let mut wildcard = false;
     let mut values = Vec::new();
     let mut warnings = Vec::new();
     for (index, arm) in arms.iter().enumerate() {
         let Some(pattern) = &arm.pattern else {
-            if !matches!(
-                ty,
-                Type::Exact | Type::Char | Type::Integer(_) | Type::Symbol | Type::Text
-            ) || wildcard
+            if !(ty.is_integer()
+                || matches!(ty, Type::Exact | Type::Char | Type::Symbol | Type::Text))
+                || wildcard
                 || index + 1 != arms.len()
             {
                 return Err(arm.location.error(
                     ErrorKind::InvalidSource,
-                    "wildcard is allowed only as the final integer, char, symbol or text match arm [match.pattern]",
+                    crate::diagnostic!("match.pattern", "wildcard is allowed only as the final integer, char, symbol or text match arm" ),
                 ));
             }
             wildcard = true;
@@ -66,11 +64,14 @@ pub(super) fn patterns<T>(
             {
                 return Err(location.error(
                     ErrorKind::InvalidSource,
-                    "match patterns can reference only constants [const.expression]",
+                    crate::diagnostic!(
+                        "const.expression",
+                        "match patterns can reference only constants"
+                    ),
                 ));
             }
         }
-        let checked = if ty == Type::Exact {
+        let checked = if ty == Type::Exact || ty.symbolic() {
             super::exact::comparison_value(pattern, bindings)?
         } else {
             expression(
@@ -82,26 +83,87 @@ pub(super) fn patterns<T>(
         if ty == Type::Exact && !matches!(checked.ty, Type::Exact | Type::Integer(_)) {
             return Err(pattern.location.error(
                 ErrorKind::InvalidSource,
-                "exact match requires integer patterns [arith.match]",
+                crate::diagnostic!("arith.match", "exact match requires integer patterns"),
             ));
         }
-        diagnostics::collect(&checked, &mut warnings);
-        let mut value = constants::evaluate(&checked)?.ok_or_else(|| {
-            arm.location.error(
+        if ty.symbolic()
+            && checked.ty != Type::Exact
+            && !super::generic::domain::same(ty, checked.ty)
+        {
+            return Err(pattern.location.error(
                 ErrorKind::InvalidSource,
-                "match pattern must be constant [const.expression]",
-            )
+                crate::diagnostic!(
+                    "type.expected",
+                    "expected {}, found {}",
+                    bindings.type_name(ty),
+                    bindings.type_name(checked.ty)
+                ),
+            ));
+        }
+        if ty.symbolic()
+            && let Some(n) = super::exact::constant(&checked)
+        {
+            let fits = super::generic::domain::judge(ty, ty, |t, _| {
+                crate::numeric::Range::point(n).fits_type(t)
+            });
+            if !fits.possible() {
+                return Err(pattern.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("lit.range", "integer pattern is out of range for int"),
+                ));
+            }
+        }
+        diagnostics::collect(&checked, &mut warnings);
+        // Constant evaluation is a local rule: type-dependent values and
+        // duplicate patterns are deferred, without rechecking any source body.
+        let mut representative = None;
+        let mut first_error = None;
+        let mut all_duplicate = true;
+        for (i, seen) in seen.iter_mut().enumerate() {
+            let evaluated = if bindings.analyzing_generic {
+                constants::generic::at(&checked, i, bindings)
+            } else {
+                constants::evaluate(&checked)
+            };
+            match evaluated {
+                Ok(Some(value)) => {
+                    all_duplicate &= !seen.insert(pattern_key(&value));
+                    representative.get_or_insert(value);
+                }
+                Err(error) => {
+                    first_error.get_or_insert(error);
+                    all_duplicate = false;
+                }
+                Ok(None) => {
+                    all_duplicate = false;
+                }
+            }
+        }
+        let mut value = representative.ok_or_else(|| {
+            first_error.unwrap_or_else(|| {
+                arm.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("const.expression", "match pattern must be constant"),
+                )
+            })
         })?;
+        if all_duplicate {
+            return Err(arm.location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("match.pattern", "duplicate evaluated pattern"),
+            ));
+        }
         if ty == Type::Exact && value.ty != Type::Exact {
             let n = super::exact::constant(&value).ok_or_else(|| {
                 arm.location.error(
                     ErrorKind::InvalidSource,
-                    "exact match requires integer patterns [match.pattern]",
+                    crate::diagnostic!("match.pattern", "exact match requires integer patterns"),
                 )
             })?;
             value = CheckedExpression {
                 ty: Type::Exact,
                 value: Value::Exact(Box::new(super::exact::Exact {
+                    domains: None,
                     arithmetic: false,
                     kind: super::exact::ExactKind::Literal(n),
                     range: Some(crate::numeric::Range::point(n)),
@@ -113,31 +175,28 @@ pub(super) fn patterns<T>(
             value.ty = Type::Symbol;
             super::text::register_constants(&value, bindings);
         }
-        let key = match &value.value {
-            Value::Integer { value, .. } => value.to_string(),
-            Value::Exact(e) => super::exact::evaluate(e).unwrap().unwrap().to_string(),
-            Value::Bool(value) => value.to_string(),
-            Value::Text { text, .. } => text.clone(),
-            _ => unreachable!(),
-        };
-        if !seen.insert(key) {
-            return Err(arm.location.error(
-                ErrorKind::InvalidSource,
-                "duplicate evaluated pattern [match.pattern]",
-            ));
-        }
         values.push(Some(value));
     }
     let exhaustive = match ty {
-        Type::Bool => seen.len() == 2,
-        Type::Enum(ty) => seen.len() == ty.count,
+        Type::Bool => seen.iter().any(|seen| seen.len() == 2),
+        Type::Enum(ty) => seen.iter().any(|seen| seen.len() == ty.count),
         _ => wildcard,
     };
     if !exhaustive {
         return Err(location.error(
             ErrorKind::InvalidSource,
-            "match must cover every value [match.exhaustive]",
+            crate::diagnostic!("match.exhaustive", "match must cover every value"),
         ));
     }
     Ok(Patterns { values, warnings })
+}
+
+fn pattern_key(value: &CheckedExpression) -> String {
+    match &value.value {
+        Value::Integer { value, .. } => value.to_string(),
+        Value::Exact(e) => super::exact::evaluate(e).unwrap().unwrap().to_string(),
+        Value::Bool(value) => value.to_string(),
+        Value::Text { text, .. } => text.clone(),
+        _ => unreachable!("constant match pattern has a validated type"),
+    }
 }

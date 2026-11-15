@@ -151,18 +151,10 @@ fn generic_numeric_types_reject_invalid_places_names_and_instantiations() {
             "struct.literal",
         ),
     ] {
-        let offset = marked.find('@').unwrap();
-        let prefix = &marked[..offset];
-        let line = prefix.bytes().filter(|b| *b == b'\n').count() + 1;
-        let column = prefix.rsplit('\n').next().unwrap().chars().count() + 1;
-        let source = marked.replacen('@', "", 1);
-        let error = suz::compile(source.as_bytes()).unwrap_err();
-        assert_eq!(
-            (error.rule(), error.line, error.column),
-            (rule, line, column),
-            "{source}: {error:?}"
-        );
+        marked_error(marked, rule);
     }
+    // [num.fn-main] The ordinary entry-point contract owns this diagnostic.
+    marked_error("fn main() -> @int { return 0 }", "prog.main");
     // Type-dependent errors in an unused function are deferred until a call.
     suz::compile(b"fn small(n: int) -> u8 { return n }\nfn main() -> u8 { return 0 }").unwrap();
 }
@@ -287,18 +279,7 @@ fn generic_unused_bodies_share_ordinary_diagnostics_and_report_independent_error
         let source = format!(
             "fn predicate(x: f64) -> bool {{ return true }}\nfn f(n: int) -> int {{\n{control}\nreturn n\n}}\nfn main() -> u8 {{ return 0 }}"
         );
-        let offset = source.find("text = 5").unwrap() + "text = ".len();
-        let prefix = &source[..offset];
-        let expected = (
-            prefix.bytes().filter(|&b| b == b'\n').count() + 1,
-            prefix.rsplit('\n').next().unwrap().chars().count() + 1,
-        );
-        let error = suz::compile(source.as_bytes()).unwrap_err();
-        assert_eq!(
-            (error.rule(), error.line, error.column),
-            ("type.expected", expected.0, expected.1),
-            "{source}: {error}"
-        );
+        marked_error(&source.replace("text = 5", "text = @5"), "type.expected");
     }
     for (expression, rule) in [
         ("x as u8", "num.fn-cast"),
@@ -402,19 +383,7 @@ fn generic_boundaries_preserve_inner_errors_and_reject_non_numeric_values() {
         ("fix n = f(@h(1.0))", "num.fn-convert"),
     ] {
         let marked = format!("{declarations}fn main() -> u8 {{\n{body}\nreturn 0\n}}");
-        let offset = marked.find('@').unwrap();
-        let prefix = &marked[..offset];
-        let expected = (
-            prefix.bytes().filter(|&b| b == b'\n').count() + 1,
-            prefix.rsplit('\n').next().unwrap().chars().count() + 1,
-        );
-        let source = marked.replace('@', "");
-        let error = suz::compile(source.as_bytes()).unwrap_err();
-        assert_eq!(
-            (error.line, error.column, error.rule()),
-            (expected.0, expected.1, rule),
-            "{source}: {error}"
-        );
+        let error = marked_error(&marked, rule);
         if rule == "num.fn-convert" {
             assert!(
                 error
@@ -426,23 +395,26 @@ fn generic_boundaries_preserve_inner_errors_and_reject_non_numeric_values() {
 }
 
 #[test]
-fn generic_unused_checks_do_not_depend_on_diagnostic_type_names_or_partial_ir() {
+fn generic_unused_checks_report_body_positions_and_return_shapes() {
     for (body, rule) in [
-        ("return true", "type.expected"),
-        ("fix b: bool = n\nreturn n", "type.expected"),
-        ("fix t: text = n\nreturn n", "type.expected"),
-        ("fix a: u8 = n", "fn.value-return-required"),
-        ("fix a: u8 = n\nif n == 0 { return n }", "fn.fallthrough"),
-        ("while n { fix b: bool = n }\nreturn n", "while.loop"),
+        ("return @true", "type.expected"),
+        ("fix b: bool = @n\nreturn n", "type.expected"),
+        ("fix t: text = @n\nreturn n", "type.expected"),
+        ("while @n { fix b: bool = n }\nreturn n", "while.loop"),
         (
-            "if n == 0 {} elif n { fix b: bool = n }\nreturn n",
+            "if n == 0 {} elif @n { fix b: bool = n }\nreturn n",
             "if.condition",
         ),
     ] {
         let source = format!("fn f(n: int) -> int {{\n{body}\n}}\nfn main() -> u8 {{ return 0 }}");
-        let error = suz::compile(source.as_bytes()).unwrap_err();
-        assert_eq!(error.rule(), rule, "{source}: {error}");
-        assert!(error.related.is_empty());
+        assert!(marked_error(&source, rule).related.is_empty());
+    }
+    for (body, rule) in [
+        ("fix a: u8 = n", "fn.value-return-required"),
+        ("fix a: u8 = n\nif n == 0 { return n }", "fn.fallthrough"),
+    ] {
+        let source = format!("fn f(n: int) -> int {{\n{body}\n@}}\nfn main() -> u8 {{ return 0 }}");
+        marked_error(&source, rule);
     }
 }
 
@@ -465,4 +437,199 @@ fn generic_unused_arithmetic_sites_apply_warning_modes_and_allow() {
         (error.rule(), error.line, error.column),
         ("diagnostic.arithmetic", 1, 32)
     );
+}
+
+// A single marker helper keeps rule, physical location and wording checks separate.
+fn marked_error(marked: &str, rule: &str) -> suz::Diagnostic {
+    let offset = marked.find('@').unwrap();
+    let prefix = &marked[..offset];
+    let location = (
+        prefix.bytes().filter(|&b| b == b'\n').count() + 1,
+        prefix.rsplit('\n').next().unwrap().chars().count() + 1,
+    );
+    let error = suz::compile(marked.replace('@', "").as_bytes()).unwrap_err();
+    assert_eq!(
+        (error.rule(), error.line, error.column),
+        (rule, location.0, location.1),
+        "{marked}: {error}"
+    );
+    error
+}
+
+#[test]
+fn generic_check_reports_symbolic_types_and_preserves_ordinary_error_order() {
+    for (marked, rule, message) in [
+        (
+            "fn f(n: int) -> int { return @true }\nfn main() -> u8 { return 0 }",
+            "type.expected",
+            "expected int, found bool",
+        ),
+        (
+            "fn f(n: float) -> float { return @true }\nfn main() -> u8 { return 0 }",
+            "type.expected",
+            "expected float, found bool",
+        ),
+        (
+            "fn f(n: int) -> int { fix b: bool = @n\nreturn n }\nfn main() -> u8 { return 0 }",
+            "type.expected",
+            "expected bool, found int",
+        ),
+        (
+            "fn f(n: int) -> int { var x: int = 0\nx = @true\nreturn n }\nfn main() -> u8 { return 0 }",
+            "type.expected",
+            "expected int, found bool",
+        ),
+        (
+            "fn main() -> u8 { fix b: bool = @1\nreturn 0 }\nfn f(n: int) -> int { return true }",
+            "type.expected",
+            "integer literal",
+        ),
+        (
+            "fn f(n: int) -> int { fix t: text = @5\nfix b = n as u8\nreturn n }\nfn main() -> u8 { return 0 }",
+            "type.expected",
+            "integer literal",
+        ),
+        (
+            "fn f(n: int) -> int { var x: int = 0\nfix b: bool = @n\nreturn n }\nfn main() -> u8 { return 0 }",
+            "type.expected",
+            "expected bool, found int",
+        ),
+        (
+            "fn f(n: int) -> u16 { return 1 }\nfn main() -> u8 { fix a: u8 = 1\nfix y: u8 = @f(a)\nreturn 0 }",
+            "type.expected",
+            "expected u8, found u16",
+        ),
+        (
+            "fn f(n: float) -> void {}\nfn main() -> u8 { fix a: u64 = 1\nf(@a)\nreturn 0 }",
+            "num.fn-convert",
+            "cannot be passed as",
+        ),
+    ] {
+        let error = marked_error(marked, rule);
+        assert!(error.message.contains(message), "{error}");
+        assert!(error.related.is_empty());
+    }
+}
+
+#[test]
+fn generic_deferred_rules_do_not_hide_independent_expression_errors() {
+    for (body, rule) in [
+        ("fix k = (n +% 300) + @true", "expr.operator-types"),
+        ("fix k = g(n +% 300, @true)", "type.expected"),
+        (
+            "fix k = ifexpr n == 0 { n +% 300 } else { @true }",
+            "type.expected",
+        ),
+    ] {
+        let source = format!(
+            "fn g(x: int, y: int) -> int {{ return x }}\nfn f(n: int) -> int {{\n{body}\nreturn n\n}}\nfn main() -> u8 {{ return 0 }}"
+        );
+        marked_error(&source, rule);
+    }
+    let prefix = "fn f(n: int) -> int { return n +% 300 }\n";
+    suz::compile(format!("{prefix}fn main() -> u8 {{ return 0 }}").as_bytes()).unwrap();
+    let error = marked_error(
+        &format!("{prefix}fn main() -> u8 {{ fix n: u8 = 1\nreturn @f(n) }}"),
+        "num.fn-body",
+    );
+    assert_eq!(
+        (
+            error.related[0].rule(),
+            error.related[0].line,
+            error.related[0].column
+        ),
+        ("lit.range", 1, 35)
+    );
+}
+
+#[test]
+fn generic_rule_judgments_agree_with_scalar_checks() {
+    for (family, types, expressions) in [
+        (
+            "int",
+            &["i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64"][..],
+            &[
+                "x + 1",
+                "x * x * x",
+                "x +% 300",
+                "x as u8 or 0",
+                "x as% u8",
+                "x + true",
+                "x && true",
+                "x as bool",
+                "x as float",
+                "ifexpr x == 0 { x } else { 300 }",
+                "(1 as int) as u8",
+                "`abc`[x] or 'a'",
+                "x << x",
+                "~x",
+                "-x",
+            ][..],
+        ),
+        (
+            "float",
+            &["f32", "f64"][..],
+            &[
+                "x + 1.0",
+                "x * 1.0",
+                "x as i32 or 0",
+                "x + true",
+                "x && true",
+                "x as% u8",
+                "(1.0 as float or 0.0) as i32",
+            ][..],
+        ),
+    ] {
+        for expression in expressions {
+            let template = format!(
+                "fn f(x: {family}) -> void {{ fix value = {expression} }}\nfn main() -> u8 {{ return 0 }}"
+            );
+            let generic = suz::compile(template.as_bytes());
+            let concrete: Vec<_> = types
+                .iter()
+                .map(|ty| {
+                    let source = template
+                        .replace(&format!(": {family}"), &format!(": {ty}"))
+                        .replace(&format!("as {family}"), &format!("as {ty}"));
+                    suz::compile(source.as_bytes())
+                })
+                .collect();
+            if concrete.iter().all(Result::is_ok) {
+                generic.unwrap_or_else(|error| {
+                    panic!("all concrete types accept {template}: {error}")
+                });
+            } else if let Err(first) = &concrete[0]
+                && concrete
+                    .iter()
+                    .all(|r| r.as_ref().is_err_and(|e| e.rule() == first.rule()))
+            {
+                assert!(generic.is_err(), "every concrete type rejects {template}");
+            }
+        }
+    }
+}
+
+#[test]
+fn generic_constant_patterns_keep_type_dependent_values_and_duplicates() {
+    for pattern in [
+        "1 as int",
+        "(1.0 as float or 0.0) as int or 0",
+        "`1` as int or 0",
+    ] {
+        let source = format!(
+            "fn f(n: int, x: float) -> int {{ match n {{ {pattern} => {{ return n }}\n_ => {{ return 0 }} }} }}\nfn main() -> u8 {{ return 0 }}"
+        );
+        suz::compile(source.as_bytes()).unwrap_or_else(|e| panic!("{source}: {e}"));
+    }
+    let source = "fn f(n: int) -> int { match n {\n256 as% int => { return n }\n0 => { return n }\n_ => { return n }\n} }\n";
+    suz::compile(format!("{source}fn main() -> u8 {{ return 0 }}").as_bytes()).unwrap();
+    marked_error(
+        &format!("{source}fn main() -> u8 {{ fix n: u8 = 1\nreturn @f(n) }}"),
+        "num.fn-body",
+    );
+    suz::compile(
+        format!("{source}fn main() -> u8 {{ fix n: u16 = 1\nfix result = f(n)\nreturn 0 }}")
+            .as_bytes(),
+    )
+    .unwrap();
 }

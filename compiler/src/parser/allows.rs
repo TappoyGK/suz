@@ -45,13 +45,13 @@ impl Parser<'_, '_> {
             let Kind::AllowItem(raw) = self.token().kind else {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
-                    "expected [rule: reason] [allow.item]",
+                    crate::diagnostic!("allow.item", "expected [rule: reason]"),
                 ));
             };
             let Some((rule, reason)) = raw.split_once(':') else {
                 return Err(location.error(
                     ErrorKind::InvalidSource,
-                    "allow requires ':' before its reason [allow.item]",
+                    crate::diagnostic!("allow.item", "allow requires ':' before its reason"),
                 ));
             };
             if rule.split('.').any(|word| {
@@ -62,7 +62,7 @@ impl Parser<'_, '_> {
             }) {
                 return Err(location.error(
                     ErrorKind::InvalidSource,
-                    "invalid allow rule name [allow.item]",
+                    crate::diagnostic!("allow.item", "invalid allow rule name"),
                 ));
             }
             if !matches!(
@@ -74,14 +74,17 @@ impl Parser<'_, '_> {
             {
                 return Err(location.error(
                     ErrorKind::InvalidSource,
-                    "unknown, non-warning or repeated allow rule [allow.rule-check]",
+                    crate::diagnostic!(
+                        "allow.rule-check",
+                        "unknown, non-warning or repeated allow rule"
+                    ),
                 ));
             }
             let reason = reason.trim_matches(' ');
             if reason.is_empty() {
                 return Err(location.error(
                     ErrorKind::InvalidSource,
-                    "allow requires a nonempty reason [allow.reason]",
+                    crate::diagnostic!("allow.reason", "allow requires a nonempty reason"),
                 ));
             }
             items.push(AllowItem {
@@ -107,7 +110,13 @@ impl Parser<'_, '_> {
             return Ok(());
         }
         if contains_block {
-            return Err(self.error(ErrorKind::InvalidSource, "a statement containing a block requires an enclosing allow block [allow.contains-block]"));
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "allow.contains-block",
+                    "a statement containing a block requires an enclosing allow block"
+                ),
+            ));
         }
         let end = self.location();
         let items = self.allow_items()?;

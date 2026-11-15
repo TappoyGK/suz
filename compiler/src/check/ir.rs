@@ -117,6 +117,7 @@ impl IntegerOperation {
 }
 #[derive(Clone)]
 pub(crate) enum Value {
+    GenericFloatLiteral(String), // Decimal spelling retained during generic checking only.
     Exact(Box<super::exact::Exact>),
     TextView(Box<CheckedExpression>),
     Intern {

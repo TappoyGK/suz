@@ -53,7 +53,7 @@ pub(crate) fn field(
     let Type::Struct(id) = ty else {
         return Err(location.error(
             ErrorKind::InvalidSource,
-            "field access requires a struct value [struct.access]",
+            crate::diagnostic!("struct.access", "field access requires a struct value"),
         ));
     };
     scope.structs[id]
@@ -65,7 +65,7 @@ pub(crate) fn field(
         .ok_or_else(|| {
             location.error(
                 ErrorKind::InvalidSource,
-                "unknown struct field [struct.access]",
+                crate::diagnostic!("struct.access", "unknown struct field"),
             )
         })
 }
@@ -86,13 +86,13 @@ pub(crate) fn initializer_indices(
             .ok_or_else(|| {
                 field.location.error(
                     ErrorKind::InvalidSource,
-                    "unknown field in struct literal [struct.literal]",
+                    crate::diagnostic!("struct.literal", "unknown field in struct literal"),
                 )
             })?;
         if !seen.insert(index) {
             return Err(field.location.error(
                 ErrorKind::InvalidSource,
-                "duplicate field initializer [struct.literal]",
+                crate::diagnostic!("struct.literal", "duplicate field initializer"),
             ));
         }
         indices.push(index);
@@ -100,7 +100,10 @@ pub(crate) fn initializer_indices(
     if seen.len() != declaration.fields.len() {
         return Err(location.error(
             ErrorKind::InvalidSource,
-            "struct literal must initialize every field [struct.literal]",
+            crate::diagnostic!(
+                "struct.literal",
+                "struct literal must initialize every field"
+            ),
         ));
     }
     Ok(indices)

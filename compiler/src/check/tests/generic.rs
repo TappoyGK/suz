@@ -8,6 +8,7 @@ fn function_count(source: &str) -> usize {
 
 #[test]
 fn emits_each_used_substitution_once_and_omits_unused_templates() {
+    // [num.monomorphize]: count checked instances, independently of C formatting.
     let prefix = "fn id(n: int) -> int { return n }\nfn unused(n: int) -> int { return n }\n";
     assert_eq!(
         function_count(&format!("{prefix}fn main() -> u8 {{ return 0 }}")),
@@ -28,18 +29,36 @@ fn emits_each_used_substitution_once_and_omits_unused_templates() {
 }
 
 #[test]
-fn nested_value_blocks_and_recovered_elif_branches_remain_bounded() {
-    let mut value = "1".to_owned();
-    for i in 0..20 {
-        value = format!("expr {{ fix x{i} = {value}\nx{i} }}");
-    }
-    crate::compile(format!("fn main() -> u8 {{ fix n = {value}\nreturn 0 }}").as_bytes()).unwrap();
-    let mut body = "return n".to_owned();
-    for _ in 0..20 {
-        body = format!("if n == 0 {{ {body} }} elif n < 1000 {{ return n }} else {{ return n }}");
-    }
-    crate::compile(
-        format!("fn f(n: int) -> int {{ {body} }}\nfn main() -> u8 {{ return 0 }}").as_bytes(),
-    )
-    .unwrap();
+fn nested_value_blocks_and_elif_branches_obey_a_traversal_budget() {
+    // Count checker visits instead of depending on machine speed. An exponential
+    // regression fails before it can hang the test runner.
+    super::generic::with_work_budget(4000, || {
+        let mut value = "1".to_owned();
+        for i in 0..30 {
+            value = format!("expr {{ fix x{i} = {value}\nx{i} }}");
+        }
+        crate::compile(format!("fn main() -> u8 {{ fix n = {value}\nreturn 0 }}").as_bytes())
+            .unwrap();
+        let mut body = "return n".to_owned();
+        for _ in 0..30 {
+            body =
+                format!("if n == 0 {{ {body} }} elif n < 1000 {{ return n }} else {{ return n }}");
+        }
+        crate::compile(
+            format!("fn f(n: int) -> int {{ {body} }}\nfn main() -> u8 {{ return 0 }}").as_bytes(),
+        )
+        .unwrap();
+    });
+}
+
+#[test]
+fn generic_body_is_checked_once_and_globals_are_shared() {
+    // [num.fn-check]: one body traversal, not 8 or 16 concrete replays.
+    super::generic::with_work_budget(3, || {
+        crate::compile(b"fn f(x: int, y: float) -> int { return x }\nfn main() -> u8 { return 0 }")
+            .unwrap();
+    });
+    let scope = super::scope::Scope::default();
+    let copy = scope.clone();
+    assert!(std::rc::Rc::ptr_eq(&scope.constants, &copy.constants));
 }

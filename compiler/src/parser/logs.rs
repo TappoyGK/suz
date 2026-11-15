@@ -18,7 +18,7 @@ impl Parser<'_, '_> {
             _ => {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
-                    "expected info or warn [log.level]",
+                    crate::diagnostic!("log.level", "expected info or warn"),
                 ));
             }
         };
@@ -26,7 +26,7 @@ impl Parser<'_, '_> {
         let Kind::Template(raw) = self.token().kind else {
             return Err(self.error(
                 ErrorKind::InvalidSource,
-                "expected a log template [log.syntax]",
+                crate::diagnostic!("log.syntax", "expected a log template"),
             ));
         };
         let parts = self.template(raw)?;
@@ -69,14 +69,17 @@ impl Parser<'_, '_> {
                     if parser.token().kind == Kind::End {
                         return Err(parser.error(
                             ErrorKind::InvalidSource,
-                            "empty interpolation [symbol.interpolation]",
+                            crate::diagnostic!("symbol.interpolation", "empty interpolation"),
                         ));
                     }
                     let value = parser.expression()?;
                     if parser.token().kind != Kind::End {
                         return Err(parser.error(
                             ErrorKind::InvalidSource,
-                            "expected one interpolation expression [symbol.interpolation]",
+                            crate::diagnostic!(
+                                "symbol.interpolation",
+                                "expected one interpolation expression"
+                            ),
                         ));
                     }
                     self.allows.extend(parser.allows);

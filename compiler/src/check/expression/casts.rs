@@ -18,8 +18,6 @@ pub(in crate::check) fn check(
             target: annotation,
             fallback,
         } => {
-            let generic_dependent =
-                annotation.generic() || super::generic_dependent(operand, bindings);
             let target = bindings.resolve_type(*annotation);
             let operand = super::super::exact::use_value(operand, bindings)?;
             if operand.ty == Type::Exact {
@@ -30,14 +28,13 @@ pub(in crate::check) fn check(
                     fallback,
                     expr.location,
                     bindings,
-                    generic_dependent,
                 );
             }
             if !*wrap && operand.ty == Type::Text && target == Type::Symbol {
                 if fallback.is_some() {
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
-                        "text interning does not accept or [text.to-symbol]",
+                        crate::diagnostic!("text.to-symbol", "text interning does not accept or"),
                     ));
                 }
                 let constant = super::super::constants::evaluate(&operand)
@@ -61,12 +58,15 @@ pub(in crate::check) fn check(
             }
             if operand.ty.is_text() {
                 let valid = if *wrap {
-                    matches!(target, Type::Integer(_))
+                    target.is_integer()
                 } else {
                     matches!(
                         target,
                         Type::Integer(_)
                             | Type::Float(_)
+                            | Type::GenericInt
+                            | Type::GenericFloat
+                            | Type::Numeric(_)
                             | Type::Bool
                             | Type::Char
                             | Type::Struct(_)
@@ -76,13 +76,15 @@ pub(in crate::check) fn check(
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
                         if *wrap {
-                            format!(
-                                "{} as% requires an integer target [symbol.cast-wrap]",
+                            crate::diagnostic!(
+                                "symbol.cast-wrap",
+                                "{} as% requires an integer target",
                                 operand.ty.name()
                             )
                         } else {
-                            format!(
-                                "unsupported {} conversion target [symbol.cast]",
+                            crate::diagnostic!(
+                                "symbol.cast",
+                                "unsupported {} conversion target",
                                 operand.ty.name()
                             )
                         },
@@ -91,8 +93,9 @@ pub(in crate::check) fn check(
                 if fallback.is_none() {
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
-                        format!(
-                            "{} conversion requires or [symbol.cast-handler]",
+                        crate::diagnostic!(
+                            "symbol.cast-handler",
+                            "{} conversion requires or",
                             operand.ty.name()
                         ),
                     ));
@@ -101,13 +104,19 @@ pub(in crate::check) fn check(
                 if fallback.is_some() {
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
-                        "integer as% does not accept or [expr.cast-wrap-handler-syntax]",
+                        crate::diagnostic!(
+                            "expr.cast-wrap-handler-syntax",
+                            "integer as% does not accept or"
+                        ),
                     ));
                 }
-                if !matches!((operand.ty, target), (Type::Integer(_), Type::Integer(_))) {
+                if !(operand.ty.is_integer() && target.is_integer()) {
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
-                        "as% requires integer source and target types [expr.as-trunc]",
+                        crate::diagnostic!(
+                            "expr.as-trunc",
+                            "as% requires integer source and target types"
+                        ),
                     ));
                 }
                 return Ok(CheckedExpression {
@@ -115,39 +124,22 @@ pub(in crate::check) fn check(
                     value: Value::Truncate(Box::new(operand)),
                 });
             }
-            let safe = match (operand.ty, target) {
-                (Type::Symbol | Type::Text, _) => false,
-                (Type::Char, Type::Integer(_)) | (Type::Integer(_), Type::Char) => {
-                    let (min, max) = operand.ty.integer_bounds().unwrap();
-                    crate::numeric::Range::bounds(min, max).fits_type(target)
-                }
-                (Type::Integer(from), Type::Integer(to)) => {
-                    let (from_min, from_max) = from.bounds();
-                    let (to_min, to_max) = to.bounds();
-                    from_min >= to_min && from_max <= to_max
-                }
-                (Type::Enum(from), Type::Integer(to)) => (from.count as i128 - 1) <= to.bounds().1,
-                (Type::Integer(_), Type::Enum(_)) => false,
-                (Type::Integer(_), Type::Float(_)) => true,
-                (Type::Float(from), Type::Float(to)) => from == to || from == FloatType::F32,
-                (Type::Float(_), Type::Integer(_)) => false,
-                _ => {
-                    return Err(expr.location.error(
-                        ErrorKind::InvalidSource,
-                        "invalid source and target types for as [expr.as]",
-                    ));
-                }
-            };
+            let validity = super::super::generic::domain::judge(operand.ty, target, |from, to| {
+                conversion_safety(from, to).is_some()
+            });
+            if !validity.possible() {
+                return Err(expr.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("expr.as", "invalid source and target types for as"),
+                ));
+            }
             if fallback.is_none() && !operand.ty.is_text() {
-                let risk = cast_risk(&operand, target, safe)?;
-                if generic_dependent && bindings.analyzing_generic {
-                    bindings
-                        .analysis
-                        .casts
-                        .borrow_mut()
-                        .push((expr.location, risk));
-                }
-                risk.require_handler(expr.location)?;
+                let safe = conversion_safety(operand.ty, target).unwrap_or(false);
+                let risk = cast_risk(&operand, target, safe, bindings)?;
+                risk.require_handler_for(
+                    expr.location,
+                    bindings.analyzing_generic && (operand.ty.symbolic() || target.symbolic()),
+                )?;
             }
             if let Some(FailureHandler::Return { value, .. }) = fallback {
                 let return_value = crate::check::functions::return_value(value, bindings)?;
@@ -217,6 +209,27 @@ pub(in crate::check) fn check(
 
 // [expr.cast-risk], [arith.cast], [const.cast-check]. The ordinary checker
 // and template analysis use this pure classification; no Scope is mutated.
+// Scalar conversion rules are shared by ordinary and symbolic checking.
+fn conversion_safety(from: Type, to: Type) -> Option<bool> {
+    Some(match (from, to) {
+        (Type::Symbol | Type::Text, _) => false,
+        (Type::Char, Type::Integer(_)) | (Type::Integer(_), Type::Char) => {
+            let (lo, hi) = from.integer_bounds().unwrap();
+            crate::numeric::Range::bounds(lo, hi).fits_type(to)
+        }
+        (Type::Integer(a), Type::Integer(b)) => {
+            let (lo, hi) = a.bounds();
+            let (min, max) = b.bounds();
+            lo >= min && hi <= max
+        }
+        (Type::Enum(a), Type::Integer(b)) => a.count as i128 - 1 <= b.bounds().1,
+        (Type::Integer(_), Type::Enum(_)) | (Type::Float(_), Type::Integer(_)) => false,
+        (Type::Integer(_), Type::Float(_)) => true,
+        (Type::Float(a), Type::Float(b)) => a == b || a == FloatType::F32,
+        _ => return None,
+    })
+}
+
 #[derive(Clone, Copy)]
 pub(in crate::check) enum CastRisk {
     Safe,
@@ -224,6 +237,22 @@ pub(in crate::check) enum CastRisk {
     ConstantOutOfRange,
 }
 impl CastRisk {
+    pub(in crate::check) fn require_handler_for(
+        self,
+        location: crate::ast::Location,
+        generic: bool,
+    ) -> Result<(), Diagnostic> {
+        if generic && !matches!(self, Self::Safe) {
+            return Err(location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "num.fn-cast",
+                    "this conversion can fail for a generic numeric type and requires or"
+                ),
+            ));
+        }
+        self.require_handler(location)
+    }
     pub(in crate::check) fn require_handler(
         self,
         location: crate::ast::Location,
@@ -232,11 +261,14 @@ impl CastRisk {
             Self::Safe => Ok(()),
             Self::Dynamic => Err(location.error(
                 ErrorKind::InvalidSource,
-                "this cast requires or [expr.cast-handler]",
+                crate::diagnostic!("expr.cast-handler", "this cast requires or"),
             )),
             Self::ConstantOutOfRange => Err(location.error(
                 ErrorKind::InvalidSource,
-                "constant cast is out of range and requires or [const.cast-check]",
+                crate::diagnostic!(
+                    "const.cast-check",
+                    "constant cast is out of range and requires or"
+                ),
             )),
         }
     }
@@ -245,7 +277,40 @@ pub(in crate::check) fn cast_risk(
     operand: &CheckedExpression,
     target: Type,
     type_safe: bool,
+    bindings: &Scope,
 ) -> Result<CastRisk, Diagnostic> {
+    if super::super::exact::dependent(operand) || target.symbolic() {
+        // [num.fn-cast] Safety is universal, unlike ordinary deferred judgments.
+        for i in 0..16 {
+            if let (Some(from), Some(to)) = (
+                super::super::generic::domain::at(operand.ty, i),
+                super::super::generic::domain::at(target, i),
+            ) {
+                let mut scalar = match super::super::constants::generic::at(operand, i, bindings) {
+                    Ok(Some(value)) => value,
+                    Ok(None) => CheckedExpression {
+                        ty: from,
+                        value: operand.value.clone(),
+                    },
+                    Err(_) => return Ok(CastRisk::Dynamic),
+                };
+                if let Value::Exact(e) = &mut scalar.value {
+                    e.range = e.range_at(i).ok().flatten();
+                    e.domains = None;
+                }
+                let safe = if from == Type::Exact {
+                    super::super::exact::range_at(operand, i)
+                        .is_some_and(|r| matches!(to, Type::Float(_)) || r.fits_type(to))
+                } else {
+                    conversion_safety(from, to).unwrap_or(false)
+                };
+                if !matches!(cast_risk(&scalar, to, safe, bindings)?, CastRisk::Safe) {
+                    return Ok(CastRisk::Dynamic);
+                }
+            }
+        }
+        return Ok(CastRisk::Safe);
+    }
     if type_safe {
         return Ok(CastRisk::Safe);
     }
