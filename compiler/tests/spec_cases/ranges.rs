@@ -3,6 +3,36 @@ use crate::{integer_bounds::INTEGER_BOUNDS, test_util::TemporaryDirectory};
 use std::{fs, process::Command};
 
 #[test]
+fn ranges_used_as_values_report_the_range_rule_at_the_operator() {
+    for operator in ["..<", "..="] {
+        for (before, after) in [
+            ("fix range = 0", "3"),
+            ("fix range = (0", "3)"),
+            ("for i in (0", "3) {}"),
+            ("for i in ((0", "3)) {}"),
+            ("for i in 0..<(0", "3) {}"),
+            ("fix value = identity(0", "3)"),
+            ("for i in identity(0", "3)..<4 {}"),
+        ] {
+            let source = format!(
+                "fn main() -> u8 {{\n    {before}{operator}{after}\n    return 0\n}}\nfn identity(value: u8) -> u8 {{ return value }}"
+            );
+            let error = suz::compile(source.as_bytes()).unwrap_err();
+            assert_eq!(error.kind, suz::ErrorKind::InvalidSource, "{source}");
+            assert_eq!(
+                (error.line, error.column),
+                (2, 5 + before.len()),
+                "{source}"
+            );
+            assert_eq!(
+                error.message, "range notation is only allowed in for [for.range]",
+                "{source}"
+            );
+        }
+    }
+}
+
+#[test]
 #[ignore = "release check: run scripts/test-release.sh"]
 fn ranges_handle_integer_extremes_and_nested_control_without_overflow() {
     let mut source = String::from("fn main() -> u8 {\n");

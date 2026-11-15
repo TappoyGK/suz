@@ -272,15 +272,10 @@ impl Parser<'_, '_> {
                 ));
             }
             statements.push(self.statement()?);
+            self.reject_range_value()?;
             match self.token().kind {
                 Kind::Newline => self.newlines(),
                 Kind::Symbol("}") => {}
-                Kind::Symbol("..<" | "..=") => {
-                    return Err(self.error(
-                        ErrorKind::InvalidSource,
-                        "range notation is only allowed in for [for.range]",
-                    ));
-                }
                 Kind::Keyword(
                     "fix" | "var" | "return" | "if" | "while" | "loop" | "for" | "break"
                     | "continue" | "log" | "match" | "matchexpr" | "ifexpr" | "true" | "false"

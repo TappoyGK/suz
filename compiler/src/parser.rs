@@ -44,6 +44,16 @@ impl<'a, 's> Parser<'a, 's> {
         self.location().error(kind, message)
     }
 
+    fn reject_range_value(&self) -> Result<(), Diagnostic> {
+        if matches!(self.token().kind, Kind::Symbol("..<" | "..=")) {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                "range notation is only allowed in for [for.range]",
+            ));
+        }
+        Ok(())
+    }
+
     fn expect(&mut self, expected: FixedToken) -> Result<(), Diagnostic> {
         let (kind, text) = match expected {
             FixedToken::Keyword(text) => (Kind::Keyword(text), text),

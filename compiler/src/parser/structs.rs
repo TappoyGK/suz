@@ -19,7 +19,9 @@ impl Parser<'_, '_> {
         self.restricted_condition = false;
         let result = self.expression();
         self.restricted_condition = previous;
-        result
+        let expression = result?;
+        self.reject_range_value()?;
+        Ok(expression)
     }
     fn field_declaration(&mut self) -> Result<StructField, Diagnostic> {
         let location = self.location();
