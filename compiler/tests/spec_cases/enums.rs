@@ -1,4 +1,4 @@
-use crate::{integer_bounds::INTEGER_BOUNDS, test_util::compile_and_run_c11};
+use crate::{integer_bounds::INTEGER_BOUNDS, test_util::compile_and_run_c23};
 
 #[test]
 #[ignore = "release check: run scripts/test-release.sh"]
@@ -24,7 +24,7 @@ fn enum_conversions_use_variant_ranges_and_preserve_integer_boundaries() {
     for (base, _, _) in INTEGER_BOUNDS {
         source.push_str(&format!("enum Kind{base}: {base} {{ A, B }}\n"));
     }
-    let output = compile_and_run_c11(&source, "enums.suz");
+    let output = compile_and_run_c23(&source, "enums.suz");
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stdout.is_empty() && output.stderr.is_empty());
 }
@@ -75,7 +75,7 @@ fn main() -> u8 {
 }
 enum Mode: u8 { A, B }
 "#;
-    let output = compile_and_run_c11(source, "enums.suz");
+    let output = compile_and_run_c23(source, "enums.suz");
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stdout.is_empty());
     assert_eq!(
@@ -103,7 +103,7 @@ fn enum_numbering_and_narrowing_cover_signed_and_unsigned_limits() {
             "enum Code: {base} {{ {variants} }}\nfn main() -> u8 {{ return Code.V{max} as u8 }}"
         );
         assert_eq!(
-            compile_and_run_c11(&source, "enums.suz").status.code(),
+            compile_and_run_c23(&source, "enums.suz").status.code(),
             Some(max as i32)
         );
         let invalid = source.replace(&format!("V{max} }}"), &format!("V{max}, Overflow }}"));
@@ -131,7 +131,7 @@ fn main() -> u8 {{
 "#
     );
     assert_eq!(
-        compile_and_run_c11(&source, "enums.suz").status.code(),
+        compile_and_run_c23(&source, "enums.suz").status.code(),
         Some(0)
     );
 }

@@ -1,4 +1,4 @@
-use crate::test_util::compile_and_run_c11;
+use crate::test_util::compile_and_run_c23;
 
 #[test]
 fn struct_symbol_casts_preserve_constants_scalar_types_and_lazy_evaluation() {
@@ -25,7 +25,7 @@ fn main() -> u8 {
     log info `${good.label}`
     return 0
 }"#;
-    let output = compile_and_run_c11(source, "text-struct.suz");
+    let output = compile_and_run_c23(source, "text-struct.suz");
     assert_eq!(
         output.status.code(),
         Some(0),
@@ -67,7 +67,7 @@ fn main() -> u8 {
     if paired != PAIR || paired.left.name != `left` || paired.right.name != `right` { return 17 }
     return 0
 }"#;
-    let output = compile_and_run_c11(source, "text-struct.suz");
+    let output = compile_and_run_c23(source, "text-struct.suz");
     assert_eq!(
         output.status.code(),
         Some(0),

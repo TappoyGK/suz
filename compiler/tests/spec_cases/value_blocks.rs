@@ -1,4 +1,4 @@
-use crate::test_util::compile_and_run_c11;
+use crate::test_util::compile_and_run_c23;
 
 #[test]
 #[ignore = "release check: run scripts/test-release.sh"]
@@ -119,7 +119,7 @@ fn value_blocks_preserve_scope_mutations_and_evaluation_order() {
     return result
 }
 "#;
-    let output = compile_and_run_c11(source, "blocks.suz");
+    let output = compile_and_run_c23(source, "blocks.suz");
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stdout.is_empty() && output.stderr.is_empty());
 }

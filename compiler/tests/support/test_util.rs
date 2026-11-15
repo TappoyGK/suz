@@ -36,7 +36,7 @@ pub(crate) fn build_and_run_c(
 }
 
 // Check generated code against standard C23, then execute it in a fresh process.
-pub(crate) fn compile_and_run_c11(source: &str, source_name: &str) -> std::process::Output {
+pub(crate) fn compile_and_run_c23(source: &str, source_name: &str) -> std::process::Output {
     let directory = TemporaryDirectory::new();
     let path = directory.0.join("program.c");
     fs::write(
