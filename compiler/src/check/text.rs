@@ -23,7 +23,7 @@ pub(super) fn parts(
                     if matches!(result.ty, Type::Void | Type::Struct(_)) {
                         return Err(value.location.error(
                             ErrorKind::InvalidSource,
-                            "this type cannot be interpolated [text.interpolation]",
+                            "this type cannot be interpolated [symbol.interpolation]",
                         ));
                     }
                     TemplatePart::Value(result)
@@ -60,7 +60,7 @@ pub(super) fn template(
         })
         .collect::<Option<String>>();
     Ok(CheckedExpression {
-        ty: Type::Text,
+        ty: Type::Symbol,
         value: Value::Template {
             parts,
             location,
@@ -98,8 +98,17 @@ fn float_format(bits: u64, ty: Type) -> String {
 // discard unused declarations and unselected operands.
 pub(super) fn register_constants(value: &CheckedExpression, scope: &Scope) {
     match &value.value {
-        Value::Text { text, .. }
-        | Value::Template {
+        Value::TextView(inner) => register_constants(inner, scope),
+        Value::Text { text, .. } if value.ty == Type::Symbol => {
+            scope.constant_texts.borrow_mut().insert(text.clone());
+        }
+        Value::Intern {
+            constant: Some(text),
+            ..
+        } => {
+            scope.constant_texts.borrow_mut().insert(text.clone());
+        }
+        Value::Template {
             constant: Some(text),
             ..
         } => {

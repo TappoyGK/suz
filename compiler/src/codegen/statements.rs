@@ -42,11 +42,16 @@ pub(super) fn emit_block(
                         writeln!(c, "{indent}    {}{{", if index == 0 { "" } else { "else " })
                             .unwrap();
                     } else {
+                        let pattern = expression(pattern.as_ref().unwrap(), context);
+                        let condition = super::expressions::equality(
+                            target.ty,
+                            &format!("suz_match_{id}"),
+                            &pattern,
+                        );
                         writeln!(
                             c,
-                            "{indent}    {}if (suz_match_{id} == {}) {{",
-                            if index == 0 { "" } else { "else " },
-                            expression(pattern.as_ref().unwrap(), context)
+                            "{indent}    {}if ({condition}) {{",
+                            if index == 0 { "" } else { "else " }
                         )
                         .unwrap();
                     }
@@ -124,13 +129,19 @@ pub(super) fn emit_block(
                 emit_block(c, body, depth + 2, next_assignment, context);
                 writeln!(c, "{indent}    }}\n{indent}}}").unwrap();
             }
-            CheckedStatement::ArithmeticReturn {
+            CheckedStatement::SliceReturn {
+                id, return_value, ..
+            }
+            | CheckedStatement::ArithmeticReturn {
                 id, return_value, ..
             }
             | CheckedStatement::CastReturn {
                 id, return_value, ..
             } => {
                 let (ty, (setup, condition, converted)) = match statement {
+                    CheckedStatement::SliceReturn { operation, .. } => {
+                        (operation.ty, super::slices::parts(operation, context))
+                    }
                     CheckedStatement::ArithmeticReturn { operation, .. } => {
                         (operation.ty, integer_parts(operation, context))
                     }

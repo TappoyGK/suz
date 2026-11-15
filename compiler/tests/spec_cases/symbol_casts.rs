@@ -13,7 +13,7 @@ fn check_program(source: &str) {
 }
 
 #[test]
-fn text_integer_casts_check_every_width_in_constants_and_at_runtime() {
+fn symbol_integer_casts_check_every_width_in_constants_and_at_runtime() {
     let mut source = String::new();
     let mut body = String::from("fn main() -> u8 {\n");
     for (ty, min, max) in INTEGER_BOUNDS {
@@ -39,7 +39,7 @@ fn text_integer_casts_check_every_width_in_constants_and_at_runtime() {
 }
 
 #[test]
-fn text_casts_reject_incomplete_formats_and_preserve_lazy_constant_evaluation() {
+fn symbol_casts_reject_incomplete_formats_and_preserve_lazy_constant_evaluation() {
     let invalid = [
         "",
         "-",
@@ -92,11 +92,11 @@ fn main() -> u8 {
 }
 
 #[test]
-fn text_cast_handlers_obey_type_and_control_constraints() {
+fn symbol_cast_handlers_obey_type_and_control_constraints() {
     for (source, rule) in [
         (
             "fn main() -> u8 { fix n = 1 as% u8 or 0\nreturn n }",
-            "text.cast-wrap-handler-syntax",
+            "expr.cast-wrap-handler-syntax",
         ),
         (
             "fn main() -> u8 { fix n = `1` as u8 or false\nreturn n }",
@@ -108,7 +108,7 @@ fn text_cast_handlers_obey_type_and_control_constraints() {
         ),
         (
             "fn main() -> u8 { fix n = `1` as text or ``\nreturn 0 }",
-            "text.cast",
+            "symbol.cast",
         ),
         (
             "fn main() -> u8 { fix n = (`1` as% u8 or return 1) + 1\nreturn n }",
@@ -127,11 +127,11 @@ fn text_cast_handlers_obey_type_and_control_constraints() {
         assert!(error.message.contains(rule), "{source}: {error:?}");
     }
     check_program(
-        r#"fn parse(value: text) -> bool {
+        r#"fn parse(value: symbol) -> bool {
     fix result = value as bool or return false
     return result
 }
-fn accumulate(value: text) -> u8 {
+fn accumulate(value: symbol) -> u8 {
     var count: u8 = 2
     count += value as% u8 or return 7
     return count

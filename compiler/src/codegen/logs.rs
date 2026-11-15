@@ -50,9 +50,10 @@ pub(super) fn emit(
             TemplatePart::Value(value) => {
                 let name = format!("suz_log_{id}_{index}");
                 match value.ty {
-                    Type::Text => format!(
-                        "suz_log_text(suz_text_bytes({name}), (size_t)suz_text_length({name}));"
-                    ),
+                    Type::Symbol | Type::Text => {
+                        let (bytes, length) = super::text::contents(value.ty, &name);
+                        format!("suz_log_text({bytes}, (size_t){length});")
+                    }
                     Type::Char => format!("suz_log_char({name});"),
                     Type::Bool => format!("suz_log_bool({name});"),
                     Type::Enum(ty) => {

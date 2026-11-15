@@ -27,7 +27,7 @@ pub(crate) fn scan(
             b'\n' => {
                 return Err(fail(
                     cursor,
-                    "template must fit on one source line [text.template-line]",
+                    "template must fit on one source line [symbol.template-line]",
                 ));
             }
             b'`' => {
@@ -39,10 +39,10 @@ pub(crate) fn scan(
                 Some(b'\n') => {
                     return Err(fail(
                         cursor + 1,
-                        "template must fit on one source line [text.template-line]",
+                        "template must fit on one source line [symbol.template-line]",
                     ));
                 }
-                _ => return Err(fail(cursor, "unknown template escape [text.escape]")),
+                _ => return Err(fail(cursor, "unknown template escape [symbol.escape]")),
             },
             b'$' if bytes.get(cursor + 1) == Some(&b'{') => {
                 parts.push(Segment::Text(&source[text_start..cursor]));
@@ -54,7 +54,7 @@ pub(crate) fn scan(
                         b'\n' => {
                             return Err(fail(
                                 cursor,
-                                "template must fit on one source line [text.template-line]",
+                                "template must fit on one source line [symbol.template-line]",
                             ));
                         }
                         b'\'' => {
@@ -72,10 +72,13 @@ pub(crate) fn scan(
                             if let Some(end) = source[cursor..].find('\n') {
                                 return Err(fail(
                                     cursor + end,
-                                    "template must fit on one source line [text.template-line]",
+                                    "template must fit on one source line [symbol.template-line]",
                                 ));
                             }
-                            return Err(fail(start, "unclosed interpolation [text.interpolation]"));
+                            return Err(fail(
+                                start,
+                                "unclosed interpolation [symbol.interpolation]",
+                            ));
                         }
                         b'{' => depth += 1,
                         b'}' => {
@@ -89,7 +92,7 @@ pub(crate) fn scan(
                     cursor += 1;
                 }
                 if depth != 0 {
-                    return Err(fail(start, "unclosed interpolation [text.interpolation]"));
+                    return Err(fail(start, "unclosed interpolation [symbol.interpolation]"));
                 }
                 parts.push(Segment::Expression {
                     source: &source[start..cursor],
@@ -101,7 +104,7 @@ pub(crate) fn scan(
             _ => cursor += 1,
         }
     }
-    Err(fail(0, "unclosed template [text.template]"))
+    Err(fail(0, "unclosed template [symbol.template]"))
 }
 
 pub(crate) fn decode(text: &str) -> String {

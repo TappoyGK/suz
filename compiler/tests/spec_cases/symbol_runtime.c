@@ -61,7 +61,7 @@ void suz_env_log(const char *bytes, size_t length) {
 _Noreturn void suz_env_panic(void) {
     assert(panic_expected);
     assert(strstr(diagnostic, "panic pool.suz:4:17: ") == diagnostic);
-    assert(strstr(diagnostic, "[rt.text-allocation]") != NULL);
+    assert(strstr(diagnostic, "[rt.symbol-allocation]") != NULL);
     if (fail_call != 0) {
         assert(calls == fail_call);
         assert(suz_text_pool_used() == used_before_failure);

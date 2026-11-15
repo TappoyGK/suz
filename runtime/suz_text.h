@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* Interned Suz symbol. Views below share its immutable, process-lifetime bytes. */
 typedef struct suz_text_entry const *suz_text;
 
 typedef struct {
@@ -26,6 +27,23 @@ const char *suz_text_bytes(suz_text value);
 uint64_t suz_text_length(suz_text value);
 int suz_text_compare(suz_text left, suz_text right);
 
+typedef struct {
+    const char *bytes;
+    uint64_t length;
+    uint64_t scalars;
+} suz_text_view;
+
+/* These operations do not allocate or access the intern table. Failed
+   extraction leaves output untouched; positions count Unicode scalars. */
+suz_text_view suz_text_as_view(suz_text value);
+bool suz_text_slice(suz_text_view value, uint64_t start, uint64_t end,
+                    suz_text_view *output);
+bool suz_text_index(suz_text_view value, uint64_t index, uint32_t *output);
+bool suz_text_view_equal(suz_text_view left, suz_text_view right);
+int suz_text_view_compare(suz_text_view left, suz_text_view right);
+
+static inline const char *suz_view_bytes(suz_text_view value) { return value.bytes; }
+static inline uint64_t suz_view_length(suz_text_view value) { return value.length; }
 /* Runtime accounting, not a Suz language API. */
 uint64_t suz_text_pool_used(void);
 

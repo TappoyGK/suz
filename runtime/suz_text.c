@@ -1,4 +1,5 @@
 #include "suz_parse.h"
+#include "suz_char.h"
 #include "suz_text.h"
 #include "suz_runtime.h"
 #include "suz_env.h"
@@ -10,6 +11,7 @@ struct suz_text_entry {
     const char *bytes;
     uint64_t length;
     uint32_t hash;
+    uint64_t scalars;
 };
 
 static struct {
@@ -38,7 +40,7 @@ static char *literal(char *out, const char *text) {
 
 static _Noreturn void length_failure(suz_text_location location) {
     suz_panic(location.source, location.line, location.column,
-              "text length exceeds the supported range [rt.text-allocation]");
+              "symbol length exceeds the supported range [rt.symbol-allocation]");
 }
 
 static uint64_t add(uint64_t left, uint64_t right, suz_text_location location) {
@@ -64,14 +66,14 @@ static void *allocate(uint64_t size, bool retained, suz_text_location location) 
         out = decimal(out, pool.used);
         out = literal(out, ", required=");
         out = decimal(out, size);
-        out = literal(out, " [rt.text-allocation]");
+        out = literal(out, " [rt.symbol-allocation]");
         *out = '\0';
         suz_panic(location.source, location.line, location.column, reason);
     }
     void *memory = suz_env_alloc(request);
     if (memory == NULL) {
         suz_panic(location.source, location.line, location.column,
-                  "text memory allocation failed [rt.text-allocation]");
+                  "symbol memory allocation failed [rt.symbol-allocation]");
     }
     if (retained) pool.used = total;
     return memory;
@@ -85,10 +87,13 @@ uint64_t suz_text_pool_used(void) {
     return pool.used;
 }
 
-static uint32_t hash_bytes(const char *bytes, uint64_t length) {
+static uint32_t hash_bytes(const char *bytes, uint64_t length, uint64_t *scalars) {
     uint32_t hash = UINT32_C(2166136261);
+    *scalars = 0;
     for (uint64_t i = 0; i < length; ++i) {
-        hash ^= (unsigned char)bytes[i];
+        unsigned char byte = (unsigned char)bytes[i];
+        if ((byte & 0xc0) != 0x80) ++*scalars;
+        hash ^= byte;
         hash *= UINT32_C(16777619);
     }
     return hash;
@@ -128,7 +133,8 @@ static void grow(suz_text_location location) {
 suz_text suz_text_intern(const char *bytes, uint64_t length, bool constant,
                          suz_text_location location) {
     allocation_size(length, location);
-    uint32_t hash = hash_bytes(bytes, length);
+    uint64_t scalars;
+    uint32_t hash = hash_bytes(bytes, length, &scalars);
     if (pool.capacity != 0) {
         uint64_t index = slot_for(pool.slots, pool.capacity, hash, bytes, length);
         if (pool.slots[index] != NULL) return pool.slots[index];
@@ -138,6 +144,7 @@ suz_text suz_text_intern(const char *bytes, uint64_t length, bool constant,
                             : add(sizeof(struct suz_text_entry), length, location);
     struct suz_text_entry *entry = allocate(size, true, location);
     entry->length = length;
+    entry->scalars = scalars;
     entry->hash = hash;
     if (constant) {
         entry->bytes = bytes;
@@ -219,4 +226,61 @@ suz_text suz_text_from_parsed(const char *bytes, uint64_t length, suz_text_locat
     suz_text result = suz_text_intern(buffer.bytes, decoded, false, location);
     suz_text_buffer_dispose(&buffer);
     return result;
+}
+
+
+suz_text_view suz_text_as_view(suz_text value) {
+    return (suz_text_view){value->bytes, value->length, value->scalars};
+}
+
+bool suz_text_slice(suz_text_view value, uint64_t start, uint64_t end,
+                    suz_text_view *output) {
+    if (start > end || end > value.scalars) return false;
+    if (value.length == value.scalars) {
+        *output = (suz_text_view){start == 0 ? value.bytes : value.bytes + start,
+                                  end - start, end - start};
+        return true;
+    }
+    uint64_t byte = 0;
+    for (uint64_t scalar = 0; scalar < start; ++scalar) {
+        do { ++byte; } while (byte < value.length &&
+                              ((unsigned char)value.bytes[byte] & 0xc0) == 0x80);
+    }
+    uint64_t first = byte;
+    if (end == value.scalars) {
+        byte = value.length;
+    } else {
+        for (uint64_t scalar = start; scalar < end; ++scalar) {
+            do { ++byte; } while (byte < value.length &&
+                                  ((unsigned char)value.bytes[byte] & 0xc0) == 0x80);
+        }
+    }
+    *output = (suz_text_view){first == 0 ? value.bytes : value.bytes + first,
+                              byte - first, end - start};
+    return true;
+}
+
+bool suz_text_index(suz_text_view value, uint64_t index, uint32_t *output) {
+    if (index >= value.scalars) return false;
+    if (value.length == value.scalars) {
+        *output = (unsigned char)value.bytes[index];
+        return true;
+    }
+    suz_text_view scalar;
+    if (!suz_text_slice(value, index, index + 1, &scalar)) return false;
+    uint64_t width;
+    return suz_char_decode(scalar.bytes, scalar.length, output, &width);
+}
+
+bool suz_text_view_equal(suz_text_view left, suz_text_view right) {
+    return left.length == right.length &&
+           (left.length == 0 || left.bytes == right.bytes ||
+            memcmp(left.bytes, right.bytes, (size_t)left.length) == 0);
+}
+
+int suz_text_view_compare(suz_text_view left, suz_text_view right) {
+    uint64_t common = left.length < right.length ? left.length : right.length;
+    int order = common == 0 ? 0 : memcmp(left.bytes, right.bytes, (size_t)common);
+    if (order != 0) return order;
+    return (left.length > right.length) - (left.length < right.length);
 }

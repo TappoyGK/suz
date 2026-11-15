@@ -71,7 +71,7 @@ impl Schema {
             }
             Type::Char => entry.kind = 6,
             Type::Bool => entry.kind = 2,
-            Type::Text => entry.kind = 3,
+            Type::Symbol | Type::Text => entry.kind = 3,
             Type::Enum(ty) => {
                 entry.kind = 4;
                 let declaration = &scope.enums[ty.id];
@@ -170,7 +170,7 @@ pub(super) fn parse(text: &str, id: usize, scope: &Scope) -> Option<CheckedExpre
             },
             Type::Float(_) => Value::Float(raw.bits),
             Type::Bool => Value::Bool(raw.bits != 0),
-            Type::Text => {
+            Type::Symbol | Type::Text => {
                 let input = text
                     .as_bytes()
                     .get(raw.start as usize..(raw.start + raw.length) as usize)?;
@@ -196,6 +196,15 @@ pub(super) fn parse(text: &str, id: usize, scope: &Scope) -> Option<CheckedExpre
             }
             _ => unreachable!(),
         };
+        if ty == Type::Text {
+            return Some(CheckedExpression {
+                ty,
+                value: Value::TextView(Box::new(CheckedExpression {
+                    ty: Type::Symbol,
+                    value,
+                })),
+            });
+        }
         Some(CheckedExpression { ty, value })
     }
     convert(Type::Struct(id), &mut values.iter(), text, scope)

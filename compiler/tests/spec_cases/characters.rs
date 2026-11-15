@@ -1,4 +1,4 @@
-use super::text_runtime::build_with_environment_optimized;
+use super::symbol_runtime::build_with_environment_optimized;
 use std::process::Command;
 
 #[test]
@@ -37,7 +37,7 @@ fn character_literals_and_conversions_reject_invalid_values_and_operations() {
         ("fix x = 55296 as char", "const.cast-check"),
         ("fix x = -1 as char", "const.cast-check"),
         ("fix n: u32 = 65\nfix x = n as char", "expr.cast-handler"),
-        ("fix x = `a` as char", "text.cast-handler"),
+        ("fix x = `a` as char", "symbol.cast-handler"),
         (
             "var message = `a`\nfor ch in message {}",
             "for.bound-reference",
@@ -76,8 +76,8 @@ fn character_constants_match_runtime_casts_and_struct_parsing() {
     let mut source = String::from(
         r#"struct Item { ch: char }
 fn integer(n: i64) -> char { return n as char or '?' }
-fn parse_text(t: text) -> char { return t as char or '?' }
-fn structure(t: text) -> Item { return t as Item or Item { ch: '?' } }
+fn parse_text(t: symbol) -> char { return t as char or '?' }
+fn structure(t: symbol) -> Item { return t as Item or Item { ch: '?' } }
 fn main() -> u8 {
     fix byte: u8 = 65
     if (byte as char) != 'A' { return 1 }
@@ -141,8 +141,8 @@ const ITEM{value} = `Item {{ ch: '\\u{{{value:x}}}' }}` as Item or Item {{ ch: '
 }
 
 #[test]
-fn text_iteration_and_character_logs_allocate_nothing_after_startup() {
-    let source = r#"fn scan(t: text) -> u32 {
+fn symbol_iteration_and_character_logs_allocate_nothing_after_startup() {
+    let source = r#"fn scan(t: symbol) -> u32 {
     var count: u32 = 0
     for ch in t {
         log info `${ch}`
@@ -242,7 +242,7 @@ fn unicode_escape_diagnostics_identify_the_failure_in_each_expression_context() 
 }
 
 #[test]
-fn mutable_loop_inputs_have_a_diagnostic_shared_by_text_and_ranges() {
+fn mutable_loop_inputs_have_a_diagnostic_shared_by_symbol_and_ranges() {
     for keyword in ["for", "rev"] {
         for (declaration, input) in [
             ("var value = `abc`", "value"),

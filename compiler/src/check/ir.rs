@@ -17,6 +17,11 @@ pub(crate) struct CheckedFunction {
 }
 #[derive(Clone)]
 pub(crate) enum CheckedStatement {
+    SliceReturn {
+        id: usize,
+        operation: CheckedExpression,
+        return_value: CheckedExpression,
+    },
     Log {
         parts: Vec<crate::ast::TemplatePart<CheckedExpression>>,
         location: Location,
@@ -109,6 +114,19 @@ impl IntegerOperation {
 }
 #[derive(Clone)]
 pub(crate) enum Value {
+    TextView(Box<CheckedExpression>),
+    Intern {
+        constant: Option<String>,
+        operand: Box<CheckedExpression>,
+        location: Location,
+    },
+    Slice {
+        target: Box<CheckedExpression>,
+        start: Option<Box<CheckedExpression>>,
+        end: Option<Box<CheckedExpression>>,
+        index: bool,
+        handler: Option<CheckedHandler>,
+    },
     Text {
         text: String,
     },

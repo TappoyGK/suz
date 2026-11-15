@@ -2049,12 +2049,12 @@ fn main() -> u8 {
 最初の加算が失敗すると、代替値の加算とその失敗処理を評価する。両方の加算が失敗し、最後の7になる。
 ### expr-072 text全体を1つのスカラー値に変換する
 
-主根拠：`[char.cast-text]`。
+主根拠：`[char.cast-symbol]`。
 
 **ソース：**
 
 ```suz
-fn parse(input: text) -> char { return input as char or '?' }
+fn parse(input: symbol) -> char { return input as char or '?' }
 fn main() -> u8 {
     log info `${parse(`😀`)} ${parse(``)} ${parse(`ab`)} ${parse(`'a'`)}`
     return 0
@@ -2075,13 +2075,13 @@ info expr-072.suz:3: 😀 ? ? ?
 
 ### expr-073 構造体のcharフィールドを文字リテラルとして読む
 
-主根拠：`[text.cast-struct-field]`。
+主根拠：`[symbol.cast-struct-field]`。
 
 **ソース：**
 
 ```suz
 struct Letter { ch: char }
-fn read(input: text) -> Letter { return input as Letter or Letter { ch: '?' } }
+fn read(input: symbol) -> Letter { return input as Letter or Letter { ch: '?' } }
 fn main() -> u8 {
     fix good = read(`Letter { ch: '\\u{1F600}' }`)
     fix bad = read(`Letter { ch: 'ab' }`)

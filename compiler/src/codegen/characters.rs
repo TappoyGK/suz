@@ -15,22 +15,16 @@ pub(super) fn emit_text_loop(
 ) {
     context.uses_text = true;
     let indent = "    ".repeat(depth);
+    let ty = source.ty.c_name();
+    let (bytes, length) = super::text::contents(source.ty, &format!("suz_iter_{id}"));
     let source = expression(source, context);
     writeln!(
         c,
-        "{indent}{{\n{indent}    const suz_text suz_iter_{id} = {source};"
+        "{indent}{{\n{indent}    const {ty} suz_iter_{id} = {source};"
     )
     .unwrap();
-    writeln!(
-        c,
-        "{indent}    const char *suz_bytes_{id} = suz_text_bytes(suz_iter_{id});"
-    )
-    .unwrap();
-    writeln!(
-        c,
-        "{indent}    const uint64_t suz_length_{id} = suz_text_length(suz_iter_{id});"
-    )
-    .unwrap();
+    writeln!(c, "{indent}    const char *suz_bytes_{id} = {bytes};").unwrap();
+    writeln!(c, "{indent}    const uint64_t suz_length_{id} = {length};").unwrap();
     let initial = if reverse {
         format!("suz_length_{id}")
     } else {

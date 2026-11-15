@@ -57,24 +57,26 @@ mod shifts;
 #[path = "spec_cases/structs.rs"]
 mod structs;
 mod support;
+#[path = "spec_cases/symbol.rs"]
+mod symbol;
+#[path = "spec_cases/symbol_casts.rs"]
+mod symbol_casts;
+#[path = "spec_cases/symbol_float_casts.rs"]
+mod symbol_float_casts;
+#[path = "spec_cases/symbol_runtime.rs"]
+mod symbol_runtime;
+#[path = "spec_cases/symbol_startup.rs"]
+mod symbol_startup;
+#[path = "spec_cases/symbol_struct_casts.rs"]
+mod symbol_struct_casts;
+#[path = "spec_cases/symbol_struct_runtime.rs"]
+mod symbol_struct_runtime;
 #[path = "spec_cases/syntax_diagnostics.rs"]
 mod syntax_diagnostics;
 #[path = "support/test_util.rs"]
 mod test_util;
-#[path = "spec_cases/text.rs"]
-mod text;
-#[path = "spec_cases/text_casts.rs"]
-mod text_casts;
-#[path = "spec_cases/text_float_casts.rs"]
-mod text_float_casts;
-#[path = "spec_cases/text_runtime.rs"]
-mod text_runtime;
-#[path = "spec_cases/text_startup.rs"]
-mod text_startup;
-#[path = "spec_cases/text_struct_casts.rs"]
-mod text_struct_casts;
-#[path = "spec_cases/text_struct_runtime.rs"]
-mod text_struct_runtime;
+#[path = "spec_cases/text_views.rs"]
+mod text_views;
 #[path = "spec_cases/value_blocks.rs"]
 mod value_blocks;
 #[path = "spec_cases/workers.rs"]

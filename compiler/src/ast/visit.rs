@@ -28,6 +28,23 @@ pub(crate) fn walk_expression<V: Visitor + ?Sized>(
     expr: &Expression,
 ) -> Result<(), Diagnostic> {
     match &expr.kind {
+        ExpressionKind::Slice {
+            target,
+            start,
+            end,
+            fallback,
+            ..
+        } => {
+            visitor.expression(target)?;
+            for bound in [start, end].into_iter().flatten() {
+                visitor.expression(bound)?;
+            }
+            if let Some(FailureHandler::Value(value) | FailureHandler::Return { value, .. }) =
+                fallback
+            {
+                visitor.expression(value)?;
+            }
+        }
         ExpressionKind::Template(parts) => {
             for part in parts {
                 if let TemplatePart::Value(value) = part {

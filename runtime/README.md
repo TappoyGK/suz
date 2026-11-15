@@ -12,7 +12,7 @@
 | `suz_char.h` | Unicodeスカラー値の検査とUTF-8の符号化・復号 |
 | `suz_parse_struct.h`・`suz_parse_struct.c` | 型情報に従う構造体の検査と、各フィールドの値・文字列範囲の取得 |
 | `suz_parse_float.c` | 10進の入力から浮動小数点への直接の最近接・偶数丸め |
-| `suz_text.h`・`suz_text.c` | テキストプール、インターン化、容量計測、一時バッファ |
+| `suz_text.h`・`suz_text.c` | `symbol` の共有実体と `text` の範囲参照・切り出し、テキストプール、インターン化、容量計測、一時バッファ |
 | `third_party/ryu/` | 最短の十進表記へ変換するRyuのC実装とライセンス |
 | `suz_env.h` | メモリ確保・解放、出力、パニック終了の環境関数の宣言 |
 | `suz_env.c` | `malloc`・`free` とC標準入出力を使う標準環境層 |
@@ -72,7 +72,7 @@
 cargo test --test spec_cases runtime::
 cargo test --test spec_cases logs::
 cargo test --test spec_cases float_logs::
-cargo test --test spec_cases text_runtime::
+cargo test --test spec_cases symbol_runtime::
 ```
 
 最適化別の全型の境界値検査と浮動小数点ログの大量検査は、リリース検査で実行する。
@@ -83,11 +83,11 @@ cargo test --test spec_cases text_runtime::
 
 環境層・整数検査・パニックのテストは [runtime.rs](../compiler/tests/spec_cases/runtime.rs)、ログのテストは [logs.rs](../compiler/tests/spec_cases/logs.rs) に置く。
 
-テキストプールは [text_runtime.rs](../compiler/tests/spec_cases/text_runtime.rs) から検証用のCプログラムを実行して確認する。環境層で確保要求と解放を記録し、共有実体、容量計測、上限超過、確保失敗、診断中の追加確保の有無を検査する。普段は最適化なしで動作を検査する。リリース検査ではAddressSanitizer・UndefinedBehaviorSanitizerを有効にし、最適化なし・ありの両方を検査する。
+テキストプールは [symbol_runtime.rs](../compiler/tests/spec_cases/symbol_runtime.rs) から検証用のCプログラムを実行して確認する。環境層で確保要求と解放を記録し、共有実体、容量計測、上限超過、確保失敗、診断中の追加確保の有無を検査する。普段は最適化なしで動作を検査する。リリース検査ではAddressSanitizer・UndefinedBehaviorSanitizerを有効にし、最適化なし・ありの両方を検査する。
 
-起動時の一括登録、初期化後の定数参照、ログの追加確保の有無は [text_startup.rs](../compiler/tests/spec_cases/text_startup.rs) で検証する。
+起動時の一括登録、初期化後の定数参照、ログの追加確保の有無は [symbol_startup.rs](../compiler/tests/spec_cases/symbol_startup.rs) で検証する。
 
-構造体変換の失敗時のプール使用量、一時領域の解放、確保失敗の診断位置、定数結果の静的配置は [text_struct_runtime.rs](../compiler/tests/spec_cases/text_struct_runtime.rs) で検証する。
+構造体変換の失敗時のプール使用量、一時領域の解放、確保失敗の診断位置、定数結果の静的配置は [symbol_struct_runtime.rs](../compiler/tests/spec_cases/symbol_struct_runtime.rs) で検証する。
 
 浮動小数点ログは [float_logs.rs](../compiler/tests/spec_cases/float_logs.rs) で検証する。両精度の境界値・特殊値、各指数の境界と疑似乱数値の読み戻し、最短の桁数、ロケールからの独立性を確認する。C11の64ビット整数演算だけを使うRyuの経路も、AddressSanitizer・UndefinedBehaviorSanitizerを有効にして実行する。
 

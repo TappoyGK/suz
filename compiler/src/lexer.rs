@@ -35,12 +35,12 @@ const KEYWORDS: &[&str] = &[
 ];
 const TYPES: &[&str] = &[
     "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "bool", "char", "text",
-    "void",
+    "symbol", "void",
 ];
 const SYMBOLS: &[&str] = &[
-    "(", ")", "{", "}", ",", ":", ".", "->", "=>", "=", "+=", "-=", "*=", "/=", "%=", "+%=", "-%=",
-    "*%=", "&=", "|=", "^=", "<<=", ">>=", "+", "-", "*", "/", "%", "+%", "-%", "*%", "&", "|",
-    "^", "~", "<<", ">>", "==", "!=", "<", "<=", ">", ">=", "&&", "||", "..<", "..=",
+    "(", ")", "[", "]", "{", "}", ",", ":", ".", "->", "=>", "=", "+=", "-=", "*=", "/=", "%=",
+    "+%=", "-%=", "*%=", "&=", "|=", "^=", "<<=", ">>=", "+", "-", "*", "/", "%", "+%", "-%", "*%",
+    "&", "|", "^", "~", "<<", ">>", "==", "!=", "<", "<=", ">", ">=", "&&", "||", "..<", "..=",
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -160,7 +160,7 @@ fn can_end_operand(kind: Option<Kind<'_>>) -> bool {
                 | Kind::Integer(_)
                 | Kind::Float(_)
                 | Kind::Keyword("true" | "false" | "nan" | "inf")
-                | Kind::Symbol(")" | "}")
+                | Kind::Symbol(")" | "]" | "}")
         )
     )
 }
@@ -231,7 +231,7 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
                 continue;
             }
             '\n' => {
-                if delimiters.last() != Some(&"(") && !continuation {
+                if !matches!(delimiters.last(), Some(&"(" | &"[")) && !continuation {
                     tokens.push(Token {
                         kind: Kind::Newline,
                         line,
@@ -319,10 +319,13 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
         };
         continuation = continues_line(kind, tokens.last().map(|token| token.kind));
         match kind {
-            Kind::Symbol("(" | "{") => {
+            Kind::Symbol("(" | "[" | "{") => {
                 if let Kind::Symbol(symbol) = kind {
                     delimiters.push(symbol);
                 }
+            }
+            Kind::Symbol("]") if delimiters.last() == Some(&"[") => {
+                delimiters.pop();
             }
             Kind::Symbol(")") if delimiters.last() == Some(&"(") => {
                 delimiters.pop();

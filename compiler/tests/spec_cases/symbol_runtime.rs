@@ -35,13 +35,13 @@ fn executable(optimized: bool) -> &'static Path {
             .args(sanitizer_flags(optimized))
             .arg("-I")
             .arg(&runtime)
-            .arg(root.join("tests/spec_cases/text_runtime.c"))
+            .arg(root.join("tests/spec_cases/symbol_runtime.c"))
             .arg(runtime.join("suz_text.c"))
             .arg(runtime.join("suz_parse.c"))
             .arg(runtime.join("suz_parse_float.c"))
             .arg(runtime.join("suz_runtime.c"))
             .args(["-lm", "-o"])
-            .arg(directory.0.join("text-runtime"))
+            .arg(directory.0.join("symbol-runtime"))
             .output()
             .unwrap();
         assert!(
@@ -53,12 +53,12 @@ fn executable(optimized: bool) -> &'static Path {
         // executable for each run repeats macOS executable validation.
         // Cargo's output directory owns this replaceable build artifact.
         let path = PathBuf::from(env!("OUT_DIR")).join(if optimized {
-            "text-runtime-O2"
+            "symbol-runtime-O2"
         } else {
-            "text-runtime-O0"
+            "symbol-runtime-O0"
         });
         let staging = path.with_extension(format!("{}.tmp", std::process::id()));
-        fs::copy(directory.0.join("text-runtime"), &staging).unwrap();
+        fs::copy(directory.0.join("symbol-runtime"), &staging).unwrap();
         fs::rename(staging, &path).unwrap();
         path
     })
@@ -96,7 +96,7 @@ fn hash_collisions_preserve_distinct_contents() {
 }
 
 #[test]
-fn pool_initialization_does_not_allocate_or_register_empty_text() {
+fn pool_initialization_does_not_allocate_or_register_empty_symbol() {
     run(false, "empty", "1", 0);
 }
 
@@ -106,7 +106,7 @@ fn pool_accounts_dynamic_storage_and_metadata() {
 }
 
 #[test]
-fn existing_text_is_reused_at_the_pool_limit() {
+fn existing_symbol_is_reused_at_the_pool_limit() {
     let probe = run(false, "reuse", "0", 0);
     let limit = String::from_utf8(probe.stdout).unwrap();
     run(false, "reuse", limit.trim(), 0);
@@ -136,7 +136,7 @@ fn temporary_buffers_do_not_accumulate_or_count_toward_the_pool() {
 }
 
 #[test]
-fn text_order_and_identity_preserve_unicode_and_nul() {
+fn symbol_order_and_identity_preserve_unicode_and_nul() {
     run(false, "order", "0", 0);
 }
 
@@ -146,7 +146,7 @@ fn allocation_failures_preserve_accounting_and_do_not_allocate_for_diagnostics()
         run(false, "oom", call, 101);
     }
     let output = run(false, "overflow", "0", 101);
-    assert!(String::from_utf8_lossy(&output.stderr).contains("text length exceeds"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("symbol length exceeds"));
 }
 
 #[test]
@@ -290,7 +290,7 @@ fn allocation_failures_report_the_operation_location() {
         assert_eq!(
             String::from_utf8_lossy(&result.stderr),
             format!(
-                "panic text.suz:{line}:{column}: text memory allocation failed [rt.text-allocation]\n"
+                "panic text.suz:{line}:{column}: symbol memory allocation failed [rt.symbol-allocation]\n"
             )
         );
     }
