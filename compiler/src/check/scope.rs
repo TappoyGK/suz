@@ -16,6 +16,7 @@ pub(super) struct Signature {
 #[derive(Clone)]
 pub(super) struct Scope {
     pub type_hints: Rc<std::cell::RefCell<BTreeMap<usize, Option<Type>>>>,
+    pub float_hints: Rc<std::cell::RefCell<BTreeMap<usize, bool>>>,
     pub hint_depth: Rc<std::cell::Cell<usize>>,
     pub division_warnings: Rc<std::cell::RefCell<std::collections::BTreeSet<(usize, usize)>>>,
     pub comparison_warnings: Rc<std::cell::RefCell<BTreeMap<(usize, usize), bool>>>,
@@ -44,6 +45,7 @@ impl Default for Scope {
         Self {
             type_hints: Rc::default(),
             hint_depth: Rc::default(),
+            float_hints: Rc::default(),
             division_warnings: Rc::default(),
             comparison_warnings: Rc::default(),
             constant_texts: Rc::default(),

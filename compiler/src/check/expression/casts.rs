@@ -110,10 +110,9 @@ pub(super) fn check(expr: &Expression, bindings: &Scope) -> Result<CheckedExpres
             }
             let safe = match (operand.ty, *target) {
                 (Type::Symbol | Type::Text, _) => false,
-                (Type::Char, Type::Integer(to)) => to.bounds().1 >= 0x10ffff,
-                (Type::Integer(from), Type::Char) => {
-                    let (min, max) = from.bounds();
-                    min >= 0 && max < 0xd800
+                (Type::Char, Type::Integer(_)) | (Type::Integer(_), Type::Char) => {
+                    let (min, max) = operand.ty.integer_bounds().unwrap();
+                    crate::numeric::Range::bounds(min, max).fits_type(*target)
                 }
                 (Type::Integer(from), Type::Integer(to)) => {
                     let (from_min, from_max) = from.bounds();

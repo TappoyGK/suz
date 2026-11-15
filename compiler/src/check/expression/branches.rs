@@ -19,7 +19,7 @@ pub(super) fn check(
             let patterns = matches::patterns(target.ty, arms, expr.location, bindings)?;
             let ty = expected
                 .or_else(|| operand_type(expr, bindings))
-                .unwrap_or_else(|| default_type(expr));
+                .unwrap_or_else(|| default_type(expr, bindings));
             if ty == Type::Void {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
@@ -45,7 +45,7 @@ pub(super) fn check(
         } => {
             let ty = expected
                 .or_else(|| operand_type(expr, bindings))
-                .unwrap_or_else(|| default_type(expr));
+                .unwrap_or_else(|| default_type(expr, bindings));
             if ty == Type::Void {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,

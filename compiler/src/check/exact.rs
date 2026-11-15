@@ -52,7 +52,7 @@ pub(super) fn is_operator(expr: &Expression) -> bool {
     }
 }
 pub(super) fn integer(expr: &Expression, bindings: &Scope) -> bool {
-    !super::expression::has_float_literal(expr)
+    !super::expression::has_float_literal(expr, bindings)
         && matches!(
             super::expression::operand_type(expr, bindings),
             None | Some(Type::Integer(_))

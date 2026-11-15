@@ -60,7 +60,7 @@ pub(super) fn check(
         ExpressionKind::BitNot(_) | ExpressionKind::Negate(_) | ExpressionKind::Binary { .. } => {
             let ty = expected
                 .or_else(|| operand_type(expr, bindings))
-                .unwrap_or_else(|| default_type(expr));
+                .unwrap_or_else(|| default_type(expr, bindings));
             let ty = if matches!(ty, Type::Float(_)) {
                 match operand_type(expr, bindings) {
                     Some(known @ Type::Float(_)) => super::super::exact::join(ty, known).unwrap(),
@@ -232,7 +232,10 @@ pub(super) fn check(
                     .map(|operand| operand_type(operand, bindings)),
             )
             .unwrap_or_else(|| {
-                if operands.iter().any(has_float_literal) {
+                if operands
+                    .iter()
+                    .any(|operand| has_float_literal(operand, bindings))
+                {
                     Type::Float(FloatType::F64)
                 } else {
                     Type::Integer(IntegerType::I64)
@@ -247,7 +250,9 @@ pub(super) fn check(
                 .iter()
                 .map(|operand| {
                     if numeric {
-                        if operand_type(operand, bindings).is_none() && has_float_literal(operand) {
+                        if operand_type(operand, bindings).is_none()
+                            && has_float_literal(operand, bindings)
+                        {
                             expression(operand, Some(float_type), bindings)
                         } else {
                             super::super::exact::comparison_value(operand, bindings)

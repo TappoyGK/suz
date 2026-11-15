@@ -92,7 +92,7 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
                 if let Some(ty) = joined_type(floats.map(Some)) {
                     return Some(ty);
                 }
-                if has_float_literal(left) || has_float_literal(right) {
+                if has_float_literal(left, bindings) || has_float_literal(right, bindings) {
                     return None;
                 }
             }
@@ -110,32 +110,53 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
 }
 
 // Only result-producing operands participate; conditions and cast sources do not.
-pub(super) fn has_float_literal(expr: &Expression) -> bool {
+pub(super) fn has_float_literal(expr: &Expression, bindings: &Scope) -> bool {
+    let key = std::ptr::from_ref(expr) as usize;
+    if bindings.hint_depth.get() > 0
+        && let Some(found) = bindings.float_hints.borrow().get(&key)
+    {
+        return *found;
+    }
+    let found = has_float_literal_inner(expr, bindings);
+    if bindings.hint_depth.get() > 0 {
+        bindings.float_hints.borrow_mut().insert(key, found);
+    }
+    found
+}
+
+fn has_float_literal_inner(expr: &Expression, bindings: &Scope) -> bool {
     match &expr.kind {
-        ExpressionKind::Match { arms, .. } => arms.iter().any(|arm| has_float_literal(&arm.body)),
-        ExpressionKind::Block { value, .. } => has_float_literal(value),
+        ExpressionKind::Match { arms, .. } => arms
+            .iter()
+            .any(|arm| has_float_literal(&arm.body, bindings)),
+        ExpressionKind::Block { value, .. } => has_float_literal(value, bindings),
         ExpressionKind::Float(_) => true,
         ExpressionKind::ArithmeticHandler { operand: inner, .. }
         | ExpressionKind::Group(inner)
         | ExpressionKind::BitNot(inner)
-        | ExpressionKind::Negate(inner) => has_float_literal(inner),
+        | ExpressionKind::Negate(inner) => has_float_literal(inner, bindings),
         ExpressionKind::Binary {
             operator,
             left,
             right,
-        } => has_float_literal(left) || (!operator.is_shift() && has_float_literal(right)),
+        } => {
+            has_float_literal(left, bindings)
+                || (!operator.is_shift() && has_float_literal(right, bindings))
+        }
         ExpressionKind::If {
             branches,
             otherwise,
         } => {
-            branches.iter().any(|(_, value)| has_float_literal(value))
-                || has_float_literal(otherwise)
+            branches
+                .iter()
+                .any(|(_, value)| has_float_literal(value, bindings))
+                || has_float_literal(otherwise, bindings)
         }
         _ => false,
     }
 }
-fn default_type(expr: &Expression) -> Type {
-    if has_float_literal(expr) {
+fn default_type(expr: &Expression, bindings: &Scope) -> Type {
+    if has_float_literal(expr, bindings) {
         Type::Float(FloatType::F64)
     } else {
         Type::Integer(IntegerType::I64)
@@ -183,6 +204,7 @@ impl<'a> HintSession<'a> {
     fn new(scope: &'a Scope) -> Self {
         if scope.hint_depth.get() == 0 {
             scope.type_hints.borrow_mut().clear();
+            scope.float_hints.borrow_mut().clear();
         }
         scope.hint_depth.set(scope.hint_depth.get() + 1);
         Self(scope)
@@ -193,6 +215,7 @@ impl Drop for HintSession<'_> {
         self.0.hint_depth.set(self.0.hint_depth.get() - 1);
         if self.0.hint_depth.get() == 0 {
             self.0.type_hints.borrow_mut().clear();
+            self.0.float_hints.borrow_mut().clear();
         }
     }
 }
