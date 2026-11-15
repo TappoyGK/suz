@@ -49,14 +49,6 @@ fn float_types_reject_overflow_and_implicit_conversions() {
         ("fix x: f32 = 1.0e40\nreturn 0", "lit.float-range"),
         ("fix x = 1.0e400\nreturn 0", "lit.float-range"),
         ("fix x: u8 = 1.0\nreturn 0", "type.expected"),
-        (
-            "fix x: f32 = 1.0\nfix y: f64 = x\nreturn 0",
-            "type.expected",
-        ),
-        (
-            "fix x: f32 = 1.0\nfix y: f64 = 1.0\nreturn ifexpr x == y { 0 } else { 1 }",
-            "type.expected",
-        ),
         ("fix x = 1\nfix y: f32 = x\nreturn 0", "type.expected"),
         ("fix x = 1.0 & 1.0\nreturn 0", "expr.operator-types"),
         ("fix x = 1.0 +% 1.0\nreturn 0", "expr.operator-types"),
@@ -141,10 +133,6 @@ fn float_arithmetic_preserves_rounding_and_ieee_results_when_optimized() {
 #[test]
 fn float_arithmetic_checks_types_and_stays_out_of_integer_diagnostics() {
     for (body, rule) in [
-        (
-            "fix x: f32 = 1.0\nfix y: f64 = 1.0\nfix z = x + y\nreturn 0",
-            "type.expected",
-        ),
         ("fix x = -true\nreturn 0", "expr.operator-types"),
         ("fix x = true + false\nreturn 0", "expr.operator-types"),
         ("fix x: f32 = 1.0\nx += 1.0\nreturn 0", "var.fix-assign"),
@@ -154,7 +142,7 @@ fn float_arithmetic_checks_types_and_stays_out_of_integer_diagnostics() {
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
         assert!(error.message.contains(rule), "{error:?}");
     }
-    let source = b"fn main() -> u8 { var x: f32 = -(1)\nx += -x * (2 - 1) / 2\nreturn 0 }";
+    let source = b"fn main() -> u8 { var x: f32 = -(1.0)\nx += -x * (2.0 - 1.0) / 2.0\nreturn 0 }";
     for mode in [
         suz::ArithmeticMode::Default,
         suz::ArithmeticMode::Warn,

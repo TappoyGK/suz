@@ -17,11 +17,6 @@ fn comparison_chains_check_direction_and_every_operand() {
         assert!(error.message.contains("expr.comparison-chain"), "{error}");
     }
     for (body, rule) in [
-        (
-            "fix first: u8 = 3\nfix second: i32 = 4\nfix result = first < 2 < second",
-            "type.expected",
-        ),
-        ("fix top: u8 = 3\nfix result = 256 < 2 < top", "lit.range"),
         ("fix result = 3 < 2 < missing", "decl.local-scope"),
         ("fix result = true == true < false", "expr.operator-types"),
     ] {

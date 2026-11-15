@@ -128,7 +128,7 @@ pub fn compile(
     if run.result == Outcome::Panic && run.panic_diagnostic.is_none() {
         return Err("missing panic diagnostic expectation".into());
     }
-    if run.warnings.len() != run.arithmetic_warnings {
+    if run.warnings.len() != run.warning_count {
         return Err("missing warning expectations".into());
     }
     if run.result == Outcome::CompileError && run.diagnostic.is_none() {

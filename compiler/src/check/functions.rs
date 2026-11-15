@@ -1,6 +1,6 @@
 use super::{
     control, declarations, diagnostics,
-    expression::expression,
+    expression::coerced as expression,
     ir::{CheckedExpression, CheckedFunction, CheckedProgram, Value},
     scope::{Scope, Signature},
     statements::{self, Binding},
@@ -106,6 +106,18 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     }
     warnings.sort_by_key(|l| (l.line, l.column));
     Ok(CheckedProgram {
+        division_warnings: globals
+            .division_warnings
+            .borrow()
+            .iter()
+            .map(|&(line, column)| crate::ast::Location { line, column })
+            .collect(),
+        comparison_warnings: globals
+            .comparison_warnings
+            .borrow()
+            .iter()
+            .map(|(&(line, column), &value)| (crate::ast::Location { line, column }, value))
+            .collect(),
         constant_texts: globals.constant_texts.borrow().clone(),
         main_location: program.functions[main_id].keyword_location,
         structs: program.structs.clone(),

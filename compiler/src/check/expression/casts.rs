@@ -1,6 +1,5 @@
 use super::super::constants::{constant_float, constant_integer, float_to_integer};
 use super::super::ir::{CheckedExpression, Value};
-use super::expression;
 use crate::ast::{FailureHandler, FloatType};
 use crate::check::scope::Scope;
 use crate::{
@@ -8,11 +7,7 @@ use crate::{
     ast::{Expression, ExpressionKind, Type},
 };
 
-pub(super) fn check(
-    expr: &Expression,
-    expected: Option<Type>,
-    bindings: &Scope,
-) -> Result<CheckedExpression, Diagnostic> {
+pub(super) fn check(expr: &Expression, bindings: &Scope) -> Result<CheckedExpression, Diagnostic> {
     Ok(match &expr.kind {
         ExpressionKind::Cast {
             wrap,
@@ -20,7 +15,17 @@ pub(super) fn check(
             target,
             fallback,
         } => {
-            let operand = expression(operand, None, bindings)?;
+            let operand = super::super::exact::use_value(operand, bindings)?;
+            if operand.ty == Type::Exact {
+                return super::super::exact::cast(
+                    operand,
+                    *target,
+                    *wrap,
+                    fallback,
+                    expr.location,
+                    bindings,
+                );
+            }
             if !*wrap && operand.ty == Type::Text && *target == Type::Symbol {
                 if fallback.is_some() {
                     return Err(expr.location.error(
@@ -105,10 +110,9 @@ pub(super) fn check(
             }
             let safe = match (operand.ty, *target) {
                 (Type::Symbol | Type::Text, _) => false,
-                (Type::Char, Type::Integer(to)) => to.bounds().1 >= 0x10ffff,
-                (Type::Integer(from), Type::Char) => {
-                    let (min, max) = from.bounds();
-                    min >= 0 && max < 0xd800
+                (Type::Char, Type::Integer(_)) | (Type::Integer(_), Type::Char) => {
+                    let (min, max) = operand.ty.integer_bounds().unwrap();
+                    crate::numeric::Range::bounds(min, max).fits_type(*target)
                 }
                 (Type::Integer(from), Type::Integer(to)) => {
                     let (from_min, from_max) = from.bounds();
@@ -138,17 +142,11 @@ pub(super) fn check(
                         return_value: Box::new(return_value),
                     },
                 };
-                if expected.is_some_and(|ty| ty != *target) {
-                    return Err(expr.location.error(
-                        ErrorKind::InvalidSource,
-                        "cast result does not match the expected type [type.expected]",
-                    ));
-                }
                 return Ok(checked);
             }
             let fallback = match fallback {
                 Some(FailureHandler::Value(value)) => {
-                    Some(expression(value, Some(*target), bindings)?)
+                    Some(super::coerced(value, Some(*target), bindings)?)
                 }
                 None => None,
                 _ => unreachable!(),
@@ -195,12 +193,12 @@ pub(super) fn check(
                     }
                 } else {
                     if !safe {
-                        let (min, max) = target.integer_bounds().unwrap();
                         match constant_integer(&operand)? {
                             Some(value)
-                                if (min..=max).contains(&value)
-                                    && (*target != Type::Char
-                                        || !(0xd800..=0xdfff).contains(&value)) => {}
+                                if crate::numeric::Range::point(
+                                    crate::numeric::Int::from_i128(value),
+                                )
+                                .fits_type(*target) => {}
                             Some(_) => return Err(expr.location.error(
                                 ErrorKind::InvalidSource,
                                 "constant cast is out of range and requires or [const.cast-check]",

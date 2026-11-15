@@ -1,4 +1,4 @@
-use super::{constants, diagnostics, expression::expression, statements::Binding};
+use super::{constants, diagnostics, expression::coerced as expression, statements::Binding};
 use crate::check::scope::Scope;
 use crate::{
     Diagnostic, ErrorKind,

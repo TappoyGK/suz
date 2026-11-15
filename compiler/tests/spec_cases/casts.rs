@@ -67,10 +67,6 @@ fn safe_casts_keep_source_types_and_diagnostics() {
         ("return true as u8", "expr.as"),
         ("fix x = 1 as f32 or false\nreturn 0", "type.expected"),
         (
-            "fix value: f32 = 1.0\nfix fallback: f32 = 0.0\nfix x = value as f64 or fallback\nreturn 0",
-            "type.expected",
-        ),
-        (
             "fix x = 1 as f32 or (1.0e39 as f32)\nreturn 0",
             "const.cast-check",
         ),

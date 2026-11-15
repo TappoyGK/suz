@@ -1,6 +1,8 @@
 use crate::ast::{BinaryOperator, ComparisonOperator, Location, LogicalOperator, Type};
 
 pub(crate) struct CheckedProgram {
+    pub division_warnings: Vec<Location>,
+    pub comparison_warnings: Vec<(Location, bool)>,
     pub constant_texts: std::collections::BTreeSet<String>,
     pub main_location: Location,
     pub structs: Vec<crate::ast::StructDeclaration>,
@@ -93,6 +95,7 @@ pub(crate) enum CheckedHandler {
 }
 #[derive(Clone)]
 pub(crate) enum IntegerOperation {
+    Exact(Box<super::exact::Exact>),
     Binary {
         operator: BinaryOperator,
         left: Box<CheckedExpression>,
@@ -108,13 +111,14 @@ impl IntegerOperation {
         let (first, second) = match self {
             Self::Binary { left, right, .. } => (Some(left.as_ref()), Some(right.as_ref())),
             Self::Negate(operand) => (Some(operand.as_ref()), None),
-            Self::NegatedLiteral(_) => (None, None),
+            Self::NegatedLiteral(_) | Self::Exact(_) => (None, None),
         };
         first.into_iter().chain(second)
     }
 }
 #[derive(Clone)]
 pub(crate) enum Value {
+    Exact(Box<super::exact::Exact>),
     TextView(Box<CheckedExpression>),
     Intern {
         constant: Option<String>,

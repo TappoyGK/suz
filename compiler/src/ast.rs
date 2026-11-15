@@ -127,6 +127,7 @@ pub(crate) struct EnumDeclaration {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Type {
+    Exact, // Internal mathematical integer; never a source-level storage type.
     Struct(usize),
     Enum(EnumType),
     Void,
@@ -179,6 +180,7 @@ impl Type {
     }
     pub fn name(self) -> &'static str {
         match self {
+            Self::Exact => "exact integer",
             Self::Integer(ty) => ty.name(),
             Self::Float(ty) => ty.name(),
             Self::Char => "char",
@@ -192,6 +194,7 @@ impl Type {
     }
     pub fn c_name(self) -> String {
         match self {
+            Self::Exact => "suz_exact".into(),
             Self::Struct(id) => format!("suz_struct_{id}"),
             Self::Integer(ty) => ty.c_name().into(),
             Self::Float(ty) => ty.c_name().into(),
@@ -543,6 +546,7 @@ pub(crate) enum ExpressionKind {
         right: Box<Expression>,
     },
     Comparison {
+        locations: Vec<Location>,
         operators: Vec<ComparisonOperator>,
         operands: Vec<Expression>,
     },

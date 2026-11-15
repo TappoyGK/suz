@@ -84,7 +84,7 @@ pub(super) fn check_statements(
                 arms,
                 location,
             } => {
-                let target = expression(target, None, bindings)?;
+                let target = crate::check::exact::use_value(target, bindings)?;
                 let patterns = super::matches::patterns(target.ty, arms, *location, bindings)?;
                 let id = *next_id;
                 *next_id += 1;
@@ -262,7 +262,8 @@ pub(super) fn check_statements(
                     ));
                 }
                 // Resolve before inserting: a binding is not visible in its own initializer.
-                let mut initializer = expression(initializer, *annotation, bindings)?;
+                let mut initializer =
+                    super::expression::coerced(initializer, *annotation, bindings)?;
                 if initializer.ty == Type::Void {
                     return Err(location.error(
                         ErrorKind::InvalidSource,
@@ -334,7 +335,7 @@ pub(super) fn check_statements(
                     indices.push(index);
                     ty = field_type;
                 }
-                let mut value = expression(value, Some(ty), bindings)?;
+                let mut value = super::expression::coerced(value, Some(ty), bindings)?;
                 *has_return |= lower_return_handler(&mut value, &mut statements, next_id);
                 bindings[name].assigned.set(true);
                 statements.push(CheckedStatement::Assign {

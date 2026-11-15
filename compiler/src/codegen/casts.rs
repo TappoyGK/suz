@@ -10,6 +10,18 @@ pub(super) fn cast_parts(
     location: crate::ast::Location,
     context: &mut ExpressionContext,
 ) -> (String, String, String) {
+    if operand.ty == crate::ast::Type::Exact {
+        let id = context.temporaries.len();
+        context.temporaries.push(crate::ast::Type::Exact);
+        let name = format!("suz_cmp_{id}");
+        let value = super::expressions::expression(operand, context);
+        return (
+            format!("{name} = {value}"),
+            super::exact::fits(target, &name),
+            super::exact::converted(target, &name, context),
+        );
+    }
+
     use crate::ast::{FloatType, IntegerType, Type};
     for ty in [operand.ty, target] {
         if let Type::Float(ty) = ty {

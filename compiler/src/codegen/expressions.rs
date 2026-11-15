@@ -16,7 +16,21 @@ pub(super) fn c_string(text: &str) -> String {
 }
 
 pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionContext) -> String {
+    if matches!(
+        expr.value,
+        Value::IntegerArithmetic {
+            operation: IntegerOperation::Exact(_),
+            ..
+        }
+    ) {
+        return super::exact::stored(expr, context);
+    }
     match expr.value {
+        Value::Exact(ref e) => format!(
+            "suz_exact_require({}, {})",
+            super::exact::tree(e, context),
+            c_string(&context.source_name)
+        ),
         Value::TextView(ref inner) => format!("suz_text_as_view({})", expression(inner, context)),
         Value::Intern {
             ref operand,
@@ -98,6 +112,9 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
         } => {
             let right_index = context.temporaries.len() + 1;
             let (setup, condition, converted) = integer_parts(expr, context);
+            if condition == "true" {
+                return format!("({setup}, {converted})");
+            }
             let fallback = match handler {
                 Some(CheckedHandler::Value(value)) => expression(value, context),
                 Some(CheckedHandler::Return(_)) => {
@@ -116,6 +133,7 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                             BinaryOperator::ShiftRight => "right shift",
                             _ => unreachable!(),
                         },
+                        IntegerOperation::Exact(_) => unreachable!(),
                         IntegerOperation::Negate(_) => "negation",
                         IntegerOperation::NegatedLiteral(_) => {
                             unreachable!("literal negation cannot fail")
@@ -129,7 +147,7 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                         }
                     ) {
                         format!(
-                            "suz_cmp_{right_index} == 0 ? \"integer {name} by zero [rt.div-zero]\" : \"integer {name} overflow [rt.div-overflow]\""
+                            "suz_cmp_{right_index} == 0 ? \"integer {name} by zero [rt.div-zero]\" : \"integer {name} overflow [rt.int-overflow]\""
                         )
                     } else if let IntegerOperation::Binary { operator, .. } = operation
                         && operator.is_shift()
@@ -137,9 +155,19 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                         let crate::ast::Type::Integer(ty) = expr.ty else {
                             unreachable!()
                         };
+                        let IntegerOperation::Binary { right, .. } = operation else {
+                            unreachable!()
+                        };
+                        let invalid = if right.ty == crate::ast::Type::Exact {
+                            format!(
+                                "suz_cmp_{right_index}.negative || suz_cmp_{right_index}.magnitude >= {}",
+                                ty.bits()
+                            )
+                        } else {
+                            format!("(uint64_t)suz_cmp_{right_index} >= {}", ty.bits())
+                        };
                         format!(
-                            "(uint64_t)suz_cmp_{right_index} >= {} ? \"shift count out of range [rt.shift-count]\" : \"integer {name} overflow [rt.shift-overflow]\"",
-                            ty.bits()
+                            "({invalid}) ? \"shift count out of range [rt.shift-count]\" : \"integer {name} overflow [rt.shift-overflow]\""
                         )
                     } else {
                         c_string(&format!("integer {name} overflow [rt.int-overflow]"))
@@ -173,6 +201,10 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             format!("({setup}, {condition} ? {converted} : ({fallback}))")
         }
         Value::Cast(ref inner) => {
+            if inner.ty == crate::ast::Type::Exact {
+                let value = expression(inner, context);
+                return super::exact::converted(expr.ty, &value, context);
+            }
             if inner.ty == crate::ast::Type::Float(crate::ast::FloatType::F64)
                 && expr.ty == crate::ast::Type::Float(crate::ast::FloatType::F32)
             {
@@ -245,7 +277,11 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             format!(
                 "suz_bits_{}((uint64_t)({}))",
                 ty.name(),
-                expression(inner, context)
+                if inner.ty == crate::ast::Type::Exact {
+                    format!("suz_exact_bits({})", expression(inner, context))
+                } else {
+                    expression(inner, context)
+                }
             )
         }
         Value::BitNot(ref inner) => {
@@ -307,7 +343,31 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             ref operators,
             ref operands,
         } => {
-            use crate::ast::Type;
+            use crate::ast::{IntegerType, Type};
+            let operands: Vec<_> = operands
+                .iter()
+                .map(|operand| {
+                    if let Value::Exact(e) = &operand.value
+                        && let crate::check::exact::ExactKind::Literal(n) = &e.kind
+                        && let Some(value) = n.to_i128()
+                    {
+                        let ty = if i64::try_from(value).is_ok() {
+                            Some(IntegerType::I64)
+                        } else if u64::try_from(value).is_ok() {
+                            Some(IntegerType::U64)
+                        } else {
+                            None
+                        };
+                        if let Some(ty) = ty {
+                            return CheckedExpression {
+                                ty: Type::Integer(ty),
+                                value: Value::Integer { value, minus: None },
+                            };
+                        }
+                    }
+                    operand.clone()
+                })
+                .collect();
             let unsigned = operands[0]
                 .ty
                 .integer_storage()
@@ -321,7 +381,11 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             } else {
                 None
             };
-            if !floating && !text && structure.is_none() {
+            if !floating
+                && !text
+                && structure.is_none()
+                && !matches!(operands[0].ty, Type::Integer(_) | Type::Exact)
+            {
                 context.helpers.insert(unsigned);
             }
             // Declarations have no evaluation effects. Assignments remain in
@@ -379,12 +443,16 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                         operators[index].symbol()
                     );
                 }
-                if floating {
-                    return format!(
-                        "{} {} {}",
-                        names[index],
-                        operators[index].symbol(),
-                        names[index + 1]
+                if matches!(
+                    operands[index].ty,
+                    Type::Exact | Type::Integer(_) | Type::Float(_)
+                ) {
+                    return super::exact::compare(
+                        operands[index].ty,
+                        &names[index],
+                        operands[index + 1].ty,
+                        &names[index + 1],
+                        operators[index],
                     );
                 }
                 format!(
@@ -432,6 +500,7 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
 pub(super) fn equality(ty: crate::ast::Type, left: &str, right: &str) -> String {
     use crate::ast::Type;
     match ty {
+        Type::Exact => format!("suz_exact_compare({left}, {right}) == 0"),
         Type::Text => format!("suz_text_view_equal({left}, {right})"),
         Type::Struct(id) => format!("suz_equal_{id}({left}, {right})"),
         _ => format!("{left} == {right}"),

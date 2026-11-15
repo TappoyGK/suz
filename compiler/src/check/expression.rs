@@ -16,6 +16,20 @@ use crate::{
 // Numeric literals receive a type from the other operand before defaulting.
 // The comparison's bool result never supplies the operand type.
 pub(super) fn operand_type(expr: &Expression, bindings: &Scope) -> Option<Type> {
+    let key = std::ptr::from_ref(expr) as usize;
+    if bindings.hint_depth.get() > 0
+        && let Some(ty) = bindings.type_hints.borrow().get(&key)
+    {
+        return *ty;
+    }
+    let ty = operand_type_inner(expr, bindings);
+    if bindings.hint_depth.get() > 0 {
+        bindings.type_hints.borrow_mut().insert(key, ty);
+    }
+    ty
+}
+
+fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
     match &expr.kind {
         ExpressionKind::Slice { index, .. } => Some(if *index { Type::Char } else { Type::Text }),
         ExpressionKind::Template(_) => Some(Type::Symbol),
@@ -64,13 +78,30 @@ pub(super) fn operand_type(expr: &Expression, bindings: &Scope) -> Option<Type> 
             operator,
             left,
             right,
-        } => operand_type(left, bindings).or_else(|| {
+        } => {
+            let a = operand_type(left, bindings);
+            let b = operand_type(right, bindings);
             if operator.is_shift() {
-                None
-            } else {
-                operand_type(right, bindings)
+                return a;
             }
-        }),
+            if operator.is_arithmetic() {
+                let floats = [a, b]
+                    .into_iter()
+                    .flatten()
+                    .filter(|t| matches!(t, Type::Float(_)));
+                if let Some(ty) = joined_type(floats.map(Some)) {
+                    return Some(ty);
+                }
+                if has_float_literal(left, bindings) || has_float_literal(right, bindings) {
+                    return None;
+                }
+            }
+            match (a, b) {
+                (Some(a), Some(b)) => Some(super::exact::join(a, b).unwrap_or(a)),
+                _ => a.or(b),
+            }
+        }
+
         ExpressionKind::Bool(_)
         | ExpressionKind::Not(_)
         | ExpressionKind::Logical { .. }
@@ -79,32 +110,53 @@ pub(super) fn operand_type(expr: &Expression, bindings: &Scope) -> Option<Type> 
 }
 
 // Only result-producing operands participate; conditions and cast sources do not.
-fn has_float_literal(expr: &Expression) -> bool {
+pub(super) fn has_float_literal(expr: &Expression, bindings: &Scope) -> bool {
+    let key = std::ptr::from_ref(expr) as usize;
+    if bindings.hint_depth.get() > 0
+        && let Some(found) = bindings.float_hints.borrow().get(&key)
+    {
+        return *found;
+    }
+    let found = has_float_literal_inner(expr, bindings);
+    if bindings.hint_depth.get() > 0 {
+        bindings.float_hints.borrow_mut().insert(key, found);
+    }
+    found
+}
+
+fn has_float_literal_inner(expr: &Expression, bindings: &Scope) -> bool {
     match &expr.kind {
-        ExpressionKind::Match { arms, .. } => arms.iter().any(|arm| has_float_literal(&arm.body)),
-        ExpressionKind::Block { value, .. } => has_float_literal(value),
+        ExpressionKind::Match { arms, .. } => arms
+            .iter()
+            .any(|arm| has_float_literal(&arm.body, bindings)),
+        ExpressionKind::Block { value, .. } => has_float_literal(value, bindings),
         ExpressionKind::Float(_) => true,
         ExpressionKind::ArithmeticHandler { operand: inner, .. }
         | ExpressionKind::Group(inner)
         | ExpressionKind::BitNot(inner)
-        | ExpressionKind::Negate(inner) => has_float_literal(inner),
+        | ExpressionKind::Negate(inner) => has_float_literal(inner, bindings),
         ExpressionKind::Binary {
             operator,
             left,
             right,
-        } => has_float_literal(left) || (!operator.is_shift() && has_float_literal(right)),
+        } => {
+            has_float_literal(left, bindings)
+                || (!operator.is_shift() && has_float_literal(right, bindings))
+        }
         ExpressionKind::If {
             branches,
             otherwise,
         } => {
-            branches.iter().any(|(_, value)| has_float_literal(value))
-                || has_float_literal(otherwise)
+            branches
+                .iter()
+                .any(|(_, value)| has_float_literal(value, bindings))
+                || has_float_literal(otherwise, bindings)
         }
         _ => false,
     }
 }
-fn default_type(expr: &Expression) -> Type {
-    if has_float_literal(expr) {
+fn default_type(expr: &Expression, bindings: &Scope) -> Type {
+    if has_float_literal(expr, bindings) {
         Type::Float(FloatType::F64)
     } else {
         Type::Integer(IntegerType::I64)
@@ -145,12 +197,48 @@ fn float_literal(
     })
 }
 
+// Hints are shared only while checking one live AST expression. Clear them at
+// the boundary so pointer keys cannot outlive their expressions or bindings.
+struct HintSession<'a>(&'a Scope);
+impl<'a> HintSession<'a> {
+    fn new(scope: &'a Scope) -> Self {
+        if scope.hint_depth.get() == 0 {
+            scope.type_hints.borrow_mut().clear();
+            scope.float_hints.borrow_mut().clear();
+        }
+        scope.hint_depth.set(scope.hint_depth.get() + 1);
+        Self(scope)
+    }
+}
+impl Drop for HintSession<'_> {
+    fn drop(&mut self) {
+        self.0.hint_depth.set(self.0.hint_depth.get() - 1);
+        if self.0.hint_depth.get() == 0 {
+            self.0.type_hints.borrow_mut().clear();
+            self.0.float_hints.borrow_mut().clear();
+        }
+    }
+}
+
 pub(super) fn expression(
     expr: &Expression,
     expected: Option<Type>,
     bindings: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
-    let checked = expression_inner(expr, expected, bindings)?;
+    let _hints = HintSession::new(bindings);
+    let checked = expression_inner(expr, expected, bindings, false)?;
+    super::text::register_constants(&checked, bindings);
+    Ok(checked)
+}
+
+// Numeric widening is opt-in at the contexts listed in conv.widen-places.
+pub(super) fn coerced(
+    expr: &Expression,
+    expected: Option<Type>,
+    bindings: &Scope,
+) -> Result<CheckedExpression, Diagnostic> {
+    let _hints = HintSession::new(bindings);
+    let checked = expression_inner(expr, expected, bindings, true)?;
     super::text::register_constants(&checked, bindings);
     Ok(checked)
 }
@@ -159,61 +247,66 @@ fn expression_inner(
     expr: &Expression,
     expected: Option<Type>,
     bindings: &Scope,
+    widen: bool,
 ) -> Result<CheckedExpression, Diagnostic> {
-    let checked = match &expr.kind {
-        ExpressionKind::Slice { .. } => slices::check(expr, bindings)?,
-        ExpressionKind::Template(parts) => super::text::template(parts, expr.location, bindings)?,
-        ExpressionKind::Struct { .. } | ExpressionKind::Field { .. } => {
-            structs::check(expr, bindings)?
-        }
-        ExpressionKind::Variant { enum_name, variant } => {
-            let decl = bindings
-                .enums
-                .iter()
-                .find(|e| &e.name == enum_name)
-                .ok_or_else(|| {
-                    expr.location
-                        .error(ErrorKind::InvalidSource, "unknown enum type [enum.access]")
-                })?;
-            let value = decl
-                .variants
-                .iter()
-                .position(|name| name == variant)
-                .ok_or_else(|| {
-                    expr.location.error(
-                        ErrorKind::InvalidSource,
-                        "unknown enum variant [enum.access]",
-                    )
-                })?;
-            CheckedExpression {
-                ty: Type::Enum(decl.ty),
-                value: Value::Integer {
-                    value: value as i128,
-                    minus: None,
-                },
+    let checked = if super::exact::is_operator(expr) && super::exact::integer(expr, bindings) {
+        super::exact::check(expr, expected, bindings, false)?
+    } else {
+        match &expr.kind {
+            ExpressionKind::Slice { .. } => slices::check(expr, bindings)?,
+            ExpressionKind::Template(parts) => {
+                super::text::template(parts, expr.location, bindings)?
             }
-        }
-        ExpressionKind::Void => CheckedExpression {
-            ty: Type::Void,
-            value: Value::Void,
-        },
-        ExpressionKind::Call { name, arguments } => {
-            super::functions::call(expr, name, arguments, bindings)?
-        }
-        ExpressionKind::Block { statements, value } => {
-            blocks::check(statements, value, expected, bindings)?
-        }
-        ExpressionKind::ArithmeticHandler { .. }
-        | ExpressionKind::BitNot(_)
-        | ExpressionKind::Negate(_)
-        | ExpressionKind::Binary { .. }
-        | ExpressionKind::Not(_)
-        | ExpressionKind::Logical { .. }
-        | ExpressionKind::Comparison { .. } => operators::check(expr, expected, bindings)?,
-        ExpressionKind::Cast { .. } => casts::check(expr, expected, bindings)?,
-        ExpressionKind::Float(text) => {
-            let ty =
-                match expected {
+            ExpressionKind::Struct { .. } | ExpressionKind::Field { .. } => {
+                structs::check(expr, bindings)?
+            }
+            ExpressionKind::Variant { enum_name, variant } => {
+                let decl = bindings
+                    .enums
+                    .iter()
+                    .find(|e| &e.name == enum_name)
+                    .ok_or_else(|| {
+                        expr.location
+                            .error(ErrorKind::InvalidSource, "unknown enum type [enum.access]")
+                    })?;
+                let value = decl
+                    .variants
+                    .iter()
+                    .position(|name| name == variant)
+                    .ok_or_else(|| {
+                        expr.location.error(
+                            ErrorKind::InvalidSource,
+                            "unknown enum variant [enum.access]",
+                        )
+                    })?;
+                CheckedExpression {
+                    ty: Type::Enum(decl.ty),
+                    value: Value::Integer {
+                        value: value as i128,
+                        minus: None,
+                    },
+                }
+            }
+            ExpressionKind::Void => CheckedExpression {
+                ty: Type::Void,
+                value: Value::Void,
+            },
+            ExpressionKind::Call { name, arguments } => {
+                super::functions::call(expr, name, arguments, bindings)?
+            }
+            ExpressionKind::Block { statements, value } => {
+                blocks::check(statements, value, expected, bindings)?
+            }
+            ExpressionKind::ArithmeticHandler { .. }
+            | ExpressionKind::BitNot(_)
+            | ExpressionKind::Negate(_)
+            | ExpressionKind::Binary { .. }
+            | ExpressionKind::Not(_)
+            | ExpressionKind::Logical { .. }
+            | ExpressionKind::Comparison { .. } => operators::check(expr, expected, bindings)?,
+            ExpressionKind::Cast { .. } => casts::check(expr, bindings)?,
+            ExpressionKind::Float(text) => {
+                let ty = match expected {
                     None => FloatType::F64,
                     Some(Type::Float(ty)) => ty,
                     _ => return Err(expr.location.error(
@@ -221,93 +314,105 @@ fn expression_inner(
                         "a floating-point literal requires a floating-point type [type.expected]",
                     )),
                 };
-            float_literal(text, ty, expr.location)?
-        }
-        ExpressionKind::Match { .. } | ExpressionKind::If { .. } => {
-            branches::check(expr, expected, bindings)?
-        }
-        ExpressionKind::Integer { digits, negative } => {
-            if let Some(Type::Float(ty)) = expected {
-                let text = if *negative {
-                    format!("-{digits}")
-                } else {
-                    digits.clone()
-                };
-                return float_literal(&text, ty, expr.location);
+                float_literal(text, ty, expr.location)?
             }
-            let ty = match expected {
-                Some(Type::Float(_)) => unreachable!(),
-                Some(
-                    Type::Char
-                    | Type::Bool
-                    | Type::Void
-                    | Type::Enum(_)
-                    | Type::Struct(_)
-                    | Type::Symbol
-                    | Type::Text,
-                ) => {
+            ExpressionKind::Match { .. } | ExpressionKind::If { .. } => {
+                branches::check(expr, expected, bindings)?
+            }
+            ExpressionKind::Integer { digits, negative } => {
+                if let Some(Type::Float(ty)) = expected {
+                    let text = if *negative {
+                        format!("-{digits}")
+                    } else {
+                        digits.clone()
+                    };
+                    return float_literal(&text, ty, expr.location);
+                }
+                let ty = match expected {
+                    Some(Type::Float(_)) => unreachable!(),
+                    Some(
+                        Type::Exact
+                        | Type::Char
+                        | Type::Bool
+                        | Type::Void
+                        | Type::Enum(_)
+                        | Type::Struct(_)
+                        | Type::Symbol
+                        | Type::Text,
+                    ) => {
+                        return Err(expr.location.error(
+                            ErrorKind::InvalidSource,
+                            "an integer literal requires a numeric type [type.expected]",
+                        ));
+                    }
+                    Some(Type::Integer(ty)) => ty,
+                    None => IntegerType::I64,
+                };
+                let fail = || {
+                    expr.location.error(
+                        ErrorKind::InvalidSource,
+                        format!(
+                            "integer literal is out of range for {} [lit.range]",
+                            ty.name()
+                        ),
+                    )
+                };
+                let magnitude = digits.parse::<i128>().map_err(|_| fail())?;
+                let value = if *negative { -magnitude } else { magnitude };
+                let (min, max) = ty.bounds();
+                if value < min || value > max {
+                    return Err(fail());
+                }
+                if *negative && min == 0 {
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
-                        "an integer literal requires a numeric type [type.expected]",
+                        "integer negation requires a signed type [expr.operator-types]",
                     ));
                 }
-                Some(Type::Integer(ty)) => ty,
-                None => IntegerType::I64,
-            };
-            let fail = || {
-                expr.location.error(
-                    ErrorKind::InvalidSource,
-                    format!(
-                        "integer literal is out of range for {} [lit.range]",
-                        ty.name()
-                    ),
-                )
-            };
-            let magnitude = digits.parse::<i128>().map_err(|_| fail())?;
-            let value = if *negative { -magnitude } else { magnitude };
-            let (min, max) = ty.bounds();
-            if value < min || value > max {
-                return Err(fail());
+                CheckedExpression {
+                    ty: Type::Integer(ty),
+                    value: Value::Integer {
+                        value,
+                        minus: negative.then_some(expr.location),
+                    },
+                }
             }
-            if *negative && min == 0 {
-                return Err(expr.location.error(
-                    ErrorKind::InvalidSource,
-                    "integer negation requires a signed type [expr.operator-types]",
-                ));
-            }
-            CheckedExpression {
-                ty: Type::Integer(ty),
+            ExpressionKind::Char(value) => CheckedExpression {
+                ty: Type::Char,
                 value: Value::Integer {
-                    value,
-                    minus: negative.then_some(expr.location),
+                    value: i128::from(*value),
+                    minus: None,
                 },
-            }
-        }
-        ExpressionKind::Char(value) => CheckedExpression {
-            ty: Type::Char,
-            value: Value::Integer {
-                value: i128::from(*value),
-                minus: None,
             },
-        },
-        ExpressionKind::Bool(value) => CheckedExpression {
-            ty: Type::Bool,
-            value: Value::Bool(*value),
-        },
-        ExpressionKind::Name(name) => {
-            let binding = bindings.get(name).ok_or_else(|| {
-                expr.location.error(
-                    ErrorKind::InvalidSource,
-                    format!("binding '{name}' is not in scope [decl.local-scope]"),
-                )
-            })?;
-            binding.constant.clone().unwrap_or(CheckedExpression {
-                ty: binding.ty,
-                value: Value::Local(binding.id),
-            })
+            ExpressionKind::Bool(value) => CheckedExpression {
+                ty: Type::Bool,
+                value: Value::Bool(*value),
+            },
+            ExpressionKind::Name(name) => {
+                let binding = bindings.get(name).ok_or_else(|| {
+                    expr.location.error(
+                        ErrorKind::InvalidSource,
+                        format!("binding '{name}' is not in scope [decl.local-scope]"),
+                    )
+                })?;
+                binding.constant.clone().unwrap_or(CheckedExpression {
+                    ty: binding.ty,
+                    value: Value::Local(binding.id),
+                })
+            }
+            ExpressionKind::Group(inner) => expression_inner(inner, expected, bindings, widen)?,
         }
-        ExpressionKind::Group(inner) => expression(inner, expected, bindings)?,
     };
+    if let Some(ty) = expected
+        && widen
+        && ty != checked.ty
+        && super::exact::widening(checked.ty, ty)
+    {
+        return Ok(CheckedExpression {
+            ty,
+            value: Value::Cast(Box::new(checked)),
+        });
+    }
     if expected == Some(Type::Text) && checked.ty == Type::Symbol {
         return Ok(CheckedExpression {
             ty: Type::Text,
@@ -328,11 +433,7 @@ fn expression_inner(
 }
 
 pub(super) fn joined_type(types: impl Iterator<Item = Option<Type>>) -> Option<Type> {
-    types.flatten().reduce(|left, right| {
-        if left.is_text() && right.is_text() && left != right {
-            Type::Text
-        } else {
-            left
-        }
-    })
+    types
+        .flatten()
+        .reduce(|a, b| super::exact::join(a, b).unwrap_or(a))
 }

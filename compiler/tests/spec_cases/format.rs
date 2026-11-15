@@ -14,7 +14,7 @@ fn main() -> u8 { return 0 }
 
 **期待結果：**
 
-| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+| 設定 | 結果 | 終了コード | 警告数 |
 |---|---|---:|---:|
 | 通常 | 正常終了 | 0 | 0 |
 
@@ -163,7 +163,7 @@ fn malformed_expectation_tables_are_rejected() {
         ),
         (
             format!(
-                "{SMALL}\n**期待結果：**\n\n| 設定 | 結果 | 終了コード | 整数演算の警告数 |\n|---|---|---|---|\n{row}\n"
+                "{SMALL}\n**期待結果：**\n\n| 設定 | 結果 | 終了コード | 警告数 |\n|---|---|---|---|\n{row}\n"
             ),
             "duplicate expectation table",
         ),
@@ -236,7 +236,7 @@ fn cases_and_modes_come_from_the_document() {
     assert_eq!(runs.len(), 2);
     assert_eq!(runs[0].mode, Mode::Warn);
     assert_eq!(runs[0].code, Some(7));
-    assert_eq!(runs[0].arithmetic_warnings, 2);
+    assert_eq!(runs[0].warning_count, 2);
     assert_eq!(runs[1].mode, Mode::Deny);
     assert_eq!(runs[1].result, Outcome::CompileError);
     assert_eq!(runs[1].code, None);
@@ -347,7 +347,7 @@ The following program returns zero.
 
 **期待結果：**
 
-| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+| 設定 | 結果 | 終了コード | 警告数 |
 |---|---|---:|---:|
 | 通常 | 正常終了 | 0 | 0 |
 

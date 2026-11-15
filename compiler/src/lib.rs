@@ -1,6 +1,7 @@
 #[cfg(test)]
 #[path = "../tests/support/integer_bounds.rs"]
 mod integer_bounds;
+mod numeric;
 
 mod ast;
 mod check;
@@ -170,6 +171,8 @@ fn analyze(
     let checked = check::check(&program)?;
     let warnings = warnings::collect(
         &checked.unhandled_arithmetic,
+        &checked.comparison_warnings,
+        &checked.division_warnings,
         &program.allows,
         mode,
         log_allow,

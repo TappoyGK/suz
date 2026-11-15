@@ -65,7 +65,13 @@ impl Parser<'_, '_> {
                     "invalid allow rule name [allow.item]",
                 ));
             }
-            if rule != "diagnostic.arithmetic" || items.iter().any(|item| item.rule == rule) {
+            if !matches!(
+                rule,
+                "diagnostic.arithmetic"
+                    | "diagnostic.constant-comparison"
+                    | "diagnostic.integer-division-to-float"
+            ) || items.iter().any(|item| item.rule == rule)
+            {
                 return Err(location.error(
                     ErrorKind::InvalidSource,
                     "unknown, non-warning or repeated allow rule [allow.rule-check]",

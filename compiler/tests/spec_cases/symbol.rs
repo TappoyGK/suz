@@ -45,7 +45,7 @@ fn template_contents_keep_diagnostics_and_scope_checks() {
         ),
         (
             "const VALUE = `${1 / 0}`\nfn main() -> u8 { return 0 }",
-            "const.evaluation",
+            "arith.div-zero-always",
         ),
     ] {
         let error = suz::compile(source.as_bytes()).unwrap_err();

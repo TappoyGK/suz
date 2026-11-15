@@ -1,7 +1,6 @@
 use super::{
     super::ir::{CheckedExpression, Value},
     super::statements,
-    expression,
 };
 use crate::check::scope::Scope;
 use crate::{
@@ -36,8 +35,10 @@ pub(super) fn operand_type(
     value: &Expression,
     bindings: &Scope,
 ) -> Option<Type> {
-    // Type discovery must not count speculative assignments in the real scope.
+    // Type discovery must not count speculative assignments or diagnostics.
     let mut local = bindings.clone();
+    local.comparison_warnings = Default::default();
+    local.division_warnings = Default::default();
     prefix(input, &mut local).ok()?;
     super::operand_type(value, &local)
 }
@@ -57,7 +58,7 @@ pub(super) fn check(
         .collect();
     let mut local = bindings.clone();
     let (statements, declared) = prefix(input, &mut local)?;
-    let checked_value = expression(value, expected, &local)?;
+    let checked_value = super::coerced(value, expected, &local)?;
     if checked_value.ty == Type::Void {
         return Err(value.location.error(
             crate::ErrorKind::InvalidSource,

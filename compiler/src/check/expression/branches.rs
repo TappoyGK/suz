@@ -15,11 +15,11 @@ pub(super) fn check(
 ) -> Result<CheckedExpression, Diagnostic> {
     Ok(match &expr.kind {
         ExpressionKind::Match { target, arms } => {
-            let target = expression(target, None, bindings)?;
+            let target = crate::check::exact::use_value(target, bindings)?;
             let patterns = matches::patterns(target.ty, arms, expr.location, bindings)?;
             let ty = expected
                 .or_else(|| operand_type(expr, bindings))
-                .unwrap_or_else(|| default_type(expr));
+                .unwrap_or_else(|| default_type(expr, bindings));
             if ty == Type::Void {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
@@ -28,7 +28,7 @@ pub(super) fn check(
             }
             let mut checked = Vec::new();
             for (arm, pattern) in arms.iter().zip(patterns.values) {
-                checked.push((pattern, expression(&arm.body, Some(ty), bindings)?));
+                checked.push((pattern, super::coerced(&arm.body, Some(ty), bindings)?));
             }
             CheckedExpression {
                 ty,
@@ -45,7 +45,7 @@ pub(super) fn check(
         } => {
             let ty = expected
                 .or_else(|| operand_type(expr, bindings))
-                .unwrap_or_else(|| default_type(expr));
+                .unwrap_or_else(|| default_type(expr, bindings));
             if ty == Type::Void {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
@@ -61,13 +61,16 @@ pub(super) fn check(
                         "ifexpr and elif conditions must be bool [if.condition]",
                     ));
                 }
-                checked.push((checked_condition, expression(value, Some(ty), bindings)?));
+                checked.push((
+                    checked_condition,
+                    super::coerced(value, Some(ty), bindings)?,
+                ));
             }
             CheckedExpression {
                 ty,
                 value: Value::If {
                     branches: checked,
-                    otherwise: Box::new(expression(otherwise, Some(ty), bindings)?),
+                    otherwise: Box::new(super::coerced(otherwise, Some(ty), bindings)?),
                 },
             }
         }

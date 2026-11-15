@@ -34,7 +34,7 @@ pub(super) fn check(expr: &Expression, scope: &Scope) -> Result<CheckedExpressio
                 }
                 values.push((
                     index,
-                    expression(&field.value, Some(declaration.fields[index].ty), scope)?,
+                    super::coerced(&field.value, Some(declaration.fields[index].ty), scope)?,
                 ));
             }
             if seen.len() != declaration.fields.len() {

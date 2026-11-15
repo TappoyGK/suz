@@ -53,11 +53,11 @@ fn warning_table_is_parsed_and_validated() {
 
 **期待結果：**
 
-| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+| 設定 | 結果 | 終了コード | 警告数 |
 |---|---|---:|---:|
 | 警告 | 正常終了 | 0 | 2 |
 
-**整数演算の警告：**
+**警告：**
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
@@ -78,7 +78,7 @@ fn main() -> u8 {
     let runs = &cases["diag-001"].runs;
     assert_eq!(runs.len(), 1);
     assert_eq!(runs[0].mode, Mode::Warn);
-    assert_eq!(runs[0].arithmetic_warnings, 2);
+    assert_eq!(runs[0].warning_count, 2);
     assert_eq!(
         runs[0].warnings,
         [
@@ -99,7 +99,7 @@ fn main() -> u8 {
     for invalid in [
         input.replace(
             "**ソース：**",
-            r#"**整数演算の警告：**
+            r#"**警告：**
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|

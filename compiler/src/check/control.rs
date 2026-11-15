@@ -176,6 +176,22 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
     Ok(())
 }
 
+fn has_return_handler(expr: &CheckedExpression) -> bool {
+    match &expr.value {
+        Value::Cast(inner) | Value::TextView(inner) => has_return_handler(inner),
+        Value::CastReturn { .. }
+        | Value::Slice {
+            handler: Some(CheckedHandler::Return(_)),
+            ..
+        }
+        | Value::IntegerArithmetic {
+            handler: Some(CheckedHandler::Return(_)),
+            ..
+        } => true,
+        _ => false,
+    }
+}
+
 // Hoist permitted failure returns into statements. Checked value expressions
 // passed to the backend then contain no function exits.
 pub(super) fn lower_return_handler(
@@ -183,6 +199,9 @@ pub(super) fn lower_return_handler(
     statements: &mut Vec<CheckedStatement>,
     next_id: &mut usize,
 ) -> bool {
+    if let Value::Cast(inner) | Value::TextView(inner) = &mut expr.value {
+        return lower_return_handler(inner, statements, next_id);
+    }
     if matches!(
         &expr.value,
         Value::Slice {
@@ -220,20 +239,44 @@ pub(super) fn lower_return_handler(
         });
         return true;
     }
+    if let Value::IntegerArithmetic {
+        operation: IntegerOperation::Exact(exact),
+        ..
+    } = &mut expr.value
+        && let super::exact::ExactKind::Binary(_, left, right) = &mut exact.kind
+        && let super::exact::ExactKind::Leaf(rhs) = &mut right.kind
+        && has_return_handler(rhs)
+    {
+        let id = *next_id;
+        *next_id += 1;
+        let replacement = super::exact::Exact {
+            arithmetic: false,
+            kind: super::exact::ExactKind::Leaf(Box::new(CheckedExpression {
+                ty: crate::ast::Type::Exact,
+                value: Value::Local(id),
+            })),
+            range: left.range,
+            location: left.location,
+        };
+        let old = std::mem::replace(left, Box::new(replacement));
+        statements.push(CheckedStatement::Binding {
+            mutable: false,
+            id,
+            ty: crate::ast::Type::Exact,
+            initializer: CheckedExpression {
+                ty: crate::ast::Type::Exact,
+                value: Value::Exact(old),
+            },
+        });
+        return lower_return_handler(rhs, statements, next_id);
+    }
     if let Value::Binary { left, right, .. }
     | Value::IntegerArithmetic {
         operation: IntegerOperation::Binary { left, right, .. },
         ..
     } = &mut expr.value
     {
-        if !matches!(
-            right.value,
-            Value::CastReturn { .. }
-                | Value::IntegerArithmetic {
-                    handler: Some(CheckedHandler::Return(_)),
-                    ..
-                }
-        ) {
+        if !has_return_handler(right) {
             return false;
         }
         // Compound assignment reads the old value before evaluating its RHS.

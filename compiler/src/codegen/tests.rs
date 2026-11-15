@@ -48,6 +48,8 @@ fn generated_bool_values_preserve_negation_and_copies() {
             enums: Vec::new(),
             structs: Vec::new(),
             unhandled_arithmetic: Vec::new(),
+            comparison_warnings: Vec::new(),
+            division_warnings: Vec::new(),
             main_id: 0,
             functions: vec![crate::check::ir::CheckedFunction {
                 id: 0,
@@ -218,6 +220,8 @@ fn comparison_codegen_sequences_and_reuses_operands() {
             enums: Vec::new(),
             structs: Vec::new(),
             unhandled_arithmetic: Vec::new(),
+            comparison_warnings: Vec::new(),
+            division_warnings: Vec::new(),
             main_id: 0,
             functions: vec![crate::check::ir::CheckedFunction {
                 id: 0,

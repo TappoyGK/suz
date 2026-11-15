@@ -196,3 +196,51 @@ _Noreturn void suz_panic(const char *source, size_t line, size_t column, const c
     write_text("\n");
     suz_env_panic();
 }
+
+int suz_exact_compare_float(suz_exact a, double b) {
+    uint64_t bits;
+    memcpy(&bits, &b, sizeof(bits));
+    unsigned exponent = (unsigned)((bits >> 52) & 2047);
+    uint64_t mantissa = bits & ((UINT64_C(1) << 52) - 1);
+    bool negative = (bits >> 63) != 0;
+    if (exponent == 2047) return mantissa != 0 ? 2 : (negative ? 1 : -1);
+    if (exponent != 0) mantissa |= UINT64_C(1) << 52;
+    if (mantissa == 0) negative = false;
+    if (a.negative != negative) return a.negative ? -1 : 1;
+    int shift = exponent == 0 ? -1074 : (int)exponent - 1023 - 52;
+    int order;
+    if (shift >= 0) {
+        if (shift > 75) order = -1;
+        else {
+            unsigned _BitInt(128) integer = (unsigned _BitInt(128))mantissa << shift;
+            order = (a.magnitude > integer) - (a.magnitude < integer);
+        }
+    } else {
+        unsigned right = (unsigned)-shift;
+        uint64_t integer = right >= 64 ? 0 : mantissa >> right;
+        bool fraction = right >= 64 ? mantissa != 0 : (mantissa & ((UINT64_C(1) << right) - 1)) != 0;
+        order = (a.magnitude > integer) - (a.magnitude < integer);
+        if (order == 0 && fraction) order = -1;
+    }
+    return negative ? -order : order;
+}
+suz_exact suz_exact_require(suz_exact a, const char *source) {
+    if (a.failed) suz_panic(source, a.line, a.column, "integer division by zero [rt.div-zero]");
+    return a;
+}
+size_t suz_format_exact(suz_exact a, char text[40]) {
+    size_t start = 40;
+    do {
+        text[--start] = (char)('0' + a.magnitude % 10);
+        a.magnitude /= 10;
+    } while (a.magnitude != 0);
+    if (a.negative) text[--start] = '-';
+    size_t length = 40 - start;
+    memmove(text, text + start, length);
+    return length;
+}
+void suz_log_exact(suz_exact a) {
+    char text[40];
+    size_t length = suz_format_exact(a, text);
+    suz_log_text(text, length);
+}

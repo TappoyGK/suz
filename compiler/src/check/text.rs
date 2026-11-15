@@ -1,6 +1,5 @@
 use super::{
     constants,
-    expression::expression,
     ir::{CheckedExpression, Value},
     scope::Scope,
 };
@@ -19,7 +18,7 @@ pub(super) fn parts(
             Ok(match part {
                 TemplatePart::Text(text) => TemplatePart::Text(text.clone()),
                 TemplatePart::Value(value) => {
-                    let result = expression(value, None, bindings)?;
+                    let result = super::exact::use_value(value, bindings)?;
                     if matches!(result.ty, Type::Void | Type::Struct(_)) {
                         return Err(value.location.error(
                             ErrorKind::InvalidSource,
@@ -53,6 +52,7 @@ pub(super) fn template(
                         Type::Enum(ty) => bindings.enums[ty.id].variants[value as usize].clone(),
                         _ => value.to_string(),
                     },
+                    Value::Exact(ref e) => super::exact::evaluate(e)?.ok()?.to_string(),
                     Value::Float(bits) => float_format(bits, evaluated.ty),
                     _ => return None,
                 })
