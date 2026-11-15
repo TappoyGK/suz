@@ -31,12 +31,12 @@ impl GenericTypes {
     }
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Family {
+pub(super) enum Family {
     Int,
     Float,
 }
 impl Family {
-    fn of(ty: Type) -> Option<Self> {
+    pub(super) fn of(ty: Type) -> Option<Self> {
         match ty {
             Type::GenericInt => Some(Self::Int),
             Type::GenericFloat => Some(Self::Float),
@@ -51,12 +51,31 @@ impl Family {
     }
 }
 
+// A persistent call chain: appending and sharing a prefix are constant time.
+// Materialize the sequence only when a diagnostic needs to display it.
+pub(super) struct CallTrace {
+    pub parent: Option<std::rc::Rc<CallTrace>>,
+    pub location: Location,
+}
+impl CallTrace {
+    pub fn locations(&self) -> Vec<Location> {
+        let mut result = Vec::new();
+        let mut trace = Some(self);
+        while let Some(node) = trace {
+            result.push(node.location);
+            trace = node.parent.as_deref();
+        }
+        result.reverse();
+        result
+    }
+}
+
 #[derive(Clone)]
 pub(super) struct Instance {
     pub function: usize,
     pub types: GenericTypes,
     pub id: usize,
-    pub calls: Vec<Location>,
+    pub calls: std::rc::Rc<CallTrace>,
 }
 #[derive(Default, Clone)]
 pub(super) struct Instances {
@@ -77,7 +96,7 @@ impl Instances {
         &mut self,
         function: usize,
         types: GenericTypes,
-        mut calls: Vec<Location>,
+        parent: &Option<std::rc::Rc<CallTrace>>,
         call: Location,
     ) -> usize {
         let key = (function, types);
@@ -87,7 +106,10 @@ impl Instances {
         let id = self.next_id;
         self.next_id += 1;
         self.ids.insert(key, id);
-        calls.push(call);
+        let calls = std::rc::Rc::new(CallTrace {
+            parent: parent.clone(),
+            location: call,
+        });
         self.queue.push_back(Instance {
             function,
             types,
@@ -132,7 +154,7 @@ fn candidates(
         }
         let known = expression::operand_type(argument, scope).or_else(|| {
             super::exact::is_operator(argument).then_some(
-                if expression::has_float_literal(argument, scope) {
+                if expression::has_float_source(argument, scope) {
                     Type::Float(FloatType::F64)
                 } else {
                     Type::Integer(IntegerType::I64)
@@ -155,12 +177,7 @@ pub(super) fn resolve(
 ) -> Result<GenericTypes, Diagnostic> {
     let mut result = GenericTypes::default();
     for family in [Family::Int, Family::Float] {
-        if !signature
-            .parameters
-            .iter()
-            .chain([&signature.result])
-            .any(|ty| Family::of(*ty) == Some(family))
-        {
+        if !signature.declares(family) {
             continue;
         }
         let mut types = Vec::new();

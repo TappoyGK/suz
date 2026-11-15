@@ -10,8 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 fn substitutions(scope: &Scope, function: &Function) -> Vec<GenericTypes> {
     let signature = &scope.functions[&function.name];
-    let has = |ty| signature.result == ty || signature.parameters.contains(&ty);
-    let ints = if has(crate::ast::Type::GenericInt) {
+    let ints = if signature.declares(super::Family::Int) {
         [
             IntegerType::I8,
             IntegerType::I16,
@@ -28,7 +27,7 @@ fn substitutions(scope: &Scope, function: &Function) -> Vec<GenericTypes> {
     } else {
         vec![None]
     };
-    let floats = if has(crate::ast::Type::GenericFloat) {
+    let floats = if signature.declares(super::Family::Float) {
         vec![Some(FloatType::F32), Some(FloatType::F64)]
     } else {
         vec![None]
@@ -42,25 +41,37 @@ fn substitutions(scope: &Scope, function: &Function) -> Vec<GenericTypes> {
 // once per template, walking its body in order with the ordinary checker.
 // There are at most 16 substitutions, independent of body length or call count.
 // Speculation never schedules emitted instances or registers runtime data.
-pub(crate) fn analyze(function: &Function, globals: &Scope) -> Result<(), Diagnostic> {
+pub(crate) fn analyze(function: &Function, globals: &Scope) -> Result<Vec<Location>, Diagnostic> {
     let mut common_errors: Option<BTreeMap<(usize, usize, String), Diagnostic>> = None;
     let mut comparisons: Option<BTreeMap<(usize, usize), bool>> = None;
     let mut divisions = BTreeSet::new();
+    let mut arithmetic = BTreeMap::new();
     for types in substitutions(globals, function) {
         let mut scope = globals.speculative();
         scope.analyzing_generic = true;
-        let result = functions::check_function(function, &scope, 0, types);
-        let mut errors = scope.analysis_errors.borrow().clone();
-        if let Err(error) = result {
-            errors.push(error);
+        // A new substitution needs fresh caches; nested blocks within it share them.
+        scope.type_hints = Default::default();
+        scope.float_hints = Default::default();
+        scope.hint_depth = Default::default();
+        let result = functions::check_function(function, scope.clone(), 0, types);
+        let mut errors = scope.analysis.errors.borrow().clone();
+        match result {
+            Ok((_, sites)) => arithmetic.extend(
+                sites
+                    .into_iter()
+                    .map(|site| ((site.line, site.column), site)),
+            ),
+            Err(error) => errors.push(error),
+        }
+        for &(location, risk) in scope.analysis.casts.borrow().iter() {
+            if !matches!(risk, super::super::expression::casts::CastRisk::Safe) {
+                return Err(location.error(ErrorKind::InvalidSource,
+                    "this conversion can fail for a generic numeric type and requires or [num.fn-cast]"));
+            }
         }
         let mut found_errors = BTreeMap::new();
         for error in errors {
-            if error.generic_cast {
-                return Err(Location { line: error.line, column: error.column }.error(ErrorKind::InvalidSource,
-                    "this conversion can fail for a generic numeric type and requires or [num.fn-cast]"));
-            }
-            found_errors.insert((error.line, error.column, error.message.clone()), error);
+            found_errors.insert((error.line, error.column, error.rule_id.clone()), error);
         }
         match &mut common_errors {
             None => common_errors = Some(found_errors),
@@ -87,5 +98,5 @@ pub(crate) fn analyze(function: &Function, globals: &Scope) -> Result<(), Diagno
         .borrow_mut()
         .extend(comparisons.unwrap_or_default());
     globals.division_warnings.borrow_mut().extend(divisions);
-    Ok(())
+    Ok(arithmetic.into_values().collect())
 }

@@ -19,6 +19,7 @@ pub(crate) fn validate(program: &Program) -> Result<(), Diagnostic> {
         Places {
             int: false,
             float: false,
+            constant: true,
         }
         .expression(&declaration.initializer)?;
     }
@@ -27,25 +28,26 @@ pub(crate) fn validate(program: &Program) -> Result<(), Diagnostic> {
             if field.ty.generic() {
                 return Err(place_error(
                     field.location,
-                    "struct fields require a concrete type",
+                    "struct fields require a concrete type; use a concrete type",
                 ));
             }
         }
     }
     for function in &program.functions {
-        let mut places = Places {
-            int: false,
-            float: false,
+        let signature = super::super::scope::Signature {
+            id: 0,
+            parameters: function
+                .parameters
+                .iter()
+                .map(|parameter| parameter.ty)
+                .collect(),
+            result: function.result,
         };
-        for ty in function
-            .parameters
-            .iter()
-            .map(|p| p.ty)
-            .chain([function.result])
-        {
-            places.int |= ty == Type::GenericInt;
-            places.float |= ty == Type::GenericFloat;
-        }
+        let mut places = Places {
+            int: signature.declares(super::Family::Int),
+            float: signature.declares(super::Family::Float),
+            constant: false,
+        };
         places.scope(&function.statements, None)?;
     }
     Ok(())
@@ -54,6 +56,7 @@ fn place_error(location: Location, message: &str) -> Diagnostic {
     location.error(ErrorKind::InvalidSource, format!("{message} [num.places]"))
 }
 struct Places {
+    constant: bool,
     int: bool,
     float: bool,
 }
@@ -78,7 +81,9 @@ impl Places {
         } else {
             Err(place_error(
                 location,
-                if annotation {
+                if self.constant {
+                    "constant expressions require a concrete cast target; use a concrete type"
+                } else if annotation {
                     "a non-generic function requires a concrete type; use a concrete type or omit the annotation"
                 } else {
                     "a non-generic function requires a concrete cast target; use a concrete type"

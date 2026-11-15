@@ -60,7 +60,6 @@ pub(crate) enum CheckedStatement {
     Loop {
         condition: Option<CheckedExpression>,
         body: Vec<CheckedStatement>,
-        unconditional: bool,
     },
     Break,
     Continue,

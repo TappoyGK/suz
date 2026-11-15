@@ -21,11 +21,11 @@ pub enum ErrorKind {
 #[derive(Clone, Debug)]
 pub struct Diagnostic {
     pub related: Vec<Diagnostic>,
-    pub(crate) generic_cast: bool,
     pub kind: ErrorKind,
     pub line: usize,
     pub column: usize,
     pub message: String,
+    pub(crate) rule_id: String,
 }
 
 impl fmt::Display for Diagnostic {
@@ -39,15 +39,28 @@ impl fmt::Display for Diagnostic {
 }
 
 impl Diagnostic {
-    /// The trailing specification rule of this diagnostic; related diagnostics
-    /// retain their own rule and location.
-    pub fn rule(&self) -> &str {
-        self.message
+    pub fn new(kind: ErrorKind, line: usize, column: usize, message: impl Into<String>) -> Self {
+        let message = message.into();
+        let rule_id = message
             .rsplit_once('[')
-            .and_then(|(_, s)| s.strip_suffix(']'))
+            .and_then(|(_, rule)| rule.strip_suffix(']'))
             .unwrap_or("")
+            .to_owned();
+        Self {
+            related: Vec::new(),
+            kind,
+            line,
+            column,
+            message,
+            rule_id,
+        }
+    }
+    /// Specification rule attached when this diagnostic was constructed.
+    pub fn rule(&self) -> &str {
+        &self.rule_id
     }
 }
+
 impl std::error::Error for Diagnostic {}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -163,26 +176,22 @@ fn analyze(
     let source = std::str::from_utf8(bytes).map_err(|error| {
         let prefix = std::str::from_utf8(&bytes[..error.valid_up_to()]).unwrap();
         let (line, column) = lexer::position(prefix);
-        Diagnostic {
-            related: Vec::new(),
-            generic_cast: false,
-            kind: ErrorKind::InvalidSource,
+        Diagnostic::new(
+            ErrorKind::InvalidSource,
             line,
             column,
-            message: "source is not valid UTF-8 [src.encoding]".into(),
-        }
+            "source is not valid UTF-8 [src.encoding]",
+        )
     })?;
     for (offset, _) in source.match_indices('\r') {
         if source.as_bytes().get(offset + 1) != Some(&b'\n') {
             let (line, column) = lexer::position(&source[..offset]);
-            return Err(Diagnostic {
-                related: Vec::new(),
-                generic_cast: false,
-                kind: ErrorKind::InvalidSource,
+            return Err(Diagnostic::new(
+                ErrorKind::InvalidSource,
                 line,
                 column,
-                message: "CR must be followed by LF [src.newline]".into(),
-            });
+                "CR must be followed by LF [src.newline]",
+            ));
         }
     }
     let source = source.replace("\r\n", "\n");

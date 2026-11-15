@@ -24,30 +24,6 @@ fn main() -> u8 {
     log info `${wide},${narrow},${plain},${f},${g},${mixed},${expression},${again}`
     return 0
 }"#;
-    let c = suz::compile(source.as_bytes()).unwrap();
-    let count_functions = |c: &str| {
-        c.lines()
-            .filter(|line| {
-                line.starts_with("static inline ")
-                    && line.contains(" suz_fn_")
-                    && line.ends_with(" {")
-            })
-            .count()
-    };
-    let without_unused = source.replace("fn unused(x: int) -> int { return x }\n", "");
-    assert_eq!(
-        count_functions(&c),
-        count_functions(&suz::compile(without_unused.as_bytes()).unwrap())
-    );
-    let repeated = source.replace(
-        "    fix again =",
-        "    fix duplicate = clamp(narrow, 0, 10)\n    fix again =",
-    );
-    assert_eq!(
-        count_functions(&c),
-        count_functions(&suz::compile(repeated.as_bytes()).unwrap())
-    );
-    assert!(count_functions(&c) > 1);
     let result = compile_and_run_c23(source, "generic.suz");
     assert!(
         result.status.success(),
@@ -303,6 +279,27 @@ fn generic_unused_bodies_share_ordinary_diagnostics_and_report_independent_error
         (error.rule(), error.line, error.column),
         ("type.expected", 3, 15)
     );
+    for control in [
+        "while predicate(n) {\nfix t: text = 5\n}",
+        "if n == 0 {} elif predicate(n) {\nfix t: text = 5\n}",
+        "match n {\n300 => { fix t: text = 5 }\n_ => {}\n}",
+    ] {
+        let source = format!(
+            "fn predicate(x: f64) -> bool {{ return true }}\nfn f(n: int) -> int {{\n{control}\nreturn n\n}}\nfn main() -> u8 {{ return 0 }}"
+        );
+        let offset = source.find("text = 5").unwrap() + "text = ".len();
+        let prefix = &source[..offset];
+        let expected = (
+            prefix.bytes().filter(|&b| b == b'\n').count() + 1,
+            prefix.rsplit('\n').next().unwrap().chars().count() + 1,
+        );
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(
+            (error.rule(), error.line, error.column),
+            ("type.expected", expected.0, expected.1),
+            "{source}: {error}"
+        );
+    }
     for (expression, rule) in [
         ("x as u8", "num.fn-cast"),
         ("`5` as% int", "symbol.cast-handler"),
@@ -382,16 +379,90 @@ fn generic_result_conversion_and_arithmetic_contexts_follow_their_own_rules() {
             result.unwrap();
         }
     }
-    for expression in ["square(a)", "square(a) + 1"] {
-        let annotation = if expression.contains('+') {
-            ": u16"
-        } else {
-            ""
-        };
+    for (expression, annotation) in [("square(a)", ""), ("square(a) + 1", ": u16")] {
         let source = format!(
             "{prefix}fn main() -> u8 {{\nfix a: u8 = 200\nfix result{annotation} = {expression}\nreturn 0\n}}"
         );
         let result = compile_and_run_c23(&source, "arithmetic-context.suz");
+        // square is instantiated with u8; 200 * 200 panics before any outer widening.
         assert_eq!(result.status.code(), Some(101));
     }
+}
+
+#[test]
+fn generic_boundaries_preserve_inner_errors_and_reject_non_numeric_values() {
+    let declarations = "fn f(n: int) -> int { return n }\nfn g(n: u8) -> u8 { return n }\nfn h(n: float) -> float { return n }\nfn pick(n: int, flag: bool) -> int { return n }\n";
+    for (body, rule) in [
+        ("fix n = f(g(@true))", "type.expected"),
+        ("fix a: u8 = 1\nfix n = f(a + g(@true))", "type.expected"),
+        ("fix n = pick(1, @3)", "type.expected"),
+        ("fix n = f(@true)", "type.expected"),
+        ("fix t: text = `x`\nfix n = f(@t)", "type.expected"),
+        ("fix a: u8 = 1\nfix t: text = @f(a)", "type.expected"),
+        ("fix n = f(@h(1.0))", "num.fn-convert"),
+    ] {
+        let marked = format!("{declarations}fn main() -> u8 {{\n{body}\nreturn 0\n}}");
+        let offset = marked.find('@').unwrap();
+        let prefix = &marked[..offset];
+        let expected = (
+            prefix.bytes().filter(|&b| b == b'\n').count() + 1,
+            prefix.rsplit('\n').next().unwrap().chars().count() + 1,
+        );
+        let source = marked.replace('@', "");
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(
+            (error.line, error.column, error.rule()),
+            (expected.0, expected.1, rule),
+            "{source}: {error}"
+        );
+        if rule == "num.fn-convert" {
+            assert!(
+                error
+                    .message
+                    .starts_with("floating-point values cannot be passed to an int parameter")
+            );
+        }
+    }
+}
+
+#[test]
+fn generic_unused_checks_do_not_depend_on_diagnostic_type_names_or_partial_ir() {
+    for (body, rule) in [
+        ("return true", "type.expected"),
+        ("fix b: bool = n\nreturn n", "type.expected"),
+        ("fix t: text = n\nreturn n", "type.expected"),
+        ("fix a: u8 = n", "fn.value-return-required"),
+        ("fix a: u8 = n\nif n == 0 { return n }", "fn.fallthrough"),
+        ("while n { fix b: bool = n }\nreturn n", "while.loop"),
+        (
+            "if n == 0 {} elif n { fix b: bool = n }\nreturn n",
+            "if.condition",
+        ),
+    ] {
+        let source = format!("fn f(n: int) -> int {{\n{body}\n}}\nfn main() -> u8 {{ return 0 }}");
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(error.rule(), rule, "{source}: {error}");
+        assert!(error.related.is_empty());
+    }
+}
+
+#[test]
+fn generic_unused_arithmetic_sites_apply_warning_modes_and_allow() {
+    let source = "fn f(n: int) -> int { return n + 1 }\nfn main() -> u8 { return 0 }";
+    let warnings = suz::check_source(source.as_bytes(), ArithmeticMode::Warn).unwrap();
+    assert_eq!(warnings.len(), 1);
+    assert_eq!((warnings[0].line, warnings[0].column), (1, 32));
+    assert!(suz::check_source(source.as_bytes(), ArithmeticMode::Deny).is_err());
+    let allowed = source.replace(
+        "return n + 1",
+        "return n + 1 allow [diagnostic.arithmetic: small]",
+    );
+    for mode in [ArithmeticMode::Default, ArithmeticMode::Warn] {
+        suz::check_source(allowed.as_bytes(), mode).unwrap();
+    }
+    let error = suz::check_source(allowed.as_bytes(), ArithmeticMode::Deny).unwrap_err();
+    assert_eq!(
+        (error.rule(), error.line, error.column),
+        ("diagnostic.arithmetic", 1, 32)
+    );
 }

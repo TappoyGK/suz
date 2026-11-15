@@ -10,14 +10,7 @@ pub(crate) struct Location {
 
 impl Location {
     pub fn error(self, kind: ErrorKind, message: impl Into<String>) -> Diagnostic {
-        Diagnostic {
-            related: Vec::new(),
-            generic_cast: false,
-            kind,
-            line: self.line,
-            column: self.column,
-            message: message.into(),
-        }
+        Diagnostic::new(kind, self.line, self.column, message)
     }
 }
 

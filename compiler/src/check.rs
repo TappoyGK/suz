@@ -49,3 +49,7 @@ mod loop_tests;
 #[cfg(test)]
 #[path = "check/tests/bindings.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "check/tests/generic.rs"]
+mod generic_tests;

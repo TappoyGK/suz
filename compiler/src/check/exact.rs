@@ -52,7 +52,7 @@ pub(super) fn is_operator(expr: &Expression) -> bool {
     }
 }
 pub(super) fn integer(expr: &Expression, bindings: &Scope) -> bool {
-    !super::expression::has_float_literal(expr, bindings)
+    !super::expression::has_float_source(expr, bindings)
         && matches!(
             super::expression::operand_type(expr, bindings),
             None | Some(Type::Integer(_))
@@ -304,6 +304,7 @@ pub(super) fn cast(
     fallback: &Option<crate::ast::FailureHandler>,
     location: Location,
     bindings: &Scope,
+    generic_dependent: bool,
 ) -> Result<CheckedExpression, Diagnostic> {
     use crate::ast::FailureHandler;
     if wrap {
@@ -356,7 +357,11 @@ pub(super) fn cast(
         };
         return Ok(CheckedExpression { ty: target, value });
     }
-    super::expression::casts::cast_risk(&operand, target, safe)?.require_handler(location)?;
+    let risk = super::expression::casts::cast_risk(&operand, target, safe)?;
+    if generic_dependent && bindings.analyzing_generic {
+        bindings.analysis.casts.borrow_mut().push((location, risk));
+    }
+    risk.require_handler(location)?;
     Ok(CheckedExpression {
         ty: target,
         value: Value::Cast(Box::new(operand)),

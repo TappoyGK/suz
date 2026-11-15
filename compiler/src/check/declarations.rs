@@ -192,5 +192,7 @@ pub(super) fn resolve(
     for declaration in declarations {
         resolver.resolve(&declaration.name, declaration.location)?;
     }
+    // Constants are immutable and shared by all function scopes and substitutions.
+    resolver.bindings.constants = std::rc::Rc::new(std::mem::take(&mut resolver.bindings.locals));
     Ok((resolver.bindings, resolver.warnings))
 }

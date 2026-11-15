@@ -94,7 +94,7 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
                 if let Some(ty) = joined_type(floats.map(Some)) {
                     return Some(ty);
                 }
-                if has_float_literal(left, bindings) || has_float_literal(right, bindings) {
+                if has_float_source(left, bindings) || has_float_source(right, bindings) {
                     return None;
                 }
             }
@@ -112,42 +112,42 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
 }
 
 // Only result-producing operands participate; conditions and cast sources do not.
-pub(super) fn has_float_literal(expr: &Expression, bindings: &Scope) -> bool {
+pub(super) fn has_float_source(expr: &Expression, bindings: &Scope) -> bool {
     let key = std::ptr::from_ref(expr) as usize;
     if bindings.hint_depth.get() > 0
         && let Some(found) = bindings.float_hints.borrow().get(&key)
     {
         return *found;
     }
-    let found = has_float_literal_inner(expr, bindings);
+    let found = has_float_source_inner(expr, bindings);
     if bindings.hint_depth.get() > 0 {
         bindings.float_hints.borrow_mut().insert(key, found);
     }
     found
 }
 
-fn has_float_literal_inner(expr: &Expression, bindings: &Scope) -> bool {
+fn has_float_source_inner(expr: &Expression, bindings: &Scope) -> bool {
     match &expr.kind {
         ExpressionKind::Call { name, .. } => bindings
             .functions
             .get(name)
             .is_some_and(|f| f.result == Type::GenericFloat),
-        ExpressionKind::Match { arms, .. } => arms
-            .iter()
-            .any(|arm| has_float_literal(&arm.body, bindings)),
-        ExpressionKind::Block { value, .. } => has_float_literal(value, bindings),
+        ExpressionKind::Match { arms, .. } => {
+            arms.iter().any(|arm| has_float_source(&arm.body, bindings))
+        }
+        ExpressionKind::Block { value, .. } => has_float_source(value, bindings),
         ExpressionKind::Float(_) => true,
         ExpressionKind::ArithmeticHandler { operand: inner, .. }
         | ExpressionKind::Group(inner)
         | ExpressionKind::BitNot(inner)
-        | ExpressionKind::Negate(inner) => has_float_literal(inner, bindings),
+        | ExpressionKind::Negate(inner) => has_float_source(inner, bindings),
         ExpressionKind::Binary {
             operator,
             left,
             right,
         } => {
-            has_float_literal(left, bindings)
-                || (!operator.is_shift() && has_float_literal(right, bindings))
+            has_float_source(left, bindings)
+                || (!operator.is_shift() && has_float_source(right, bindings))
         }
         ExpressionKind::If {
             branches,
@@ -155,14 +155,14 @@ fn has_float_literal_inner(expr: &Expression, bindings: &Scope) -> bool {
         } => {
             branches
                 .iter()
-                .any(|(_, value)| has_float_literal(value, bindings))
-                || has_float_literal(otherwise, bindings)
+                .any(|(_, value)| has_float_source(value, bindings))
+                || has_float_source(otherwise, bindings)
         }
         _ => false,
     }
 }
 fn default_type(expr: &Expression, bindings: &Scope) -> Type {
-    if has_float_literal(expr, bindings) {
+    if has_float_source(expr, bindings) {
         Type::Float(FloatType::F64)
     } else {
         Type::Integer(IntegerType::I64)
@@ -232,7 +232,7 @@ pub(super) fn expression(
     bindings: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
     let _hints = HintSession::new(bindings);
-    let checked = expression_inner(expr, expected, bindings, false)?;
+    let checked = expression_inner(expr, expected, bindings, false, None)?;
     super::text::register_constants(&checked, bindings);
     Ok(checked)
 }
@@ -244,7 +244,20 @@ pub(super) fn coerced(
     bindings: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
     let _hints = HintSession::new(bindings);
-    let checked = expression_inner(expr, expected, bindings, true)?;
+    let checked = expression_inner(expr, expected, bindings, true, None)?;
+    super::text::register_constants(&checked, bindings);
+    Ok(checked)
+}
+
+// This context belongs only to the argument boundary, never to its subexpressions.
+pub(super) fn generic_argument(
+    expr: &Expression,
+    expected: Type,
+    family: super::generic::Family,
+    bindings: &Scope,
+) -> Result<CheckedExpression, Diagnostic> {
+    let _hints = HintSession::new(bindings);
+    let checked = expression_inner(expr, Some(expected), bindings, true, Some(family))?;
     super::text::register_constants(&checked, bindings);
     Ok(checked)
 }
@@ -254,7 +267,19 @@ fn expression_inner(
     expected: Option<Type>,
     bindings: &Scope,
     widen: bool,
+    argument: Option<super::generic::Family>,
 ) -> Result<CheckedExpression, Diagnostic> {
+    let required = expected;
+    // Infer an incompatible family independently so that the outer parameter
+    // owns the conversion diagnostic, including for nested generic calls.
+    let expected = if argument == Some(super::generic::Family::Int)
+        && (has_float_source(expr, bindings)
+            || matches!(operand_type(expr, bindings), Some(Type::Float(_))))
+    {
+        None
+    } else {
+        expected
+    };
     let checked = if super::exact::is_operator(expr) && super::exact::integer(expr, bindings) {
         super::exact::check(expr, expected, bindings, false)?
     } else {
@@ -408,9 +433,12 @@ fn expression_inner(
                     value: Value::Local(binding.id),
                 })
             }
-            ExpressionKind::Group(inner) => expression_inner(inner, expected, bindings, widen)?,
+            ExpressionKind::Group(inner) => {
+                expression_inner(inner, required, bindings, widen, argument)?
+            }
         }
     };
+    let expected = required;
     if let Some(ty) = expected
         && widen
         && ty != checked.ty
@@ -428,17 +456,31 @@ fn expression_inner(
         });
     }
     if expected.is_some_and(|ty| ty != checked.ty) {
-        if let ExpressionKind::Call { name, .. } = &expr.kind
-            && bindings.functions.get(name).is_some_and(|f| f.is_generic())
+        let numeric = |ty| matches!(ty, Type::Integer(_) | Type::Float(_));
+        let generic_result = matches!(&expr.kind, ExpressionKind::Call { name, .. }
+            if bindings.functions.get(name).is_some_and(|f| f.is_generic()));
+        if numeric(checked.ty)
+            && numeric(expected.unwrap())
+            && (argument.is_some() || generic_result)
         {
-            return Err(expr.location.error(
-                ErrorKind::InvalidSource,
+            let message = if argument == Some(super::generic::Family::Int)
+                && matches!(checked.ty, Type::Float(_))
+            {
+                "floating-point values cannot be passed to an int parameter [num.fn-convert]"
+                    .to_owned()
+            } else {
                 format!(
-                    "generic result {} cannot be received as {} without loss [num.fn-convert]",
+                    "{} {} cannot be received as {} without loss [num.fn-convert]",
+                    if argument.is_some() {
+                        "argument"
+                    } else {
+                        "generic result"
+                    },
                     bindings.type_name(checked.ty),
                     bindings.type_name(expected.unwrap())
-                ),
-            ));
+                )
+            };
+            return Err(expr.location.error(ErrorKind::InvalidSource, message));
         }
         return Err(expr.location.error(
             ErrorKind::InvalidSource,
@@ -491,6 +533,18 @@ pub(super) fn generic_dependent(expr: &Expression, scope: &Scope) -> bool {
         // Block-local bindings are checked by the ordinary checker. Conservatively
         // retain dependence when a block is used as a numeric cast operand.
         ExpressionKind::Block { .. } => true,
-        _ => false,
+        ExpressionKind::Void
+        | ExpressionKind::Integer { .. }
+        | ExpressionKind::Float(_)
+        | ExpressionKind::Bool(_)
+        | ExpressionKind::Char(_)
+        | ExpressionKind::Template(_)
+        | ExpressionKind::Struct { .. }
+        | ExpressionKind::Field { .. }
+        | ExpressionKind::Variant { .. }
+        | ExpressionKind::Slice { .. }
+        | ExpressionKind::Not(_)
+        | ExpressionKind::Logical { .. }
+        | ExpressionKind::Comparison { .. } => false,
     }
 }

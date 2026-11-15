@@ -119,10 +119,10 @@ IDは分野の接頭辞と番号で構成し、期待結果の種類を含めな
 | [symbolとtext](spec-cases/text.md) | `text` | 第5・6・7・8・10章 | 33 |
 | [定数・変数・代入](spec-cases/bind.md) | `bind` | 第6章 | 29 |
 | [式](spec-cases/expr.md) | `expr` | 第7章 | 77 |
-| [関数と制御](spec-cases/flow.md) | `flow` | 第8章 | 78 |
+| [関数と制御](spec-cases/flow.md) | `flow` | 第8章 | 79 |
 | [実行時の検査](spec-cases/runtime.md) | `runtime` | 第9章 | 18 |
 | [ログ](spec-cases/log.md) | `log` | 第10章 | 11 |
 | [警告と診断設定](spec-cases/diag.md) | `diag` | 第11章 | 14 |
-| 合計 | | | 348 |
+| 合計 | | | 349 |
 
 結果別：受理158例、コンパイルエラー167例、実行時パニック13例、診断設定の比較10例。バイト列による4例も、それぞれの期待結果に含めている。

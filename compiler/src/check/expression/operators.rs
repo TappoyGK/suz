@@ -1,7 +1,7 @@
 use super::super::ir::{CheckedExpression, Value};
 use super::super::ir::{CheckedHandler, IntegerOperation};
 use super::expression;
-use super::{default_type, has_float_literal, operand_type};
+use super::{default_type, has_float_source, operand_type};
 use crate::ast::{BinaryOperator, FailureHandler, FloatType, IntegerType};
 use crate::check::scope::Scope;
 use crate::{
@@ -234,7 +234,7 @@ pub(super) fn check(
             .unwrap_or_else(|| {
                 if operands
                     .iter()
-                    .any(|operand| has_float_literal(operand, bindings))
+                    .any(|operand| has_float_source(operand, bindings))
                 {
                     Type::Float(FloatType::F64)
                 } else {
@@ -251,7 +251,7 @@ pub(super) fn check(
                 .map(|operand| {
                     if numeric {
                         if operand_type(operand, bindings).is_none()
-                            && has_float_literal(operand, bindings)
+                            && has_float_source(operand, bindings)
                         {
                             expression(operand, Some(float_type), bindings)
                         } else {

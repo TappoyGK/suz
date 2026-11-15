@@ -15,29 +15,25 @@ pub(in crate::check) fn check(
         ExpressionKind::Cast {
             wrap,
             operand,
-            target,
+            target: annotation,
             fallback,
         } => {
-            let generic_dependent = target.generic() || super::generic_dependent(operand, bindings);
-            let concrete_target = bindings.resolve_type(*target);
-            let target = &concrete_target;
+            let generic_dependent =
+                annotation.generic() || super::generic_dependent(operand, bindings);
+            let target = bindings.resolve_type(*annotation);
             let operand = super::super::exact::use_value(operand, bindings)?;
             if operand.ty == Type::Exact {
                 return super::super::exact::cast(
                     operand,
-                    *target,
+                    target,
                     *wrap,
                     fallback,
                     expr.location,
                     bindings,
-                )
-                .map_err(|mut error| {
-                    error.generic_cast = generic_dependent
-                        && matches!(error.rule(), "expr.cast-handler" | "const.cast-check");
-                    error
-                });
+                    generic_dependent,
+                );
             }
-            if !*wrap && operand.ty == Type::Text && *target == Type::Symbol {
+            if !*wrap && operand.ty == Type::Text && target == Type::Symbol {
                 if fallback.is_some() {
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
@@ -115,15 +111,15 @@ pub(in crate::check) fn check(
                     ));
                 }
                 return Ok(CheckedExpression {
-                    ty: *target,
+                    ty: target,
                     value: Value::Truncate(Box::new(operand)),
                 });
             }
-            let safe = match (operand.ty, *target) {
+            let safe = match (operand.ty, target) {
                 (Type::Symbol | Type::Text, _) => false,
                 (Type::Char, Type::Integer(_)) | (Type::Integer(_), Type::Char) => {
                     let (min, max) = operand.ty.integer_bounds().unwrap();
-                    crate::numeric::Range::bounds(min, max).fits_type(*target)
+                    crate::numeric::Range::bounds(min, max).fits_type(target)
                 }
                 (Type::Integer(from), Type::Integer(to)) => {
                     let (from_min, from_max) = from.bounds();
@@ -143,17 +139,20 @@ pub(in crate::check) fn check(
                 }
             };
             if fallback.is_none() && !operand.ty.is_text() {
-                cast_risk(&operand, concrete_target, safe)?
-                    .require_handler(expr.location)
-                    .map_err(|mut error| {
-                        error.generic_cast = generic_dependent;
-                        error
-                    })?;
+                let risk = cast_risk(&operand, target, safe)?;
+                if generic_dependent && bindings.analyzing_generic {
+                    bindings
+                        .analysis
+                        .casts
+                        .borrow_mut()
+                        .push((expr.location, risk));
+                }
+                risk.require_handler(expr.location)?;
             }
             if let Some(FailureHandler::Return { value, .. }) = fallback {
                 let return_value = crate::check::functions::return_value(value, bindings)?;
                 let checked = CheckedExpression {
-                    ty: *target,
+                    ty: target,
                     value: Value::CastReturn {
                         location: expr.location,
                         wrap: *wrap,
@@ -165,7 +164,7 @@ pub(in crate::check) fn check(
             }
             let fallback = match fallback {
                 Some(FailureHandler::Value(value)) => {
-                    Some(super::coerced(value, Some(*target), bindings)?)
+                    Some(super::coerced(value, Some(target), bindings)?)
                 }
                 None => None,
                 _ => unreachable!(),
@@ -182,13 +181,13 @@ pub(in crate::check) fn check(
                             let Value::Text { text, .. } = value.value else {
                                 return None;
                             };
-                            super::super::text_structure::parse(&text, *id, bindings).map(Box::new)
+                            super::super::text_structure::parse(&text, id, bindings).map(Box::new)
                         })
                 } else {
                     None
                 };
                 return Ok(CheckedExpression {
-                    ty: *target,
+                    ty: target,
                     value: Value::CheckedCast {
                         location: expr.location,
                         constant_struct,
@@ -198,77 +197,18 @@ pub(in crate::check) fn check(
                     },
                 });
             }
-            if operand.ty.integer_bounds().is_some() && target.integer_bounds().is_some() {
-                if let Some(fallback) = fallback {
-                    CheckedExpression {
-                        ty: *target,
-                        value: Value::CheckedCast {
-                            location: expr.location,
-                            constant_struct: None,
-                            wrap: false,
-                            operand: Box::new(operand),
-                            fallback: Box::new(fallback),
-                        },
-                    }
-                } else {
-                    CheckedExpression {
-                        ty: *target,
-                        value: Value::Cast(Box::new(operand)),
-                    }
-                }
-            } else if let (Type::Float(_), Type::Integer(_)) = (operand.ty, *target) {
-                if let Some(fallback) = fallback {
-                    CheckedExpression {
-                        ty: *target,
-                        value: Value::CheckedCast {
-                            location: expr.location,
-                            constant_struct: None,
-                            wrap: false,
-                            operand: Box::new(operand),
-                            fallback: Box::new(fallback),
-                        },
-                    }
-                } else {
-                    CheckedExpression {
-                        ty: *target,
-                        value: Value::Cast(Box::new(operand)),
-                    }
-                }
-            } else if operand.ty == Type::Float(FloatType::F64)
-                && *target == Type::Float(FloatType::F32)
-            {
-                if let Some(fallback) = fallback {
-                    CheckedExpression {
-                        ty: *target,
-                        value: Value::CheckedCast {
-                            location: expr.location,
-                            constant_struct: None,
-                            wrap: false,
-                            operand: Box::new(operand),
-                            fallback: Box::new(fallback),
-                        },
-                    }
-                } else {
-                    CheckedExpression {
-                        ty: *target,
-                        value: Value::Cast(Box::new(operand)),
-                    }
+            let value = if let Some(fallback) = fallback {
+                Value::CheckedCast {
+                    location: expr.location,
+                    constant_struct: None,
+                    wrap: false,
+                    operand: Box::new(operand),
+                    fallback: Box::new(fallback),
                 }
             } else {
-                debug_assert!(safe);
-                let value = if let Some(fallback) = fallback {
-                    Value::CheckedCast {
-                        location: expr.location,
-                        constant_struct: None,
-                        wrap: false,
-                        operand: Box::new(operand),
-                        fallback: Box::new(fallback),
-                    }
-                } else {
-                    Value::Cast(Box::new(operand))
-                };
-                CheckedExpression { ty: *target, value }
-            }
+                Value::Cast(Box::new(operand))
+            };
+            CheckedExpression { ty: target, value }
         }
 
         _ => unreachable!(),
@@ -277,6 +217,7 @@ pub(in crate::check) fn check(
 
 // [expr.cast-risk], [arith.cast], [const.cast-check]. The ordinary checker
 // and template analysis use this pure classification; no Scope is mutated.
+#[derive(Clone, Copy)]
 pub(in crate::check) enum CastRisk {
     Safe,
     Dynamic,
