@@ -3,6 +3,7 @@ mod blocks;
 mod branches;
 mod casts;
 mod operators;
+mod slices;
 pub(crate) mod structs;
 
 use super::ir::{CheckedExpression, Value};
@@ -16,7 +17,8 @@ use crate::{
 // The comparison's bool result never supplies the operand type.
 pub(super) fn operand_type(expr: &Expression, bindings: &Scope) -> Option<Type> {
     match &expr.kind {
-        ExpressionKind::Template(_) => Some(Type::Text),
+        ExpressionKind::Slice { index, .. } => Some(if *index { Type::Char } else { Type::Text }),
+        ExpressionKind::Template(_) => Some(Type::Symbol),
         ExpressionKind::Struct { id, .. } => Some(Type::Struct(*id)),
         ExpressionKind::Field { target, name } => {
             let Type::Struct(id) = operand_type(target, bindings)? else {
@@ -38,17 +40,19 @@ pub(super) fn operand_type(expr: &Expression, bindings: &Scope) -> Option<Type> 
         ExpressionKind::Block { statements, value } => {
             blocks::operand_type(statements, value, bindings)
         }
-        ExpressionKind::Match { arms, .. } => arms
-            .iter()
-            .find_map(|arm| operand_type(&arm.body, bindings)),
+        ExpressionKind::Match { arms, .. } => {
+            joined_type(arms.iter().map(|arm| operand_type(&arm.body, bindings)))
+        }
         ExpressionKind::Cast { target, .. } => Some(*target),
         ExpressionKind::If {
             branches,
             otherwise,
-        } => branches
-            .iter()
-            .find_map(|(_, value)| operand_type(value, bindings))
-            .or_else(|| operand_type(otherwise, bindings)),
+        } => joined_type(
+            branches
+                .iter()
+                .map(|(_, value)| operand_type(value, bindings))
+                .chain(std::iter::once(operand_type(otherwise, bindings))),
+        ),
         ExpressionKind::Char(_) => Some(Type::Char),
         ExpressionKind::Integer { .. } | ExpressionKind::Float(_) => None,
         ExpressionKind::Name(name) => bindings.get(name).map(|binding| binding.ty),
@@ -157,6 +161,7 @@ fn expression_inner(
     bindings: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
     let checked = match &expr.kind {
+        ExpressionKind::Slice { .. } => slices::check(expr, bindings)?,
         ExpressionKind::Template(parts) => super::text::template(parts, expr.location, bindings)?,
         ExpressionKind::Struct { .. } | ExpressionKind::Field { .. } => {
             structs::check(expr, bindings)?
@@ -238,6 +243,7 @@ fn expression_inner(
                     | Type::Void
                     | Type::Enum(_)
                     | Type::Struct(_)
+                    | Type::Symbol
                     | Type::Text,
                 ) => {
                     return Err(expr.location.error(
@@ -302,6 +308,12 @@ fn expression_inner(
         }
         ExpressionKind::Group(inner) => expression(inner, expected, bindings)?,
     };
+    if expected == Some(Type::Text) && checked.ty == Type::Symbol {
+        return Ok(CheckedExpression {
+            ty: Type::Text,
+            value: Value::TextView(Box::new(checked)),
+        });
+    }
     if expected.is_some_and(|ty| ty != checked.ty) {
         return Err(expr.location.error(
             ErrorKind::InvalidSource,
@@ -313,4 +325,14 @@ fn expression_inner(
         ));
     }
     Ok(checked)
+}
+
+pub(super) fn joined_type(types: impl Iterator<Item = Option<Type>>) -> Option<Type> {
+    types.flatten().reduce(|left, right| {
+        if left.is_text() && right.is_text() && left != right {
+            Type::Text
+        } else {
+            left
+        }
+    })
 }

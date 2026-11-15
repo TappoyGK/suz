@@ -322,7 +322,45 @@ impl Parser<'_, '_> {
             }
         };
         let mut result = Expression { kind, location };
-        while self.token().kind == Kind::Symbol(".") {
+        while matches!(self.token().kind, Kind::Symbol("." | "[")) {
+            if self.token().kind == Kind::Symbol("[") {
+                let location = self.location();
+                self.cursor += 1;
+                let start = if self.token().kind == Kind::Symbol(":") {
+                    None
+                } else {
+                    Some(Box::new(self.expression()?))
+                };
+                let index = self.token().kind != Kind::Symbol(":");
+                let end = if !index {
+                    self.cursor += 1;
+                    if self.token().kind == Kind::Symbol("]") {
+                        None
+                    } else {
+                        Some(Box::new(self.expression()?))
+                    }
+                } else {
+                    None
+                };
+                self.expect(FixedToken::Symbol("]"))?;
+                let fallback = if self.token().kind == Kind::Keyword("or") {
+                    self.cursor += 1;
+                    Some(self.failure_handler()?)
+                } else {
+                    None
+                };
+                result = Expression {
+                    location,
+                    kind: ExpressionKind::Slice {
+                        target: Box::new(result),
+                        start,
+                        end,
+                        index,
+                        fallback,
+                    },
+                };
+                continue;
+            }
             self.cursor += 1;
             let location = self.location();
             let Kind::Ident(name) = self.token().kind else {

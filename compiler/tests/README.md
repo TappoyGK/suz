@@ -87,6 +87,7 @@ SUZ_TIMINGS=1 ./scripts/test-spec-cases.sh
 - `compiler/tests/spec_cases/text_struct_casts.rs`：構造体変換の入れ子、フィールド型、エスケープ、改行、定数評価と失敗処理を検査する。
 - `compiler/tests/spec_cases/text_struct_runtime.rs`：失敗した構造体変換がプールを増やさないこと、一時領域の解放、確保失敗の位置、定数結果の静的配置を検査する。
 - `compiler/tests/spec_cases/text_casts.rs`：整数・真偽値への変換、整数のラップ変換、定数評価、失敗処理の型と制御移動を検査する。
+- `compiler/tests/spec_cases/text_views.rs`：型変換と失敗処理の制約、Unicodeの全境界での切り出し・添字、範囲の保持、確保なしの読み取りと明示的なインターン化を検査する。
 - `compiler/tests/spec_cases/text.rs`：テンプレートの定数依存、入れ子のスコープ、診断、定数と実行時の浮動小数点表示の一致を検査する。
 - `compiler/tests/spec_cases/text_startup.rs`：未使用の定数を含む起動時の一括登録、初期化失敗の位置、定数参照とログ出力の追加確保の有無を検査する。
 - `compiler/tests/spec_cases/text_runtime.rs`・`text_runtime.c`：環境層の確保・解放の記録によるテキストプールの共有実体、容量計測、上限、確保失敗、一時バッファの検査。プール単体のCプログラムはテスト起動ごとに最適化設定別で1回ビルドし、Cargoの出力ディレクトリに置いた同じ実行ファイルを各検査から別プロセスで起動する。検査結果は再利用しない。`text_environment.c` は生成プログラムの確保要求を記録し、ログの確保要求がないこと、確保失敗時のソース位置、NULを含む出力を検査する。textのC実行テストは、通常の開発プロファイルでは動作を検査し、リリースプロファイルではサニタイザーも有効にする。最適化ありのプール検査は、プロファイルによらずサニタイザーを有効にする。

@@ -12,7 +12,7 @@
 | `suz_char.h` | Unicodeスカラー値の検査とUTF-8の符号化・復号 |
 | `suz_parse_struct.h`・`suz_parse_struct.c` | 型情報に従う構造体の検査と、各フィールドの値・文字列範囲の取得 |
 | `suz_parse_float.c` | 10進の入力から浮動小数点への直接の最近接・偶数丸め |
-| `suz_text.h`・`suz_text.c` | テキストプール、インターン化、容量計測、一時バッファ |
+| `suz_text.h`・`suz_text.c` | `symbol` の共有実体と `text` の範囲参照・切り出し、テキストプール、インターン化、容量計測、一時バッファ |
 | `third_party/ryu/` | 最短の十進表記へ変換するRyuのC実装とライセンス |
 | `suz_env.h` | メモリ確保・解放、出力、パニック終了の環境関数の宣言 |
 | `suz_env.c` | `malloc`・`free` とC標準入出力を使う標準環境層 |

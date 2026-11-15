@@ -14,6 +14,26 @@ pub(super) fn emit_block(
     let indent = "    ".repeat(depth);
     for statement in statements {
         match statement {
+            CheckedStatement::SliceReturn {
+                id,
+                operation,
+                return_value,
+            } => {
+                let (setup, condition, converted) = super::slices::parts(operation, context);
+                writeln!(c, "{indent}{setup};").unwrap();
+                writeln!(
+                    c,
+                    "{indent}if (!({condition})) return {};",
+                    expression(return_value, context)
+                )
+                .unwrap();
+                writeln!(
+                    c,
+                    "{indent}const {} suz_local_{id} = {converted};\n{indent}(void)suz_local_{id};",
+                    operation.ty.c_name()
+                )
+                .unwrap();
+            }
             CheckedStatement::Log { parts, location } => {
                 let id = *next_assignment;
                 *next_assignment += 1;
@@ -42,11 +62,16 @@ pub(super) fn emit_block(
                         writeln!(c, "{indent}    {}{{", if index == 0 { "" } else { "else " })
                             .unwrap();
                     } else {
+                        let pattern = expression(pattern.as_ref().unwrap(), context);
+                        let condition = if target.ty == crate::ast::Type::Text {
+                            format!("suz_text_view_compare(suz_match_{id}, {pattern}) == 0")
+                        } else {
+                            format!("suz_match_{id} == {pattern}")
+                        };
                         writeln!(
                             c,
-                            "{indent}    {}if (suz_match_{id} == {}) {{",
-                            if index == 0 { "" } else { "else " },
-                            expression(pattern.as_ref().unwrap(), context)
+                            "{indent}    {}if ({condition}) {{",
+                            if index == 0 { "" } else { "else " }
                         )
                         .unwrap();
                     }

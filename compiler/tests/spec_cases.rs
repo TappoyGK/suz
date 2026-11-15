@@ -75,6 +75,8 @@ mod text_startup;
 mod text_struct_casts;
 #[path = "spec_cases/text_struct_runtime.rs"]
 mod text_struct_runtime;
+#[path = "spec_cases/text_views.rs"]
+mod text_views;
 #[path = "spec_cases/value_blocks.rs"]
 mod value_blocks;
 #[path = "spec_cases/workers.rs"]

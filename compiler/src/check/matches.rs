@@ -23,11 +23,11 @@ pub(super) fn patterns<T>(
 ) -> Result<Patterns, Diagnostic> {
     if !matches!(
         ty,
-        Type::Char | Type::Integer(_) | Type::Bool | Type::Enum(_) | Type::Text
+        Type::Char | Type::Integer(_) | Type::Bool | Type::Enum(_) | Type::Symbol | Type::Text
     ) {
         return Err(location.error(
             ErrorKind::InvalidSource,
-            "match requires an integer, char, bool, enum or text target [match.target]",
+            "match requires an integer, char, bool, enum, symbol or text target [match.target]",
         ));
     }
     let mut seen = BTreeSet::new();
@@ -36,13 +36,15 @@ pub(super) fn patterns<T>(
     let mut warnings = Vec::new();
     for (index, arm) in arms.iter().enumerate() {
         let Some(pattern) = &arm.pattern else {
-            if !matches!(ty, Type::Char | Type::Integer(_) | Type::Text)
-                || wildcard
+            if !matches!(
+                ty,
+                Type::Char | Type::Integer(_) | Type::Symbol | Type::Text
+            ) || wildcard
                 || index + 1 != arms.len()
             {
                 return Err(arm.location.error(
                     ErrorKind::InvalidSource,
-                    "wildcard is allowed only as the final integer, char or text match arm [match.pattern]",
+                    "wildcard is allowed only as the final integer, char, symbol or text match arm [match.pattern]",
                 ));
             }
             wildcard = true;
@@ -62,14 +64,22 @@ pub(super) fn patterns<T>(
                 ));
             }
         }
-        let checked = expression(pattern, Some(ty), bindings)?;
+        let checked = expression(
+            pattern,
+            Some(if ty == Type::Symbol { Type::Text } else { ty }),
+            bindings,
+        )?;
         diagnostics::collect(&checked, &mut warnings);
-        let value = constants::evaluate(&checked)?.ok_or_else(|| {
+        let mut value = constants::evaluate(&checked)?.ok_or_else(|| {
             arm.location.error(
                 ErrorKind::InvalidSource,
                 "match pattern must be constant [const.expression]",
             )
         })?;
+        if ty == Type::Symbol {
+            value.ty = Type::Symbol;
+            super::text::register_constants(&value, bindings);
+        }
         let key = match &value.value {
             Value::Integer { value, .. } => value.to_string(),
             Value::Bool(value) => value.to_string(),

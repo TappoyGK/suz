@@ -134,10 +134,14 @@ pub(crate) enum Type {
     Integer(IntegerType),
     Bool,
     Char,
+    Symbol,
     Text,
 }
 
 impl Type {
+    pub fn is_text(self) -> bool {
+        matches!(self, Self::Symbol | Self::Text)
+    }
     pub fn integer_bounds(self) -> Option<(i128, i128)> {
         match self {
             Self::Char => Some((0, 0x10ffff)),
@@ -157,6 +161,8 @@ impl Type {
     pub fn from_name(name: &str) -> Option<Self> {
         if name == "char" {
             Some(Self::Char)
+        } else if name == "symbol" {
+            Some(Self::Symbol)
         } else if name == "text" {
             Some(Self::Text)
         } else if name == "void" {
@@ -176,6 +182,7 @@ impl Type {
             Self::Integer(ty) => ty.name(),
             Self::Float(ty) => ty.name(),
             Self::Char => "char",
+            Self::Symbol => "symbol",
             Self::Text => "text",
             Self::Bool => "bool",
             Self::Void => "void",
@@ -189,7 +196,8 @@ impl Type {
             Self::Integer(ty) => ty.c_name().into(),
             Self::Float(ty) => ty.c_name().into(),
             Self::Char => "uint32_t".into(),
-            Self::Text => "suz_text".into(),
+            Self::Symbol => "suz_text".into(),
+            Self::Text => "suz_text_view".into(),
             Self::Bool => "_Bool".into(),
             Self::Void => "void".into(),
             Self::Enum(ty) => ty.base.c_name().into(),
@@ -459,6 +467,13 @@ pub(crate) enum FailureHandler {
 }
 
 pub(crate) enum ExpressionKind {
+    Slice {
+        target: Box<Expression>,
+        start: Option<Box<Expression>>,
+        end: Option<Box<Expression>>,
+        index: bool,
+        fallback: Option<FailureHandler>,
+    },
     Char(u32),
     Template(Vec<TemplatePart<Expression>>),
     Struct {

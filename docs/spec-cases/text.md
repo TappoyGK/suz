@@ -1,10 +1,10 @@
-# text
+# symbolとtext
 
 [目次と書式](../spec-cases.md)
 
-### text-001 関数から返したtextを構造体へ保存してコピーする
+### text-001 関数から返したsymbolを構造体へ保存してコピーする
 
-主根拠：`[text.copy]`。
+主根拠：`[symbol.copy]`。
 
 関数の復帰、元変数への再代入、構造体フィールドの更新後もコピー先の内容が変わらない。
 
@@ -12,9 +12,9 @@
 
 ```suz
 struct Message {
-    body: text,
+    body: symbol,
 }
-fn make(name: text) -> text {
+fn make(name: symbol) -> symbol {
     return `Hello, ${name}`
 }
 fn main() -> u8 {
@@ -36,14 +36,14 @@ fn main() -> u8 {
 
 ### text-002 異なる生成経路の同値と空文字列を比較する
 
-主根拠：`[text.compare]`。
+主根拠：`[symbol.compare]`。
 
 これは比較結果の確認である。実体の共有そのものはランタイムを直接検証するテストで確認する。
 
 **ソース：**
 
 ```suz
-fn identity(value: text) -> text { return value }
+fn identity(value: symbol) -> symbol { return value }
 fn main() -> u8 {
     fix name = identity(`Suz`)
     fix generated = `${name}`
@@ -61,7 +61,7 @@ fn main() -> u8 {
 
 ### text-003 Unicodeの辞書順と接頭辞を比較する
 
-主根拠：`[text.order]`。
+主根拠：`[symbol.order]`。
 
 「é」はU+00E9、分解形はU+0065とU+0301。「𐀀」はU+10000、「」はU+E000である。UTF-16のコード単位順との取り違えとUnicode正規化を検出する。
 
@@ -85,9 +85,9 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | 正常終了 | 0 | 0 |
 
-### text-004 textを加算演算で連結しようとする
+### text-004 symbolを加算演算で連結しようとする
 
-主根拠：`[text.operations]`。
+主根拠：`[symbol.operations]`。
 
 **ソース：**
 
@@ -108,50 +108,27 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[text.operations]` | 2 | 21 |
+| 通常 | `[symbol.operations]` | 2 | 21 |
 
-### text-005 数値とboolをSuzの表記で読み取る
+### text-026 symbolをtextとして渡し、分岐と構造体に保持する
 
-主根拠：`[text.cast-format]`。
-
-**ソース：**
-
-```suz
-fn main() -> u8 {
-    fix integer = `1_000` as u16 or 0
-    fix minimum = `-128` as i8 or 0
-    fix fraction = `1.2_5e+1` as f64 or 0.0
-    fix integral = `1` as f32 or 0.0
-    fix yes = `true` as bool or false
-    fix no = `false` as bool or true
-    if integer == 1000 && minimum == -128 && fraction == 12.5 && integral == 1.0 && yes && not no { return 0 }
-    return 1
-}
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 整数演算の警告数 |
-|---|---|---:|---:|
-| 通常 | 正常終了 | 0 | 0 |
-
-### text-006 数値とboolの入力全体を検査する
-
-主根拠：`[text.cast-format]`。
+主根拠：`[text.from-symbol]`。
 
 **ソース：**
 
 ```suz
-fn invalid(value: text) -> bool {
-    return (value as u8 or 99) == 99
-}
+struct Message { body: text }
+fn keep(value: text) -> text { return value }
 fn main() -> u8 {
-    if not (invalid(``) && invalid(` 1`) && invalid(`1 `)) { return 1 }
-    if not (invalid(`1\0`) && invalid(`1+2`) && invalid(`(1)`)) { return 2 }
-    if not (invalid(`+1`) && invalid(`1__0`) && invalid(`1.0`)) { return 3 }
-    if not (invalid(`0x10`) && invalid(`1//comment`)) { return 4 }
-    if (`True` as bool or false) { return 5 }
-    if (`1` as bool or false) { return 6 }
+    var original = `abc`
+    fix saved = keep(original)
+    original = `other`
+    fix first = ifexpr true { `abc` } else { saved }
+    fix second = ifexpr false { saved } else { `abc` }
+    fix message = Message { body: first }
+    if message.body != second { return 1 }
+    if saved != `abc` { return 2 }
+    if original != `other` { return 3 }
     return 0
 }
 ```
@@ -162,118 +139,15 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | 正常終了 | 0 | 0 |
 
-### text-007 整数の上下限と浮動小数点の丸めを確認する
+### text-033 textをsymbolへ暗黙変換しない
 
-主根拠：`[text.cast-range]`。
-
-**ソース：**
-
-```suz
-fn main() -> u8 {
-    fix maximum = `18446744073709551615` as u64 or 0
-    fix overflow = `18446744073709551616` as u64 or 7
-    fix underflow = `-129` as i8 or 7
-    fix unsigned = `-0` as u8 or 7
-    fix rounded = `16777217` as f32 or 0.0
-    fix too_large = `1.0e100` as f32 or 7.0
-    fix tiny = `1.0e-1000` as f64 or 7.0
-    fix negative_zero = `-0` as f64 or 7.0
-    fix special = `nan` as f64 or 0.0
-    fix infinity = `-inf` as f64 or 0.0
-    if maximum != 18446744073709551615 || overflow != 7 || underflow != 7 || unsigned != 7 { return 1 }
-    if rounded != 16777216.0 || too_large != 7.0 || tiny != 0.0 { return 2 }
-    if 1.0 / negative_zero != -inf || special == special || infinity != -inf { return 3 }
-    return 0
-}
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 整数演算の警告数 |
-|---|---|---:|---:|
-| 通常 | 正常終了 | 0 | 0 |
-
-### text-008 成功する定数文字列のasにもorを要求する
-
-主根拠：`[text.cast-handler]`。
-
-**ソース：**
-
-```suz
-const VALUE: u8 = `1` as u8
-fn main() -> u8 { return VALUE }
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 整数演算の警告数 |
-|---|---|---:|---:|
-| 通常 | コンパイルエラー | — | 0 |
-
-**コンパイル診断：**
-
-| 設定 | 規則 | 行 | 列 |
-|---|---|---:|---:|
-| 通常 | `[text.cast-handler]` | 1 | 23 |
-
-### text-009 桁数の大きな整数と負数をas%でラップする
-
-主根拠：`[text.cast-wrap]`。
+主根拠：`[text.from-symbol]`。
 
 **ソース：**
 
 ```suz
 fn main() -> u8 {
-    fix large = `18446744073709551617` as% u8 or 7
-    fix negative = `-1` as% u8 or 7
-    fix signed = `255` as% i8 or 7
-    fix invalid = `18446744073709551617x` as% u8 or 7
-    fix fraction = `1.0` as% u8 or 7
-    if large == 1 && negative == 255 && signed == -1 && invalid == 7 && fraction == 7 { return 0 }
-    return 1
-}
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 整数演算の警告数 |
-|---|---|---:|---:|
-| 通常 | 正常終了 | 0 | 0 |
-
-### text-010 成功する定数文字列のas%にもorを要求する
-
-主根拠：`[text.cast-handler]`。
-
-**ソース：**
-
-```suz
-fn main() -> u8 {
-    fix value = `256` as% u8
-    return value
-}
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 整数演算の警告数 |
-|---|---|---:|---:|
-| 通常 | コンパイルエラー | — | 0 |
-
-**コンパイル診断：**
-
-| 設定 | 規則 | 行 | 列 |
-|---|---|---:|---:|
-| 通常 | `[text.cast-handler]` | 2 | 23 |
-
-### text-011 boolへのas%を拒否する
-
-主根拠：`[text.cast-wrap]`。
-
-**ソース：**
-
-```suz
-fn main() -> u8 {
-    fix value = `true` as% bool or false
+    fix value: symbol = `abc`[:]
     return 0
 }
 ```
@@ -288,58 +162,25 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[text.cast-wrap]` | 2 | 24 |
+| 通常 | `[type.expected]` | 2 | 30 |
+### text-020 constでテンプレートと型変換を評価する
 
-### text-012 text変換の評価回数と代替値の遅延評価
-
-主根拠：`[text.cast-handler]`。
-
-**ソース：**
-
-```suz
-fn source(value: text) -> text {
-    log info `source`
-    return value
-}
-fn fallback() -> u8 {
-    log info `fallback`
-    return 7
-}
-fn main() -> u8 {
-    fix first = source(`1`) as u8 or fallback()
-    fix second = source(`bad`) as% u8 or fallback()
-    if first == 1 && second == 7 { return 0 }
-    return 1
-}
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 整数演算の警告数 |
-|---|---|---:|---:|
-| 通常 | 正常終了 | 0 | 0 |
-
-**標準エラー：**
-
-```text
-info text-012.suz:2: source
-info text-012.suz:2: source
-info text-012.suz:6: fallback
-```
-
-### text-013 text変換のor returnで呼び出し元に戻る
-
-主根拠：`[text.cast-handler]`。
+主根拠：`[const.symbol-cast]`。
 
 **ソース：**
 
 ```suz
-fn parse(value: text) -> u8 {
-    fix result = value as u8 or return 7
-    return result
+struct Label {
+    name: symbol,
 }
+const PRODUCT = `Suz`
+const MAJOR: u8 = 1
+const LABEL = `${PRODUCT} ${MAJOR}`
+const COUNT: u8 = `256` as u8 or 10
+const WRAPPED = `257` as% u8 or 10
+const OBJECT = `Label { name: \`Suz\` }` as Label or Label { name: `` }
 fn main() -> u8 {
-    if parse(`2`) == 2 && parse(`bad`) == 7 { return 0 }
+    if LABEL == `Suz 1` && COUNT == 10 && WRAPPED == 1 && OBJECT.name == PRODUCT { return 0 }
     return 1
 }
 ```
@@ -375,9 +216,280 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | `[expr.or-return-position]` | 2 | 35 |
 
-### text-015 構造体へ入れ子の値とtextと列挙子を読み取る
+### text-024 symbol生成でも埋め込みを左から右へ1回ずつ評価する
 
-主根拠：`[text.cast-struct]`。
+主根拠：`[symbol.interpolation]`。
+
+**ソース：**
+
+```suz
+fn piece(value: u8) -> symbol {
+    log info `${value}`
+    return `${value}`
+}
+fn main() -> u8 {
+    fix value = `${piece(1)}:${piece(2)}`
+    if value == `1:2` { return 0 }
+    return 1
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+**標準エラー：**
+
+```text
+info text-024.suz:2: 1
+info text-024.suz:2: 2
+```
+
+### text-009 桁数の大きな整数と負数をas%でラップする
+
+主根拠：`[symbol.cast-wrap]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix large = `18446744073709551617` as% u8 or 7
+    fix negative = `-1` as% u8 or 7
+    fix signed = `255` as% i8 or 7
+    fix invalid = `18446744073709551617x` as% u8 or 7
+    fix fraction = `1.0` as% u8 or 7
+    if large == 1 && negative == 255 && signed == -1 && invalid == 7 && fraction == 7 { return 0 }
+    return 1
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### text-011 boolへのas%を拒否する
+
+主根拠：`[symbol.cast-wrap]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix value = `true` as% bool or false
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[symbol.cast-wrap]` | 2 | 24 |
+
+### text-008 成功する定数文字列のasにもorを要求する
+
+主根拠：`[symbol.cast-handler]`。
+
+**ソース：**
+
+```suz
+const VALUE: u8 = `1` as u8
+fn main() -> u8 { return VALUE }
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[symbol.cast-handler]` | 1 | 23 |
+
+### text-010 成功する定数文字列のas%にもorを要求する
+
+主根拠：`[symbol.cast-handler]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix value = `256` as% u8
+    return value
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[symbol.cast-handler]` | 2 | 23 |
+
+### text-012 symbol変換の評価回数と代替値の遅延評価
+
+主根拠：`[symbol.cast-handler]`。
+
+**ソース：**
+
+```suz
+fn source(value: symbol) -> symbol {
+    log info `source`
+    return value
+}
+fn fallback() -> u8 {
+    log info `fallback`
+    return 7
+}
+fn main() -> u8 {
+    fix first = source(`1`) as u8 or fallback()
+    fix second = source(`bad`) as% u8 or fallback()
+    if first == 1 && second == 7 { return 0 }
+    return 1
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+**標準エラー：**
+
+```text
+info text-012.suz:2: source
+info text-012.suz:2: source
+info text-012.suz:6: fallback
+```
+
+### text-013 symbol変換のor returnで呼び出し元に戻る
+
+主根拠：`[symbol.cast-handler]`。
+
+**ソース：**
+
+```suz
+fn parse(value: symbol) -> u8 {
+    fix result = value as u8 or return 7
+    return result
+}
+fn main() -> u8 {
+    if parse(`2`) == 2 && parse(`bad`) == 7 { return 0 }
+    return 1
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### text-005 数値とboolをSuzの表記で読み取る
+
+主根拠：`[symbol.cast-format]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix integer = `1_000` as u16 or 0
+    fix minimum = `-128` as i8 or 0
+    fix fraction = `1.2_5e+1` as f64 or 0.0
+    fix integral = `1` as f32 or 0.0
+    fix yes = `true` as bool or false
+    fix no = `false` as bool or true
+    if integer == 1000 && minimum == -128 && fraction == 12.5 && integral == 1.0 && yes && not no { return 0 }
+    return 1
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### text-006 数値とboolの入力全体を検査する
+
+主根拠：`[symbol.cast-format]`。
+
+**ソース：**
+
+```suz
+fn invalid(value: symbol) -> bool {
+    return (value as u8 or 99) == 99
+}
+fn main() -> u8 {
+    if not (invalid(``) && invalid(` 1`) && invalid(`1 `)) { return 1 }
+    if not (invalid(`1\0`) && invalid(`1+2`) && invalid(`(1)`)) { return 2 }
+    if not (invalid(`+1`) && invalid(`1__0`) && invalid(`1.0`)) { return 3 }
+    if not (invalid(`0x10`) && invalid(`1//comment`)) { return 4 }
+    if (`True` as bool or false) { return 5 }
+    if (`1` as bool or false) { return 6 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### text-007 整数の上下限と浮動小数点の丸めを確認する
+
+主根拠：`[symbol.cast-range]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix maximum = `18446744073709551615` as u64 or 0
+    fix overflow = `18446744073709551616` as u64 or 7
+    fix underflow = `-129` as i8 or 7
+    fix unsigned = `-0` as u8 or 7
+    fix rounded = `16777217` as f32 or 0.0
+    fix too_large = `1.0e100` as f32 or 7.0
+    fix tiny = `1.0e-1000` as f64 or 7.0
+    fix negative_zero = `-0` as f64 or 7.0
+    fix special = `nan` as f64 or 0.0
+    fix infinity = `-inf` as f64 or 0.0
+    if maximum != 18446744073709551615 || overflow != 7 || underflow != 7 || unsigned != 7 { return 1 }
+    if rounded != 16777216.0 || too_large != 7.0 || tiny != 0.0 { return 2 }
+    if 1.0 / negative_zero != -inf || special == special || infinity != -inf { return 3 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### text-015 構造体へ入れ子の値とsymbolと列挙子を読み取る
+
+主根拠：`[symbol.cast-struct]`。
 
 **ソース：**
 
@@ -388,7 +500,7 @@ struct Point {
     y: i32,
 }
 struct Item {
-    name: text,
+    name: symbol,
     mode: Mode,
     point: Point,
 }
@@ -408,7 +520,7 @@ fn main() -> u8 {
 
 ### text-016 構造体の型名とフィールドの過不足を検査する
 
-主根拠：`[text.cast-struct]`。
+主根拠：`[symbol.cast-struct]`。
 
 **ソース：**
 
@@ -417,7 +529,7 @@ struct Point {
     x: u8,
     y: u8,
 }
-fn invalid(value: text) -> bool {
+fn invalid(value: symbol) -> bool {
     fix point = value as Point or Point { x: 99, y: 99 }
     return point.x == 99 && point.y == 99
 }
@@ -438,13 +550,13 @@ fn main() -> u8 {
 
 ### text-017 構造体内の文字列でエスケープを展開する
 
-主根拠：`[text.cast-struct-text]`。
+主根拠：`[symbol.cast-struct-symbol]`。
 
 **ソース：**
 
 ```suz
 struct Label {
-    name: text,
+    name: symbol,
 }
 fn main() -> u8 {
     fix input = `Label { name: \`a\\0b\` }`
@@ -462,7 +574,7 @@ fn main() -> u8 {
 
 ### text-018 変換入力内の不正エスケープと埋め込みを失敗にする
 
-主根拠：`[text.cast-struct-text]`。
+主根拠：`[symbol.cast-struct-symbol]`。
 
 ソースのエスケープは合法である。復元された変換入力の不正をorが処理する。
 
@@ -470,9 +582,9 @@ fn main() -> u8 {
 
 ```suz
 struct Label {
-    name: text,
+    name: symbol,
 }
-fn invalid(value: text) -> bool {
+fn invalid(value: symbol) -> bool {
     fix label = value as Label or Label { name: `fallback` }
     return label.name == `fallback`
 }
@@ -491,7 +603,7 @@ fn main() -> u8 {
 
 ### text-019 構造体入力の行数に応じて末尾カンマを検査する
 
-主根拠：`[text.cast-struct-layout]`。
+主根拠：`[symbol.cast-struct-layout]`。
 
 **ソース：**
 
@@ -500,7 +612,7 @@ struct Point {
     x: u8,
     y: u8,
 }
-fn valid(value: text) -> bool {
+fn valid(value: symbol) -> bool {
     fix point = value as Point or return false
     return point.x == 1 && point.y == 2
 }
@@ -521,25 +633,28 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | 正常終了 | 0 | 0 |
 
-### text-020 constでテンプレートと型変換を評価する
+### text-027 Unicodeの部分範囲を切り出して順逆に読む
 
-主根拠：`[const.text-cast]`。
+主根拠：`[text.slice]`。
 
 **ソース：**
 
 ```suz
-struct Label {
-    name: text,
-}
-const PRODUCT = `Suz`
-const MAJOR: u8 = 1
-const LABEL = `${PRODUCT} ${MAJOR}`
-const COUNT: u8 = `256` as u8 or 10
-const WRAPPED = `257` as% u8 or 10
-const OBJECT = `Label { name: \`Suz\` }` as Label or Label { name: `` }
+fn tail(value: text) -> text { return value[1:] or `` }
 fn main() -> u8 {
-    if LABEL == `Suz 1` && COUNT == 10 && WRAPPED == 1 && OBJECT.name == PRODUCT { return 0 }
-    return 1
+    fix source = `xあ😀\0z`
+    fix body = tail(source)
+    if (body[:2] or ``) != `あ😀` { return 1 }
+    if (body[2] or '?') != '\0' { return 2 }
+    if ((body[1:] or ``)[0] or '?') != '😀' { return 3 }
+    var count: u8 = 0
+    for ch in body { count += 1 }
+    rev ch in body {
+        count += 1
+        continue
+    }
+    if count != 8 { return 4 }
+    return 0
 }
 ```
 
@@ -549,29 +664,160 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | 正常終了 | 0 | 0 |
 
-### text-021 textをmatchとmatchexprで分岐する
+### text-031 対象と両端を順に評価し、代替値を必要時だけ使う
 
-主根拠：`[text.match]`。
+主根拠：`[text.slice]`。
 
 **ソース：**
 
 ```suz
-fn classify(value: text) -> u8 {
+fn source() -> symbol {
+    log info `source`
+    return `abc`
+}
+fn bound(value: i64) -> i64 {
+    log info `${value}`
+    return value
+}
+fn fallback() -> text {
+    log info `fallback`
+    return ``
+}
+fn main() -> u8 {
+    fix first = source()[bound(0):bound(1)] or fallback()
+    fix second = source()[bound(2):bound(1)] or fallback()
+    if first != `a` { return 1 }
+    if second != `` { return 2 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+**標準エラー：**
+
+```text
+info text-031.suz:2: source
+info text-031.suz:6: 0
+info text-031.suz:6: 1
+info text-031.suz:2: source
+info text-031.suz:6: 2
+info text-031.suz:6: 1
+info text-031.suz:10: fallback
+```
+### text-028 空の範囲と不正な位置を処理する
+
+主根拠：`[text.slice-fail]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix source = `abc`
+    if (source[3:] or `bad`) != `` { return 1 }
+    if (source[-1:] or `bad`) != `bad` { return 2 }
+    if (source[2:1] or `bad`) != `bad` { return 3 }
+    if (source[:4] or `bad`) != `bad` { return 4 }
+    if (source[3] or '?') != '?' { return 5 }
+    fix empty = ``[:]
+    if (empty[0] or '?') != '?' { return 6 }
+    fix result = source[4:] or return 0
+    return 7
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### text-032 切り出しには成功する位置でもorを要求する
+
+主根拠：`[text.slice-handler]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix value = `abc`[:1]
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[text.slice-handler]` | 2 | 22 |
+
+### text-029 切り出した範囲を数値・真偽値・文字・構造体として読む
+
+主根拠：`[text.cast-view]`。
+
+**ソース：**
+
+```suz
+struct Item { name: text }
+fn number(value: text) -> u8 { return value as u8 or 99 }
+fn item(value: text) -> Item { return value as Item or Item { name: `bad` } }
+fn main() -> u8 {
+    fix source = `x42y`
+    if number(source[1:3] or ``) != 42 { return 1 }
+    if ((`xtruey`[1:5] or ``) as bool or false) != true { return 2 }
+    if ((`x😀y`[1:2] or ``) as char or '?') != '😀' { return 3 }
+    if ((`x256y`[1:4] or ``) as% u8 or 7) != 0 { return 4 }
+    fix parsed = item(`Item { name: \`Suz\` }`[:])
+    if parsed.name != `Suz` { return 5 }
+    if (parsed.name as symbol) != `Suz` { return 6 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### text-030 定数の切り出しとsymbol・textのパターン照合
+
+主根拠：`[text.const-view]`。
+
+**ソース：**
+
+```suz
+const SOURCE = `xnamey`
+const KEY = SOURCE[1:5] or ``
+const FIRST = KEY[0] or '?'
+const FALLBACK = SOURCE[-1:] or `bad`
+const INTERNED = KEY as symbol
+fn classify(value: symbol) -> u8 {
     return matchexpr value {
-        `ready` => 1
-        `busy` => 2
-        _ => 3
+        KEY => 1
+        _ => 0
     }
 }
 fn main() -> u8 {
-    var result: u8 = 0
-    match `busy` {
-        `ready` => { result = 1 }
-        `busy` => { result = 2 }
-        _ => { result = 3 }
+    if FIRST != 'n' { return 1 }
+    if FALLBACK != `bad` { return 2 }
+    if INTERNED != `name` { return 3 }
+    if classify(`name`) != 1 { return 4 }
+    fix view = SOURCE[1:5] or return 5
+    return matchexpr view {
+        `name` => 0
+        _ => 6
     }
-    if result == 2 && classify(`ready`) == 1 && classify(`other`) == 3 { return 0 }
-    return 1
 }
 ```
 
@@ -581,7 +827,7 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | 正常終了 | 0 | 0 |
 
-### text-022 内容が等しいtextパターンの重複を拒否する
+### text-022 内容が等しいsymbolパターンの重複を拒否する
 
 主根拠：`[match.pattern]`。
 
@@ -610,7 +856,7 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | `[match.pattern]` | 5 | 9 |
 
-### text-023 textのmatchに最後のワイルドカードを要求する
+### text-023 symbolのmatchに最後のワイルドカードを要求する
 
 主根拠：`[match.exhaustive]`。
 
@@ -637,20 +883,28 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | `[match.exhaustive]` | 2 | 5 |
 
-### text-024 text生成でも埋め込みを左から右へ1回ずつ評価する
+### text-021 symbolをmatchとmatchexprで分岐する
 
-主根拠：`[text.interpolation]`。
+主根拠：`[symbol.match]`。
 
 **ソース：**
 
 ```suz
-fn piece(value: u8) -> text {
-    log info `${value}`
-    return `${value}`
+fn classify(value: symbol) -> u8 {
+    return matchexpr value {
+        `ready` => 1
+        `busy` => 2
+        _ => 3
+    }
 }
 fn main() -> u8 {
-    fix value = `${piece(1)}:${piece(2)}`
-    if value == `1:2` { return 0 }
+    var result: u8 = 0
+    match `busy` {
+        `ready` => { result = 1 }
+        `busy` => { result = 2 }
+        _ => { result = 3 }
+    }
+    if result == 2 && classify(`ready`) == 1 && classify(`other`) == 3 { return 0 }
     return 1
 }
 ```
@@ -661,14 +915,7 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | 正常終了 | 0 | 0 |
 
-**標準エラー：**
-
-```text
-info text-024.suz:2: 1
-info text-024.suz:2: 2
-```
-
-### text-025 textをログへ埋め込む
+### text-025 symbolをログへ埋め込む
 
 主根拠：`[log.fragments]`。
 

@@ -290,7 +290,7 @@ fn allocation_failures_report_the_operation_location() {
         assert_eq!(
             String::from_utf8_lossy(&result.stderr),
             format!(
-                "panic text.suz:{line}:{column}: text memory allocation failed [rt.text-allocation]\n"
+                "panic text.suz:{line}:{column}: text memory allocation failed [rt.symbol-allocation]\n"
             )
         );
     }

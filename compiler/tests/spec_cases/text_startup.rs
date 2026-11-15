@@ -5,8 +5,8 @@ use std::process::Command;
 fn startup_registers_unused_folded_and_pattern_texts_before_direct_access() {
     let source = r#"const UNUSED = `unused`
 const FOLDED = `${`fold`}${`ed`}`
-fn unused() -> text { return `not called` }
-fn compare(t: text) -> u8 {
+fn unused() -> symbol { return `not called` }
+fn compare(t: symbol) -> u8 {
     var count: u8 = 0
     for index in 0..<3 {
         if t == `v1` { count += 1 }
@@ -74,17 +74,17 @@ fn startup_failure_points_to_main_keyword_before_main_body_runs() {
     assert_eq!(result.status.code(), Some(101));
     assert_eq!(
         result.stderr,
-        b"panic text.suz:2:3: text memory allocation failed [rt.text-allocation]\n"
+        b"panic text.suz:2:3: text memory allocation failed [rt.symbol-allocation]\n"
     );
 }
 
 #[test]
 fn logs_reference_generated_and_long_text_without_allocating() {
-    let source = r#"fn make_text(count: u8) -> text {
+    let source = r#"fn make_text(count: u8) -> symbol {
     log info `inner: ${count}`
     return `count: ${count}`
 }
-fn write(message: text) -> void {
+fn write(message: symbol) -> void {
     log info `outer: ${message} / ${1.5} / ${true}`
 }
 fn main() -> u8 { return 0 }

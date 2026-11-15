@@ -113,7 +113,7 @@ pub(super) fn check_statements(
                 } else {
                     super::ranges::check_references(start, bindings)?;
                     let value = expression(start, None, bindings)?;
-                    if value.ty != Type::Text {
+                    if !value.ty.is_text() {
                         return Err(start.location.error(
                             ErrorKind::InvalidSource,
                             "iteration without a range requires text [char.for-type]",

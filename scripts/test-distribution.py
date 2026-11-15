@@ -52,6 +52,10 @@ def verify(binary, version, cc, directory):
     fix wrapped = `257` as% u8 or return 6
     fix enabled = `true` as bool or return 6
     if wrapped != 1 || not enabled { return 6 }
+    fix view = `xあ😀y`[1:3] or return 8
+    if (view[1] or '?') != '😀' { return 9 }
+    if (view as symbol) != `あ😀` { return 10 }
+    if view != `あ😀` { return 11 }
     return 7
 }
 enum Mode: u8 { First, Last }
@@ -120,7 +124,7 @@ struct Entry {
             directory, env, expected,
         )
         if expected == 101:
-            require(b"[rt.text-allocation]" in result.stderr, "missing text pool diagnostic")
+            require(b"[rt.symbol-allocation]" in result.stderr, "missing text pool diagnostic")
         limited_export = directory / f"exported-{limit}"
         run(
             [copied, "emit-c", source, "-o", limited_export, "--text-pool-limit", limit],
@@ -132,7 +136,7 @@ struct Entry {
         )
         result = run([limited_export / "program"], directory, env, expected)
         if expected == 101:
-            require(b"[rt.text-allocation]" in result.stderr, "missing exported text pool diagnostic")
+            require(b"[rt.symbol-allocation]" in result.stderr, "missing exported text pool diagnostic")
 
     # A custom compiler path exercises actual missing SDK/linker failures without
     # modifying the developer's Xcode installation or system search paths.

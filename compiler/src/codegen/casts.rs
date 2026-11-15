@@ -20,16 +20,21 @@ pub(super) fn cast_parts(
     context.temporaries.push(operand.ty);
     let source = expression(operand, context);
     let local = format!("suz_cmp_{index}");
-    if operand.ty == Type::Text {
+    if operand.ty.is_text() {
         context.uses_text = true;
         let output = context.temporaries.len();
         if let Type::Struct(id) = target {
             context.struct_parsers.insert(id);
             context.temporaries.push(target);
             let position = super::text::position(location, context);
+            let input = if operand.ty == Type::Symbol {
+                format!("suz_text_as_view({local})")
+            } else {
+                local.clone()
+            };
             return (
                 format!("{local} = {source}"),
-                format!("suz_parse_struct_{id}({local}, &suz_cmp_{output}, {position})"),
+                format!("suz_parse_struct_{id}({input}, &suz_cmp_{output}, {position})"),
                 format!("suz_cmp_{output}"),
             );
         }

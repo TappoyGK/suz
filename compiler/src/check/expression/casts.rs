@@ -21,7 +21,33 @@ pub(super) fn check(
             fallback,
         } => {
             let operand = expression(operand, None, bindings)?;
-            if operand.ty == Type::Text {
+            if !*wrap && operand.ty == Type::Text && *target == Type::Symbol {
+                if fallback.is_some() {
+                    return Err(expr.location.error(
+                        ErrorKind::InvalidSource,
+                        "text interning does not accept or [text.to-symbol]",
+                    ));
+                }
+                let constant = super::super::constants::evaluate(&operand)
+                    .ok()
+                    .flatten()
+                    .and_then(|value| {
+                        if let Value::Text { text } = value.value {
+                            Some(text)
+                        } else {
+                            None
+                        }
+                    });
+                return Ok(CheckedExpression {
+                    ty: Type::Symbol,
+                    value: Value::Intern {
+                        constant,
+                        operand: Box::new(operand),
+                        location: expr.location,
+                    },
+                });
+            }
+            if operand.ty.is_text() {
                 let valid = if *wrap {
                     matches!(target, Type::Integer(_))
                 } else {
@@ -38,23 +64,23 @@ pub(super) fn check(
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
                         if *wrap {
-                            "text as% requires an integer target [text.cast-wrap]"
+                            "text as% requires an integer target [symbol.cast-wrap]"
                         } else {
-                            "unsupported text conversion target [text.cast]"
+                            "unsupported text conversion target [symbol.cast]"
                         },
                     ));
                 }
                 if fallback.is_none() {
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
-                        "text conversion requires or [text.cast-handler]",
+                        "text conversion requires or [symbol.cast-handler]",
                     ));
                 }
             } else if *wrap {
                 if fallback.is_some() {
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
-                        "integer as% does not accept or [text.cast-wrap-handler-syntax]",
+                        "integer as% does not accept or [symbol.cast-wrap-handler-syntax]",
                     ));
                 }
                 if !matches!((operand.ty, target), (Type::Integer(_), Type::Integer(_))) {
@@ -69,7 +95,7 @@ pub(super) fn check(
                 });
             }
             let safe = match (operand.ty, *target) {
-                (Type::Text, _) => false,
+                (Type::Symbol | Type::Text, _) => false,
                 (Type::Char, Type::Integer(to)) => to.bounds().1 >= 0x10ffff,
                 (Type::Integer(from), Type::Char) => {
                     let (min, max) = from.bounds();
@@ -118,7 +144,7 @@ pub(super) fn check(
                 None => None,
                 _ => unreachable!(),
             };
-            if operand.ty == Type::Text {
+            if operand.ty.is_text() {
                 let constant_struct = if let Type::Struct(id) = target
                     && super::super::constants::is_constant(fallback.as_ref().unwrap())
                 {

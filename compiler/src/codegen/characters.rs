@@ -15,10 +15,11 @@ pub(super) fn emit_text_loop(
 ) {
     context.uses_text = true;
     let indent = "    ".repeat(depth);
+    let ty = source.ty.c_name();
     let source = expression(source, context);
     writeln!(
         c,
-        "{indent}{{\n{indent}    const suz_text suz_iter_{id} = {source};"
+        "{indent}{{\n{indent}    const {ty} suz_iter_{id} = {source};"
     )
     .unwrap();
     writeln!(

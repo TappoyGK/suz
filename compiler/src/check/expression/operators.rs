@@ -84,6 +84,8 @@ pub(super) fn check(
                     ErrorKind::InvalidSource,
                     if ty == Type::Text {
                         "text does not support arithmetic or bitwise operations [text.operations]"
+                    } else if ty == Type::Symbol {
+                        "symbol does not support arithmetic or bitwise operations [symbol.operations]"
                     } else {
                         "invalid operand type for this operator [expr.operator-types]"
                     },
@@ -186,16 +188,18 @@ pub(super) fn check(
             operators,
             operands,
         } => {
-            let ty = operands
-                .iter()
-                .find_map(|operand| operand_type(operand, bindings))
-                .unwrap_or_else(|| {
-                    if operands.iter().any(has_float_literal) {
-                        Type::Float(FloatType::F64)
-                    } else {
-                        Type::Integer(IntegerType::I64)
-                    }
-                });
+            let ty = super::joined_type(
+                operands
+                    .iter()
+                    .map(|operand| operand_type(operand, bindings)),
+            )
+            .unwrap_or_else(|| {
+                if operands.iter().any(has_float_literal) {
+                    Type::Float(FloatType::F64)
+                } else {
+                    Type::Integer(IntegerType::I64)
+                }
+            });
             let operands = operands
                 .iter()
                 .map(|operand| expression(operand, Some(ty), bindings))

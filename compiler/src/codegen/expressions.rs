@@ -17,7 +17,56 @@ pub(super) fn c_string(text: &str) -> String {
 
 pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionContext) -> String {
     match expr.value {
-        Value::Text { ref text, .. } => super::text::constant(text, context),
+        Value::TextView(ref inner) => format!("suz_text_as_view({})", expression(inner, context)),
+        Value::Intern {
+            ref operand,
+            location,
+            ref constant,
+        } => {
+            if let Some(text) = constant {
+                return super::text::constant(text, context);
+            }
+            context.uses_text = true;
+            let id = context.temporaries.len();
+            context.temporaries.push(operand.ty);
+            let value = expression(operand, context);
+            format!(
+                "(suz_cmp_{id} = {value}, suz_text_intern(suz_cmp_{id}.bytes, suz_cmp_{id}.length, false, {}))",
+                super::text::position(location, context)
+            )
+        }
+        Value::Slice {
+            ref target,
+            ref start,
+            ref end,
+            ref handler,
+            index,
+        } => {
+            if !index && start.is_none() && end.is_none() {
+                return expression(target, context);
+            }
+            let (setup, condition, converted) = super::slices::parts(expr, context);
+            let Some(CheckedHandler::Value(fallback)) = handler else {
+                unreachable!("slice returns are lowered")
+            };
+            format!(
+                "({setup}, {condition} ? {converted} : ({}))",
+                expression(fallback, context)
+            )
+        }
+        Value::Text { ref text, .. } => {
+            if expr.ty == crate::ast::Type::Text {
+                context.uses_text = true;
+                format!(
+                    "(suz_text_view){{{}, UINT64_C({}), UINT64_C({})}}",
+                    c_string(text),
+                    text.len(),
+                    text.chars().count()
+                )
+            } else {
+                super::text::constant(text, context)
+            }
+        }
         Value::Template {
             ref parts,
             location,
@@ -163,14 +212,17 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             let index = context.temporaries.len();
             context.temporaries.push(target.ty);
             let name = format!("suz_cmp_{index}");
+            let view = target.ty == crate::ast::Type::Text;
             let target = expression(target, context);
             let mut result = expression(&arms.last().unwrap().1, context);
             for (pattern, value) in arms[..arms.len() - 1].iter().rev() {
-                result = format!(
-                    "({name} == {} ? {} : {result})",
-                    expression(pattern.as_ref().unwrap(), context),
-                    expression(value, context)
-                );
+                let pattern = expression(pattern.as_ref().unwrap(), context);
+                let condition = if view {
+                    format!("suz_text_view_compare({name}, {pattern}) == 0")
+                } else {
+                    format!("{name} == {pattern}")
+                };
+                result = format!("({condition} ? {} : {result})", expression(value, context));
             }
             format!("({name} = {target}, {result})")
         }
@@ -264,7 +316,8 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                 .ty
                 .integer_storage()
                 .is_some_and(|ty| ty.bounds().0 == 0);
-            let text = operands[0].ty == Type::Text;
+            let text = operands[0].ty.is_text();
+            let view = operands[0].ty == Type::Text;
             let floating = matches!(operands[0].ty, Type::Float(_));
             let structure = if let Type::Struct(id) = operands[0].ty {
                 context.struct_equals.insert(id);
@@ -303,7 +356,14 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                     );
                 }
                 if text {
-                    return if operators[index].is_equality() {
+                    return if view {
+                        format!(
+                            "suz_text_view_compare({}, {}) {} 0",
+                            names[index],
+                            names[index + 1],
+                            operators[index].symbol()
+                        )
+                    } else if operators[index].is_equality() {
                         format!(
                             "{} {} {}",
                             names[index],

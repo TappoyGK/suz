@@ -6,6 +6,7 @@ mod expressions;
 mod functions;
 mod helpers;
 mod logs;
+mod slices;
 mod statements;
 mod structs;
 #[cfg(test)]

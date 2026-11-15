@@ -11,6 +11,28 @@ pub(super) fn dependencies(
     names: &mut Vec<(String, Location)>,
 ) -> Result<(), Diagnostic> {
     match &expr.kind {
+        ExpressionKind::Slice {
+            target,
+            start,
+            end,
+            fallback,
+            ..
+        } => {
+            dependencies(target, names)?;
+            for bound in [start, end].into_iter().flatten() {
+                dependencies(bound, names)?;
+            }
+            match fallback {
+                Some(FailureHandler::Value(value)) => dependencies(value, names)?,
+                Some(FailureHandler::Return { location, .. }) => {
+                    return Err(location.error(
+                        ErrorKind::InvalidSource,
+                        "control transfers are not constant expressions [const.expression]",
+                    ));
+                }
+                None => {}
+            }
+        }
         ExpressionKind::Template(parts) => {
             for part in parts {
                 if let crate::ast::TemplatePart::Value(value) = part {

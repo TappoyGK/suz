@@ -50,7 +50,7 @@ pub(super) fn emit(
             TemplatePart::Value(value) => {
                 let name = format!("suz_log_{id}_{index}");
                 match value.ty {
-                    Type::Text => format!(
+                    Type::Symbol | Type::Text => format!(
                         "suz_log_text(suz_text_bytes({name}), (size_t)suz_text_length({name}));"
                     ),
                     Type::Char => format!("suz_log_char({name});"),

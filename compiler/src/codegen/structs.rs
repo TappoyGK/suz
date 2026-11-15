@@ -72,6 +72,8 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
             .map(|(index, field)| {
                 if let Type::Struct(child) = field.ty {
                     format!("suz_equal_{child}(left.suz_field_{index}, right.suz_field_{index})")
+                } else if field.ty == Type::Text {
+                    format!("suz_text_view_compare(left.suz_field_{index}, right.suz_field_{index}) == 0")
                 } else {
                     format!("left.suz_field_{index} == right.suz_field_{index}")
                 }
