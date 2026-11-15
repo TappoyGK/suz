@@ -64,7 +64,7 @@ pub fn build_and_run_c(c_file: &Path, executable: &Path) -> Result<Output> {
     let compiler = std::env::var_os("CC").unwrap_or_else(|| "clang".into());
     let mut command = Command::new(compiler);
     command
-        .args(["-std=c11", "-Wall", "-Wextra", "-Werror"])
+        .args(["-std=c23", "-Wall", "-Wextra", "-Werror"])
         .arg(c_file);
     let source =
         std::fs::read_to_string(c_file).map_err(|e| format!("could not read generated C: {e}"))?;

@@ -156,7 +156,7 @@ int main(void) {
     let runtime = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime");
     let executable = directory.0.join("atomic");
     let built = Command::new(std::env::var_os("CC").unwrap_or_else(|| "clang".into()))
-        .args(["-std=c11", "-Wall", "-Wextra", "-Werror", "-pthread"])
+        .args(["-std=c23", "-Wall", "-Wextra", "-Werror", "-pthread"])
         .arg("-I")
         .arg(&runtime)
         .arg(&path)

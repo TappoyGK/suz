@@ -29,7 +29,7 @@ fn main() {
         let object = output.join(format!("format-{index}.o"));
         run(Command::new(&compiler)
             .args([
-                "-std=c11",
+                "-std=c23",
                 "-O2",
                 "-ffp-model=strict",
                 "-ffp-contract=off",

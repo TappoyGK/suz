@@ -49,7 +49,7 @@ fn float_logs_round_trip_and_obey_exact_boundaries_without_undefined_behavior() 
     let mut command = Command::new(std::env::var_os("CC").unwrap_or_else(|| "clang".into()));
     command
         .args([
-            "-std=c11",
+            "-std=c23",
             "-pedantic-errors",
             "-Wall",
             "-Wextra",

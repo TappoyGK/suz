@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <limits.h>
 #include <stdatomic.h>
+#include <stdckdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -18,24 +19,23 @@ void suz_runtime_init(void) {
 }
 
 bool suz_try_add_i64(int64_t a, int64_t b, int64_t min, int64_t max, int64_t *result) {
-    if ((b > 0 && a > max - b) || (b < 0 && a < min - b)) return false;
-    *result = a + b;
+    int64_t value;
+    if (ckd_add(&value, a, b) || value < min || value > max) return false;
+    *result = value;
     return true;
 }
 
 bool suz_try_sub_i64(int64_t a, int64_t b, int64_t min, int64_t max, int64_t *result) {
-    if ((b < 0 && a > max + b) || (b > 0 && a < min + b)) return false;
-    *result = a - b;
+    int64_t value;
+    if (ckd_sub(&value, a, b) || value < min || value > max) return false;
+    *result = value;
     return true;
 }
 
 bool suz_try_mul_i64(int64_t a, int64_t b, int64_t min, int64_t max, int64_t *result) {
-    if (a > 0) {
-        if ((b > 0 && a > max / b) || (b < 0 && b < min / a)) return false;
-    } else if (a < 0) {
-        if ((b > 0 && a < min / b) || (b < 0 && a < max / b)) return false;
-    }
-    *result = a * b;
+    int64_t value;
+    if (ckd_mul(&value, a, b) || value < min || value > max) return false;
+    *result = value;
     return true;
 }
 
@@ -54,21 +54,23 @@ bool suz_try_rem_i64(int64_t a, int64_t b, int64_t min, int64_t max, int64_t *re
 }
 
 bool suz_try_add_u64(uint64_t a, uint64_t b, uint64_t max, uint64_t *result) {
-    if (a > max - b) return false;
-    *result = a + b;
+    uint64_t value;
+    if (ckd_add(&value, a, b) || value > max) return false;
+    *result = value;
     return true;
 }
 
 bool suz_try_sub_u64(uint64_t a, uint64_t b, uint64_t max, uint64_t *result) {
-    (void)max;
-    if (a < b) return false;
-    *result = a - b;
+    uint64_t value;
+    if (ckd_sub(&value, a, b) || value > max) return false;
+    *result = value;
     return true;
 }
 
 bool suz_try_mul_u64(uint64_t a, uint64_t b, uint64_t max, uint64_t *result) {
-    if (b != 0 && a > max / b) return false;
-    *result = a * b;
+    uint64_t value;
+    if (ckd_mul(&value, a, b) || value > max) return false;
+    *result = value;
     return true;
 }
 
@@ -88,13 +90,12 @@ bool suz_try_rem_u64(uint64_t a, uint64_t b, uint64_t max, uint64_t *result) {
 
 bool suz_try_shl_i64(int64_t a, uint64_t count, unsigned width, int64_t *result) {
     if (count >= width) return false;
-    uint64_t magnitude = a < 0 ? UINT64_C(0) - (uint64_t)a : (uint64_t)a;
-    uint64_t limit = UINT64_C(1) << (width - 1);
-    if (a >= 0) --limit;
-    if (magnitude > (limit >> count)) return false;
-    magnitude <<= count;
-    /* Keep all shifts unsigned and avoid converting 2^63 directly to int64_t. */
-    *result = a < 0 ? -(int64_t)(magnitude - 1) - 1 : (int64_t)magnitude;
+    /* Multiplication avoids shifting a negative signed value. All 64-bit
+       operands and valid shift counts fit exactly in this intermediate. */
+    _BitInt(128) value = (_BitInt(128))a * ((_BitInt(128))1 << count);
+    _BitInt(128) limit = (_BitInt(128))1 << (width - 1);
+    if (value < -limit || value >= limit) return false;
+    *result = (int64_t)value;
     return true;
 }
 

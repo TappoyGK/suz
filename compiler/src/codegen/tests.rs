@@ -84,7 +84,7 @@ fn generated_bool_values_preserve_negation_and_copies() {
         )
         .unwrap();
         let output = runtime_link::compiler()
-            .args(["-std=c11", "-Wall", "-Wextra", "-Werror"])
+            .args(["-std=c23", "-Wall", "-Wextra", "-Werror"])
             .arg(&c_file)
             .arg("-o")
             .arg(&executable)
@@ -148,7 +148,7 @@ return result != {expected} || trace != {trace};
         let executable = directory.join(format!("{index}"));
         fs::write(&source, c).unwrap();
         let output = runtime_link::compiler()
-            .args(["-std=c11", "-Wall", "-Wextra", "-Werror"])
+            .args(["-std=c23", "-Wall", "-Wextra", "-Werror"])
             .arg(&source)
             .arg("-o")
             .arg(&executable)
@@ -250,7 +250,7 @@ return result != {expected} || trace != {trace};
         let executable = directory.join(format!("{index}"));
         fs::write(&source, c).unwrap();
         let built = runtime_link::compiler()
-            .args(["-std=c11", "-Wall", "-Wextra", "-Werror"])
+            .args(["-std=c23", "-Wall", "-Wextra", "-Werror"])
             .arg(&source)
             .arg("-o")
             .arg(&executable)

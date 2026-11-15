@@ -12,7 +12,7 @@ fn build(source: &Path, executable: &Path, optimization: &str, standard_env: boo
     let mut command = Command::new(std::env::var("CC").unwrap_or_else(|_| "clang".into()));
     command
         .args([
-            "-std=c11",
+            "-std=c23",
             "-Wall",
             "-Wextra",
             "-Werror",

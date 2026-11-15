@@ -178,7 +178,7 @@ fn integer_arithmetic_failures_panic_at_the_suz_operator_even_when_optimized() {
             let executable = directory.0.join(format!("panic-{index}{optimization}"));
             let built = Command::new(std::env::var("CC").unwrap_or_else(|_| "clang".into()))
                 .args([
-                    "-std=c11",
+                    "-std=c23",
                     "-Wall",
                     "-Wextra",
                     "-Werror",
