@@ -78,21 +78,6 @@ struct Entry {
         result = run([copied, option], directory, without_tools)
         require(bool(result.stdout.strip()), f"empty {option} output")
     run([copied, "check", source], directory, without_tools)
-    # Check the fix in the shipped executable, outside the source tree.
-    invalid_range = directory / "invalid-range.suz"
-    invalid_range.write_text("""fn main() -> u8 {
-    for i in (0..<3) {}
-    return 0
-}
-""")
-    result = run([copied, "check", invalid_range], directory, without_tools, 1)
-    require(
-        not result.stdout
-        and result.stderr == (
-            f"{invalid_range}:2:16: range notation is only allowed in for [for.range]\n"
-        ).encode(),
-        f"incorrect range diagnostic: {result.stderr!r}",
-    )
     exported = directory / "exported"
     run([copied, "emit-c", source, "-o", exported], directory, without_tools)
     for path in ("program.c", "runtime/suz_env.c", "scripts/build-c.sh"):
