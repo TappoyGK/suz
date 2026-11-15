@@ -332,11 +332,16 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
     });
     for (index, token) in tokens.iter().enumerate() {
         if matches!(token.kind, Kind::Symbol("..<" | "..=")) {
-            let touches_left = index > 0
-                && !matches!(tokens[index - 1].kind, Kind::Newline | Kind::End)
-                && tokens[index - 1].span.end == token.span.start;
+            // Input boundaries are not whitespace. Missing bounds are syntax
+            // errors for the parser, including in isolated interpolations.
+            let touches_left = if index == 0 {
+                token.span.start == 0
+            } else {
+                !matches!(tokens[index - 1].kind, Kind::Newline | Kind::End)
+                    && tokens[index - 1].span.end == token.span.start
+            };
             let touches_right = tokens.get(index + 1).is_some_and(|next| {
-                !matches!(next.kind, Kind::Newline | Kind::End) && next.span.start == token.span.end
+                next.kind != Kind::Newline && next.span.start == token.span.end
             });
             if !touches_left || !touches_right {
                 return Err(error(
@@ -581,20 +586,28 @@ mod tests {
 
     #[test]
     fn ranges_require_adjacent_bounds_even_across_suppressed_newlines() {
-        for source in [
-            "a ..<b",
-            "a..< b",
-            "a\n..<b",
-            "a..<\nb",
-            "(a\n..<b)",
-            "(a..<\nb)",
-            "a..<// comment\nb",
-        ] {
-            let error = lex(source).unwrap_err();
-            assert_eq!(error.kind, ErrorKind::InvalidSource, "{source}");
-            assert!(error.message.contains("for.range-spacing"), "{source}");
+        for operator in ["..<", "..="] {
+            for template in [
+                "a ..<b",
+                "a..< b",
+                "a\n..<b",
+                "a..<\nb",
+                "(a\n..<b)",
+                "(a..<\nb)",
+                "a..<// comment\nb",
+                " ..<b",
+                "a..< ",
+            ] {
+                let source = template.replace("..<", operator);
+                let error = lex(&source).unwrap_err();
+                assert_eq!(error.kind, ErrorKind::InvalidSource, "{source}");
+                assert!(error.message.contains("for.range-spacing"), "{source}");
+            }
+            for template in ["(a+1)..<(b+2)", "..<b", "a..<", "..<"] {
+                let source = template.replace("..<", operator);
+                assert!(lex(&source).is_ok(), "{source}");
+            }
         }
-        assert!(lex("(a+1)..<(b+2)").is_ok());
     }
 
     #[test]

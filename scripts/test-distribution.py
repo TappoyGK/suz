@@ -78,6 +78,7 @@ struct Entry {
         result = run([copied, option], directory, without_tools)
         require(bool(result.stdout.strip()), f"empty {option} output")
     run([copied, "check", source], directory, without_tools)
+    # Check the fix in the shipped executable, outside the source tree.
     invalid_range = directory / "invalid-range.suz"
     invalid_range.write_text("""fn main() -> u8 {
     for i in (0..<3) {}
