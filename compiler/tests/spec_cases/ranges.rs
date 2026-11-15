@@ -211,7 +211,7 @@ fn ranges_handle_integer_extremes_and_nested_control_without_overflow() {
         let executable = directory.0.join(format!("ranges{optimization}"));
         let built = runtime_link::compiler()
             .args([
-                "-std=c11",
+                "-std=c23",
                 "-Wall",
                 "-Wextra",
                 "-Werror",

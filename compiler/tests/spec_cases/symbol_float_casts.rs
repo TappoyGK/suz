@@ -1,4 +1,4 @@
-use crate::test_util::compile_and_run_c11;
+use crate::test_util::compile_and_run_c23;
 
 #[test]
 fn symbol_float_casts_share_constant_rounding_and_lazy_handlers() {
@@ -29,7 +29,7 @@ fn main() -> u8 {
     if parse(`1.5`) != 1.5 || parse(`bad`) != 7.0 { return 4 }
     return 0
 }"#;
-    let result = compile_and_run_c11(source, "text-float.suz");
+    let result = compile_and_run_c23(source, "text-float.suz");
     assert_eq!(
         result.status.code(),
         Some(0),

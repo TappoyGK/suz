@@ -42,6 +42,40 @@ fn clean(directory: &Path) {
     }));
 }
 
+#[cfg(unix)]
+#[test]
+fn native_build_rejects_non_clang_and_pre_c23_compilers() {
+    use std::os::unix::fs::PermissionsExt;
+    let directory = setup();
+    let wrapper = directory.0.join("compiler");
+    for flag in ["-U__clang__", "-std=c11"] {
+        fs::write(
+            &wrapper,
+            format!("#!/bin/sh\nexec \"${{REAL_CC:-clang}}\" \"$@\" {flag}\n"),
+        )
+        .unwrap();
+        fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o755)).unwrap();
+        for verb in ["build", "run"] {
+            let mut cmd = command(&directory.0);
+            cmd.env(
+                "REAL_CC",
+                std::env::var_os("CC").unwrap_or_else(|| "clang".into()),
+            )
+            .args([verb, "input.suz", "--cc", "./compiler"]);
+            if verb == "build" {
+                cmd.args(["-o", "program"]);
+            }
+            let result = code(cmd.output().unwrap(), 2);
+            assert!(result.stdout.is_empty());
+            let diagnostic = String::from_utf8_lossy(&result.stderr);
+            assert!(diagnostic.contains("[tool.c-compiler]"), "{diagnostic}");
+            assert!(diagnostic.contains("C23-capable Clang"), "{diagnostic}");
+            assert!(!directory.0.join("program").exists());
+            clean(&directory.0);
+        }
+    }
+}
+
 #[test]
 fn native_settings_and_input_aliases_are_rejected_before_compilation() {
     let directory = setup();

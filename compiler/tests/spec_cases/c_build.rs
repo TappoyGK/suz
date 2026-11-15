@@ -11,6 +11,34 @@ fn build_command() -> Command {
 }
 
 #[test]
+fn c_headers_require_clang_c23_and_wide_integers() {
+    let directory = TemporaryDirectory::new();
+    let runtime = Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime");
+    let source = directory.0.join("requirements.c");
+    for header in ["suz_runtime.h", "suz_env.h"] {
+        fs::write(&source, format!("#include \"{header}\"\n")).unwrap();
+        for flags in [
+            vec!["-std=c11"],
+            vec!["-std=c23", "-U__clang__"],
+            vec!["-std=c23", "-U__BITINT_MAXWIDTH__"],
+        ] {
+            let result = Command::new(std::env::var_os("CC").unwrap_or_else(|| "clang".into()))
+                .args(flags)
+                .args(["-fsyntax-only", "-I"])
+                .arg(&runtime)
+                .arg(&source)
+                .output()
+                .unwrap();
+            assert!(!result.status.success());
+            assert!(
+                String::from_utf8_lossy(&result.stderr).contains("[runtime.c-check]"),
+                "{result:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn generated_c_and_runtime_reject_unsafe_math_modes() {
     let directory = TemporaryDirectory::new();
     let source = directory.0.join("program.c");
@@ -34,7 +62,7 @@ fn generated_c_and_runtime_reject_unsafe_math_modes() {
             "-funsafe-math-optimizations",
         ] {
             let output = Command::new(std::env::var_os("CC").unwrap_or_else(|| "clang".into()))
-                .args(["-std=c11", "-fsyntax-only", flag, "-I"])
+                .args(["-std=c23", "-fsyntax-only", flag, "-I"])
                 .arg(&runtime)
                 .arg("-I")
                 .arg(runtime.join("third_party/ryu"))

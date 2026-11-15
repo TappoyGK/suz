@@ -1,6 +1,6 @@
 use crate::{
     support::float_runtime,
-    test_util::{TemporaryDirectory, compile_and_run_c11},
+    test_util::{TemporaryDirectory, compile_and_run_c23},
 };
 use std::{
     fmt::Write as _,
@@ -23,7 +23,7 @@ fn main() -> u8 {
     return 0
 }
 "#;
-    let output = compile_and_run_c11(source, "float.suz");
+    let output = compile_and_run_c23(source, "float.suz");
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stdout.is_empty());
     assert_eq!(
@@ -49,7 +49,7 @@ fn float_logs_round_trip_and_obey_exact_boundaries_without_undefined_behavior() 
     let mut command = Command::new(std::env::var_os("CC").unwrap_or_else(|| "clang".into()));
     command
         .args([
-            "-std=c11",
+            "-std=c23",
             "-pedantic-errors",
             "-Wall",
             "-Wextra",

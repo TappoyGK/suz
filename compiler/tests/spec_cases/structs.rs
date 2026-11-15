@@ -1,4 +1,4 @@
-use crate::test_util::compile_and_run_c11;
+use crate::test_util::compile_and_run_c23;
 
 #[test]
 #[ignore = "release check: run scripts/test-release.sh"]
@@ -27,7 +27,7 @@ fn main() -> u8 {
     return 0
 }
 "#;
-    let output = compile_and_run_c11(source, "structs.suz");
+    let output = compile_and_run_c23(source, "structs.suz");
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stdout.is_empty() && output.stderr.is_empty());
 }
@@ -60,7 +60,7 @@ fn main() -> u8 {
     return 5
 }
 "#;
-    let output = compile_and_run_c11(source, "structs.suz");
+    let output = compile_and_run_c23(source, "structs.suz");
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stdout.is_empty() && output.stderr.is_empty());
 }

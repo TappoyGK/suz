@@ -51,7 +51,7 @@ impl Batch {
     ) -> Result<Self> {
         let compiler = std::env::var_os("CC").unwrap_or_else(|| "clang".into());
         let runtime = Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime");
-        let flags = ["-std=c11", "-Wall", "-Wextra", "-Werror"];
+        let flags = ["-std=c23", "-Wall", "-Wextra", "-Werror"];
         // Keep translation units separate: private C helpers and static state
         // from different Suz programs must not share a namespace.
         let compiled = parallel_map(inputs, workers, |(index, source)| {

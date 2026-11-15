@@ -79,7 +79,7 @@ pub struct Compilation {
     pub warnings: Vec<Warning>,
 }
 
-/// Compile Suz source to C11.
+/// Compile Suz source to C23.
 pub fn compile(bytes: &[u8]) -> Result<String, Diagnostic> {
     compile_with_mode(bytes, ArithmeticMode::Default).map(|result| result.c)
 }

@@ -1,9 +1,24 @@
 #ifndef SUZ_CONFIG_H
 #define SUZ_CONFIG_H
 
+#if !defined(__clang__)
+#error "Clang required [runtime.c-check]"
+#endif
+#if !defined(__STDC_VERSION__) || __STDC_VERSION__ < 202311L
+#error "C23 required; compile with -std=c23 [runtime.c-check]"
+#endif
+
 #include <float.h>
 #include <limits.h>
 #include <stdint.h>
+#include <stdckdint.h>
+
+#if !defined(BITINT_MAXWIDTH) || BITINT_MAXWIDTH < 128
+#error "Clang with 128-bit _BitInt support required [runtime.c-check]"
+#endif
+#if !defined(__STDC_VERSION_STDCKDINT_H__) || __STDC_VERSION_STDCKDINT_H__ < 202311L
+#error "C23 checked integer arithmetic required [runtime.c-check]"
+#endif
 
 #if defined(__FAST_MATH__) || (defined(__FINITE_MATH_ONLY__) && __FINITE_MATH_ONLY__ > 0)
 #error "unsafe floating-point optimization [runtime.float-environment]"

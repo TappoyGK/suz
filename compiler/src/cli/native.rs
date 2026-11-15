@@ -72,7 +72,7 @@ impl Build {
         let mut command = Command::new(&self.cc);
         command.env("TMPDIR", self.directory.path());
         command.args([
-            "-std=c11",
+            "-std=c23",
             "-Wall",
             "-Wextra",
             "-Werror",
@@ -87,6 +87,32 @@ impl Build {
         let root = self.directory.path();
         let source = root.join("probe.c");
         let object = root.join("probe.o");
+        fs::write(
+            &source,
+            r#"#if !defined(__clang__)
+#error "Clang required [tool.c-compiler]"
+#endif
+#if !defined(__STDC_VERSION__) || __STDC_VERSION__ < 202311L
+#error "C23 required [tool.c-compiler]"
+#endif
+_BitInt(128) suz_compiler_probe;
+"#,
+        )
+        .map_err(|e| error("tool.temporary", e))?;
+        let result = self
+            .command()
+            .args(["-Wno-unused-command-line-argument", "-fsyntax-only"])
+            .arg(&source)
+            .output()
+            .map_err(|e| {
+                prerequisite(format!("cannot start Clang '{}': {e}", self.cc.display()))
+            })?;
+        if !result.status.success() {
+            return Err(error(
+                "tool.c-compiler",
+                "C23-capable Clang with 128-bit _BitInt support is required",
+            ));
+        }
         fs::write(&source, "#include <stdio.h>\n#include <stdlib.h>\n#include <fenv.h>\nint main(void) { return fesetenv(FE_DFL_ENV); }\n")
             .map_err(|e| error("tool.temporary", e))?;
         for link in [false, true] {

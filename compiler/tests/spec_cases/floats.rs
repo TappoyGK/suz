@@ -122,7 +122,7 @@ fn float_arithmetic_preserves_rounding_and_ieee_results_when_optimized() {
     let executable = directory.0.join("float-arithmetic");
     fs::write(&c_file, suz::compile(source.as_bytes()).unwrap()).unwrap();
     let built = runtime_link::compiler()
-        .args(["-std=c11", "-O2", "-Wall", "-Wextra", "-Werror"])
+        .args(["-std=c23", "-O2", "-Wall", "-Wextra", "-Werror"])
         .arg(&c_file)
         .arg("-o")
         .arg(&executable)
@@ -228,7 +228,7 @@ int main(void) {
     for optimization in ["-O0", "-O2"] {
         let executable = directory.0.join(format!("entry{optimization}"));
         let built = runtime_link::compiler()
-            .args(["-std=c11", "-Wall", "-Wextra", "-Werror", optimization])
+            .args(["-std=c23", "-Wall", "-Wextra", "-Werror", optimization])
             .arg(&driver)
             .arg("-o")
             .arg(&executable)

@@ -46,7 +46,7 @@ done
 [[ "$environment_file" == /* ]] || environment_file="./$environment_file"
 [[ "$output_file" == /* ]] || output_file="./$output_file"
 runtime="$repo_dir/runtime"
-exec "${CC:-clang}" -std=c11 -Wall -Wextra -Werror "$optimization" \
+exec "${CC:-clang}" -std=c23 -Wall -Wextra -Werror "$optimization" \
     -ffp-model=strict -ffp-contract=off \
     -fdenormal-fp-math=ieee \
     -I "$runtime" -I "$runtime/third_party/ryu" \

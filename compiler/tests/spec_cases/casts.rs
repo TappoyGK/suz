@@ -275,7 +275,7 @@ fn narrowing_float_casts_preserve_rounding_boundaries_and_special_values() {
     for optimization in ["-O0", "-O2"] {
         let executable = directory.0.join(format!("narrow-floats{optimization}"));
         let built = runtime_link::compiler()
-            .args(["-std=c11", "-Wall", "-Wextra", "-Werror", optimization])
+            .args(["-std=c23", "-Wall", "-Wextra", "-Werror", optimization])
             .arg(&c_file)
             .arg("-o")
             .arg(&executable)
@@ -447,7 +447,7 @@ fn float_to_integer_casts_cover_all_integer_boundaries() {
         let executable = directory.0.join(format!("float-to-int{optimization}"));
         let built = runtime_link::compiler()
             .args([
-                "-std=c11",
+                "-std=c23",
                 "-Wall",
                 "-Wextra",
                 "-Werror",

@@ -16,7 +16,9 @@ void suz_runtime_init(void);
    Both operands must already fit those bounds; result must be writable.
    Return true and write *result on success. Return false and leave *result
    unchanged on overflow or division by zero. Division and remainder both fail
-   for signed min / -1. Arithmetic is performed only after these checks. */
+   for signed min / -1. Division and remainder are evaluated only after checking
+   those failure conditions; addition, subtraction and multiplication use C23
+   checked arithmetic before checking the target bounds. */
 bool suz_try_add_i64(int64_t a, int64_t b, int64_t min, int64_t max, int64_t *result);
 bool suz_try_sub_i64(int64_t a, int64_t b, int64_t min, int64_t max, int64_t *result);
 bool suz_try_mul_i64(int64_t a, int64_t b, int64_t min, int64_t max, int64_t *result);

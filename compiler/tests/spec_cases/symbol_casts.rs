@@ -1,8 +1,8 @@
 use crate::integer_bounds::INTEGER_BOUNDS;
-use crate::test_util::compile_and_run_c11;
+use crate::test_util::compile_and_run_c23;
 
 fn check_program(source: &str) {
-    let result = compile_and_run_c11(source, "text-casts.suz");
+    let result = compile_and_run_c23(source, "text-casts.suz");
     assert_eq!(
         result.status.code(),
         Some(0),

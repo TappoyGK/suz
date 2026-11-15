@@ -1,4 +1,4 @@
-use crate::test_util::compile_and_run_c11;
+use crate::test_util::compile_and_run_c23;
 
 #[test]
 fn templates_preserve_constant_dependencies_and_nested_value_scopes() {
@@ -18,7 +18,7 @@ fn main() -> u8 {
     if captured != `2` { return 2 }
     return 0
 }"#;
-    let result = compile_and_run_c11(source, "text.suz");
+    let result = compile_and_run_c23(source, "text.suz");
     assert_eq!(
         result.status.code(),
         Some(0),
@@ -81,7 +81,7 @@ fn float_templates(values: impl IntoIterator<Item = (String, &'static str)>) {
     }
     body.push_str("return 0\n}\n");
     source.push_str(&body);
-    let result = compile_and_run_c11(&source, "float-text.suz");
+    let result = compile_and_run_c23(&source, "float-text.suz");
     assert_eq!(
         result.status.code(),
         Some(0),

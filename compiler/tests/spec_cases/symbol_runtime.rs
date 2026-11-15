@@ -26,7 +26,7 @@ fn executable(optimized: bool) -> &'static Path {
         let runtime = root.join("../runtime");
         let result = Command::new(std::env::var_os("CC").unwrap_or_else(|| "clang".into()))
             .args([
-                "-std=c11",
+                "-std=c23",
                 "-Wall",
                 "-Wextra",
                 "-Werror",
@@ -209,7 +209,7 @@ pub(super) fn build_with_environment_optimized(
     let executable = directory.0.join("program");
     let mut compiler = Command::new(std::env::var_os("CC").unwrap_or_else(|| "clang".into()));
     compiler
-        .args(["-std=c11", "-Wall", "-Wextra", "-Werror"])
+        .args(["-std=c23", "-Wall", "-Wextra", "-Werror"])
         .arg(if optimized { "-O2" } else { "-O0" })
         .args(sanitizer_flags(optimized))
         .arg("-I")
