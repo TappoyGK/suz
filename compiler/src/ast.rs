@@ -127,6 +127,8 @@ pub(crate) struct EnumDeclaration {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Type {
+    GenericInt,
+    GenericFloat,
     Exact, // Internal mathematical integer; never a source-level storage type.
     Struct(usize),
     Enum(EnumType),
@@ -140,6 +142,9 @@ pub(crate) enum Type {
 }
 
 impl Type {
+    pub fn generic(self) -> bool {
+        matches!(self, Self::GenericInt | Self::GenericFloat)
+    }
     pub fn is_text(self) -> bool {
         matches!(self, Self::Symbol | Self::Text)
     }
@@ -160,7 +165,11 @@ impl Type {
         }
     }
     pub fn from_name(name: &str) -> Option<Self> {
-        if name == "char" {
+        if name == "int" {
+            Some(Self::GenericInt)
+        } else if name == "float" {
+            Some(Self::GenericFloat)
+        } else if name == "char" {
             Some(Self::Char)
         } else if name == "symbol" {
             Some(Self::Symbol)
@@ -181,6 +190,8 @@ impl Type {
     pub fn name(self) -> &'static str {
         match self {
             Self::Exact => "exact integer",
+            Self::GenericInt => "int",
+            Self::GenericFloat => "float",
             Self::Integer(ty) => ty.name(),
             Self::Float(ty) => ty.name(),
             Self::Char => "char",
@@ -195,6 +206,9 @@ impl Type {
     pub fn c_name(self) -> String {
         match self {
             Self::Exact => "suz_exact".into(),
+            Self::GenericInt | Self::GenericFloat => {
+                unreachable!("generic types are resolved before code generation")
+            }
             Self::Struct(id) => format!("suz_struct_{id}"),
             Self::Integer(ty) => ty.c_name().into(),
             Self::Float(ty) => ty.c_name().into(),
@@ -224,6 +238,7 @@ pub(crate) struct StructDeclaration {
     pub end: usize,
 }
 
+#[derive(Clone)]
 pub(crate) struct FieldInitializer {
     pub name: String,
     pub value: Expression,
@@ -261,6 +276,7 @@ pub(crate) struct Function {
     pub end: Location,
 }
 
+#[derive(Clone)]
 pub(crate) struct MatchArm<T = Vec<Statement>> {
     pub pattern: Option<Expression>,
     pub location: Location,
@@ -273,6 +289,7 @@ pub(crate) enum LogLevel {
     Warn,
 }
 
+#[derive(Clone)]
 pub(crate) enum Statement {
     Log {
         level: LogLevel,
@@ -322,6 +339,7 @@ pub(crate) enum Statement {
     Return(Expression),
 }
 
+#[derive(Clone)]
 pub(crate) struct Expression {
     pub kind: ExpressionKind,
     pub location: Location,
@@ -469,6 +487,7 @@ impl BinaryOperator {
     }
 }
 
+#[derive(Clone)]
 pub(crate) enum FailureHandler {
     Value(Box<Expression>),
     Return {
@@ -477,6 +496,7 @@ pub(crate) enum FailureHandler {
     },
 }
 
+#[derive(Clone)]
 pub(crate) enum ExpressionKind {
     Slice {
         target: Box<Expression>,

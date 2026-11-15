@@ -13,36 +13,17 @@ pub(super) fn check(expr: &Expression, scope: &Scope) -> Result<CheckedExpressio
     match &expr.kind {
         ExpressionKind::Struct { id, fields } => {
             let declaration = &scope.structs[*id];
-            let mut seen = BTreeSet::new();
-            let mut values = Vec::new();
-            for field in fields {
-                let index = declaration
-                    .fields
-                    .iter()
-                    .position(|f| f.name == field.name)
-                    .ok_or_else(|| {
-                        field.location.error(
-                            ErrorKind::InvalidSource,
-                            "unknown field in struct literal [struct.literal]",
-                        )
-                    })?;
-                if !seen.insert(index) {
-                    return Err(field.location.error(
-                        ErrorKind::InvalidSource,
-                        "duplicate field initializer [struct.literal]",
-                    ));
-                }
-                values.push((
-                    index,
-                    super::coerced(&field.value, Some(declaration.fields[index].ty), scope)?,
-                ));
-            }
-            if seen.len() != declaration.fields.len() {
-                return Err(expr.location.error(
-                    ErrorKind::InvalidSource,
-                    "struct literal must initialize every field [struct.literal]",
-                ));
-            }
+            let indices = initializer_indices(declaration, fields, expr.location)?;
+            let values = fields
+                .iter()
+                .zip(indices)
+                .map(|(field, index)| {
+                    Ok((
+                        index,
+                        super::coerced(&field.value, Some(declaration.fields[index].ty), scope)?,
+                    ))
+                })
+                .collect::<Result<_, Diagnostic>>()?;
             Ok(CheckedExpression {
                 ty: Type::Struct(*id),
                 value: Value::Struct { fields: values },
@@ -87,4 +68,40 @@ pub(crate) fn field(
                 "unknown struct field [struct.access]",
             )
         })
+}
+
+// Field membership and completeness do not depend on numeric substitutions.
+pub(crate) fn initializer_indices(
+    declaration: &crate::ast::StructDeclaration,
+    fields: &[crate::ast::FieldInitializer],
+    location: crate::ast::Location,
+) -> Result<Vec<usize>, Diagnostic> {
+    let mut seen = BTreeSet::new();
+    let mut indices = Vec::new();
+    for field in fields {
+        let index = declaration
+            .fields
+            .iter()
+            .position(|f| f.name == field.name)
+            .ok_or_else(|| {
+                field.location.error(
+                    ErrorKind::InvalidSource,
+                    "unknown field in struct literal [struct.literal]",
+                )
+            })?;
+        if !seen.insert(index) {
+            return Err(field.location.error(
+                ErrorKind::InvalidSource,
+                "duplicate field initializer [struct.literal]",
+            ));
+        }
+        indices.push(index);
+    }
+    if seen.len() != declaration.fields.len() {
+        return Err(location.error(
+            ErrorKind::InvalidSource,
+            "struct literal must initialize every field [struct.literal]",
+        ));
+    }
+    Ok(indices)
 }

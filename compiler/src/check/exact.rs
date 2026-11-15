@@ -357,13 +357,10 @@ pub(super) fn cast(
         return Ok(CheckedExpression { ty: target, value });
     }
     if !safe && !constant(&operand).is_some_and(|n| fits(Range::point(n))) {
-        return Err(location.error(
-            ErrorKind::InvalidSource,
-            if super::constants::is_constant(&operand) {
-                "constant cast is out of range and requires or [const.cast-check]"
-            } else {
-                "this cast requires or [expr.cast-handler]"
-            },
+        return Err(super::generic::missing_handler(
+            location,
+            bindings,
+            super::constants::is_constant(&operand),
         ));
     }
     Ok(CheckedExpression {

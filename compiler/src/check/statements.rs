@@ -14,6 +14,8 @@ pub(super) struct Binding {
     pub(super) constant: Option<CheckedExpression>,
     pub(super) id: usize,
     pub(super) ty: Type,
+    pub(super) generic: Option<Type>,
+    pub(super) generic_source: Option<std::rc::Rc<super::generic::BindingSource>>,
     pub(super) mutable: bool,
     pub(super) parameter: bool,
     pub(super) loop_variable: bool,
@@ -111,6 +113,15 @@ pub(super) fn check_statements(
                 reverse,
                 body,
             } => {
+                let generic_source = end
+                    .as_ref()
+                    .filter(|_| bindings.generic_types.iter().any(Option::is_some))
+                    .map(|end| {
+                        std::rc::Rc::new(super::generic::BindingSource::Range {
+                            start: start.clone(),
+                            end: end.clone(),
+                        })
+                    });
                 let (start, end, variable_type) = if let Some(end) = end {
                     let (start, end) = super::ranges::bounds(start, end, bindings)?;
                     let ty = start.ty;
@@ -145,6 +156,8 @@ pub(super) fn check_statements(
                         id,
                         ty: variable_type,
                         mutable: false,
+                        generic: None,
+                        generic_source,
                         loop_variable: true,
                         assigned: Default::default(),
                         location: *location,
@@ -262,8 +275,18 @@ pub(super) fn check_statements(
                     ));
                 }
                 // Resolve before inserting: a binding is not visible in its own initializer.
-                let mut initializer =
-                    super::expression::coerced(initializer, *annotation, bindings)?;
+                let generic_source =
+                    bindings.generic_types.iter().any(Option::is_some).then(|| {
+                        std::rc::Rc::new(super::generic::BindingSource::Initializer {
+                            annotation: *annotation,
+                            value: initializer.clone(),
+                        })
+                    });
+                let mut initializer = super::expression::coerced(
+                    initializer,
+                    annotation.map(|t| bindings.resolve_type(t)),
+                    bindings,
+                )?;
                 if initializer.ty == Type::Void {
                     return Err(location.error(
                         ErrorKind::InvalidSource,
@@ -282,6 +305,8 @@ pub(super) fn check_statements(
                         parameter: false,
                         id,
                         ty,
+                        generic: None,
+                        generic_source,
                         mutable: *mutable,
                         loop_variable: false,
                         assigned: Default::default(),

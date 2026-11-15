@@ -7,7 +7,10 @@ use crate::{
     ast::{Expression, ExpressionKind, Type},
 };
 
-pub(super) fn check(expr: &Expression, bindings: &Scope) -> Result<CheckedExpression, Diagnostic> {
+pub(in crate::check) fn check(
+    expr: &Expression,
+    bindings: &Scope,
+) -> Result<CheckedExpression, Diagnostic> {
     Ok(match &expr.kind {
         ExpressionKind::Cast {
             wrap,
@@ -15,6 +18,8 @@ pub(super) fn check(expr: &Expression, bindings: &Scope) -> Result<CheckedExpres
             target,
             fallback,
         } => {
+            super::super::generic::validate_cast(expr, bindings)?;
+            let target = &bindings.resolve_type(*target);
             let operand = super::super::exact::use_value(operand, bindings)?;
             if operand.ty == Type::Exact {
                 return super::super::exact::cast(
@@ -199,14 +204,18 @@ pub(super) fn check(expr: &Expression, bindings: &Scope) -> Result<CheckedExpres
                                     crate::numeric::Int::from_i128(value),
                                 )
                                 .fits_type(*target) => {}
-                            Some(_) => return Err(expr.location.error(
-                                ErrorKind::InvalidSource,
-                                "constant cast is out of range and requires or [const.cast-check]",
-                            )),
+                            Some(_) => {
+                                return Err(super::super::generic::missing_handler(
+                                    expr.location,
+                                    bindings,
+                                    true,
+                                ));
+                            }
                             None => {
-                                return Err(expr.location.error(
-                                    ErrorKind::InvalidSource,
-                                    "this cast requires or [expr.cast-handler]",
+                                return Err(super::super::generic::missing_handler(
+                                    expr.location,
+                                    bindings,
+                                    false,
                                 ));
                             }
                         }
@@ -232,15 +241,17 @@ pub(super) fn check(expr: &Expression, bindings: &Scope) -> Result<CheckedExpres
                     match constant_float(&operand)? {
                         Some(value) if float_to_integer(value, to).is_some() => {}
                         Some(_) => {
-                            return Err(expr.location.error(
-                                ErrorKind::InvalidSource,
-                                "constant cast is out of range and requires or [const.cast-check]",
+                            return Err(super::super::generic::missing_handler(
+                                expr.location,
+                                bindings,
+                                true,
                             ));
                         }
                         None => {
-                            return Err(expr.location.error(
-                                ErrorKind::InvalidSource,
-                                "this cast requires or [expr.cast-handler]",
+                            return Err(super::super::generic::missing_handler(
+                                expr.location,
+                                bindings,
+                                false,
                             ));
                         }
                     }
@@ -267,15 +278,17 @@ pub(super) fn check(expr: &Expression, bindings: &Scope) -> Result<CheckedExpres
                     match constant_float(&operand)? {
                         Some(value) if !value.is_finite() || (value as f32).is_finite() => {}
                         Some(_) => {
-                            return Err(expr.location.error(
-                                ErrorKind::InvalidSource,
-                                "constant cast is out of range and requires or [const.cast-check]",
+                            return Err(super::super::generic::missing_handler(
+                                expr.location,
+                                bindings,
+                                true,
                             ));
                         }
                         None => {
-                            return Err(expr.location.error(
-                                ErrorKind::InvalidSource,
-                                "this cast requires or [expr.cast-handler]",
+                            return Err(super::super::generic::missing_handler(
+                                expr.location,
+                                bindings,
+                                false,
                             ));
                         }
                     }

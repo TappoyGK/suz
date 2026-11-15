@@ -12,6 +12,7 @@ use crate::{
 use std::{collections::BTreeMap, rc::Rc};
 
 pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
+    super::generic::validate(program)?;
     let mut signatures = BTreeMap::new();
     for (id, function) in program.functions.iter().enumerate() {
         if signatures.contains_key(&function.name)
@@ -38,73 +39,39 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     let (mut globals, mut warnings) =
         declarations::resolve(&program.constants, &program.enums, &program.structs)?;
     globals.functions = signatures;
+    globals.instances.borrow_mut().next_id = program.functions.len();
     let mut functions = Vec::new();
-    for function in &program.functions {
-        control::validate_return_positions(&function.statements)?;
-        let mut scope = globals.clone();
-        scope.result = function.result;
-        let mut declared = Vec::new();
-        for (id, parameter) in function.parameters.iter().enumerate() {
-            if declared.contains(&parameter.name) {
-                return Err(parameter.location.error(
-                    ErrorKind::InvalidSource,
-                    "duplicate parameter name [fn.parameter-scope]",
-                ));
-            }
-            if scope.contains_key(&parameter.name)
-                || scope.functions.contains_key(&parameter.name)
-                || scope.is_type_name(&parameter.name)
-            {
-                return Err(parameter.location.error(
-                    ErrorKind::InvalidSource,
-                    "parameter shadows a top-level name [decl.shadowing]",
-                ));
-            }
-            declared.push(parameter.name.clone());
-            scope.insert(
-                parameter.name.clone(),
-                Binding {
-                    id,
-                    ty: parameter.ty,
-                    mutable: false,
-                    parameter: true,
-                    loop_variable: false,
-                    assigned: Default::default(),
-                    location: parameter.location,
-                    constant: None,
-                },
-            );
+    for (id, function) in program.functions.iter().enumerate() {
+        if super::generic::active(&globals.functions[&function.name])
+            .iter()
+            .any(|v| *v)
+        {
+            continue;
         }
-        let mut has_return = false;
-        let mut next_id = function.parameters.len();
-        let statements = statements::block_with_bindings(
-            &function.statements,
-            &mut scope,
-            &mut next_id,
-            &mut has_return,
-            0,
-            declared,
-        )?;
-        if function.result != Type::Void {
-            if !has_return {
-                return Err(function.end.error(ErrorKind::InvalidSource, "a value-returning function requires a return expression [fn.value-return-required]"));
-            }
-            if !control::stops(&statements) {
-                return Err(function.end.error(
-                    ErrorKind::InvalidSource,
-                    "a value-returning function may reach its end [fn.fallthrough]",
-                ));
-            }
-        }
-        warnings.extend(diagnostics::unhandled_arithmetic(&statements));
-        functions.push(CheckedFunction {
-            id: scope.functions[&function.name].id,
-            parameters: function.parameters.iter().map(|p| p.ty).collect(),
-            result: function.result,
-            statements,
-        });
+        let (checked, found) = check_function(function, &globals, id, [None, None])?;
+        functions.push(checked);
+        warnings.extend(found);
+    }
+    loop {
+        let Some(instance) = globals.instances.borrow_mut().queue.pop_front() else {
+            break;
+        };
+        let function = &program.functions[instance.function];
+        let (checked, found) = check_function(function, &globals, instance.id, instance.types)
+            .map_err(|e| {
+                instance.call.error(
+                    e.kind,
+                    format!(
+                        "generic call to '{}' fails at {}:{}: {} [num.fn-body]",
+                        function.name, e.line, e.column, e.message
+                    ),
+                )
+            })?;
+        functions.push(checked);
+        warnings.extend(found);
     }
     warnings.sort_by_key(|l| (l.line, l.column));
+    warnings.dedup_by_key(|l| (l.line, l.column));
     Ok(CheckedProgram {
         division_warnings: globals
             .division_warnings
@@ -128,10 +95,95 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     })
 }
 
+fn check_function(
+    function: &crate::ast::Function,
+    globals: &Scope,
+    id: usize,
+    types: [Option<Type>; 2],
+) -> Result<(CheckedFunction, Vec<crate::ast::Location>), Diagnostic> {
+    control::validate_return_positions(&function.statements)?;
+    let mut warnings = Vec::new();
+    let mut scope = globals.clone();
+    scope.generic_types = types;
+    scope.generic_result = function.result.generic().then_some(function.result);
+    scope.result = scope.resolve_type(function.result);
+    let mut declared = Vec::new();
+    for (id, parameter) in function.parameters.iter().enumerate() {
+        if declared.contains(&parameter.name) {
+            return Err(parameter.location.error(
+                ErrorKind::InvalidSource,
+                "duplicate parameter name [fn.parameter-scope]",
+            ));
+        }
+        if scope.contains_key(&parameter.name)
+            || scope.functions.contains_key(&parameter.name)
+            || scope.is_type_name(&parameter.name)
+        {
+            return Err(parameter.location.error(
+                ErrorKind::InvalidSource,
+                "parameter shadows a top-level name [decl.shadowing]",
+            ));
+        }
+        declared.push(parameter.name.clone());
+        let parameter_type = scope.resolve_type(parameter.ty);
+        scope.insert(
+            parameter.name.clone(),
+            Binding {
+                id,
+                ty: parameter_type,
+                generic: parameter.ty.generic().then_some(parameter.ty),
+                generic_source: None,
+                mutable: false,
+                parameter: true,
+                loop_variable: false,
+                assigned: Default::default(),
+                location: parameter.location,
+                constant: None,
+            },
+        );
+    }
+    let mut has_return = false;
+    let mut next_id = function.parameters.len();
+    let statements = statements::block_with_bindings(
+        &function.statements,
+        &mut scope,
+        &mut next_id,
+        &mut has_return,
+        0,
+        declared,
+    )?;
+    if function.result != Type::Void {
+        if !has_return {
+            return Err(function.end.error(ErrorKind::InvalidSource, "a value-returning function requires a return expression [fn.value-return-required]"));
+        }
+        if !control::stops(&statements) {
+            return Err(function.end.error(
+                ErrorKind::InvalidSource,
+                "a value-returning function may reach its end [fn.fallthrough]",
+            ));
+        }
+    }
+    warnings.extend(diagnostics::unhandled_arithmetic(&statements));
+    Ok((
+        CheckedFunction {
+            id,
+            parameters: function
+                .parameters
+                .iter()
+                .map(|p| scope.resolve_type(p.ty))
+                .collect(),
+            result: scope.result,
+            statements,
+        },
+        warnings,
+    ))
+}
+
 pub(super) fn call(
     expr: &Expression,
     name: &str,
     arguments: &[Expression],
+    expected: Option<Type>,
     scope: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
     let signature = scope.functions.get(name).ok_or_else(|| {
@@ -144,17 +196,25 @@ pub(super) fn call(
             "argument count does not match the function declaration [fn.call]",
         ));
     }
+    let generic = super::generic::active(signature).iter().any(|v| *v);
+    let types = super::generic::resolve(signature, arguments, expected, scope, expr.location)?;
+    let concrete = |ty| super::generic::index(ty).map_or(ty, |i| types[i].unwrap());
+    let id = if generic {
+        scope
+            .instances
+            .borrow_mut()
+            .request(signature.id, types, expr.location)
+    } else {
+        signature.id
+    };
     let arguments = arguments
         .iter()
         .zip(&signature.parameters)
-        .map(|(argument, ty)| expression(argument, Some(*ty), scope))
+        .map(|(argument, ty)| expression(argument, Some(concrete(*ty)), scope))
         .collect::<Result<_, _>>()?;
     Ok(CheckedExpression {
-        ty: signature.result,
-        value: Value::Call {
-            id: signature.id,
-            arguments,
-        },
+        ty: concrete(signature.result),
+        value: Value::Call { id, arguments },
     })
 }
 

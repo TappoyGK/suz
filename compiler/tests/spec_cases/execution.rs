@@ -58,8 +58,8 @@ fn generated_bindings_handle_c_names_and_large_integer_literals() {
     fix signed_maximum: i64 = 9223372036854775807
     fix wide: u32 = 4294967295
     fix negative: i32 = -2147483648
-    fix int: u8 = 7
-    fix suz_main = (int)
+    fix unsigned: u8 = 7
+    fix suz_main = (unsigned)
     fix suz_local_0 = suz_main
     return suz_local_0
 }

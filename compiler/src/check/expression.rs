@@ -1,7 +1,7 @@
 use crate::check::scope::Scope;
 mod blocks;
 mod branches;
-mod casts;
+pub(in crate::check) mod casts;
 mod operators;
 mod slices;
 pub(crate) mod structs;
@@ -50,14 +50,14 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
             .find(|e| &e.name == enum_name)
             .map(|e| Type::Enum(e.ty)),
         ExpressionKind::Void => Some(Type::Void),
-        ExpressionKind::Call { name, .. } => bindings.functions.get(name).map(|f| f.result),
+        ExpressionKind::Call { name, arguments } => super::generic::hint(name, arguments, bindings),
         ExpressionKind::Block { statements, value } => {
             blocks::operand_type(statements, value, bindings)
         }
         ExpressionKind::Match { arms, .. } => {
             joined_type(arms.iter().map(|arm| operand_type(&arm.body, bindings)))
         }
-        ExpressionKind::Cast { target, .. } => Some(*target),
+        ExpressionKind::Cast { target, .. } => Some(bindings.resolve_type(*target)),
         ExpressionKind::If {
             branches,
             otherwise,
@@ -126,6 +126,10 @@ pub(super) fn has_float_literal(expr: &Expression, bindings: &Scope) -> bool {
 
 fn has_float_literal_inner(expr: &Expression, bindings: &Scope) -> bool {
     match &expr.kind {
+        ExpressionKind::Call { name, .. } => bindings
+            .functions
+            .get(name)
+            .is_some_and(|f| f.result == Type::GenericFloat),
         ExpressionKind::Match { arms, .. } => arms
             .iter()
             .any(|arm| has_float_literal(&arm.body, bindings)),
@@ -292,7 +296,7 @@ fn expression_inner(
                 value: Value::Void,
             },
             ExpressionKind::Call { name, arguments } => {
-                super::functions::call(expr, name, arguments, bindings)?
+                super::functions::call(expr, name, arguments, expected, bindings)?
             }
             ExpressionKind::Block { statements, value } => {
                 blocks::check(statements, value, expected, bindings)?
@@ -331,7 +335,9 @@ fn expression_inner(
                 let ty = match expected {
                     Some(Type::Float(_)) => unreachable!(),
                     Some(
-                        Type::Exact
+                        Type::GenericInt
+                        | Type::GenericFloat
+                        | Type::Exact
                         | Type::Char
                         | Type::Bool
                         | Type::Void
