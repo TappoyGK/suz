@@ -61,7 +61,8 @@ impl Parser<'_, '_> {
                     location,
                 })
             }
-            Kind::Keyword("for") => {
+            Kind::Keyword("for" | "rev") => {
+                let reverse = self.token().kind == Kind::Keyword("rev");
                 self.cursor += 1;
                 let location = self.location();
                 let Kind::Ident(name) = self.token().kind else {
@@ -101,6 +102,7 @@ impl Parser<'_, '_> {
                     start,
                     end,
                     inclusive,
+                    reverse,
                     body,
                 })
             }
@@ -283,7 +285,7 @@ impl Parser<'_, '_> {
                 Kind::Newline => self.newlines(),
                 Kind::Symbol("}") => {}
                 Kind::Keyword(
-                    "fix" | "var" | "return" | "if" | "while" | "loop" | "for" | "break"
+                    "fix" | "var" | "return" | "if" | "while" | "loop" | "for" | "rev" | "break"
                     | "continue" | "log" | "match" | "matchexpr" | "ifexpr" | "true" | "false"
                     | "not" | "nan" | "inf" | "expr",
                 )

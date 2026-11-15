@@ -103,6 +103,7 @@ pub(super) fn check_statements(
                 start,
                 end,
                 inclusive,
+                reverse,
                 body,
             } => {
                 let (start, end) = super::ranges::bounds(start, end, bindings)?;
@@ -143,6 +144,7 @@ pub(super) fn check_statements(
                     start,
                     end,
                     inclusive: *inclusive,
+                    reverse: *reverse,
                     body,
                 });
             }

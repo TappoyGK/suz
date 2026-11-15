@@ -340,6 +340,34 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | `[expr.jump-prohibited]` | 4 | 13 |
 
+### expr-070 値を作るブロック内のrevからcontinueする
+
+主根拠：`[expr.jump-prohibited]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix value = expr {
+        rev i in 0..<1 { continue }
+        0
+    }
+    return value
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[expr.jump-prohibited]` | 3 | 26 |
+
 ### expr-012 ifexprで選ばれない分岐の演算は実行しない
 
 主根拠：`[expr.if-value]`。

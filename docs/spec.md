@@ -15,7 +15,7 @@ Suzは次のものを含む。
 - 型：`i8`、`i16`、`i32`、`i64`、`u8`、`u16`、`u32`、`u64`、`f32`、`f64`、`bool`、`text`、`void`
 - 宣言：定数、関数、変数、列挙型、構造体
 - 式：テンプレート、算術、ラップする算術、比較、論理、ビット演算、型の変換、`ifexpr`、`matchexpr`、`expr`
-- 制御：`if`、`while`、`loop`、`for`、`break`、`continue`、`return`、`match`
+- 制御：`if`、`while`、`loop`、`for`、`rev`、`break`、`continue`、`return`、`match`
 - 出力：`log info` と出力用のテンプレート
 
 ### 1.2 安全性
@@ -43,7 +43,7 @@ Suzは次のものを含む。
 
 **[src.ident]** 識別子は、ASCII の英字か `_` で始まり、ASCII の英字、数字、`_` が続く。宣言する名前には4.2節の名前の形を適用する。大文字と小文字を区別する。キーワードと組み込み型名は識別子に使えない。`_` 単独は `match` と `matchexpr` のワイルドカードとして使う。
 
-**[src.whitespace]** テンプレートの本文以外では、スペースとタブはトークンの区切りとして扱う。`for` の範囲演算子との境界には、[for.range-spacing] の隣接規則を適用する。
+**[src.whitespace]** テンプレートの本文以外では、スペースとタブはトークンの区切りとして扱う。`for` と `rev` の範囲演算子との境界には、[for.range-spacing] の隣接規則を適用する。
 
 **[src.longest-match]** トークンは、現在の位置から一致する最も長いものを読む。たとえば、`+%=` は 1 つの複合代入演算子として読む。
 
@@ -51,7 +51,7 @@ Suzは次のものを含む。
 
 ```text
 const fix var fn struct enum
-if ifexpr elif else while loop for in break continue return match matchexpr
+if ifexpr elif else while loop for rev in break continue return match matchexpr
 as or not log expr
 true false nan inf
 ```
@@ -70,7 +70,7 @@ i8 i16 i32 i64 u8 u16 u32 u64 f32 f64 bool text void
 
 **[src.final-newline]** ファイルの最後の行の改行は省略できる。
 
-**[src.line-continuation]** 二項演算子、`=`、複合代入演算子、`or` の直後の改行では、式は次の行に続く。また、最も内側の開き括弧が `(` のとき、改行は文を区切らない。丸括弧の中にある `{ }` のブロック内では、通常どおり改行で文を区切る。`for` の範囲演算子の直前・直後は、[for.range-spacing] の隣接規則に従う。
+**[src.line-continuation]** 二項演算子、`=`、複合代入演算子、`or` の直後の改行では、式は次の行に続く。また、最も内側の開き括弧が `(` のとき、改行は文を区切らない。丸括弧の中にある `{ }` のブロック内では、通常どおり改行で文を区切る。`for` と `rev` の範囲演算子の直前・直後は、[for.range-spacing] の隣接規則に従う。
 
 **[src.or-line]** 次の行の先頭の `or` は、それだけでは前の行を継続させない。`or` の前の改行には [src.line-continuation] を適用する。
 
@@ -158,7 +158,7 @@ fn main() -> u8 {
 
 **[name.constant]** `const` の名前はASCIIの大文字で始まり、大文字・数字・`_` だけからなる。`_` は末尾に置かず、連続させない。例は `MAX_COUNT`、`N`、`LIMIT_2` である。
 
-**[name.value]** 関数、`fix`・`var`、仮引数、構造体のフィールド、`for` のループ変数の名前はASCIIの小文字で始まり、小文字・数字・`_` だけからなる。`_` は末尾に置かず、連続させない。例は `read_count`、`count`、`x2` である。
+**[name.value]** 関数、`fix`・`var`、仮引数、構造体のフィールド、`for` と `rev` のループ変数の名前はASCIIの小文字で始まり、小文字・数字・`_` だけからなる。`_` は末尾に置かず、連続させない。例は `read_count`、`count`、`x2` である。
 
 **[name.type]** 構造体・列挙型の名前はASCIIの大文字で始まり、英字と数字だけからなる。小文字を1文字以上含み、大文字を連続させない。例は `Vec2`、`IoError` である。`IOError`、`T`、`Load_Error` は認めない。
 
@@ -193,7 +193,7 @@ fix bits: u8 = ~0     // 255
 
 **[type.propagation-boundary]** 比較の結果型 `bool` は、比較対象には伝えない。シフトの結果に要求される型は左辺だけへ伝え、右辺は独立に型を決める。`as` と `as%` の変換先の型は、変換前の式へ伝えない。
 
-**[type.context]** 構造体リテラルの各初期値には、そのフィールドの型を要求する。`for` の両端は、一方の型が決まっていれば、もう一方にもその型を要求する。`match` と `matchexpr` のパターンには、対象の型を要求する。
+**[type.context]** 構造体リテラルの各初期値には、そのフィールドの型を要求する。`for` と `rev` の両端は、一方の型が決まっていれば、もう一方にもその型を要求する。`match` と `matchexpr` のパターンには、対象の型を要求する。
 
 **[type.branch-inference]** `ifexpr` と `matchexpr` は、外側から要求される型がない場合も、分岐の型を一致させる。分岐の型が決まっていれば、その型をほかの分岐へ要求し、未確定の数値リテラルの型を決める。たとえば、`end` が `u8` なら、`ifexpr ready { end } else { 0 }` の `0` と結果の型は `u8` である。
 
@@ -434,7 +434,7 @@ fn choose(ready: bool) -> i32 {
 
 ### 7.4 構造体リテラルの位置
 
-**[expr.struct-in-cond]** `if`、`ifexpr`、`elif`、`while` の条件、`for` の範囲、`match`、`matchexpr` の対象の中には、構造体リテラルを括弧なしで書けない。括弧なしで書くとコンパイルエラーである。 構造体リテラルを囲む丸括弧には、式をグループ化する丸括弧と関数呼び出しの実引数を囲む丸括弧の両方を含む。たとえば、`if is_zero(Point { x: 0 }) { ... }` と書ける。
+**[expr.struct-in-cond]** `if`、`ifexpr`、`elif`、`while` の条件、`for` と `rev` の範囲、`match`、`matchexpr` の対象の中には、構造体リテラルを括弧なしで書けない。括弧なしで書くとコンパイルエラーである。 構造体リテラルを囲む丸括弧には、式をグループ化する丸括弧と関数呼び出しの実引数を囲む丸括弧の両方を含む。たとえば、`if is_zero(Point { x: 0 }) { ... }` と書ける。
 
 ```suz
 if p == (Vec2 { x: 0.0, y: 0.0 }) {
@@ -801,7 +801,7 @@ fn main() -> u8 {
 - `if` は、最後の `else` があり、`elif` を含むすべての分岐が先へ進まない場合、全体も先へ進まない。それ以外は先へ進みうる。
 - `match` は、すべての腕が先へ進まない場合、全体も先へ進まない。それ以外は先へ進みうる。
 - `loop` と、条件が `true` リテラルの `while` は、そのループを抜ける `break` が構文上なければ、ループの後続へ進まない。条件分岐内の `break` も数える。内側の別のループを抜ける `break` は、その別のループについて数える。
-- その他の `while` と `for` は、ループの後続へ進みうるものとして判定する。
+- その他の `while`、`for`、`rev` は、ループの後続へ進みうるものとして判定する。
 - 関数呼び出しは、呼び出しから戻りうるものとして判定する。
 - 型変換や整数演算に付けた `or return` は、失敗側で関数から戻り、成功側では後続へ進みうるものとして判定する。
 
@@ -875,9 +875,15 @@ fix sign = ifexpr x < 0 {
 
 **[loop.unconditional]** `loop { ... }` は、`while true { ... }` と同じ意味である。条件を書かずにブロックを繰り返し、値は返さない。`loop` はキーワードであり、識別子には使えない。
 
-### 8.5 for
+### 8.5 for と rev
 
-**[for.range]** `for 名前 in 開始値..<終了値 { ... }` は終了値を含まない範囲、`for 名前 in 開始値..=終了値 { ... }` は終了値を含む範囲を繰り返す。開始値から 1 ずつ増やした整数を、各反復のループ変数の値とする。この範囲の記法は `for` 専用であり、値として保存できない。`for` は値を返さない。
+**[for.range]** `for 名前 in 開始値..<終了値 { ... }` は終了値を含まない範囲、`for 名前 in 開始値..=終了値 { ... }` は終了値を含む範囲を繰り返す。開始値から 1 ずつ増やした整数を、各反復のループ変数の値とする。この範囲の記法は `for` と `rev` 専用であり、値として保存できない。`for` は値を返さない。
+
+**[rev.range]** `rev 名前 in 開始値..<終了値 { ... }` と `rev 名前 in 開始値..=終了値 { ... }` は、同じ範囲の `for` が繰り返す整数を逆順に繰り返す。空でない範囲では、`..<` は終了値より 1 小さい値から、`..=` は終了値から、開始値まで 1 ずつ減らす。`rev` は値を返さない。
+
+**[rev.bounds]** `rev` の両端の型・評価順・評価回数と、反復が 0 回になる条件は [for.bounds] に従う。空の範囲では減算を行わない。開始値が整数型の最小値でも、最後の反復後に減分によるオーバーフローは起きない。反復のためにメモリを確保しない。
+
+`for` と `rev` には、以下の範囲演算子、両端の参照、ループ変数の規則を共通に適用する。
 
 **[for.range-spacing]** `..<` と `..=` は、開始値の式の最後のトークンと、終了値の式の最初のトークンに隣接して書く。演算子の直前・直後に空白、タブ、改行、コメントを挟むとコンパイルエラーである。たとえば、`a..<b` は正しく、`a ..< b`、`a..< b`、`a ..<b` はコンパイルエラーである。この規則は範囲演算子との境界に適用し、両端の式の内部の空白は禁止しない。
 
@@ -907,9 +913,9 @@ for i in 0..=10 {
 
 ### 8.6 break と continue
 
-**[loop.break]** `break` は、最も内側の `while`、`loop`、`for` を抜ける。値は付けられない。
+**[loop.break]** `break` は、最も内側の `while`、`loop`、`for`、`rev` を抜ける。値は付けられない。
 
-**[loop.continue]** `continue` は、最も内側のループの次の反復へ進む。`while` では条件の再評価へ進み、`loop` ではブロックの先頭へ戻る。`for` では次の範囲内の値があればその反復へ進み、なければループを終了する。
+**[loop.continue]** `continue` は、最も内側のループの次の反復へ進む。`while` では条件の再評価へ進み、`loop` ではブロックの先頭へ戻る。`for` と `rev` では、それぞれの進行方向で次の範囲内の値があればその反復へ進み、なければループを終了する。
 
 **[loop.jump-context]** ループの外の `break` と `continue` はコンパイルエラーである。
 
@@ -1110,7 +1116,7 @@ IntegerType      ::= "i8" | "i16" | "i32" | "i64"
 ```ebnf
 Block            ::= "{" NL* ( Statement NL+ )* Statement? "}"
 Statement        ::= VariableDeclaration | Assignment | ReturnStatement
-                   | WhileStatement | LoopStatement | ForStatement
+                   | WhileStatement | LoopStatement | ForStatement | RevStatement
                    | IfStatement | MatchStatement
                    | "break" | "continue" | LogStatement | Block | Expression
 
@@ -1125,11 +1131,12 @@ ReturnStatement  ::= "return" Expression?
 WhileStatement   ::= "while" Condition Block
 LoopStatement    ::= "loop" Block
 ForStatement     ::= "for" IDENT "in" Condition RangeOperator Condition Block
+RevStatement     ::= "rev" IDENT "in" Condition RangeOperator Condition Block
 RangeOperator    ::= "..<" | "..="
 LogStatement     ::= "log" "info" TEMPLATE
 ```
 
-`RangeOperator` は [for.range-spacing] に従い、左右の式の境界に隣接する。`Assignment` の右辺には [assign.rhs-write] の代入先の制約を適用する。`ForStatement` の両端の `Condition` には [for.bound-reference] の参照の制約も適用する。`Condition` の扱いは A.6 に定める。
+`RangeOperator` は [for.range-spacing] に従い、左右の式の境界に隣接する。`Assignment` の右辺には [assign.rhs-write] の代入先の制約を適用する。`ForStatement` と `RevStatement` の両端の `Condition` には [for.bound-reference] の参照の制約も適用する。`Condition` の扱いは A.6 に定める。
 
 ### A.5 式
 
@@ -1184,7 +1191,7 @@ MatchArm         ::= Pattern "=>" ( Expression | Block )
 Pattern          ::= "_" | ConstExpression
 ```
 
-`Condition` は、[expr.struct-in-cond] の制約を付けて `Expression` を読む。`if`、`ifexpr`、`elif`、`while` の条件、`for` の両端、`match`、`matchexpr` の対象では、構造体リテラルを括弧で囲む。たとえば、`if ready { ... }` の `{` は条件の後のブロックを開き、`ready` に続く構造体リテラルとしては読まない。
+`Condition` は、[expr.struct-in-cond] の制約を付けて `Expression` を読む。`if`、`ifexpr`、`elif`、`while` の条件、`for` と `rev` の両端、`match`、`matchexpr` の対象では、構造体リテラルを括弧で囲む。たとえば、`if ready { ... }` の `{` は条件の後のブロックを開き、`ready` に続く構造体リテラルとしては読まない。
 
 `CastHandler` と `ArithmeticHandler` には [expr.cast-binding] と [expr.or-binding] の結合規則を適用する。`ArithmeticHandler` の左側は [expr.arithmetic-handler] の整数演算でなければならない。 両方のハンドラーの `or return` には、[expr.or-return-position] の位置の制約を適用する。`elif` と `else` には [expr.else-line] を適用する。`Pattern` には [match.pattern] の型と値の重複の規則を適用する。`Block` は、`ifexpr` と `matchexpr` の分岐、および `expr` の本体では [block.value] に従い、それ以外では [block.statement] に従う。`IfExpression`、`MatchExpression`、`BlockExpression` の内部全体には、[expr.jump-prohibited] の制約を適用する。
 

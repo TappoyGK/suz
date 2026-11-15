@@ -33,6 +33,7 @@ pub(crate) enum CheckedStatement {
         start: CheckedExpression,
         end: CheckedExpression,
         inclusive: bool,
+        reverse: bool,
         body: Vec<CheckedStatement>,
     },
     ArithmeticReturn {

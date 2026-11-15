@@ -16,6 +16,7 @@ const KEYWORDS: &[&str] = &[
     "while",
     "loop",
     "for",
+    "rev",
     "in",
     "break",
     "continue",
