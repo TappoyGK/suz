@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-void suz_env_log(const char *text, size_t len) {
+void suz_log_text(const char *text, size_t len) {
     if (fwrite(text, 1, len, stdout) != len) abort();
 }
 

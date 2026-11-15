@@ -13,7 +13,8 @@ void suz_env_free(void *ptr) {
     free(ptr);
 }
 
-void suz_env_log(const char *text, size_t len) {
+void suz_env_log(suz_log_level level, const char *text, size_t len) {
+    (void)level; /* Tell the compiler that this parameter is intentionally unused. */
 #ifdef SIGPIPE
     /* A closed output pipe is an output failure, not a process failure. */
     (void)signal(SIGPIPE, SIG_IGN);

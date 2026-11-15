@@ -269,14 +269,6 @@ pub(crate) enum LogLevel {
     Info,
     Warn,
 }
-impl LogLevel {
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Info => "info",
-            Self::Warn => "warn",
-        }
-    }
-}
 
 pub(crate) enum Statement {
     Log {

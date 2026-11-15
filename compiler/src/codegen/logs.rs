@@ -38,7 +38,10 @@ pub(super) fn emit(
     writeln!(
         c,
         "{indent}    suz_log_begin({}, {}, {});",
-        c_string(level.name()),
+        match level {
+            crate::ast::LogLevel::Info => "SUZ_LOG_INFO",
+            crate::ast::LogLevel::Warn => "SUZ_LOG_WARN",
+        },
         c_string(filename),
         location.line
     )

@@ -118,7 +118,8 @@ fn runtime_keeps_log_fragments_atomic_across_threads() {
 static _Thread_local int writer;
 static atomic_int owner;
 static atomic_int lines;
-void suz_env_log(const char *text, size_t len) {
+void suz_env_log(suz_log_level level, const char *text, size_t len) {
+    assert(level == (writer == 1 ? SUZ_LOG_INFO : SUZ_LOG_WARN));
     if (len == 4 && (memcmp(text, "info", 4) == 0 || memcmp(text, "warn", 4) == 0)) {
         assert(atomic_exchange(&owner, writer) == 0);
     }
@@ -133,9 +134,11 @@ _Noreturn void suz_env_panic(void) { abort(); }
 static void *work(void *arg) {
     writer = *(int *)arg;
     for (int i = 0; i < 100; ++i) {
-        suz_log_begin(writer == 1 ? "info" : "warn", "thread.suz", 1);
+        suz_log_begin(writer == 1 ? SUZ_LOG_INFO : SUZ_LOG_WARN, "thread.suz", 1);
         suz_log_i64(-i);
         suz_log_bool(true);
+        suz_log_f32(1.25f);
+        suz_log_f64(-2.5);
         suz_log_end();
     }
     return NULL;
@@ -155,7 +158,9 @@ int main(void) {
     .unwrap();
     let runtime = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime");
     let executable = directory.0.join("atomic");
-    let built = Command::new(std::env::var_os("CC").unwrap_or_else(|| "clang".into()))
+    let mut command = Command::new(std::env::var_os("CC").unwrap_or_else(|| "clang".into()));
+    super::support::float_runtime::link(&mut command, &runtime);
+    let built = command
         .args(["-std=c23", "-Wall", "-Wextra", "-Werror", "-pthread"])
         .arg("-I")
         .arg(&runtime)

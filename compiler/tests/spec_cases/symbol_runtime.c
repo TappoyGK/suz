@@ -52,7 +52,8 @@ void suz_env_free(void *ptr) {
     assert(!"free of an unknown allocation");
 }
 
-void suz_env_log(const char *bytes, size_t length) {
+void suz_env_log(suz_log_level level, const char *bytes, size_t length) {
+    (void)level;
     assert(length > 0 && length < sizeof(diagnostic) - diagnostic_length);
     memcpy(diagnostic + diagnostic_length, bytes, length);
     diagnostic_length += length;
