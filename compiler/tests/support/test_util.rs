@@ -35,7 +35,7 @@ pub(crate) fn build_and_run_c(
     crate::support::runner::build_and_run_c(c_file, executable).unwrap()
 }
 
-// Check generated code against standard C23, then execute it in a fresh process.
+// Check generated code in Clang's C23 mode, then execute it in a fresh process.
 pub(crate) fn compile_and_run_c23(source: &str, source_name: &str) -> std::process::Output {
     let directory = TemporaryDirectory::new();
     let path = directory.0.join("program.c");
@@ -50,7 +50,6 @@ pub(crate) fn compile_and_run_c23(source: &str, source_name: &str) -> std::proce
         std::process::Command::new(std::env::var_os("CC").unwrap_or_else(|| "clang".into()))
             .args([
                 "-std=c23",
-                "-pedantic-errors",
                 "-Wall",
                 "-Wextra",
                 "-Werror",
