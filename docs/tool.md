@@ -8,7 +8,11 @@
 
 **[tool.c-compiler]** 実行ファイルの生成には、外部のClangと対象環境のSDKを使う。`--cc PATH` を指定した場合はその実行ファイルを使い、省略した場合は `PATH` 上の `clang` を使う。指定できるのはC23に対応したClangだけである。指定値は1つの実行ファイルのパスとして扱う。Clangの引数はSuzが構成し、シェルを介さず起動する。対応環境は `[tool.platform]` で定める。
 
-**[tool.prerequisites]** `build` と `run` は、処理の開始時にClang・リンカー・SDKが利用できることを確認する。指定コンパイラがC23と128ビットの `_BitInt` に対応したClangでない場合は、[tool.c-compiler] の英語の診断を表示し、終了コード2で終了する。Clang・リンカー・SDKが不足する場合は、不足しているものと導入方法を標準エラーに表示し、終了コード2で終了する。macOSではXcode Command Line Toolsの導入方法として `xcode-select --install` を案内する。コンパイラが見つからない場合とSDKが見つからない場合は、診断を区別する。外部ツールのインストールは利用者が行う。`check` と `emit-c` は、外部ツールを用意せず実行できる。
+**[tool.prerequisites]** `build` と `run` は、処理の開始時にClang・リンカー・SDKが利用できることを確認する。指定コンパイラがC23と128ビットの `_BitInt` に対応したClangでない場合は、[tool.c-compiler] の英語の診断を表示し、終了コード2で終了する。
+
+Clang・リンカー・SDKが不足する場合は、不足しているものと導入方法を標準エラーに表示し、終了コード2で終了する。macOSではXcode Command Line Toolsの導入方法として `xcode-select --install` を案内する。コンパイラが見つからない場合とSDKが見つからない場合は、診断を区別する。外部ツールのインストールは利用者が行う。
+
+`check` と `emit-c` は、外部ツールを用意せず実行できる。
 
 **[tool.platform]** 対象環境は次のとおりである。OSとClangのバージョンは、コンパイラ・ランタイムを実際に検証した値である。
 
@@ -66,7 +70,7 @@ suz check program.suz
 
 ### 2.4 emit-c
 
-**[tool.emit-c]** Cの調査や環境層との組み込みに使う一式を `DIRECTORY` に出力する。ビルドスクリプトは `-std=c23` を使う。`CC` に指定できるのはC23に対応したClangだけであり、必要な機能は [runtime.c-check] で検査する。出力内容は次のとおりである。
+**[tool.emit-c]** 生成したCの調査や、独自の環境層とのリンクに必要な一式を `DIRECTORY` に出力する。ビルドスクリプトは `-std=c23` を使う。`CC` に指定できるのはC23に対応したClangだけであり、必要な機能は [runtime.c-check] で検査する。出力内容は次のとおりである。
 
 | パス | 内容 |
 |---|---|
@@ -98,7 +102,7 @@ cd generated
 | `--deny-unhandled-arithmetic` | 可 | 可 | 可 | 可 | 同じ箇所をコンパイルエラーにする |
 | `--help` | 可 | 可 | 可 | 可 | そのコマンドの使用方法を表示する |
 
-`-O0` と `-O2`、整数演算の警告と強制は、それぞれ排他的である。診断設定の意味は言語仕様の `[diagnostic.arithmetic]` に従う。設定を省略した場合は通常設定である。`[diagnostic.constant-comparison]` と `[diagnostic.integer-division-to-float]` の警告は、これらの整数演算の診断設定にかかわらず有効である。
+`-O0` と `-O2` は併用できない。`--warn-unhandled-arithmetic` と `--deny-unhandled-arithmetic` も併用できない。診断設定の意味は言語仕様の `[diagnostic.arithmetic]` に従う。設定を省略した場合は通常設定である。`[diagnostic.constant-comparison]` と `[diagnostic.integer-division-to-float]` の警告は、これらの整数演算の診断設定にかかわらず有効である。
 
 **[tool.environment]** `--env` のCソースは、ランタイム仕様の環境関数を実装する。`build` と `run` はそのファイルを標準環境層の代わりにリンクする。`emit-c` はその内容を出力先の `runtime/suz_env.c` に収録する。環境層のコンパイルには同梱の `suz_env.h` を使う。
 
