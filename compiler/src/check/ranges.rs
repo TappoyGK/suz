@@ -50,7 +50,7 @@ impl crate::ast::visit::Visitor for References {
     }
 }
 
-fn check_references(expr: &Expression, bindings: &Scope) -> Result<(), Diagnostic> {
+pub(super) fn check_references(expr: &Expression, bindings: &Scope) -> Result<(), Diagnostic> {
     use crate::ast::visit::Visitor;
     References(
         bindings
@@ -72,10 +72,10 @@ pub(super) fn bounds(
     let expected = operand_type(start, bindings).or_else(|| operand_type(end, bindings));
     let first = expression(start, expected, bindings)?;
     let last = expression(end, Some(first.ty), bindings)?;
-    if !matches!(first.ty, Type::Integer(_)) || first.ty != last.ty {
+    if !matches!(first.ty, Type::Integer(_) | Type::Char) || first.ty != last.ty {
         return Err(start.location.error(
             ErrorKind::InvalidSource,
-            "range bounds must have the same integer type [for.bounds]",
+            "range bounds must have the same integer type or both be char [for.bounds]",
         ));
     }
     Ok((first, last))

@@ -57,6 +57,11 @@ pub(crate) fn scan(
                                 "template must fit on one source line [text.template-line]",
                             ));
                         }
+                        b'\'' => {
+                            let (_, length) = super::char_literal(&source[cursor..]).ok_or_else(|| fail(cursor, "expected one Unicode scalar in a character literal [char.literal]"))?;
+                            cursor += length;
+                            continue;
+                        }
                         b'`' => {
                             let nested_column = column + source[..cursor].chars().count();
                             cursor += scan(&source[cursor..], line, nested_column)?.0;

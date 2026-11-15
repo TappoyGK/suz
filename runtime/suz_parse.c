@@ -76,3 +76,57 @@ bool suz_parse_string(const char *bytes, uint64_t length, uint64_t *consumed,
     }
     return false;
 }
+
+bool suz_parse_char(const char *bytes, uint64_t length, uint32_t *output) {
+    uint32_t value;
+    uint64_t consumed;
+    if (!suz_char_decode(bytes, length, &value, &consumed) || consumed != length) return false;
+    *output = value;
+    return true;
+}
+
+bool suz_parse_char_literal(const char *bytes, uint64_t length,
+                             uint32_t *output, uint64_t *consumed) {
+    if (length < 3 || bytes[0] != '\'') return false;
+    uint64_t index = 1;
+    uint32_t value;
+    if (bytes[index] == '\\') {
+        ++index;
+        switch (bytes[index++]) {
+            case '0': value = 0; break;
+            case 'n': value = '\n'; break;
+            case 'r': value = '\r'; break;
+            case 't': value = '\t'; break;
+            case '\\': value = '\\'; break;
+            case '\'': value = '\''; break;
+            case 'u': {
+                if (index >= length || bytes[index++] != '{') return false;
+                value = 0;
+                unsigned digits = 0;
+                while (index < length && bytes[index] != '}') {
+                    unsigned char c = (unsigned char)bytes[index++];
+                    unsigned digit;
+                    if (c >= '0' && c <= '9') digit = c - '0';
+                    else if (c >= 'a' && c <= 'f') digit = c - 'a' + 10;
+                    else if (c >= 'A' && c <= 'F') digit = c - 'A' + 10;
+                    else return false;
+                    if (++digits > 6) return false;
+                    value = (value << 4) | digit;
+                }
+                if (!digits || index >= length || !suz_char_valid(value)) return false;
+                ++index;
+                break;
+            }
+            default: return false;
+        }
+    } else {
+        if (bytes[index] == '\'' || bytes[index] == '\n' || bytes[index] == '\r') return false;
+        uint64_t count;
+        if (!suz_char_decode(bytes + index, length - index, &value, &count)) return false;
+        index += count;
+    }
+    if (index >= length || bytes[index++] != '\'') return false;
+    *output = value;
+    *consumed = index;
+    return true;
+}

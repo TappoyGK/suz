@@ -31,7 +31,7 @@ pub(crate) enum CheckedStatement {
     For {
         id: usize,
         start: CheckedExpression,
-        end: CheckedExpression,
+        end: Option<CheckedExpression>,
         inclusive: bool,
         reverse: bool,
         body: Vec<CheckedStatement>,

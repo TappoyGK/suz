@@ -58,6 +58,7 @@ fn main() {
         "suz_parse_struct.c",
         "suz_runtime.h",
         "suz_parse.h",
+        "suz_char.h",
         "suz_parse_struct.h",
         "suz_config.h",
         "third_party/ryu/ryu",

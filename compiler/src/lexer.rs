@@ -34,7 +34,8 @@ const KEYWORDS: &[&str] = &[
     "inf",
 ];
 const TYPES: &[&str] = &[
-    "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "bool", "text", "void",
+    "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "bool", "char", "text",
+    "void",
 ];
 const SYMBOLS: &[&str] = &[
     "(", ")", "{", "}", ",", ":", ".", "->", "=>", "=", "+=", "-=", "*=", "/=", "%=", "+%=", "-%=",
@@ -44,6 +45,7 @@ const SYMBOLS: &[&str] = &[
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Kind<'a> {
+    Char(u32),
     Template(&'a str),
     Ident(&'a str),
     Keyword(&'a str),
@@ -242,6 +244,26 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
                 column = 1;
                 continue;
             }
+            '\'' => {
+                let (value, length) = char_literal(rest).ok_or_else(|| {
+                    error(
+                        line,
+                        column,
+                        ErrorKind::InvalidSource,
+                        "expected one Unicode scalar in a character literal [char.literal]",
+                    )
+                })?;
+                tokens.push(Token {
+                    kind: Kind::Char(value),
+                    line,
+                    column,
+                    span: offset..offset + length,
+                });
+                offset += length;
+                column += rest[..length].chars().count();
+                continuation = false;
+                continue;
+            }
             '`' => {
                 let length = templates::scan(rest, line, column)?.0;
                 tokens.push(Token {
@@ -355,6 +377,32 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
         }
     }
     Ok(tokens)
+}
+
+// Share literal parsing with text-to-structure conversion at runtime.
+pub(crate) fn char_literal(input: &str) -> Option<(u32, usize)> {
+    unsafe extern "C" {
+        fn suz_parse_char_literal(
+            bytes: *const u8,
+            length: u64,
+            output: *mut u32,
+            consumed: *mut u64,
+        ) -> bool;
+    }
+    let (mut value, mut consumed) = (0, 0);
+    // Input and outputs remain live for this bounded, allocation-free call.
+    if unsafe {
+        suz_parse_char_literal(
+            input.as_ptr(),
+            input.len() as u64,
+            &mut value,
+            &mut consumed,
+        )
+    } {
+        Some((value, consumed as usize))
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]

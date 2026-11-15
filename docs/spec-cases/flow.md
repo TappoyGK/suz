@@ -596,6 +596,37 @@ info flow-019.suz:2: subject
 info flow-019.suz:9: second
 ```
 
+### flow-064 charのmatchと比較の連鎖を使う
+
+主根拠：`[match.target]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix ch = '5'
+    fix kind = matchexpr ch {
+        ' ' => 1
+        '5' => 2
+        _ => 0
+    }
+    log info `${kind} ${'0' <= ch <= '9'}`
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+**標準エラー：**
+
+```text
+info flow-064.suz:8: 2 true
+```
+
 ### flow-020 整数matchの定数パターンとワイルドカード
 
 主根拠：`[match.pattern]`。
@@ -1407,6 +1438,38 @@ fn main() -> u8 {
 info flow-062.suz:11: 256 -128
 ```
 
+### flow-065 文字範囲でサロゲートを飛ばし、両端でcontinueする
+
+主根拠：`[char.range]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    for ch in '\u{D7FF}'..='\u{E000}' { log info `${ch as u32}` }
+    rev ch in '\u{D7FF}'..='\u{E000}' { log info `${ch as u32}` }
+    for ch in '\u{10FFFF}'..='\u{10FFFF}' { continue }
+    rev ch in '\0'..='\0' { continue }
+    rev ch in '\0'..<'\0' { return 1 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+**標準エラー：**
+
+```text
+info flow-065.suz:2: 55295
+info flow-065.suz:2: 57344
+info flow-065.suz:3: 57344
+info flow-065.suz:3: 55295
+```
+
 ### flow-044 範囲演算子の前後の空白
 
 主根拠：`[for.range-spacing]`。
@@ -1719,6 +1782,32 @@ limitsのフィールドへの参照もvarからの参照として扱う。
 |---|---|---:|---:|
 | 通常 | `[for.bound-reference]` | 5 | 18 |
 
+### flow-067 textの反復対象でvarを参照する
+
+主根拠：`[for.bound-reference]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    var message = `abc`
+    for ch in message {}
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[for.bound-reference]` | 3 | 15 |
+
 ### flow-054 ループ変数への代入
 
 主根拠：`[for.variable]`。
@@ -1775,6 +1864,55 @@ iを参照できるのはループ本体の中だけ。
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
 | 通常 | `[decl.local-scope]` | 4 | 12 |
+
+### flow-066 textをスカラー値単位で前後に反復する
+
+主根拠：`[char.for]`。
+
+**ソース：**
+
+```suz
+fn read(value: text) -> text {
+    log info `read`
+    return value
+}
+fn main() -> u8 {
+    var message = `aあ😀`
+    fix target = message
+    for ch in read(target) {
+        log info `${ch}`
+        message = `changed`
+        continue
+    }
+    rev ch in read(target) {
+        if ch == 'a' { break }
+        log info `${ch}`
+    }
+    for ch in `` { return 1 }
+    rev ch in `` { return 2 }
+    log info `${message}`
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+**標準エラー：**
+
+```text
+info flow-066.suz:2: read
+info flow-066.suz:9: a
+info flow-066.suz:9: あ
+info flow-066.suz:9: 😀
+info flow-066.suz:2: read
+info flow-066.suz:15: 😀
+info flow-066.suz:15: あ
+info flow-066.suz:19: changed
+```
 
 ### flow-056 forのcontinueは次の値へ進む
 

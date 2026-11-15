@@ -17,6 +17,7 @@ bundled!(
     "runtime/suz_runtime.c",
     "runtime/suz_text.h",
     "runtime/suz_parse.h",
+    "runtime/suz_char.h",
     "runtime/suz_parse_struct.h",
     "runtime/suz_text.c",
     "runtime/suz_parse.c",

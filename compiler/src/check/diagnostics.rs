@@ -124,7 +124,9 @@ fn collect_statements(statements: &[CheckedStatement], locations: &mut Vec<Locat
                 start, end, body, ..
             } => {
                 collect(start, locations);
-                collect(end, locations);
+                if let Some(end) = end {
+                    collect(end, locations);
+                }
                 collect_statements(body, locations);
             }
             CheckedStatement::ArithmeticReturn {

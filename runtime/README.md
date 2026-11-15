@@ -8,7 +8,8 @@
 | `suz_runtime.h`・`suz_runtime.c` | 起動時の浮動小数点環境の初期化、整数演算の検査、ログとパニック診断の組み立て |
 | `suz_format_float.c` | コンパイラと生成プログラムで共有する浮動小数点の表示形式と数値による境界判定 |
 | `suz_float.c` | 整形した浮動小数点のバイト列をログへ出力する関数 |
-| `suz_parse.h`・`suz_parse.c` | コンパイラと生成プログラムで共有する整数・真偽値の解析 |
+| `suz_parse.h`・`suz_parse.c` | コンパイラと生成プログラムで共有する整数・真偽値・文字の解析 |
+| `suz_char.h` | Unicodeスカラー値の検査とUTF-8の符号化・復号 |
 | `suz_parse_struct.h`・`suz_parse_struct.c` | 型情報に従う構造体の検査と、各フィールドの値・文字列範囲の取得 |
 | `suz_parse_float.c` | 10進の入力から浮動小数点への直接の最近接・偶数丸め |
 | `suz_text.h`・`suz_text.c` | テキストプール、インターン化、容量計測、一時バッファ |

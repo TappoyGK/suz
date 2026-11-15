@@ -2,6 +2,36 @@
 
 [目次と書式](../spec-cases.md)
 
+### type-032 charのフィールドをコピーし、コピー先だけを変更する
+
+主根拠：`[char.type]`。
+
+**ソース：**
+
+```suz
+struct Letter { ch: char }
+fn echo(ch: char) -> char { return ch }
+fn main() -> u8 {
+    fix original = Letter { ch: 'a' }
+    var copy = original
+    copy.ch = echo('b')
+    log info `${original.ch} ${copy.ch}`
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+**標準エラー：**
+
+```text
+info type-032.suz:7: a b
+```
+
 ### type-001 整数でboolの変数を初期化する
 
 主根拠：`[type.bool]`。

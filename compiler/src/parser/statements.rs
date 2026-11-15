@@ -77,24 +77,25 @@ impl Parser<'_, '_> {
                 self.expect(FixedToken::Keyword("in"))?;
                 let start = self.condition()?;
                 let range_location = self.location();
-                let inclusive = match self.token().kind {
-                    Kind::Symbol("..<") => false,
-                    Kind::Symbol("..=") => true,
+                let (inclusive, end) = match self.token().kind {
+                    Kind::Symbol(operator @ ("..<" | "..=")) => {
+                        self.cursor += 1;
+                        if self.token().kind == Kind::End {
+                            return Err(range_location.error(
+                                ErrorKind::InvalidSource,
+                                "expected an end bound after the range operator [for.range]",
+                            ));
+                        }
+                        (operator == "..=", Some(self.condition()?))
+                    }
+                    Kind::Symbol("{") => (false, None),
                     _ => {
                         return Err(self.error(
                             ErrorKind::InvalidSource,
-                            "expected a range operator [for.range]",
+                            "expected a range operator or loop body [for.range]",
                         ));
                     }
                 };
-                self.cursor += 1;
-                if self.token().kind == Kind::End {
-                    return Err(range_location.error(
-                        ErrorKind::InvalidSource,
-                        "expected an end bound after the range operator [for.range]",
-                    ));
-                }
-                let end = self.condition()?;
                 let (body, _) = self.block()?;
                 Ok(Statement::For {
                     name,
@@ -291,6 +292,7 @@ impl Parser<'_, '_> {
                 )
                 | Kind::Ident(_)
                 | Kind::Template(_)
+                | Kind::Char(_)
                 | Kind::Integer(_)
                 | Kind::Float(_)
                 | Kind::Symbol("{" | "~") => {

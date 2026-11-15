@@ -1,6 +1,7 @@
 mod arithmetic;
 mod blocks;
 mod casts;
+mod characters;
 mod expressions;
 mod functions;
 mod helpers;

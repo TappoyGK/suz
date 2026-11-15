@@ -23,11 +23,11 @@ pub(super) fn patterns<T>(
 ) -> Result<Patterns, Diagnostic> {
     if !matches!(
         ty,
-        Type::Integer(_) | Type::Bool | Type::Enum(_) | Type::Text
+        Type::Char | Type::Integer(_) | Type::Bool | Type::Enum(_) | Type::Text
     ) {
         return Err(location.error(
             ErrorKind::InvalidSource,
-            "match requires an integer, bool, enum or text target [match.target]",
+            "match requires an integer, char, bool, enum or text target [match.target]",
         ));
     }
     let mut seen = BTreeSet::new();
@@ -36,10 +36,13 @@ pub(super) fn patterns<T>(
     let mut warnings = Vec::new();
     for (index, arm) in arms.iter().enumerate() {
         let Some(pattern) = &arm.pattern else {
-            if !matches!(ty, Type::Integer(_) | Type::Text) || wildcard || index + 1 != arms.len() {
+            if !matches!(ty, Type::Char | Type::Integer(_) | Type::Text)
+                || wildcard
+                || index + 1 != arms.len()
+            {
                 return Err(arm.location.error(
                     ErrorKind::InvalidSource,
-                    "wildcard is allowed only as the final integer or text match arm [match.pattern]",
+                    "wildcard is allowed only as the final integer, char or text match arm [match.pattern]",
                 ));
             }
             wildcard = true;
