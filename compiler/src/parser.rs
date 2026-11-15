@@ -1,3 +1,4 @@
+mod allows;
 mod branches;
 mod enums;
 mod expressions;
@@ -19,6 +20,7 @@ enum FixedToken {
 }
 
 struct Parser<'a, 's> {
+    allows: Vec<crate::warnings::AllowScope>,
     tokens: &'a [Token<'s>],
     enums: &'a [crate::ast::EnumDeclaration],
     structs: &'a [crate::ast::StructDeclaration],
@@ -75,6 +77,7 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     fn constant(&mut self) -> Result<ConstDeclaration, Diagnostic> {
+        let start = self.location();
         self.expect(FixedToken::Keyword("const"))?;
         let location = self.location();
         let name = match self.token().kind {
@@ -111,6 +114,7 @@ impl<'a, 's> Parser<'a, 's> {
         self.constant_expression = true;
         let initializer = self.expression()?;
         self.constant_expression = false;
+        self.allow_clause(start, allows::expression_contains_block(&initializer))?;
         Ok(ConstDeclaration {
             name,
             location,
@@ -124,6 +128,7 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
     let enums = enums::collect(tokens)?;
     let structs = structs::collect(tokens, &enums)?;
     let mut p = Parser {
+        allows: Vec::new(),
         enums: &enums,
         structs: &structs,
         restricted_condition: false,
@@ -192,6 +197,7 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
         ));
     }
     Ok(Program {
+        allows: p.allows,
         structs,
         enums,
         constants,

@@ -11,7 +11,7 @@ use std::fmt::Write;
 pub(super) fn emit(
     c: &mut String,
     parts: &[TemplatePart<CheckedExpression>],
-    location: Location,
+    (location, level): (Location, crate::ast::LogLevel),
     depth: usize,
     id: usize,
     context: &mut ExpressionContext,
@@ -37,7 +37,11 @@ pub(super) fn emit(
         .unwrap_or(&context.source_name);
     writeln!(
         c,
-        "{indent}    suz_log_begin({}, {});",
+        "{indent}    suz_log_begin({}, {}, {});",
+        match level {
+            crate::ast::LogLevel::Info => "SUZ_LOG_INFO",
+            crate::ast::LogLevel::Warn => "SUZ_LOG_WARN",
+        },
         c_string(filename),
         location.line
     )

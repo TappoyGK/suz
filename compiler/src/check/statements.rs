@@ -62,9 +62,14 @@ pub(super) fn check_statements(
     let mut statements = Vec::new();
     for statement in input {
         match statement {
-            Statement::Log { parts, location } => {
+            Statement::Log {
+                parts,
+                location,
+                level,
+            } => {
                 let checked = super::text::parts(parts, bindings)?;
                 statements.push(CheckedStatement::Log {
+                    level: *level,
                     parts: checked,
                     location: *location,
                 });

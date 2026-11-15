@@ -93,6 +93,7 @@ cd generated
 | `--env FILE` | 可 | 可 | | 可 | 標準環境層を置き換えるCソース |
 | `--text-pool-limit SIZE` | 可 | 可 | | 可 | テキストプールの上限。既定は `1G` |
 | `--force` | 可 | | | | 既存の通常ファイルを出力先として置き換える |
+| `--log-allow` | 可 | 可 | 可 | 可 | 抑えた警告と理由を表示する |
 | `--warn-unhandled-arithmetic` | 可 | 可 | 可 | 可 | 整数演算の失敗処理がない箇所を警告する |
 | `--deny-unhandled-arithmetic` | 可 | 可 | 可 | 可 | 同じ箇所をコンパイルエラーにする |
 | `--help` | 可 | 可 | 可 | 可 | そのコマンドの使用方法を表示する |
@@ -133,11 +134,13 @@ suz emit-c program.suz -o generated --text-pool-limit unlimited
 
 ## 5. メッセージと終了
 
+**[tool.log-allow]** `--log-allow` は [allow.log] に従い、その設定で警告になる箇所のうち `allow` で抑えたものを理由とともに標準エラーへ書く。
+
 **[tool.messages]** ツールのメッセージは英語で出力する。`build`、`check`、`emit-c` の成功時は標準出力を空にする。警告・エラーは標準エラーに出力する。言語の診断は次の形式とし、規則名は言語仕様から使う。
 
 ```text
 FILE:LINE:COLUMN: MESSAGE [rule]
-FILE:LINE:COLUMN: warning: MESSAGE [rule]
+FILE:LINE:COLUMN: warn: MESSAGE [rule]
 ```
 
 ツールの使用方法・入出力・外部ツールのエラーは `suz: MESSAGE [tool.rule]` の形式にする。Clangが出力した診断は標準エラーへ伝え、Suzの言語診断と区別する。

@@ -96,7 +96,7 @@ fn unary_literal_diagnostics_follow_the_selected_mode() {
         assert_eq!(result.status.code(), Some(status));
         assert!(result.stdout.is_empty());
         let diagnostic = String::from_utf8(result.stderr).unwrap();
-        assert_eq!(diagnostic.matches(": warning: ").count(), warnings);
+        assert_eq!(diagnostic.matches(": warn: ").count(), warnings);
         if option.is_some() {
             assert!(diagnostic.contains("negative.suz:2:17:"), "{diagnostic}");
         }

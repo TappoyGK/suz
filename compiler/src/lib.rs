@@ -7,6 +7,7 @@ mod check;
 mod codegen;
 mod lexer;
 mod parser;
+mod warnings;
 
 use std::{fmt, num::NonZeroU64};
 
@@ -63,12 +64,14 @@ impl TextPoolLimit {
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CompilationOptions {
+    pub log_allow: bool,
     pub arithmetic_mode: ArithmeticMode,
     pub text_pool_limit: TextPoolLimit,
 }
 
 #[derive(Debug)]
 pub struct Warning {
+    pub allowed_reason: Option<String>,
     pub line: usize,
     pub column: usize,
     pub message: String,
@@ -110,7 +113,7 @@ pub fn compile_with_options(
     source_name: &str,
     options: &CompilationOptions,
 ) -> Result<Compilation, Diagnostic> {
-    let (checked, warnings) = analyze(bytes, options.arithmetic_mode)?;
+    let (checked, warnings) = analyze(bytes, options.arithmetic_mode, options.log_allow)?;
     Ok(Compilation {
         c: codegen::generate(&checked, source_name, options.text_pool_limit),
         warnings,
@@ -119,12 +122,26 @@ pub fn compile_with_options(
 
 /// Validate source and return warnings without generating C.
 pub fn check_source(bytes: &[u8], mode: ArithmeticMode) -> Result<Vec<Warning>, Diagnostic> {
-    analyze(bytes, mode).map(|(_, warnings)| warnings)
+    check_source_with_options(
+        bytes,
+        &CompilationOptions {
+            arithmetic_mode: mode,
+            ..CompilationOptions::default()
+        },
+    )
+}
+
+pub fn check_source_with_options(
+    bytes: &[u8],
+    options: &CompilationOptions,
+) -> Result<Vec<Warning>, Diagnostic> {
+    analyze(bytes, options.arithmetic_mode, options.log_allow).map(|(_, warnings)| warnings)
 }
 
 fn analyze(
     bytes: &[u8],
     mode: ArithmeticMode,
+    log_allow: bool,
 ) -> Result<(check::CheckedProgram, Vec<Warning>), Diagnostic> {
     let source = std::str::from_utf8(bytes).map_err(|error| {
         let prefix = std::str::from_utf8(&bytes[..error.valid_up_to()]).unwrap();
@@ -151,25 +168,12 @@ fn analyze(
     let tokens = lexer::lex(&source)?;
     let program = parser::parse(&tokens)?;
     let checked = check::check(&program)?;
-    let message = "integer arithmetic has no 'or' handler [diagnostic.arithmetic]";
-    if mode == ArithmeticMode::Deny
-        && let Some(location) = checked.unhandled_arithmetic.first()
-    {
-        return Err(location.error(ErrorKind::InvalidSource, message));
-    }
-    let warnings = if mode == ArithmeticMode::Warn {
-        checked
-            .unhandled_arithmetic
-            .iter()
-            .map(|location| Warning {
-                line: location.line,
-                column: location.column,
-                message: message.into(),
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
+    let warnings = warnings::collect(
+        &checked.unhandled_arithmetic,
+        &program.allows,
+        mode,
+        log_allow,
+    )?;
     Ok((checked, warnings))
 }
 

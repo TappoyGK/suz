@@ -12,9 +12,16 @@ impl Parser<'_, '_> {
     pub(super) fn log(&mut self) -> Result<Statement, Diagnostic> {
         let location = self.location();
         self.cursor += 1;
-        if self.token().kind != Kind::Ident("info") {
-            return Err(self.error(ErrorKind::InvalidSource, "expected log info [log.syntax]"));
-        }
+        let level = match self.token().kind {
+            Kind::Ident("info") => crate::ast::LogLevel::Info,
+            Kind::Ident("warn") => crate::ast::LogLevel::Warn,
+            _ => {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    "expected info or warn [log.level]",
+                ));
+            }
+        };
         self.cursor += 1;
         let Kind::Template(raw) = self.token().kind else {
             return Err(self.error(
@@ -23,7 +30,11 @@ impl Parser<'_, '_> {
             ));
         };
         let parts = self.template(raw)?;
-        Ok(Statement::Log { parts, location })
+        Ok(Statement::Log {
+            parts,
+            location,
+            level,
+        })
     }
 
     pub(super) fn template(
@@ -46,6 +57,7 @@ impl Parser<'_, '_> {
                         item.column += column - 1;
                     }
                     let mut parser = Parser {
+                        allows: Vec::new(),
                         tokens: &tokens,
                         enums: self.enums,
                         structs: self.structs,
@@ -67,6 +79,7 @@ impl Parser<'_, '_> {
                             "expected one interpolation expression [symbol.interpolation]",
                         ));
                     }
+                    self.allows.extend(parser.allows);
                     parts.push(TemplatePart::Value(value));
                 }
             }

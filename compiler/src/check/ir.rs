@@ -23,6 +23,7 @@ pub(crate) enum CheckedStatement {
         return_value: CheckedExpression,
     },
     Log {
+        level: crate::ast::LogLevel,
         parts: Vec<crate::ast::TemplatePart<CheckedExpression>>,
         location: Location,
     },

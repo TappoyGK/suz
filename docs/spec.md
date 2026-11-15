@@ -16,7 +16,7 @@ Suzは次のものを含む。
 - 宣言：定数、関数、変数、列挙型、構造体
 - 式：テンプレート、算術、ラップする算術、比較、論理、ビット演算、型の変換、`ifexpr`、`matchexpr`、`expr`
 - 制御：`if`、`while`、`loop`、`for`、`rev`、`break`、`continue`、`return`、`match`
-- 出力：`log info` と出力用のテンプレート
+- 出力：`log info`・`log warn` と出力用のテンプレート
 
 ### 1.2 安全性
 
@@ -52,7 +52,7 @@ Suzは次のものを含む。
 ```text
 const fix var fn struct enum
 if ifexpr elif else while loop for rev in break continue return match matchexpr
-as or not log expr
+as or not log allow expr
 true false nan inf
 ```
 
@@ -62,7 +62,7 @@ true false nan inf
 i8 i16 i32 i64 u8 u16 u32 u64 f32 f64 bool char symbol text void
 ```
 
-**[src.info]** `info` は、`log` の直後でログレベルを表す。それ以外では識別子として使える。
+**[src.info]** `info` と `warn` は、`log` の直後でログレベルを表す（[log.level]）。それ以外では識別子として使える。
 
 ### 3.1 文の区切りと行の継続
 
@@ -1065,9 +1065,11 @@ fix b = top + 1     // パニックする
 
 ## 10. ログ
 
-**[log.syntax]** ログは、`log info` のあとにテンプレートを1つ書く。テンプレートの記法、埋め込み、値の表示は [symbol.template-line]、[symbol.template-text]、[symbol.escape]、[symbol.interpolation]、[symbol.value-format]、[symbol.float-format] に従う。
+**[log.syntax]** ログは、`log` と [log.level] のレベルのあとにテンプレートを1つ書く。テンプレートの記法、埋め込み、値の表示は [symbol.template-line]、[symbol.template-text]、[symbol.escape]、[symbol.interpolation]、[symbol.value-format]、[symbol.float-format] に従う。
 
-**[log.output]** ログは、`info ファイル名:行番号: メッセージ` の形式で標準エラー出力へ書く。ファイル名と行番号は、そのログ文のソース位置を示す。行番号は 1 から数える。メッセージの末尾に改行を 1 つ追加する。
+**[log.level]** `log` の直後には `info` または `warn` を書く。どちらも [log.evaluation] と [log.fragments] に従う。
+
+**[log.output]** ログは、`レベル ファイル名:行番号: メッセージ` の形式で標準エラー出力へ書く。レベルは `info` または `warn` である。ファイル名と行番号は、そのログ文のソース位置を示す。行番号は 1 から数える。メッセージの末尾に改行を 1 つ追加する。
 
 **[log.evaluation]** すべての埋め込み式を左から右へ1回ずつ評価し、値を保持した後、そのログ文の出力を始める。評価中にパニックした場合、そのログ文の出力は始めない。埋め込み式の中で実行したログは、その式の評価中に出力する。
 
@@ -1092,7 +1094,9 @@ fn main() -> u8 {
 
 `make_text` が行うsymbolの生成と保持は、その関数の処理である。ログは戻されたsymbolのバイト列を出力し、出力用の本文を作るための追加確保を行わない。
 
-## 11. 整数演算の失敗処理に関する診断
+## 11. 警告と診断設定
+
+### 11.1 整数演算の診断
 
 **[diagnostic.arithmetic]** コンパイラは、次の設定で`or` による失敗処理がない整数演算を診断する。
 
@@ -1108,6 +1112,59 @@ fn main() -> u8 {
 
 ```suz
 count = (count + 1) or return 1
+```
+
+### 11.2 警告
+
+**[warn.definition]** 警告は、コンパイラがプログラムを受け付けたうえで、書いた人の意図しなかった可能性がある箇所を知らせる診断である。警告があってもコンパイルを続ける。
+
+**[warn.rule]** 警告は、それを定める規則の名前で指定する。1つの規則が出す警告は `allow` では区別しない。
+
+**[warn.list]** 警告を出す規則は次のとおりである。
+
+| 規則 | 警告 | 出す場合 |
+|---|---|---|
+| [diagnostic.arithmetic] | `or` による失敗処理がない整数演算 | `--warn-unhandled-arithmetic` を指定した場合 |
+
+**[warn.output]** 警告は [tool.messages] の形式で標準エラーへ書く。メッセージの前には `warn:` を付ける。メッセージの末尾の規則名が、`allow` に指定する規則名である。
+
+### 11.3 警告の抑制
+
+**[allow.clause]** 文の末尾に `allow [規則名: 理由]` を書くと、その文で出る、その規則の警告を抑える。複数行にまたがる文にも文全体に効く。`const` 宣言の末尾にも書ける。複数の規則を指定する場合は、それぞれに理由を付けてカンマで区切る。
+
+**[allow.block]** `allow [規則名: 理由] { ... }` は、ブロック内の文で出る、その規則の警告を抑える文である。ブロックは [block.statement] と同じくスコープを作る。
+
+**[allow.contains-block]** ブロックを含む文に末尾の `allow` を書くとコンパイルエラーである。対象は `if`・`while`・`loop`・`for`・`rev`・`match`・ブロック文と、式のどこかに `ifexpr`・`matchexpr`・`expr` を含む文である。式内の位置や丸括弧の有無は問わない。それらの文は [allow.block] で囲む。構造体リテラルの `{ }` はブロックではない。
+
+**[allow.scope]** `allow` は、対象の文・ブロック内に字句上現れる箇所だけに効く。呼び出した関数の本体の警告は抑えない。
+
+**[allow.item]** `allow` の直後と、それに続くカンマの直後の `[` から最初の `]` までを `規則名: 理由` として読む。`[` の直後に規則名、規則名の直後に `:` を書く。規則名はASCIIの小文字・数字・`-` からなる空でない語を `.` でつなぐ。規則名に空白は含めない。この間には [src.longest-match]、コメント、通常のトークンの規則を適用しない。形式を満たさない場合はコンパイルエラーである。
+
+**[allow.reason]** 理由は `:` の後から `]` の前までの文字をそのまま使い、前後のスペース（U+0020）を除く。エスケープと埋め込みはなく、バッククォート、`${`、`//` も文字として扱う。最初の `]` で閉じるため、理由に `]` は含められない。理由が空の場合と、制御文字（U+0000からU+001F、U+007F）を含む場合はコンパイルエラーである。改行も制御文字なので、理由はソース上の1行に収まる。理由はプログラムの動作に影響しない。
+
+**[allow.rule-check]** [warn.list] にない規則名、同じ `allow` 内で重複する規則名はコンパイルエラーである。
+
+**[allow.nested]** 同じ規則を指定した外側の `allow` ブロック内に、その規則の `allow` を書くとコンパイルエラーである。
+
+**[allow.unused]** 警告の条件を満たす箇所が対象範囲に1つもない `allow` はコンパイルエラーである。警告を出す設定によらず、規則ごとに判定する。コードの変更で警告の条件がなくなった場合も、残った `allow` はコンパイルエラーになる。
+
+**[allow.effect]** 抑えた警告は通常の警告出力に含めず、[allow.log] を指定した場合に出力する。`allow` はコンパイルエラーと生成プログラムの動作を変えない。
+
+**[allow.deny]** `--deny-unhandled-arithmetic` では、`allow` があっても失敗処理のない整数演算をコンパイルエラーにする。`allow` は演算の失敗処理を追加するものではない。
+
+```suz
+fix total = a + b allow [diagnostic.arithmetic: a and b are below 10]
+allow [diagnostic.arithmetic: each step adds at most 9] {
+    var sum: u8 = 0
+    fix limit: u8 = 10
+    for i in 0..<limit { sum += i }
+}
+```
+
+**[allow.log]** `check`・`build`・`run`・`emit-c` の `--log-allow` は、その設定で警告として出るはずだった箇所のうち、`allow` で抑えたものを標準エラーへ書く。`warn:` の代わりに `allowed:` を使い、規則名の後にスペースと理由を付ける。警告が無効な設定では出力しない。
+
+```text
+app.suz:3:22: allowed: integer arithmetic has no 'or' handler [diagnostic.arithmetic] count is at most 3
 ```
 
 ## 付録 A. 文法
@@ -1150,7 +1207,7 @@ CharEscape ::= "\" ( "0" | "n" | "r" | "t" | "\" | "'"
                     | "u{" HEX HEX? HEX? HEX? HEX? HEX? "}" )
 ```
 
-`WORD` のうち、[src.keywords] と [src.type-names] の語は、そのつづりの予約トークンとして扱う。`_` 単独はワイルドカードのトークン、それ以外は `IDENT` である。構文規則の `"info"` は、つづりが `info` の `IDENT` に一致する。
+`WORD` のうち、[src.keywords] と [src.type-names] の語は、そのつづりの予約トークンとして扱う。`_` 単独はワイルドカードのトークン、それ以外は `IDENT` である。構文規則の `"info"` と `"warn"` は、それぞれのつづりの `IDENT` に一致する。
 
 演算子と区切り記号は、次のトークンである。
 
@@ -1161,7 +1218,9 @@ CharEscape ::= "\" ( "0" | "n" | "r" | "t" | "\" | "'"
 == != < <= > >= && || as% ..< ..=
 ```
 
-トークン化では [src.longest-match] に従う。`as%` は隣接した文字列として 1 トークンにする。`0..<10` は `INTEGER`、`..<`、`INTEGER` に分かれる。
+`allow` の直後と、その項目を区切るカンマの直後の `[` から最初の `]` までは、[allow.item] に従って1つの `ALLOW_ITEM` トークンとして読む。この内部には通常のトークン化、コメント、空白と改行の読み飛ばしを適用しない。
+
+それ以外のトークン化では [src.longest-match] に従う。`as%` は隣接した文字列として 1 トークンにする。`0..<10` は `INTEGER`、`..<`、`INTEGER` に分かれる。
 
 改行は [src.newline] に従って正規化する。テンプレートと文字リテラルの外のスペース、タブ、コメントを読み飛ばす。物理的な改行は、次の場合に読み飛ばし、それ以外は `NL` にする。
 
@@ -1180,7 +1239,7 @@ Program          ::= NL* ( Declaration NL+ )* Declaration? EOF
 Declaration      ::= ConstDeclaration | FunctionDeclaration
                    | StructDeclaration | EnumDeclaration
 
-ConstDeclaration ::= "const" IDENT TypeAnnotation? "=" ConstExpression
+ConstDeclaration ::= "const" IDENT TypeAnnotation? "=" ConstExpression AllowClause?
 TypeAnnotation   ::= ":" Type
 
 FunctionDeclaration ::= "fn" IDENT "(" Parameters? ")" "->" Type Block
@@ -1206,10 +1265,10 @@ IntegerType      ::= "i8" | "i16" | "i32" | "i64"
 
 ```ebnf
 Block            ::= "{" NL* ( Statement NL+ )* Statement? "}"
-Statement        ::= VariableDeclaration | Assignment | ReturnStatement
+Statement        ::= ( VariableDeclaration | Assignment | ReturnStatement
+                     | "break" | "continue" | LogStatement | Expression ) AllowClause?
                    | WhileStatement | LoopStatement | ForStatement | RevStatement
-                   | IfStatement | MatchStatement
-                   | "break" | "continue" | LogStatement | Block | Expression
+                   | IfStatement | MatchStatement | Block | AllowStatement
 
 VariableDeclaration ::= ( "fix" | "var" ) IDENT TypeAnnotation?
                         "=" Expression
@@ -1224,8 +1283,14 @@ LoopStatement    ::= "loop" Block
 ForStatement     ::= "for" IDENT "in" Condition ( RangeOperator Condition )? Block
 RevStatement     ::= "rev" IDENT "in" Condition ( RangeOperator Condition )? Block
 RangeOperator    ::= "..<" | "..="
-LogStatement     ::= "log" "info" TEMPLATE
+LogStatement     ::= "log" LogLevel TEMPLATE
+LogLevel         ::= "info" | "warn"
+AllowStatement   ::= "allow" AllowItem ( "," AllowItem )* Block
+AllowClause      ::= "allow" AllowItem ( "," AllowItem )*
+AllowItem        ::= ALLOW_ITEM
 ```
+
+`ALLOW_ITEM` は [allow.item] に従って読む1つのトークンである。`AllowClause` には [allow.clause] と [allow.contains-block]、`AllowStatement` には [allow.block]、`AllowItem` には [allow.item]・[allow.reason]・[allow.rule-check] を適用する。`LogLevel` の `"info"` と `"warn"` は、そのつづりの `IDENT` に一致する。
 
 `RangeOperator` は [for.range-spacing] に従い、左右の式の境界に隣接する。`Assignment` の右辺には [assign.rhs-write] の代入先の制約を適用する。`ForStatement` と `RevStatement` のすべての `Condition` には [for.bound-reference] の参照の制約も適用する。範囲演算子のない形は [char.for-type] と [char.for] に従う。`Condition` の扱いは A.6 に定める。
 

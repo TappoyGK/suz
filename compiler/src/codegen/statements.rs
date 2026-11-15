@@ -14,10 +14,14 @@ pub(super) fn emit_block(
     let indent = "    ".repeat(depth);
     for statement in statements {
         match statement {
-            CheckedStatement::Log { parts, location } => {
+            CheckedStatement::Log {
+                parts,
+                location,
+                level,
+            } => {
                 let id = *next_assignment;
                 *next_assignment += 1;
-                super::logs::emit(c, parts, *location, depth, id, context);
+                super::logs::emit(c, parts, (*location, *level), depth, id, context);
             }
             CheckedStatement::Expression(value) => {
                 writeln!(c, "{indent}(void)({});", expression(value, context)).unwrap();

@@ -79,6 +79,7 @@ pub(super) fn collect(
     enums: &[EnumDeclaration],
 ) -> Result<Vec<StructDeclaration>, Diagnostic> {
     let mut p = Parser {
+        allows: Vec::new(),
         tokens,
         enums,
         structs: &[],

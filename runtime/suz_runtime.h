@@ -2,6 +2,7 @@
 #define SUZ_RUNTIME_H
 
 #include "suz_config.h"
+#include "suz_env.h"
 #include "suz_char.h"
 
 #include <stdbool.h>
@@ -44,7 +45,7 @@ _Noreturn void suz_panic(const char *source, size_t line, size_t column, const c
 
 /* Evaluate all interpolation values before begin. Keep begin/end paired;
    writers only emit already evaluated values. */
-void suz_log_begin(const char *source, size_t line);
+void suz_log_begin(suz_log_level level, const char *source, size_t line);
 void suz_log_text(const char *text, size_t len);
 void suz_log_i64(int64_t value);
 void suz_log_u64(uint64_t value);

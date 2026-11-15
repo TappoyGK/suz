@@ -208,7 +208,10 @@ fn exported_sources_build_independently_with_standard_and_custom_environments() 
 #include <stdlib.h>
 void *suz_env_alloc(size_t size) { return malloc(size); }
 void suz_env_free(void *ptr) { free(ptr); }
-void suz_env_log(const char *bytes, size_t length) { fwrite(bytes, 1, length, stdout); }
+void suz_env_log(suz_log_level level, const char *bytes, size_t length) {
+    (void)level;
+    fwrite(bytes, 1, length, stdout);
+}
 _Noreturn void suz_env_panic(void) { exit(101); }
 "#,
     )

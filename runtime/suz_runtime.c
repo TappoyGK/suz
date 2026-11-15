@@ -122,16 +122,19 @@ bool suz_try_shr_u64(uint64_t a, uint64_t count, unsigned width, uint64_t *resul
     return true;
 }
 
+/* Accessed only while output_lock is held. */
+static suz_log_level output_level;
+
 static void write_text(const char *text) {
     size_t len = strlen(text);
-    if (len != 0) suz_env_log(text, len);
+    if (len != 0) suz_env_log(output_level, text, len);
 }
 
 static void write_position(size_t value) {
     /* At most 3 decimal digits per byte, plus a terminating NUL. */
     char text[3 * sizeof(size_t) + 1];
     int len = snprintf(text, sizeof(text), "%zu", value);
-    if (len > 0) suz_env_log(text, (size_t)len);
+    if (len > 0) suz_env_log(output_level, text, (size_t)len);
 }
 
 static atomic_flag output_lock = ATOMIC_FLAG_INIT;
@@ -140,9 +143,11 @@ static void lock_output(void) {
     while (atomic_flag_test_and_set_explicit(&output_lock, memory_order_acquire)) {}
 }
 
-void suz_log_begin(const char *source, size_t line) {
+void suz_log_begin(suz_log_level level, const char *source, size_t line) {
     lock_output();
-    write_text("info ");
+    output_level = level;
+    write_text(level == SUZ_LOG_WARN ? "warn" : "info");
+    write_text(" ");
     write_text(source);
     write_text(":");
     write_position(line);
@@ -150,7 +155,7 @@ void suz_log_begin(const char *source, size_t line) {
 }
 
 void suz_log_text(const char *text, size_t len) {
-    if (len != 0) suz_env_log(text, len);
+    if (len != 0) suz_env_log(output_level, text, len);
 }
 
 void suz_log_u64(uint64_t value) {
@@ -160,7 +165,7 @@ void suz_log_u64(uint64_t value) {
         text[--start] = (char)('0' + value % 10);
         value /= 10;
     } while (value != 0);
-    suz_env_log(text + start, sizeof(text) - start);
+    suz_env_log(output_level, text + start, sizeof(text) - start);
 }
 
 void suz_log_i64(int64_t value) {
@@ -179,6 +184,7 @@ void suz_log_end(void) {
 
 _Noreturn void suz_panic(const char *source, size_t line, size_t column, const char *reason) {
     lock_output();
+    output_level = SUZ_LOG_PANIC;
     write_text("panic ");
     write_text(source);
     write_text(":");

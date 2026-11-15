@@ -21,7 +21,7 @@ impl ExpectedDiagnostic {
             path.display(),
             self.line,
             self.column,
-            if warning { "warning: " } else { "" }
+            if warning { "warn: " } else { "" }
         );
         let Some(message) = stderr
             .strip_suffix('\n')
@@ -36,7 +36,7 @@ impl ExpectedDiagnostic {
         self.line == line
             && self.column == column
             && !message.contains(['\n', '\r'])
-            && !message.starts_with("warning:")
+            && !message.starts_with("warn:")
             && message
                 .strip_suffix(&format!(" [{}]", self.rule))
                 .is_some_and(|description| !description.trim().is_empty())

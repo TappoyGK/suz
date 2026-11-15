@@ -158,7 +158,8 @@ fn panic_runtime_delegates_diagnostic_fragments_and_exit_to_the_environment() {
 #include <string.h>
 static char text[256];
 static size_t used;
-void suz_env_log(const char *fragment, size_t len) {
+void suz_env_log(suz_log_level level, const char *fragment, size_t len) {
+    if (level != SUZ_LOG_PANIC) exit(4);
     if (len == 0 || len >= sizeof(text) - used) exit(2);
     memcpy(text + used, fragment, len);
     used += len;
@@ -194,14 +195,14 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "closed") == 0 || strcmp(argv[1], "closed-panic") == 0) {
         if (setvbuf(stderr, NULL, _IONBF, 0) != 0) return 3;
         if (getchar() != 'x') return 4;
-        suz_env_log("discarded\n", 10);
+        suz_env_log(SUZ_LOG_INFO, "discarded\n", 10);
         if (strcmp(argv[1], "closed-panic") == 0) suz_panic("sample.suz", 1, 1, "overflow");
         return 7;
     }
     static char buffer[1024];
     if (setvbuf(stderr, buffer, _IOFBF, sizeof(buffer)) != 0) return 5;
     char text[] = "copy\0bytes\n";
-    suz_env_log(text, sizeof(text) - 1);
+    suz_env_log(SUZ_LOG_INFO, text, sizeof(text) - 1);
     memset(text, 'x', sizeof(text));
     if (strcmp(argv[1], "panic") == 0) suz_panic("sample.suz", 3, 9, "integer overflow");
     return 7;
@@ -276,15 +277,15 @@ static void injected_clear(FILE *stream) { (void)stream; failed = 0; }
 #define clearerr injected_clear
 #include "suz_env.c"
 int main(void) {
-    suz_env_log("abcdef", 6);
+    suz_env_log(SUZ_LOG_INFO, "abcdef", 6);
     if (calls != 3 || used != 6 || memcmp(output, "abcdef", 6) != 0) return 3;
     used = 0;
     calls = 0;
     mode = 1;
-    suz_env_log("abcdef", 6);
+    suz_env_log(SUZ_LOG_INFO, "abcdef", 6);
     if (calls != 1 || used != 2 || memcmp(output, "ab", 2) != 0) return 4;
     mode = 2;
-    suz_env_log("XY", 2);
+    suz_env_log(SUZ_LOG_INFO, "XY", 2);
     if (calls != 2 || used != 4 || memcmp(output, "abXY", 4) != 0) return 5;
     return 0;
 }

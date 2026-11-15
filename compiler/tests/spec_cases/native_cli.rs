@@ -244,7 +244,8 @@ fn run_inherits_streams_and_cwd_and_cleans_up_after_signals() {
 #include <stdlib.h>
 void *suz_env_alloc(size_t size) { return malloc(size); }
 void suz_env_free(void *ptr) { free(ptr); }
-void suz_env_log(const char *s, size_t n) {
+void suz_env_log(suz_log_level level, const char *s, size_t n) {
+    (void)level;
     static int written; (void)s; (void)n;
     if (!written) { putchar(getchar()); written = 1; }
 }
@@ -272,7 +273,8 @@ _Noreturn void suz_env_panic(void) { exit(101); }
 #include <unistd.h>
 void *suz_env_alloc(size_t size) { return malloc(size); }
 void suz_env_free(void *ptr) { free(ptr); }
-void suz_env_log(const char *s, size_t n) {
+void suz_env_log(suz_log_level level, const char *s, size_t n) {
+    (void)level;
     (void)s; (void)n;
     FILE *f = fopen("ready", "w"); if (!f) exit(91);
     fputs("ready", f); fclose(f);

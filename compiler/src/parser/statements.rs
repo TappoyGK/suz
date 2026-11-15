@@ -33,6 +33,13 @@ impl Parser<'_, '_> {
     }
 
     fn statement(&mut self) -> Result<Statement, Diagnostic> {
+        let start = self.location();
+        let statement = self.statement_inner()?;
+        self.allow_clause(start, super::allows::statement_contains_block(&statement))?;
+        Ok(statement)
+    }
+
+    fn statement_inner(&mut self) -> Result<Statement, Diagnostic> {
         if self.in_value
             && matches!(
                 self.token().kind,
@@ -45,6 +52,7 @@ impl Parser<'_, '_> {
             ));
         }
         match self.token().kind {
+            Kind::Keyword("allow") => self.allow_block(),
             Kind::Keyword("or") => Err(self.error(
                 ErrorKind::InvalidSource,
                 "or cannot start a statement or continue the preceding line [src.or-line]",
@@ -128,7 +136,7 @@ impl Parser<'_, '_> {
                 self.cursor += 1;
                 if !matches!(
                     self.token().kind,
-                    Kind::Newline | Kind::Symbol("}") | Kind::End
+                    Kind::Newline | Kind::Symbol("}") | Kind::End | Kind::Keyword("allow")
                 ) {
                     return Err(self.error(
                         ErrorKind::InvalidSource,
@@ -257,7 +265,7 @@ impl Parser<'_, '_> {
                 self.cursor += 1;
                 if matches!(
                     self.token().kind,
-                    Kind::Newline | Kind::Symbol("}") | Kind::End
+                    Kind::Newline | Kind::Symbol("}") | Kind::End | Kind::Keyword("allow")
                 ) {
                     return Ok(Statement::Return(Expression {
                         kind: ExpressionKind::Void,

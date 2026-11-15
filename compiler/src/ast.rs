@@ -235,6 +235,7 @@ pub(crate) struct ConstDeclaration {
 }
 
 pub(crate) struct Program {
+    pub allows: Vec<crate::warnings::AllowScope>,
     pub structs: Vec<StructDeclaration>,
     pub enums: Vec<EnumDeclaration>,
     pub constants: Vec<ConstDeclaration>,
@@ -263,8 +264,15 @@ pub(crate) struct MatchArm<T = Vec<Statement>> {
     pub body: T,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum LogLevel {
+    Info,
+    Warn,
+}
+
 pub(crate) enum Statement {
     Log {
+        level: LogLevel,
         parts: Vec<TemplatePart<Expression>>,
         location: Location,
     },
