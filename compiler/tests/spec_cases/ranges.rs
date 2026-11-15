@@ -3,13 +3,47 @@ use crate::{integer_bounds::INTEGER_BOUNDS, test_util::TemporaryDirectory};
 use std::{fs, process::Command};
 
 fn assert_range_error(source: &str, line: usize, column: usize) {
+    assert_diagnostic(
+        source,
+        line,
+        column,
+        "range notation is only allowed in for [for.range]",
+    );
+}
+
+fn assert_diagnostic(source: &str, line: usize, column: usize, message: &str) {
     let error = suz::compile(source.as_bytes()).unwrap_err();
     assert_eq!(error.kind, suz::ErrorKind::InvalidSource, "{source}");
     assert_eq!((error.line, error.column), (line, column), "{source}");
-    assert_eq!(
-        error.message, "range notation is only allowed in for [for.range]",
-        "{source}"
-    );
+    assert_eq!(error.message, message, "{source}");
+}
+
+#[test]
+fn missing_range_end_at_eof_points_to_the_operator() {
+    for operator in ["..<", "..="] {
+        for (ending, column, message) in [
+            (
+                "",
+                15,
+                "expected an end bound after the range operator [for.range]",
+            ),
+            (
+                "\n",
+                15,
+                "range bounds must touch the range operator [for.range-spacing]",
+            ),
+            (
+                " ",
+                15,
+                "range bounds must touch the range operator [for.range-spacing]",
+            ),
+            ("3", 19, "expected '{' [syntax.grammar]"),
+            ("(3", 20, "expected ')' [syntax.grammar]"),
+        ] {
+            let source = format!("fn main() -> u8 {{\n    for i in 0{operator}{ending}");
+            assert_diagnostic(&source, 2, column, message);
+        }
+    }
 }
 
 #[test]

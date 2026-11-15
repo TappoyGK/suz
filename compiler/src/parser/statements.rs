@@ -75,6 +75,7 @@ impl Parser<'_, '_> {
                 self.cursor += 1;
                 self.expect(FixedToken::Keyword("in"))?;
                 let start = self.condition()?;
+                let range_location = self.location();
                 let inclusive = match self.token().kind {
                     Kind::Symbol("..<") => false,
                     Kind::Symbol("..=") => true,
@@ -86,6 +87,12 @@ impl Parser<'_, '_> {
                     }
                 };
                 self.cursor += 1;
+                if self.token().kind == Kind::End {
+                    return Err(range_location.error(
+                        ErrorKind::InvalidSource,
+                        "expected an end bound after the range operator [for.range]",
+                    ));
+                }
                 let end = self.condition()?;
                 let (body, _) = self.block()?;
                 Ok(Statement::For {
