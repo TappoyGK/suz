@@ -82,7 +82,7 @@ fn templates_validate_syntax_escapes_and_embedded_expressions() {
         ("log info `bad\\q`", "symbol.escape"),
         ("log info `first\nsecond`", "symbol.template-line"),
         ("log info `${1 // comment}`", "symbol.template-line"),
-        ("log error `text`", "log.syntax"),
+        ("log error `text`", "log.level"),
         ("log info 1", "log.syntax"),
         (
             "fix n: u16 = 2\nlog info `${n as u8 or return 1}`",
@@ -119,7 +119,7 @@ static _Thread_local int writer;
 static atomic_int owner;
 static atomic_int lines;
 void suz_env_log(const char *text, size_t len) {
-    if (len == 5 && memcmp(text, "info ", 5) == 0) {
+    if (len == 4 && (memcmp(text, "info", 4) == 0 || memcmp(text, "warn", 4) == 0)) {
         assert(atomic_exchange(&owner, writer) == 0);
     }
     assert(atomic_load(&owner) == writer);
@@ -133,7 +133,7 @@ _Noreturn void suz_env_panic(void) { abort(); }
 static void *work(void *arg) {
     writer = *(int *)arg;
     for (int i = 0; i < 100; ++i) {
-        suz_log_begin("thread.suz", 1);
+        suz_log_begin(writer == 1 ? "info" : "warn", "thread.suz", 1);
         suz_log_i64(-i);
         suz_log_bool(true);
         suz_log_end();

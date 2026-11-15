@@ -51,6 +51,40 @@ pub(crate) fn scan(
                 let mut depth = 1;
                 while cursor < bytes.len() {
                     match bytes[cursor] {
+                        ch if ch.is_ascii_alphabetic() || ch == b'_' => {
+                            let word_start = cursor;
+                            while bytes
+                                .get(cursor)
+                                .is_some_and(|ch| ch.is_ascii_alphanumeric() || *ch == b'_')
+                            {
+                                cursor += 1;
+                            }
+                            if &source[word_start..cursor] == "allow" {
+                                loop {
+                                    while bytes.get(cursor) == Some(&b' ')
+                                        || bytes.get(cursor) == Some(&b'\t')
+                                    {
+                                        cursor += 1;
+                                    }
+                                    if bytes.get(cursor) != Some(&b'[') {
+                                        break;
+                                    }
+                                    let item_column = column + source[..cursor].chars().count();
+                                    cursor +=
+                                        super::allows::scan(&source[cursor..], line, item_column)?;
+                                    while bytes.get(cursor) == Some(&b' ')
+                                        || bytes.get(cursor) == Some(&b'\t')
+                                    {
+                                        cursor += 1;
+                                    }
+                                    if bytes.get(cursor) != Some(&b',') {
+                                        break;
+                                    }
+                                    cursor += 1;
+                                }
+                            }
+                            continue;
+                        }
                         b'\n' => {
                             return Err(fail(
                                 cursor,

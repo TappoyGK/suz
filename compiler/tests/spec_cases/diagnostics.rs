@@ -23,7 +23,7 @@ fn diagnostic_expectations_are_strict() {
         correct.replace("decl.shadowing", "decl.duplicate"),
         correct.replace("example", "other"),
         format!("{correct}{correct}"),
-        correct.replace("name already", "warning: name already"),
+        correct.replace("name already", "warn: name already"),
     ] {
         assert!(!expected.matches(&wrong, path), "{wrong}");
     }
@@ -132,8 +132,8 @@ fn warning_diagnostics_match_locations_and_counts() {
         },
     ];
     let path = std::path::Path::new("test.suz");
-    let first = "test.suz:2:21: warning: integer negation [diagnostic.arithmetic]\n";
-    let second = "test.suz:4:17: warning: integer negation [diagnostic.arithmetic]\n";
+    let first = "test.suz:2:21: warn: integer negation [diagnostic.arithmetic]\n";
+    let second = "test.suz:4:17: warn: integer negation [diagnostic.arithmetic]\n";
     assert!(support::warnings_match(warnings, &[first, second], path));
     assert!(support::warnings_match(warnings, &[second, first], path));
     for wrong in [
@@ -142,7 +142,7 @@ fn warning_diagnostics_match_locations_and_counts() {
         vec![first, second, first],
         vec![
             first,
-            "test.suz:4:18: warning: integer negation [diagnostic.arithmetic]\n",
+            "test.suz:4:18: warn: integer negation [diagnostic.arithmetic]\n",
         ],
         vec![
             first,
@@ -150,11 +150,11 @@ fn warning_diagnostics_match_locations_and_counts() {
         ],
         vec![
             first,
-            "test.suz:4:17: warning: integer negation [other.rule]\n",
+            "test.suz:4:17: warn: integer negation [other.rule]\n",
         ],
         vec![
             first,
-            "other.suz:4:17: warning: integer negation [diagnostic.arithmetic]\n",
+            "other.suz:4:17: warn: integer negation [diagnostic.arithmetic]\n",
         ],
     ] {
         assert!(

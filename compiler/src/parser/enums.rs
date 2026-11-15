@@ -97,6 +97,7 @@ impl Parser<'_, '_> {
 // declarations. Function and expression blocks are skipped by delimiter depth.
 pub(super) fn collect(tokens: &[Token<'_>]) -> Result<Vec<EnumDeclaration>, Diagnostic> {
     let mut p = Parser {
+        allows: Vec::new(),
         tokens,
         enums: &[],
         structs: &[],

@@ -315,3 +315,87 @@ rawは定数式ではなく、i64からu8への変換にはorが必要。警告�
 | 通常 | `[expr.cast-handler]` | 3 | 21 |
 | 警告 | `[expr.cast-handler]` | 3 | 21 |
 | 強制 | `[expr.cast-handler]` | 3 | 21 |
+
+### diag-010 allowは警告を抑え、強制設定のエラーは抑えない
+
+主根拠：`[allow.clause]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix count: u8 = 3
+    fix next = count + 1 allow [diagnostic.arithmetic: count is 3]
+    return next
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 4 | 0 |
+| 警告 | 正常終了 | 4 | 0 |
+| 強制 | コンパイルエラー | — | 0 |
+
+演算は同じ結果を返し、警告だけを抑える。強制設定では演算子の位置を診断する。
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 強制 | `[diagnostic.arithmetic]` | 3 | 22 |
+
+### diag-011 ブロックを含む式の末尾にはallowを書けない
+
+主根拠：`[allow.contains-block]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix value = (expr { 1 + 2 }) allow [diagnostic.arithmetic: small]
+    return value
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+丸括弧で囲んでも、exprのブロックを含む文の末尾には指定できない。
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[allow.contains-block]` | 2 | 34 |
+
+### diag-012 警告設定を省略しても不要なallowを拒否する
+
+主根拠：`[allow.unused]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix value: u8 = 1 allow [diagnostic.arithmetic: no operation]
+    return value
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+警告対象の演算がないため、指定したallowを診断する。
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[allow.unused]` | 2 | 29 |

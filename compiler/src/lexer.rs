@@ -1,8 +1,10 @@
 use crate::{Diagnostic, ErrorKind};
+pub(crate) mod allows;
 pub(crate) mod templates;
 use std::ops::Range;
 
 const KEYWORDS: &[&str] = &[
+    "allow",
     "const",
     "fix",
     "var",
@@ -45,6 +47,7 @@ const SYMBOLS: &[&str] = &[
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Kind<'a> {
+    AllowItem(&'a str),
     Char(u32),
     Template(&'a str),
     Ident(&'a str),
@@ -242,6 +245,25 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
                 offset += 1;
                 line += 1;
                 column = 1;
+                continue;
+            }
+            '[' if matches!(tokens.last().map(|t| t.kind), Some(Kind::Keyword("allow")))
+                || (matches!(tokens.last().map(|t| t.kind), Some(Kind::Symbol(",")))
+                    && matches!(
+                        tokens.iter().rev().nth(1).map(|t| t.kind),
+                        Some(Kind::AllowItem(_))
+                    )) =>
+            {
+                let length = allows::scan(rest, line, column)?;
+                tokens.push(Token {
+                    kind: Kind::AllowItem(&rest[1..length - 1]),
+                    line,
+                    column,
+                    span: offset..offset + length,
+                });
+                offset += length;
+                column += rest[..length].chars().count();
+                continuation = false;
                 continue;
             }
             '\'' => {

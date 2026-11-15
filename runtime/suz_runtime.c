@@ -140,9 +140,10 @@ static void lock_output(void) {
     while (atomic_flag_test_and_set_explicit(&output_lock, memory_order_acquire)) {}
 }
 
-void suz_log_begin(const char *source, size_t line) {
+void suz_log_begin(const char *level, const char *source, size_t line) {
     lock_output();
-    write_text("info ");
+    write_text(level);
+    write_text(" ");
     write_text(source);
     write_text(":");
     write_position(line);

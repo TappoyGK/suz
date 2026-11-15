@@ -56,6 +56,8 @@ def verify(binary, version, cc, directory):
     if (view[1] or '?') != '😀' { return 9 }
     if (view as symbol) != `あ😀` { return 10 }
     if view != `あ😀` { return 11 }
+    fix count: u8 = 1 + 2 allow [diagnostic.arithmetic: bounded sum]
+    log warn `count: ${count}`
     return 7
 }
 enum Mode: u8 { First, Last }
@@ -82,6 +84,11 @@ struct Entry {
         result = run([copied, option], directory, without_tools)
         require(bool(result.stdout.strip()), f"empty {option} output")
     run([copied, "check", source], directory, without_tools)
+    result = run([copied, "check", source, "--warn-unhandled-arithmetic", "--log-allow"], directory, without_tools)
+    require(result.stderr.count(b": allowed:") == 1 and b"[diagnostic.arithmetic] bounded sum\n" in result.stderr,
+            "incorrect suppressed warning diagnostic")
+    warn_line = next(i for i, line in enumerate(source.read_text().splitlines(), 1) if "log warn" in line)
+    expected_log = f"info {source.name}:7: nan -0.0\nwarn {source.name}:{warn_line}: count: 3\n".encode()
     exported = directory / "exported"
     run([copied, "emit-c", source, "-o", exported], directory, without_tools)
     for path in ("program.c", "runtime/suz_env.c", "scripts/build-c.sh"):
@@ -90,7 +97,7 @@ struct Entry {
     for optimization in ("-O0", "-O2"):
         for command in ("build", "run"):
             for input_file, expected in ((source, 7), (panic, 101)):
-                args = [copied, command, input_file, optimization, "--cc", cc]
+                args = [copied, command, input_file, optimization, "--cc", cc, "--log-allow"]
                 if command == "build":
                     output = directory / f"{input_file.stem}{optimization}"
                     run([*args, "-o", output], directory, env)
@@ -100,7 +107,7 @@ struct Entry {
                 require(not result.stdout, "unexpected program stdout")
                 if expected == 7:
                     require(
-                        result.stderr == f"info {source.name}:7: nan -0.0\n".encode(),
+                        result.stderr == expected_log,
                         f"incorrect log: {result.stderr!r}",
                     )
                 else:
@@ -114,7 +121,7 @@ struct Entry {
         )
         result = run([exported / f"program{optimization}"], directory, env, 7)
         require(
-            not result.stdout and result.stderr == f"info {source.name}:7: nan -0.0\n".encode(),
+            not result.stdout and result.stderr == expected_log,
             f"incorrect exported program output: {result.stderr!r}",
         )
 
