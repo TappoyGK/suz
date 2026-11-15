@@ -8,25 +8,20 @@ use std::collections::BTreeSet;
 
 impl Parser<'_, '_> {
     pub(super) fn condition(&mut self) -> Result<Expression, Diagnostic> {
-        let expression = self.condition_prefix()?;
-        self.reject_range_value()?;
-        Ok(expression)
+        self.restricted_expression(true)
     }
 
-    pub(super) fn condition_prefix(&mut self) -> Result<Expression, Diagnostic> {
-        let previous = self.restricted_condition;
-        self.restricted_condition = true;
-        let result = self.expression_prefix();
-        self.restricted_condition = previous;
-        result
-    }
     pub(super) fn parenthesized_expression(&mut self) -> Result<Expression, Diagnostic> {
-        let previous = self.restricted_condition;
-        self.restricted_condition = false;
+        self.restricted_expression(false)
+    }
+
+    fn restricted_expression(&mut self, restricted: bool) -> Result<Expression, Diagnostic> {
+        let previous = std::mem::replace(&mut self.restricted_condition, restricted);
         let result = self.expression();
         self.restricted_condition = previous;
         result
     }
+
     fn field_declaration(&mut self) -> Result<StructField, Diagnostic> {
         let location = self.location();
         let Kind::Ident(name) = self.token().kind else {

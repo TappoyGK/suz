@@ -2,6 +2,16 @@ use crate::support::runtime_link;
 use crate::{integer_bounds::INTEGER_BOUNDS, test_util::TemporaryDirectory};
 use std::{fs, process::Command};
 
+fn assert_range_error(source: &str, line: usize, column: usize) {
+    let error = suz::compile(source.as_bytes()).unwrap_err();
+    assert_eq!(error.kind, suz::ErrorKind::InvalidSource, "{source}");
+    assert_eq!((error.line, error.column), (line, column), "{source}");
+    assert_eq!(
+        error.message, "range notation is only allowed in for [for.range]",
+        "{source}"
+    );
+}
+
 #[test]
 fn ranges_used_as_values_report_the_range_rule_at_the_operator() {
     for operator in ["..<", "..="] {
@@ -17,17 +27,7 @@ fn ranges_used_as_values_report_the_range_rule_at_the_operator() {
             let source = format!(
                 "fn main() -> u8 {{\n    {before}{operator}{after}\n    return 0\n}}\nfn identity(value: u8) -> u8 {{ return value }}"
             );
-            let error = suz::compile(source.as_bytes()).unwrap_err();
-            assert_eq!(error.kind, suz::ErrorKind::InvalidSource, "{source}");
-            assert_eq!(
-                (error.line, error.column),
-                (2, 5 + before.len()),
-                "{source}"
-            );
-            assert_eq!(
-                error.message, "range notation is only allowed in for [for.range]",
-                "{source}"
-            );
+            assert_range_error(&source, 2, 5 + before.len());
         }
     }
 }
@@ -50,22 +50,21 @@ fn range_misuse_is_diagnosed_in_other_expression_contexts() {
             "fn main() -> u8 { for i in 0..<3RANGE4 {}\nreturn 0 }",
             "fn main() -> u8 { fix value = 1 / 0 or 0RANGE3\nreturn 0 }",
             "fn main() -> u8 { fix value = 256 as u8 or 0RANGE3\nreturn 0 }",
+            "fn f() -> void {\n    fix x: u8 = 1 / 0 or returnRANGE3\n}\nfn main() -> u8 { return 0 }",
+            "fn f() -> void {\n    returnRANGE3\n}\nfn main() -> u8 { return 0 }",
+            "fn main() -> u8 { fix value = 1 +RANGE3\nreturn 0 }",
+            "fn main() -> u8 { log info `${(RANGE3)}`\nreturn 0 }",
+            "fn main() -> u8 {\n    for i in 0..<3 {}RANGE4\n    return 0\n}",
+            "fn main() -> u8 { if true {}RANGE4\nreturn 0 }",
+            "fn main() -> u8 { while false {}RANGE4\nreturn 0 }",
+            "fn main() -> u8 { match true { true => {}\nfalse => {} }RANGE4\nreturn 0 }",
         ] {
             let (before, _) = template.split_once("RANGE").unwrap();
             let source = template.replace("RANGE", operator);
-            let error = suz::compile(source.as_bytes()).unwrap_err();
-            assert_eq!(error.kind, suz::ErrorKind::InvalidSource, "{source}");
-            assert_eq!(
-                (error.line, error.column),
-                (
-                    before.lines().count(),
-                    before.rsplit('\n').next().unwrap().len() + 1
-                ),
-                "{source}"
-            );
-            assert_eq!(
-                error.message, "range notation is only allowed in for [for.range]",
-                "{source}"
+            assert_range_error(
+                &source,
+                before.lines().count(),
+                before.rsplit('\n').next().unwrap().len() + 1,
             );
         }
     }
