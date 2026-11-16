@@ -70,11 +70,7 @@ fn generated_c_and_runtime_reject_active_unsafe_math_macros() {
                 file.display()
             );
             let diagnostic = String::from_utf8_lossy(&output.stderr);
-            assert!(
-                diagnostic.contains("[runtime.float-environment]")
-                    || diagnostic.contains("FENV_ACCESS"),
-                "{diagnostic}"
-            );
+            assert!(diagnostic.contains("[runtime.unsafe-math]"), "{diagnostic}");
         }
     }
 }
@@ -100,7 +96,7 @@ fn build_command_rejects_uncontrolled_flags_before_compiling() {
             .output()
             .unwrap();
         assert_eq!(result.status.code(), Some(2));
-        assert!(String::from_utf8_lossy(&result.stderr).contains("[runtime.float-environment]"));
+        assert!(String::from_utf8_lossy(&result.stderr).contains("[tool.build-settings]"));
         assert!(!output.exists());
     }
     for variable in ["CFLAGS", "CPPFLAGS", "LDFLAGS", "SUZ_CFLAGS"] {
@@ -112,7 +108,14 @@ fn build_command_rejects_uncontrolled_flags_before_compiling() {
             .output()
             .unwrap();
         assert_eq!(result.status.code(), Some(2));
-        assert!(String::from_utf8_lossy(&result.stderr).contains(variable));
+        let diagnostic = String::from_utf8_lossy(&result.stderr);
+        assert!(diagnostic.contains(variable), "{diagnostic}");
+        let rule = if variable == "SUZ_CFLAGS" {
+            "[tool.extra-flags]"
+        } else {
+            "[tool.build-settings]"
+        };
+        assert!(diagnostic.contains(rule), "{diagnostic}");
         assert!(!output.exists());
     }
 }

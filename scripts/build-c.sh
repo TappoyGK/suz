@@ -33,13 +33,13 @@ while [[ $# -gt 0 ]]; do
             environment_set=true
             shift 2
             ;;
-        *) fail "Unsupported C build option: $1 [runtime.float-environment]" ;;
+        *) fail "Unsupported C build option: $1 [tool.build-settings]" ;;
     esac
 done
 [[ -n "$output_file" ]] || fail "$usage"
 [[ ! -e "$output_file" && ! -L "$output_file" ]] || fail 'Output path already exists.'
 for variable in CFLAGS CPPFLAGS LDFLAGS; do
-    [[ -z "${!variable:-}" ]] || fail "$variable is not accepted; use SUZ_CFLAGS and -O0 or -O2 [runtime.float-environment]"
+    [[ -z "${!variable:-}" ]] || fail "$variable is not accepted; use SUZ_CFLAGS and -O0 or -O2 [tool.build-settings]"
 done
 # シェルの展開は行わない。改行も区切りとし、各項目を独立した引数として保持する。
 extra_flags=()

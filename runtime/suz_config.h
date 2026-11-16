@@ -22,7 +22,7 @@
 
 /* フラグの指定履歴ではなく、最終的に危険な設定が残っている場合を拒否する。 */
 #if defined(__FAST_MATH__) || (defined(__FINITE_MATH_ONLY__) && __FINITE_MATH_ONLY__ > 0)
-#error "unsafe floating-point optimization [runtime.float-environment]"
+#error "unsafe floating-point optimization [runtime.unsafe-math]"
 #endif
 
 /* 入口で初期化した環境に従い、各演算を分離したまま実行する。
