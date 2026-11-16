@@ -23,16 +23,24 @@ def source_language(path):
     return None
 
 
-def source_counts(root):
-    """Git管理対象と未追跡のソースを調べる。生成物などの無視対象は除く。"""
+def repository_files(root):
+    """Git管理対象と無視されていない未追跡ファイルを、Git上の表記で返す。"""
     output = subprocess.check_output(
         ['git', 'ls-files', '--cached', '--others', '--exclude-standard', '-z'], cwd=root,
     )
+    names = set(output.decode('utf-8').split('\0')) - {''}
+    return {name for name in names if (root / name).is_file()}
+
+
+def source_counts(root, files=None):
+    """Gitのファイル一覧から対象ソースのコード行数を数える。"""
+    if files is None:
+        files = repository_files(root)
     counts = {}
-    for name in sorted(set(output.decode('utf-8').split('\0')) - {''}):
+    for name in sorted(files):
         language = source_language(name)
         path = root / name
-        if language and path.is_file():
+        if language:
             try:
                 counts[name] = code_lines(path.read_text(encoding='utf-8'), language)
             except ValueError as error:
@@ -40,7 +48,7 @@ def source_counts(root):
     return counts
 
 
-def read_exceptions(text, known_rules=None, *, root=None):
+def read_exceptions(text, known_rules=None, *, files=None):
     """共通の形式を検査し、行数検査が扱う例外だけを返す。"""
     document = tomllib.loads(text)
     if not document:
@@ -65,7 +73,7 @@ def read_exceptions(text, known_rules=None, *, root=None):
         path = PurePosixPath(name)
         if path.is_absolute() or '..' in path.parts or str(path) != name or name == '.':
             raise ValueError(f'Invalid exception path: {name}')
-        if root is not None and not (root / name).is_file():
+        if files is not None and name not in files:
             raise ValueError(f'{name}: exception source is missing [impl.exceptions]')
         if not isinstance(entry['reason'], str) or not entry['reason'].strip():
             raise ValueError(f'Missing exception reason: {name}')
@@ -112,6 +120,7 @@ def check_repository(root):
     """ソースの実測値と、レビュー対象となる例外一覧を照合する。"""
     rules = set(re.findall(r'\*\*\[(impl\.[a-z-]+)\]\*\*',
                            (root / 'docs/implementation.md').read_text(encoding='utf-8')))
-    exceptions = read_exceptions((root / EXCEPTIONS).read_text(encoding='utf-8'), rules, root=root)
-    counts = source_counts(root)
+    files = repository_files(root)
+    exceptions = read_exceptions((root / EXCEPTIONS).read_text(encoding='utf-8'), rules, files=files)
+    counts = source_counts(root, files)
     return counts, exceptions, check_counts(counts, exceptions)

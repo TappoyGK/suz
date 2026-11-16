@@ -216,6 +216,46 @@ class ExceptionTests(unittest.TestCase):
 
 
 class RepositoryTests(unittest.TestCase):
+    def test_exception_paths_match_git_files_exactly(self):
+        # [impl.exceptions] 規則によらずGitの一覧と照合し、大小文字の誤記や無視対象を拒否する。
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(['git', 'init', '-q', directory], check=True)
+            (root / 'docs').mkdir()
+            (root / 'docs/implementation.md').write_text(
+                '**[impl.format]**\n**[impl.file-length]**\n', encoding='utf-8')
+            (root / 'compiler/src').mkdir(parents=True)
+            source = root / 'compiler/src/example.rs'
+            source.write_text('code\n' * 510, encoding='utf-8')
+            subprocess.run(['git', '-C', directory, 'add', 'compiler/src/example.rs'], check=True)
+            (root / '.gitignore').write_text('compiler/src/ignored.rs\ntarget/\n', encoding='utf-8')
+            (root / 'compiler/src/new.rs').write_text('// new\n', encoding='utf-8')
+            (root / 'compiler/src/ignored.rs').write_text('// ignored\n', encoding='utf-8')
+            (root / 'target').mkdir()
+            (root / 'target/x.rs').write_text('// generated\n', encoding='utf-8')
+            config = root / EXCEPTIONS
+            config.parent.mkdir(parents=True)
+            for rule in ('impl.format', 'impl.file-length'):
+                entry = exception_text(rule=rule)
+                if rule != 'impl.file-length':
+                    entry = entry.replace('max_code_lines = 510\n', '')
+                for name in ('compiler/src/example.rs', 'compiler/src/new.rs'):
+                    with self.subTest(rule=rule, valid_path=name):
+                        config.write_text(entry.replace('compiler/src/example.rs', name), encoding='utf-8')
+                        check_repository(root)
+                for name in ('compiler/src/EXAMPLE.rs', 'compiler/src/NEW.rs',
+                             'compiler/src/ignored.rs', 'target/x.rs'):
+                    with self.subTest(rule=rule, invalid_path=name):
+                        config.write_text(entry.replace('compiler/src/example.rs', name), encoding='utf-8')
+                        with self.assertRaisesRegex(ValueError, 'exception source is missing'):
+                            check_repository(root)
+            # Git索引に残っていても、作業ツリーから削除されたファイルは拒否する。
+            source.unlink()
+            config.write_text(exception_text(rule='impl.format').replace(
+                'max_code_lines = 510\n', ''), encoding='utf-8')
+            with self.assertRaisesRegex(ValueError, 'exception source is missing'):
+                check_repository(root)
+
     def test_all_exception_rules_require_existing_files(self):
         # [impl.exceptions] 個別の規則の検査が未実装でも、対象の不在は拒否する。
         with tempfile.TemporaryDirectory() as directory:
