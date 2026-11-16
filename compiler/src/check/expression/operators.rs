@@ -81,33 +81,6 @@ pub(super) fn check(
             let arithmetic = matches!(&expr.kind, ExpressionKind::Negate(_))
                 || matches!(&expr.kind, ExpressionKind::Binary { operator, .. } if operator.is_arithmetic());
             let integer_arithmetic = arithmetic && ty.is_integer();
-            if matches!(&expr.kind, ExpressionKind::Negate(_))
-                && matches!(ty, Type::Integer(integer) if integer.bounds().0 == 0)
-            {
-                return Err(expr.location.error(
-                    ErrorKind::InvalidSource,
-                    crate::diagnostic!(
-                        "expr.operator-types",
-                        "integer negation requires a signed type"
-                    ),
-                ));
-            }
-            if matches!(&expr.kind, ExpressionKind::Negate(_)) && ty.symbolic() {
-                bindings.defer_rule(|i| {
-                    let Type::Integer(integer) = domain::at(ty, i)? else {
-                        return None;
-                    };
-                    (integer.bounds().0 == 0).then(|| {
-                        expr.location.error(
-                            ErrorKind::InvalidSource,
-                            crate::diagnostic!(
-                                "expr.operator-types",
-                                "integer negation requires a signed type"
-                            ),
-                        )
-                    })
-                });
-            }
             let integer_only = matches!(
                 &expr.kind,
                 ExpressionKind::Binary {
@@ -117,29 +90,46 @@ pub(super) fn check(
                     ..
                 }
             );
-            if (integer_only && !ty.is_integer())
-                || !(ty.is_integer() || (arithmetic && ty.is_float()))
-            {
-                return Err(expr.location.error(
-                    ErrorKind::InvalidSource,
-                    if ty == Type::Text {
-                        crate::diagnostic!(
-                            "text.operations",
-                            "text does not support arithmetic or bitwise operations"
-                        )
-                    } else if ty == Type::Symbol {
-                        crate::diagnostic!(
-                            "symbol.operations",
-                            "symbol does not support arithmetic or bitwise operations"
-                        )
-                    } else {
+            let type_error = |ty: Type| {
+                if matches!(&expr.kind, ExpressionKind::Negate(_))
+                    && matches!(ty, Type::Integer(integer) if integer.bounds().0 == 0)
+                {
+                    return Some(expr.location.error(
+                        ErrorKind::InvalidSource,
                         crate::diagnostic!(
                             "expr.operator-types",
-                            "invalid operand type for this operator"
-                        )
-                    },
-                ));
+                            "integer negation requires a signed type"
+                        ),
+                    ));
+                }
+                ((integer_only && !ty.is_integer())
+                    || !(ty.is_integer() || (arithmetic && ty.is_float())))
+                .then(|| {
+                    expr.location.error(
+                        ErrorKind::InvalidSource,
+                        match ty {
+                            Type::Text => crate::diagnostic!(
+                                "text.operations",
+                                "text does not support arithmetic or bitwise operations"
+                            ),
+                            Type::Symbol => crate::diagnostic!(
+                                "symbol.operations",
+                                "symbol does not support arithmetic or bitwise operations"
+                            ),
+                            _ => crate::diagnostic!(
+                                "expr.operator-types",
+                                "invalid operand type for this operator"
+                            ),
+                        },
+                    )
+                })
+            };
+            if !domain::judge_one(ty, |ty| type_error(ty).is_none()).possible() {
+                return Err(domain::indices()
+                    .find_map(|i| type_error(domain::at(ty, i)?))
+                    .expect("invalid operator type has a diagnostic"));
             }
+            bindings.defer_rule(|i| type_error(domain::at(ty, i)?));
             let value = match &expr.kind {
                 ExpressionKind::Negate(inner) => {
                     let operand = Box::new(numeric_operand(inner, ty, bindings)?);
@@ -166,7 +156,7 @@ pub(super) fn check(
                 } => {
                     let typed_left = operand_type(left, bindings);
                     let typed_right = operand_type(right, bindings);
-                    if ty.is_integer() {
+                    if domain::judge_one(ty, Type::is_integer).possible() {
                         for (operand, known) in [(left, typed_left), (right, typed_right)] {
                             if operator.is_shift() && std::ptr::eq(operand, right) {
                                 continue;
@@ -361,11 +351,14 @@ fn same_width(
             ),
         )
     };
-    if !domain::same(from, ty) {
+    if !domain::judge(from, ty, |from, to| !to.is_integer() || from == to).possible() {
         return Err(error());
     }
     if from.symbolic() || ty.symbolic() {
-        bindings.defer_rule(|i| (domain::at(from, i)? != domain::at(ty, i)?).then(error));
+        bindings.defer_rule(|i| {
+            let (from, to) = (domain::at(from, i)?, domain::at(ty, i)?);
+            (to.is_integer() && from != to).then(error)
+        });
     }
     Ok(())
 }
@@ -376,43 +369,28 @@ fn numeric_operand(
     ty: Type,
     bindings: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
-    if ty.is_float()
-        && !super::super::exact::is_operator(expr)
+    if !super::super::exact::is_operator(expr)
         && let Some(from) = operand_type(expr, bindings)
-        && from.is_integer()
-        && !super::super::exact::widening(from, ty)
     {
-        return Err(expr.location.error(
-            ErrorKind::InvalidSource,
-            crate::diagnostic!(
-                "arith.mix",
-                "integer operand is not losslessly convertible; use as"
-            ),
-        ));
+        let compatible = |from: Type, to: Type| {
+            !(from.is_integer() && to.is_float()) || super::super::exact::widening(from, to)
+        };
+        let error = || {
+            expr.location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "arith.mix",
+                    "integer operand is not losslessly convertible; use as"
+                ),
+            )
+        };
+        if !domain::judge(from, ty, compatible).possible() {
+            return Err(error());
+        }
+        bindings
+            .defer_rule(|i| (!compatible(domain::at(from, i)?, domain::at(ty, i)?)).then(error));
     }
-    if ty.is_float()
-        && !super::super::exact::is_operator(expr)
-        && let Some(from) = operand_type(expr, bindings)
-        && from.is_integer()
-        && (from.symbolic() || ty.symbolic())
-    {
-        bindings.defer_rule(|i| {
-            (!super::super::exact::widening(domain::at(from, i)?, domain::at(ty, i)?)).then(|| {
-                expr.location.error(
-                    ErrorKind::InvalidSource,
-                    crate::diagnostic!(
-                        "arith.mix",
-                        "integer operand is not losslessly convertible; use as"
-                    ),
-                )
-            })
-        });
-    }
-    let checked = if ty.is_float() {
-        super::coerced(expr, Some(ty), bindings)?
-    } else {
-        expression(expr, Some(ty), bindings)?
-    };
+    let checked = super::floating_operand(expr, ty, bindings)?;
     if ty.is_float()
         && let Value::IntegerArithmetic {
             operation: IntegerOperation::Exact(e),

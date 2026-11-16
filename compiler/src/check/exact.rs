@@ -286,30 +286,12 @@ pub(super) fn check(
             value: Value::Exact(Box::new(exact)),
         });
     }
-    if ty.is_float() {
-        let possible = domain::any(|i| {
-            let Some(Type::Float(float)) = domain::at(ty, i) else {
-                return false;
-            };
-            exact
-                .range_at(i)
-                .is_ok_and(|r| r.is_none_or(|r| r.exact_float(float == FloatType::F32)))
-        });
-        if !possible {
-            return Err(exact.location.error(
-                ErrorKind::InvalidSource,
-                crate::diagnostic!(
-                    "arith.store-float",
-                    "integer range is not exactly representable; use as"
-                ),
-            ));
-        }
-        bindings.defer_rule(|i| {
-            let Type::Float(float) = domain::at(ty, i)? else {
-                return None;
-            };
-            let range = exact.range_at(i).ok()?;
-            range
+    let storage_error = |i| {
+        let ty = domain::at(ty, i)?;
+        let range = exact.range_at(i).ok()?;
+        match ty {
+            Type::Integer(_) => None,
+            Type::Float(float) => range
                 .is_some_and(|r| !r.exact_float(float == FloatType::F32))
                 .then(|| {
                     exact.location.error(
@@ -319,17 +301,24 @@ pub(super) fn check(
                             "integer range is not exactly representable; use as"
                         ),
                     )
-                })
-        });
-    } else if !ty.is_integer() {
-        return Err(expr.location.error(
-            ErrorKind::InvalidSource,
-            crate::diagnostic!(
-                "type.expected",
-                "integer arithmetic requires a numeric destination"
-            ),
-        ));
+                }),
+            _ => Some(expr.location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "type.expected",
+                    "integer arithmetic requires a numeric destination"
+                ),
+            )),
+        }
+    };
+    // Missing type/range entries belong to an earlier deferred failure.
+    if !domain::any(|i| {
+        domain::at(ty, i).is_some() && exact.range_at(i).is_ok() && storage_error(i).is_none()
+    }) && let Some(error) = domain::indices().find_map(storage_error)
+    {
+        return Err(error);
     }
+    bindings.defer_rule(storage_error);
     let location = exact.location;
     Ok(CheckedExpression {
         ty,

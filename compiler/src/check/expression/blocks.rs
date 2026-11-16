@@ -34,6 +34,14 @@ pub(super) fn operand_type(
     value: &Expression,
     bindings: &Scope,
 ) -> Option<Type> {
+    super::operand_type(value, &local_hints(input, bindings))
+}
+
+pub(super) fn has_float_source(input: &[Statement], value: &Expression, bindings: &Scope) -> bool {
+    super::has_float_source(value, &local_hints(input, bindings))
+}
+
+fn local_hints(input: &[Statement], bindings: &Scope) -> Scope {
     // Discover only local types here. Running the statement checker would
     // repeatedly construct the entire nested argument before checking it again.
     // Names and values are validated once by check(); hints never report errors.
@@ -56,7 +64,7 @@ pub(super) fn operand_type(
                 .insert(name.clone(), statements::Binding::hint(ty, *location));
         }
     }
-    super::operand_type(value, &local)
+    local
 }
 
 pub(super) fn check(

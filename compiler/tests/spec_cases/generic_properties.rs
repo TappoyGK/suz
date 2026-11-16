@@ -71,6 +71,54 @@ fn generic_instantiations_agree_with_explicit_scalar_functions() {
 }
 
 #[test]
+fn mixed_branch_hints_preserve_scalar_literal_and_operator_rules() {
+    for value in [
+        "1",
+        "-0",
+        "300",
+        "1.0",
+        "n + n",
+        "x + x",
+        "-x",
+        "x / 2",
+        "n +% 1",
+        "n << 1",
+        "~n",
+        "n as float or 0",
+        "x as int or 0",
+        "expr { 1 }",
+        "ifexpr true { 1 } else { 2 }",
+    ] {
+        for expression in [
+            format!("ifexpr true {{ {value} }} elif false {{ n }} else {{ x }}"),
+            format!("ifexpr true {{ n }} elif false {{ {value} }} else {{ x }}"),
+            format!("ifexpr true {{ x }} elif false {{ n }} else {{ {value} }}"),
+        ] {
+            let body = format!("fn f(n: int, x: float) -> void {{ fix value = {expression} }}\n");
+            for (integer, _, _) in INTEGER_BOUNDS {
+                for float in ["f32", "f64"] {
+                    let main = format!(
+                        "fn main() -> u8 {{ fix n: {integer} = 1\nfix x: {float} = 1.0\nf(n, x)\nreturn 0 }}"
+                    );
+                    let scalar = body
+                        .replace(": int", &format!(": {integer}"))
+                        .replace(": float", &format!(": {float}"))
+                        .replace("as int", &format!("as {integer}"))
+                        .replace("as float", &format!("as {float}"));
+                    let expected = check(&format!("{scalar}{main}"));
+                    let actual = check(&format!("{body}{main}"));
+                    assert_eq!(
+                        actual.is_ok(),
+                        expected.is_ok(),
+                        "{expression}, {integer}/{float}: generic={actual:?}, scalar={expected:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn generic_argument_type_hints_preserve_value_block_bindings() {
     // Moving the binding into an expr block preserves its inferred type.
     for (integer, _, _) in INTEGER_BOUNDS {
@@ -199,6 +247,14 @@ fn invalid_generic_bodies_preserve_all_earlier_deferred_judgments() {
         "fix value = n * n * n",
         "fix value = ifexpr true { n } else { 300 }",
         "fix value = ifexpr true { n } else { x }",
+        "fix value = ifexpr true { 1 } elif false { n } else { x }",
+        "fix value = ifexpr true { n } elif false { x + x } else { x }",
+        "fix value = ifexpr true { n + n } else { x }",
+        "fix value = ifexpr true { n } elif false { 1.0 } else { x }",
+        "fix value = ifexpr true { n } elif false { ~n } else { x }",
+        "fix value = -(ifexpr true { n } elif false { 300 } else { x })",
+        "fix value = -(ifexpr true { n } else { expr { fix local = x\nlocal } })",
+        "fix value = -(ifexpr true { n } else { x as float or 0 })",
         "fix value = ifexpr true { x } else { n }",
         "fix value = `value=${expr { ifexpr true { x } else { n } }}`",
         "fix value = (ifexpr true { x } else { n }) as f32 or 0",

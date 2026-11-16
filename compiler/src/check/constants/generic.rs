@@ -44,11 +44,17 @@ fn substitute(value: &mut CheckedExpression, index: usize, scope: &Scope) -> Opt
         return None;
     }
     match &mut value.value {
-        Value::GenericFloatLiteral(text) => {
-            let Type::Float(ty) = value.ty else {
-                return None;
-            };
-            value.value = Value::Float(crate::check::expression::float_bits(text, ty)?);
+        Value::GenericNumericLiteral {
+            text,
+            negative,
+            floating,
+            location,
+        } => {
+            value.value = crate::check::expression::scalar_literal(
+                text, *negative, *floating, value.ty, *location,
+            )
+            .ok()?
+            .value;
         }
         Value::Template {
             parts, constant, ..

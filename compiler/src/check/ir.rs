@@ -125,7 +125,13 @@ impl IntegerOperation {
 
 #[derive(Clone)]
 pub(crate) enum Value {
-    GenericFloatLiteral(String), // Decimal spelling retained during generic checking only.
+    // Spelling retained until a scalar type determines the representation.
+    GenericNumericLiteral {
+        text: String,
+        negative: bool,
+        floating: bool,
+        location: Location,
+    },
     Exact(Box<super::exact::Exact>),
     TextView(Box<CheckedExpression>),
     Intern {
@@ -288,7 +294,7 @@ macro_rules! constant_children_visitor {
                     }
                     return handler(h, visit);
                 }
-                Self::GenericFloatLiteral(_) | Self::Integer { .. } | Self::Float(_)
+                Self::GenericNumericLiteral { .. } | Self::Integer { .. } | Self::Float(_)
                 | Self::Bool(_) | Self::Text { .. } => {}
                 Self::Local(_) | Self::Void | Self::Call { .. } | Self::Block { .. }
                 | Self::Match { .. } | Self::If { .. } | Self::CastReturn { .. } => return false,

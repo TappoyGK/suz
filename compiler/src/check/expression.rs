@@ -129,14 +129,19 @@ pub(super) fn has_float_source(expr: &Expression, bindings: &Scope) -> bool {
 
 fn has_float_source_inner(expr: &Expression, bindings: &Scope) -> bool {
     match &expr.kind {
+        ExpressionKind::Name(_) | ExpressionKind::Field { .. } | ExpressionKind::Cast { .. } => {
+            operand_type(expr, bindings).is_some_and(Type::is_float)
+        }
         ExpressionKind::Call { name, .. } => bindings
             .functions
             .get(name)
-            .is_some_and(|f| f.result == Type::GenericFloat),
+            .is_some_and(|f| f.result.is_float()),
         ExpressionKind::Match { arms, .. } => {
             arms.iter().any(|arm| has_float_source(&arm.body, bindings))
         }
-        ExpressionKind::Block { value, .. } => has_float_source(value, bindings),
+        ExpressionKind::Block { statements, value } => {
+            blocks::has_float_source(statements, value, bindings)
+        }
         ExpressionKind::Float(_) => true,
         ExpressionKind::ArithmeticHandler { operand: inner, .. }
         | ExpressionKind::Group(inner)
@@ -238,7 +243,7 @@ pub(super) fn expression(
     bindings: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
     let _hints = HintSession::new(bindings);
-    let checked = expression_inner(expr, expected, bindings, false, None)?;
+    let checked = expression_inner(expr, expected, bindings, Widening::None, None)?;
     super::text::register_constants(&checked, bindings);
     Ok(checked)
 }
@@ -250,7 +255,7 @@ pub(super) fn coerced(
     bindings: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
     let _hints = HintSession::new(bindings);
-    let checked = expression_inner(expr, expected, bindings, true, None)?;
+    let checked = expression_inner(expr, expected, bindings, Widening::All, None)?;
     super::text::register_constants(&checked, bindings);
     Ok(checked)
 }
@@ -264,7 +269,38 @@ pub(super) fn generic_argument(
     bindings: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
     let _hints = HintSession::new(bindings);
-    let checked = expression_inner(expr, Some(expected), bindings, true, Some(family))?;
+    let checked = expression_inner(expr, Some(expected), bindings, Widening::All, Some(family))?;
+    super::text::register_constants(&checked, bindings);
+    Ok(checked)
+}
+
+#[derive(Clone, Copy)]
+enum Widening {
+    None,
+    All,
+    FloatDestination,
+}
+impl Widening {
+    fn accepts(self, from: Type, to: Type) -> bool {
+        from == to
+            || (match self {
+                Self::None => false,
+                Self::All => true,
+                Self::FloatDestination => to.is_float(),
+            } && super::exact::widening(from, to))
+    }
+    fn possible(self, from: Type, to: Type) -> bool {
+        domain::judge(from, to, |from, to| self.accepts(from, to)).possible()
+    }
+}
+
+pub(super) fn floating_operand(
+    expr: &Expression,
+    ty: Type,
+    bindings: &Scope,
+) -> Result<CheckedExpression, Diagnostic> {
+    let _hints = HintSession::new(bindings);
+    let checked = expression_inner(expr, Some(ty), bindings, Widening::FloatDestination, None)?;
     super::text::register_constants(&checked, bindings);
     Ok(checked)
 }
@@ -273,7 +309,7 @@ fn expression_inner(
     expr: &Expression,
     required: Option<Type>,
     bindings: &Scope,
-    widen: bool,
+    widen: Widening,
     argument: Option<super::generic::Family>,
 ) -> Result<CheckedExpression, Diagnostic> {
     // Infer an incompatible family independently so that the outer parameter
@@ -346,86 +382,25 @@ fn expression_inner(
                 operators::check(expr, inference_hint, bindings)?
             }
             ExpressionKind::Cast { .. } => casts::check(expr, bindings)?,
-            ExpressionKind::Float(text) if inference_hint.is_some_and(Type::symbolic) => {
-                let ty = inference_hint.unwrap();
-                if !ty.is_float() {
-                    return Err(expr.location.error(
-                        ErrorKind::InvalidSource,
-                        crate::diagnostic!(
-                            "type.expected",
-                            "a floating-point literal requires a floating-point type"
-                        ),
-                    ));
-                }
-                symbolic_literal(text, false, ty, expr.location, bindings)?
-            }
-            ExpressionKind::Float(text) => {
-                let ty = match inference_hint {
-                    None => FloatType::F64,
-                    Some(Type::Float(ty)) => ty,
-                    _ => {
-                        return Err(expr.location.error(
-                            ErrorKind::InvalidSource,
-                            crate::diagnostic!(
-                                "type.expected",
-                                "a floating-point literal requires a floating-point type"
-                            ),
-                        ));
-                    }
-                };
-                float_literal(text, ty, expr.location)?
-            }
+            ExpressionKind::Float(text) => literal(
+                text,
+                false,
+                true,
+                inference_hint.unwrap_or(Type::Float(FloatType::F64)),
+                expr.location,
+                bindings,
+            )?,
             ExpressionKind::Match { .. } | ExpressionKind::If { .. } => {
                 branches::check(expr, inference_hint, bindings)?
             }
-            ExpressionKind::Integer { digits, negative }
-                if inference_hint.is_some_and(Type::symbolic) =>
-            {
-                symbolic_literal(
-                    digits,
-                    *negative,
-                    inference_hint.unwrap(),
-                    expr.location,
-                    bindings,
-                )?
-            }
-            ExpressionKind::Integer { digits, negative } => {
-                if let Some(Type::Float(ty)) = inference_hint {
-                    let text = if *negative {
-                        format!("-{digits}")
-                    } else {
-                        digits.clone()
-                    };
-                    return float_literal(&text, ty, expr.location);
-                }
-                let ty = match inference_hint {
-                    Some(Type::Float(_)) => unreachable!(),
-                    Some(
-                        Type::Numeric(_)
-                        | Type::GenericInt
-                        | Type::GenericFloat
-                        | Type::Exact
-                        | Type::Char
-                        | Type::Bool
-                        | Type::Void
-                        | Type::Enum(_)
-                        | Type::Struct(_)
-                        | Type::Symbol
-                        | Type::Text,
-                    ) => {
-                        return Err(expr.location.error(
-                            ErrorKind::InvalidSource,
-                            crate::diagnostic!(
-                                "type.expected",
-                                "an integer literal requires a numeric type"
-                            ),
-                        ));
-                    }
-                    Some(Type::Integer(ty)) => ty,
-                    None => IntegerType::I64,
-                };
-                integer_literal(digits, *negative, ty, expr.location)?
-            }
+            ExpressionKind::Integer { digits, negative } => literal(
+                digits,
+                *negative,
+                false,
+                inference_hint.unwrap_or(Type::Integer(IntegerType::I64)),
+                expr.location,
+                bindings,
+            )?,
 
             ExpressionKind::Char(value) => CheckedExpression {
                 ty: Type::Char,
@@ -462,20 +437,19 @@ fn expression_inner(
         if bindings.functions.get(name).is_some_and(|f| f.result.generic()));
     if let Some(to) = required
         && (to.symbolic() || checked.ty.symbolic())
-        && (domain::same(to, checked.ty) || (widen && super::exact::widening(checked.ty, to)))
+        && widen.possible(checked.ty, to)
     {
         bindings.defer_rule(|i| {
             let (from, to) = (domain::at(checked.ty, i)?, domain::at(to, i)?);
-            (!(from == to || (widen && super::exact::widening(from, to)))).then(|| {
+            (!widen.accepts(from, to)).then(|| {
                 conversion_error(expr.location, from, to, argument, generic_result, bindings)
             })
         });
     }
 
     if let Some(ty) = required
-        && widen
         && ty != checked.ty
-        && super::exact::widening(checked.ty, ty)
+        && widen.possible(checked.ty, ty)
     {
         return Ok(CheckedExpression {
             ty,
@@ -616,74 +590,91 @@ fn integer_literal_value(
     Ok(value)
 }
 
-// A literal is checked once. Width-dependent range failures are deferred;
-// the value keeps its symbolic type for the enclosing rule.
-fn symbolic_literal(
+// A literal rule uses the same scalar checker in ordinary and symbolic contexts.
+// Preserve spelling until substitution when its representation can vary by type.
+fn literal(
     text: &str,
     negative: bool,
+    floating: bool,
     ty: Type,
     location: Location,
     bindings: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
-    use domain::judge_one;
-    if ty.is_integer() {
-        let value = text
-            .parse::<i128>()
-            .ok()
-            .and_then(|n| if negative { n.checked_neg() } else { Some(n) });
-        if let Some(value) = value
-            && judge_one(ty, |t| {
-                let (lo, hi) = t.integer_bounds().unwrap();
-                value >= lo && value <= hi && (!negative || lo < 0)
-            })
-            .possible()
-        {
-            bindings.defer_rule(|i| {
-                let Type::Integer(ty) = domain::at(ty, i)? else {
-                    return None;
-                };
-                integer_literal_value(Some(value), negative, ty, location).err()
-            });
-            return Ok(CheckedExpression {
-                ty,
-                value: Value::Integer {
-                    value,
-                    minus: negative.then_some(location),
-                },
-            });
-        }
+    if !ty.symbolic() {
+        return scalar_literal(text, negative, floating, ty, location);
+    }
+    let results: [_; domain::NUMERIC_COMBINATIONS] = std::array::from_fn(|i| {
+        domain::at(ty, i).map(|ty| scalar_literal(text, negative, floating, ty, location))
+    });
+    let representative = results.iter().flatten().find_map(|r| r.as_ref().ok());
+    let Some(representative) = representative else {
+        // Keep declaration diagnostics symbolic, rather than naming an arbitrary
+        // scalar type. The range rule is otherwise the ordinary literal rule.
         return Err(location.error(
             ErrorKind::InvalidSource,
-            crate::diagnostic!("lit.range", "integer literal is out of range for int"),
+            if floating && !ty.is_float() {
+                crate::diagnostic!(
+                    "type.expected",
+                    "a floating-point literal requires a floating-point type"
+                )
+                .to_owned()
+            } else if ty.is_integer() {
+                crate::diagnostic!("lit.range", "integer literal is out of range for int")
+                    .to_owned()
+            } else {
+                crate::diagnostic!(
+                    "lit.float-range",
+                    "floating-point literal is out of range for float"
+                )
+                .to_owned()
+            },
         ));
-    }
-    if ty.is_float() {
-        let text = if negative {
-            format!("-{text}")
+    };
+    bindings.defer_rule(|i| results[i].as_ref()?.as_ref().err().cloned());
+    Ok(CheckedExpression {
+        ty,
+        value: if ty.is_integer() {
+            representative.value.clone()
         } else {
-            text.to_owned()
-        };
-        if domain::any(
-            |i| matches!(domain::at(ty, i), Some(Type::Float(t)) if float_bits(&text, t).is_some()),
-        ) {
-            bindings.defer_rule(|i| {
-                let Type::Float(ty) = domain::at(ty, i)? else {
-                    return None;
-                };
-                float_literal(&text, ty, location).err()
-            });
-            return Ok(CheckedExpression {
-                ty,
-                value: Value::GenericFloatLiteral(text),
-            });
+            Value::GenericNumericLiteral {
+                text: text.to_owned(),
+                negative,
+                floating,
+                location,
+            }
+        },
+    })
+}
+
+pub(in crate::check) fn scalar_literal(
+    text: &str,
+    negative: bool,
+    floating: bool,
+    ty: Type,
+    location: Location,
+) -> Result<CheckedExpression, Diagnostic> {
+    match ty {
+        Type::Integer(ty) if !floating => integer_literal(text, negative, ty, location),
+        Type::Float(ty) => {
+            if negative {
+                float_literal(&format!("-{text}"), ty, location)
+            } else {
+                float_literal(text, ty, location)
+            }
         }
-        return Err(location.error(
+        _ => Err(location.error(
             ErrorKind::InvalidSource,
-            crate::diagnostic!(
-                "lit.float-range",
-                "floating-point literal is out of range for float"
-            ),
-        ));
+            if floating {
+                crate::diagnostic!(
+                    "type.expected",
+                    "a floating-point literal requires a floating-point type"
+                )
+            } else {
+                crate::diagnostic!(
+                    "type.expected",
+                    "an integer literal requires a numeric type"
+                )
+            },
+        )),
     }
-    unreachable!("symbolic numeric type")
 }
