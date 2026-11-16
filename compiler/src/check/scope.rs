@@ -42,7 +42,7 @@ pub(super) struct Scope {
     pub mode: Mode,
     // Preserve universal cast policy in forward instances of an invalid body;
     // all other unconditional violations also fail under scalar substitution.
-    pub generic_error: Option<Rc<crate::Diagnostic>>,
+    pub forced_cast_policy: Option<crate::ast::Location>,
     // Persistent path from the initiating call to this instance.
     pub generic_calls: Option<Rc<super::generic::CallTrace>>,
     pub instances: Rc<std::cell::RefCell<super::generic::Instances>>,
@@ -95,7 +95,7 @@ impl Default for Scope {
     fn default() -> Self {
         Self {
             mode: Default::default(),
-            generic_error: None,
+            forced_cast_policy: None,
             generic_calls: None,
             instances: Rc::default(),
             type_hints: Rc::default(),

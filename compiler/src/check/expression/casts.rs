@@ -279,11 +279,11 @@ pub(in crate::check) fn require_handler(
 ) -> Result<(), Diagnostic> {
     // [num.fn-cast] is a universal policy. A forward instance must stop at
     // the known policy failure even when this scalar conversion is safe.
-    if let Some(error) = &scope.generic_error
-        && error.rule() == "num.fn-cast"
-        && (error.line, error.column) == (location.line, location.column)
+    if scope
+        .forced_cast_policy
+        .is_some_and(|site| (site.line, site.column) == (location.line, location.column))
     {
-        return Err(error.as_ref().clone());
+        return CastRisk::Dynamic.require_handler_for(location, true);
     }
     if type_safe {
         return Ok(());

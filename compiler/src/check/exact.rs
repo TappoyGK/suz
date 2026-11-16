@@ -44,6 +44,17 @@ impl Exact {
             _ => {}
         }
     }
+    pub fn leaves_mut(&mut self, f: &mut impl FnMut(&mut CheckedExpression)) {
+        match &mut self.kind {
+            ExactKind::Leaf(e) => f(e),
+            ExactKind::Negate(e) => e.leaves_mut(f),
+            ExactKind::Binary(_, a, b) => {
+                a.leaves_mut(f);
+                b.leaves_mut(f);
+            }
+            _ => {}
+        }
+    }
 }
 pub(super) fn is_operator(expr: &Expression) -> bool {
     match &expr.kind {

@@ -22,28 +22,42 @@ pub(in crate::check) fn at(
     evaluate(&value)
 }
 
-fn exact(value: &mut Exact, index: usize, scope: &Scope) -> Option<()> {
+// Exact ranges and template renderings are derived metadata. Update these
+// around the common child walk; the list of Value children lives only in IR.
+fn exact_ranges(value: &mut Exact, index: usize) -> Option<()> {
     value.range = value.range_at(index).ok()?;
     value.domains = None;
     match &mut value.kind {
-        ExactKind::Literal(_) => {}
-        ExactKind::Leaf(value) => substitute(value, index, scope)?,
-        ExactKind::Negate(value) => exact(value, index, scope)?,
+        ExactKind::Negate(value) => exact_ranges(value, index)?,
         ExactKind::Binary(_, a, b) => {
-            exact(a, index, scope)?;
-            exact(b, index, scope)?;
+            exact_ranges(a, index)?;
+            exact_ranges(b, index)?;
         }
+        ExactKind::Literal(_) | ExactKind::Leaf(_) => {}
     }
     Some(())
 }
-fn handler(value: &mut Option<CheckedHandler>, index: usize, scope: &Scope) -> Option<()> {
-    if let Some(CheckedHandler::Value(value)) = value {
-        substitute(value, index, scope)?;
-    }
-    Some(())
-}
+
 fn substitute(value: &mut CheckedExpression, index: usize, scope: &Scope) -> Option<()> {
     value.ty = domain::at(value.ty, index)?;
+    if let Value::Exact(exact)
+    | Value::IntegerArithmetic {
+        operation: IntegerOperation::Exact(exact),
+        ..
+    } = &mut value.value
+    {
+        exact_ranges(exact, index)?;
+    }
+    let mut result = Some(());
+    let admitted = value.value.visit_constant_children_mut(&mut |child| {
+        if result.is_some() {
+            result = substitute(child, index, scope);
+        }
+    });
+    if !admitted {
+        return None;
+    }
+    result?;
     match &mut value.value {
         Value::GenericFloatLiteral(text) => {
             let Type::Float(ty) = value.ty else {
@@ -51,88 +65,12 @@ fn substitute(value: &mut CheckedExpression, index: usize, scope: &Scope) -> Opt
             };
             value.value = Value::Float(crate::check::expression::float_bits(text, ty)?);
         }
-        Value::Exact(e) => exact(e, index, scope)?,
-        Value::Cast(e)
-        | Value::Negate(e)
-        | Value::Truncate(e)
-        | Value::BitNot(e)
-        | Value::Not(e)
-        | Value::TextView(e)
-        | Value::Field { target: e, .. }
-        | Value::Intern { operand: e, .. } => substitute(e, index, scope)?,
-        Value::CheckedCast {
-            operand,
-            fallback,
-            constant_struct,
-            ..
-        } => {
-            substitute(operand, index, scope)?;
-            substitute(fallback, index, scope)?;
-            if let Some(value) = constant_struct {
-                substitute(value, index, scope)?;
-            }
-        }
-        Value::Binary { left, right, .. } | Value::Logical { left, right, .. } => {
-            substitute(left, index, scope)?;
-            substitute(right, index, scope)?;
-        }
-        Value::Comparison { operands, .. } => {
-            for e in operands {
-                substitute(e, index, scope)?;
-            }
-        }
-        Value::Struct { fields } => {
-            for (_, e) in fields {
-                substitute(e, index, scope)?;
-            }
-        }
         Value::Template {
             parts, constant, ..
         } => {
-            for part in parts.iter_mut() {
-                if let crate::ast::TemplatePart::Value(e) = part {
-                    substitute(e, index, scope)?;
-                }
-            }
             *constant = crate::check::text::constant_parts(parts, scope);
         }
-        Value::Slice {
-            target,
-            start,
-            end,
-            handler: h,
-            ..
-        } => {
-            substitute(target, index, scope)?;
-            for e in [start, end].into_iter().flatten() {
-                substitute(e, index, scope)?;
-            }
-            handler(h, index, scope)?;
-        }
-        Value::IntegerArithmetic {
-            operation,
-            handler: h,
-            ..
-        } => {
-            match operation {
-                IntegerOperation::Exact(e) => exact(e, index, scope)?,
-                IntegerOperation::Binary { left, right, .. } => {
-                    substitute(left, index, scope)?;
-                    substitute(right, index, scope)?;
-                }
-                IntegerOperation::Negate(e) => substitute(e, index, scope)?,
-                IntegerOperation::NegatedLiteral(_) => {}
-            }
-            handler(h, index, scope)?;
-        }
-        Value::Integer { .. } | Value::Float(_) | Value::Bool(_) | Value::Text { .. } => {}
-        Value::Void
-        | Value::Local(_)
-        | Value::Call { .. }
-        | Value::Block { .. }
-        | Value::Match { .. }
-        | Value::If { .. }
-        | Value::CastReturn { .. } => return None,
+        _ => {}
     }
     Some(())
 }

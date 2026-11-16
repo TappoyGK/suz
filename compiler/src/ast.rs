@@ -126,11 +126,14 @@ pub(crate) enum ScalarType {
     Float(FloatType),
 }
 
+// Number of independent int/float substitutions in an internal type function.
+pub(crate) const NUMERIC_COMBINATIONS: usize = 16;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Type {
     GenericInt,
     GenericFloat,
-    Numeric([Option<ScalarType>; crate::check::generic::domain::COUNT]), // Internal type function of int and float.
+    Numeric([Option<ScalarType>; NUMERIC_COMBINATIONS]), // Internal type function of int and float.
     Exact, // Internal mathematical integer; never a source-level storage type.
     Struct(usize),
     Enum(EnumType),

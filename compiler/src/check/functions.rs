@@ -43,7 +43,10 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     let mut functions = Vec::new();
     for (id, function) in program.functions.iter().enumerate() {
         if globals.functions[&function.name].is_generic() {
-            warnings.extend(analyze_once(function, id, &globals)?);
+            match analyze_once(function, id, &globals).as_ref() {
+                Ok(found) => warnings.extend(found.iter().copied()),
+                Err(error) => return Err(error.clone()),
+            }
             continue;
         }
         let result = check_function(function, globals.clone(), id);
@@ -89,17 +92,40 @@ fn analyze_once(
     function: &crate::ast::Function,
     id: usize,
     scope: &Scope,
-) -> Result<Vec<crate::ast::Location>, Diagnostic> {
+) -> Rc<Result<Vec<crate::ast::Location>, Diagnostic>> {
     if let Some(result) = scope.instances.borrow().analyzed_functions.get(&id) {
         return result.clone();
     }
-    let result = super::generic::analyze(function, scope);
+    let result = Rc::new(super::generic::analyze(function, scope));
     scope
         .instances
         .borrow_mut()
         .analyzed_functions
         .insert(id, result.clone());
     result
+}
+
+// The symbolic pass establishes the declaration failure. Concrete checking
+// must still report any earlier deferred failure, including another rule at
+// the same source position. Universal cast policy is retained in the scope.
+fn reaches_declaration_failure<T>(
+    known: Option<&Diagnostic>,
+    result: &Result<T, Diagnostic>,
+) -> bool {
+    let Some(known) = known else {
+        return false;
+    };
+    debug_assert!(
+        result.is_err(),
+        "an invalid generic body must fail concrete checking"
+    );
+    match result {
+        Err(error) => {
+            (error.line, error.column, error.rule()) == (known.line, known.column, known.rule())
+        }
+        // Keep invalid IR out of code generation even in builds without assertions.
+        Ok(_) => true,
+    }
 }
 
 fn check_instances(
@@ -139,26 +165,21 @@ fn check_instances(
                 let function = &program.functions[instance.function];
                 // Forward calls need the generic result, but an unconditional
                 // error belongs to the declaration's turn, not to this call.
-                let generic_error = analyze_once(function, instance.function, globals).err();
+                let analysis = analyze_once(function, instance.function, globals);
+                let generic_error = analysis.as_ref().as_ref().err();
                 let mut context = globals.clone();
                 context.generic_calls = Some(instance.calls.clone());
                 context.mode = super::scope::Mode::Instance(instance.types);
-                context.generic_error = generic_error.clone().map(Rc::new);
+                context.forced_cast_policy = generic_error
+                    .filter(|error| error.rule() == "num.fn-cast")
+                    .map(|error| crate::ast::Location {
+                        line: error.line,
+                        column: error.column,
+                    });
                 // Rebuild concrete IR with the shared checker. Once generic
                 // checking succeeds, only deferred rules can fail here.
                 let result = check_function(function, context, instance.id);
-                let blocked = generic_error.as_ref().is_some_and(|known| match &result {
-                    Err(error) => {
-                        (error.line, error.column, error.rule())
-                            == (known.line, known.column, known.rule())
-                    }
-                    Ok(_) => true,
-                });
-                // The symbolic pass established this universal failure. Match
-                // its site AND rule to distinguish an earlier deferred rule at
-                // the same position (call resolution before a bool constraint).
-                // Report the cached failure when visiting its declaration.
-                if !blocked {
+                if !reaches_declaration_failure(generic_error, &result) {
                     tasks.push(Task::Finish(instance, result));
                 }
                 tasks.extend(

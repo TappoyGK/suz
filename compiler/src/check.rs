@@ -5,7 +5,7 @@ mod diagnostics;
 pub(crate) mod exact;
 mod expression;
 mod functions;
-pub(crate) mod generic;
+mod generic;
 pub(crate) mod ir;
 mod matches;
 mod ranges;

@@ -4,7 +4,7 @@
 //! enumerate only a rule's scalar inputs, never replay statements or expressions.
 use crate::ast::{FloatType, IntegerType, ScalarType, Type};
 
-pub(crate) const COUNT: usize = 16;
+pub(crate) use crate::ast::NUMERIC_COMBINATIONS as COUNT;
 pub(crate) fn indices() -> std::ops::Range<usize> {
     0..COUNT
 }

@@ -524,6 +524,9 @@ pub(super) fn is_constant(expr: &CheckedExpression) -> bool {
 
 // A value depends on a generic type through its result/range or a constant
 // subexpression. Concrete intermediate casts do not erase that dependence.
+// The direct type/range check also covers nonconstant values (parameters and
+// exact expressions containing them): constant_kind deliberately classifies
+// those as Nonconstant even when their type depends on a substitution.
 pub(super) fn depends_on_generic(expr: &CheckedExpression) -> bool {
     expr.ty.symbolic()
         || expr.value.symbolic_range()

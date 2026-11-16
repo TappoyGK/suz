@@ -707,3 +707,33 @@ fn deferred_and_universal_failures_at_one_expression_keep_distinct_rules() {
         "num.fn-body",
     );
 }
+
+#[test]
+fn forward_generic_cast_policy_survives_scalar_safe_intermediate_casts() {
+    for expression in [
+        "(300 as% int) @as u8",
+        "(300 as int or 0) @as u8",
+        "((300 as% int) as u16 or 0) @as u8",
+        "(((300 as% int) as u16 or 0) as i64 or 0) @as u8",
+    ] {
+        for (ty, _, _) in crate::integer_bounds::INTEGER_BOUNDS {
+            let declaration = format!("fn f(n: int) -> u8 {{ return {expression} }}");
+            // The universal policy failure is retained even for u8/i8, where
+            // wrapping or a fallback makes the final scalar cast safe.
+            marked_error(
+                &format!(
+                    "fn main() -> u8 {{ fix n: {ty} = 1\nfix value = f(n)\nreturn 0 }}\n{declaration}"
+                ),
+                "num.fn-cast",
+            );
+            // Reporting that declaration still waits for earlier functions.
+            marked_error(
+                &format!(
+                    "fn main() -> u8 {{ fix n: {ty} = 1\nfix value = f(n)\nfix invalid: bool = @1\nreturn 0 }}\n{}",
+                    declaration.replace('@', "")
+                ),
+                "type.expected",
+            );
+        }
+    }
+}

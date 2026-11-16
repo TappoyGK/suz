@@ -20,23 +20,32 @@ fn main() -> u8 { return 0 }
 
 "#;
 
+const ONE_CASE_INVENTORY: &str = r#"## 目次と件数
+
+| 分野 | ID接頭辞 | 対応する仕様 | 件数 |
+|---|---|---|---:|
+| 例 | `lex` | 任意 | 1 |
+| 合計 | | | 1 |
+
+### 結果別件数
+
+| 結果 | 件数 |
+|---|---:|
+| 受理 | 1 |
+| コンパイルエラー | 0 |
+| 実行時パニック | 0 |
+| 診断設定の比較 | 0 |
+| 合計 | 1 |
+
+"#;
+
 #[test]
 fn split_catalog_checks_cross_file_duplicates_and_missing_cases() {
     use crate::{support::catalog, test_util::TemporaryDirectory};
     use std::fs;
 
     let directory = TemporaryDirectory::new();
-    fs::write(
-        directory.0.join("spec-cases.md"),
-        r#"## 目次と件数
-
-| 分野 | ID接頭辞 | 対応する仕様 | 件数 |
-|---|---|---|---:|
-| 字句 | `lex` | 第3章 | 1 |
-| 合計 | | | 1 |
-"#,
-    )
-    .unwrap();
+    fs::write(directory.0.join("spec-cases.md"), ONE_CASE_INVENTORY).unwrap();
     let cases = directory.0.join("spec-cases");
     fs::create_dir(&cases).unwrap();
     fs::write(cases.join("lex.md"), SMALL).unwrap();
@@ -159,7 +168,7 @@ fn malformed_expectation_tables_are_rejected() {
         ),
         (
             SMALL.replace(row, "| 通常 | 正常終了 | 0 | 0 | extra |"),
-            "four table columns",
+            "4 table columns",
         ),
         (
             format!(
@@ -252,24 +261,46 @@ fn cases_and_modes_come_from_the_document() {
 
 #[test]
 fn inventory_is_checked_against_the_parsed_cases() {
-    let inventory = "## 目次と件数\n\n| 分野 | ID接頭辞 | 対応する仕様 | 件数 |\n|---|---|---|---:|\n| 例 | `lex` | 任意 | 1 |\n| 合計 | | | 1 |\n\n## 例\n\n";
-    let doc = format!("{inventory}{SMALL}");
+    let doc = format!("{ONE_CASE_INVENTORY}{SMALL}");
     let cases = extract(&doc).unwrap();
     validate_inventory(&doc, &cases).unwrap();
     for bad in [
         doc.replace("任意 | 1", "任意 | 2"),
-        doc.replace("合計 | | | 1", "合計 | | | 2"),
+        doc.replace("合計 | | | 1", "合計 | | | 2")
+            .replace("| 受理 | 1 |", "| 受理 | 2 |")
+            .replace("| 合計 | 1 |", "| 合計 | 2 |"),
         doc.replace("`lex`", "`other`"),
+        doc.replace("| 受理 | 1 |", "| 受理 | 0 |")
+            .replace("| コンパイルエラー | 0 |", "| コンパイルエラー | 1 |"),
+        doc.replace("| 合計 | 1 |", "| 合計 | 2 |"),
+        doc.replace("| 受理 | 1 |", "| 受理 | 1 |\n| 受理 | 1 |"),
+        doc.replace("### 結果別件数", "### その他"),
+        doc.replace("| 実行時パニック | 0 |\n", ""),
+        doc.replace("| 受理 | 1 |", "| 受理 |"),
     ] {
         assert!(validate_inventory(&bad, &cases).is_err());
     }
     let extended = format!(
         "{}{}",
         doc.replace("任意 | 1", "任意 | 2")
-            .replace("合計 | | | 1", "合計 | | | 2"),
+            .replace("合計 | | | 1", "合計 | | | 2")
+            .replace("| 受理 | 1 |", "| 受理 | 2 |")
+            .replace("| 合計 | 1 |", "| 合計 | 2 |"),
         SMALL.replace("lex-001", "lex-002")
     );
     validate_inventory(&extended, &extract(&extended).unwrap()).unwrap();
+    // Two settings count as one comparison case even when both exit normally.
+    let compared = format!(
+        "{}{}",
+        ONE_CASE_INVENTORY
+            .replace("| 受理 | 1 |", "| 受理 | 0 |")
+            .replace("| 診断設定の比較 | 0 |", "| 診断設定の比較 | 1 |"),
+        SMALL.replace(
+            "| 通常 | 正常終了 | 0 | 0 |",
+            "| 通常 | 正常終了 | 0 | 0 |\n| 警告 | 正常終了 | 0 | 0 |"
+        )
+    );
+    validate_inventory(&compared, &extract(&compared).unwrap()).unwrap();
 }
 
 #[test]

@@ -212,96 +212,92 @@ pub(crate) enum Value {
     Local(usize),
 }
 
-impl Value {
-    // Visit the children admitted by the constant-expression grammar. Exact
-    // leaves and value handlers are children too; a return handler is not a
-    // constant expression. The caller combines properties in one traversal.
-    pub fn visit_constant_children(&self, visit: &mut impl FnMut(&CheckedExpression)) -> bool {
-        let handler = |handler: &Option<CheckedHandler>,
-                       visit: &mut dyn FnMut(&CheckedExpression)| {
-            match handler {
-                None => true,
-                Some(CheckedHandler::Value(value)) => {
-                    visit(value);
-                    true
+// Keep the read-only and mutable constant grammar in one definition. The
+// mutability and Exact leaf visitor are the only differences between them.
+macro_rules! constant_children_visitor {
+    ($name:ident, ($($mutable:tt)?), $leaves:ident) => {
+        pub fn $name(
+            &$($mutable)? self,
+            visit: &mut impl FnMut(&$($mutable)? CheckedExpression),
+        ) -> bool {
+            let handler = |handler: &$($mutable)? Option<CheckedHandler>,
+                           visit: &mut dyn FnMut(&$($mutable)? CheckedExpression)| {
+                match handler {
+                    None => true,
+                    Some(CheckedHandler::Value(value)) => {
+                        visit(value);
+                        true
+                    }
+                    Some(CheckedHandler::Return(_)) => false,
                 }
-                Some(CheckedHandler::Return(_)) => false,
-            }
-        };
-        match self {
-            Self::Exact(exact) => exact.leaves(visit),
-            Self::IntegerArithmetic {
-                operation,
-                handler: h,
-                ..
-            } => {
-                match operation {
-                    IntegerOperation::Exact(exact) => exact.leaves(visit),
-                    _ => operation.operands().for_each(&mut *visit),
+            };
+            match self {
+                Self::Exact(exact) => exact.$leaves(visit),
+                Self::IntegerArithmetic { operation, handler: h, .. } => {
+                    match operation {
+                        IntegerOperation::Exact(exact) => exact.$leaves(visit),
+                        IntegerOperation::Binary { left, right, .. } => {
+                            visit(left);
+                            visit(right);
+                        }
+                        IntegerOperation::Negate(value) => visit(value),
+                        IntegerOperation::NegatedLiteral(_) => {}
+                    }
+                    return handler(h, visit);
                 }
-                return handler(h, visit);
-            }
-            Self::Cast(v)
-            | Self::Negate(v)
-            | Self::Truncate(v)
-            | Self::BitNot(v)
-            | Self::Not(v)
-            | Self::TextView(v)
-            | Self::Intern { operand: v, .. }
-            | Self::Field { target: v, .. } => visit(v),
-            Self::CheckedCast {
-                operand,
-                fallback,
-                constant_struct,
-                ..
-            } => {
-                visit(operand);
-                visit(fallback);
-                if let Some(value) = constant_struct {
-                    visit(value);
+                Self::Cast(v) | Self::Negate(v) | Self::Truncate(v) | Self::BitNot(v)
+                | Self::Not(v) | Self::TextView(v) | Self::Intern { operand: v, .. }
+                | Self::Field { target: v, .. } => visit(v),
+                // constant_struct is a derived, concrete cache of parsing the
+                // operand, not a source operand. It cannot contain generic types:
+                // struct fields have concrete types ([num.places]).
+                Self::CheckedCast { operand, fallback, .. } => {
+                    visit(operand);
+                    visit(fallback);
                 }
-            }
-            Self::Binary { left, right, .. } | Self::Logical { left, right, .. } => {
-                visit(left);
-                visit(right);
-            }
-            Self::Comparison { operands, .. } => operands.iter().for_each(visit),
-            Self::Template { parts, .. } => {
-                for part in parts {
-                    if let crate::ast::TemplatePart::Value(value) = part {
+                Self::Binary { left, right, .. } | Self::Logical { left, right, .. } => {
+                    visit(left);
+                    visit(right);
+                }
+                Self::Comparison { operands, .. } => {
+                    for value in operands {
                         visit(value);
                     }
                 }
-            }
-            Self::Struct { fields } => fields.iter().for_each(|(_, v)| visit(v)),
-            Self::Slice {
-                target,
-                start,
-                end,
-                handler: h,
-                ..
-            } => {
-                visit(target);
-                for value in [start, end].into_iter().flatten() {
-                    visit(value);
+                Self::Template { parts, .. } => {
+                    for part in parts {
+                        if let crate::ast::TemplatePart::Value(value) = part {
+                            visit(value);
+                        }
+                    }
                 }
-                return handler(h, visit);
+                Self::Struct { fields } => {
+                    for (_, value) in fields {
+                        visit(value);
+                    }
+                }
+                Self::Slice { target, start, end, handler: h, .. } => {
+                    visit(target);
+                    for value in [start, end].into_iter().flatten() {
+                        visit(value);
+                    }
+                    return handler(h, visit);
+                }
+                Self::GenericFloatLiteral(_) | Self::Integer { .. } | Self::Float(_)
+                | Self::Bool(_) | Self::Text { .. } => {}
+                Self::Local(_) | Self::Void | Self::Call { .. } | Self::Block { .. }
+                | Self::Match { .. } | Self::If { .. } | Self::CastReturn { .. } => return false,
             }
-            Self::GenericFloatLiteral(_)
-            | Self::Integer { .. }
-            | Self::Float(_)
-            | Self::Bool(_)
-            | Self::Text { .. } => {}
-            Self::Local(_)
-            | Self::Void
-            | Self::Call { .. }
-            | Self::Block { .. }
-            | Self::Match { .. }
-            | Self::If { .. }
-            | Self::CastReturn { .. } => return false,
+            true
         }
-        true
-    }
+    };
+}
+
+impl Value {
+    // Exact leaves and value handlers are children too; return handlers are
+    // outside the constant-expression grammar.
+    constant_children_visitor!(visit_constant_children, (), leaves);
+    constant_children_visitor!(visit_constant_children_mut, (mut), leaves_mut);
 
     pub fn symbolic_range(&self) -> bool {
         match self {
