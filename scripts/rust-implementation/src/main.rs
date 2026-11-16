@@ -290,17 +290,28 @@ impl Scanner<'_> {
                 matches!(m, syn::Meta::NameValue(n) if n.path.is_ident("reason")
                     && literal(&n.value).is_some_and(|s| !s.trim().is_empty()))
             });
-            if !reason {
-                let lints = children
-                    .iter()
-                    .filter(|m| !m.path().is_ident("reason"))
-                    .map(|m| path(m.path()).join("::"))
-                    .collect::<Vec<_>>()
-                    .join(",");
+            // restrictionは対象3リントを含み、warningsは-Wで有効にした警告を抑える。
+            // clippy::allはrestrictionを含まないため対象外。
+            let targets: Vec<_> = children
+                .iter()
+                .map(|m| path(m.path()).join("::"))
+                .filter(|name| {
+                    matches!(
+                        name.as_str(),
+                        "clippy::let_underscore_must_use"
+                            | "clippy::unused_result_ok"
+                            | "clippy::map_err_ignore"
+                            | "clippy::restriction"
+                            | "warnings"
+                    )
+                })
+                .collect();
+            if !reason && !targets.is_empty() {
+                let lints = targets.join(",");
                 let key = format!(
-                    "{}:{}:{lints}",
-                    self.scope.join("::"),
-                    list.path.to_token_stream()
+                    "#[{}]:{}:{lints}",
+                    list.path.to_token_stream(),
+                    self.scope.join("::")
                 );
                 let ordinal = self.ordinals.entry(key.clone()).or_default();
                 *ordinal += 1;

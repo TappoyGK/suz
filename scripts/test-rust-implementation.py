@@ -219,10 +219,41 @@ fn f() { vec![#[allow(clippy::map_err_ignore)] { 1 }]; }
         errors = apply_exceptions(violations, entries)
         self.assertEqual(len(errors), 1)
         self.assertIn('build: clippy::map_err_ignore: 3 violations, 2 exceptions, 1 over limit', errors[0])
-        self.assertNotIn(':123:', errors[0])
+        self.assertIn('Candidate locations (including existing exceptions):', errors[0])
+        for line in (97, 101, 123):
+            self.assertIn(f'{name}:{line}:', errors[0])
         self.assertIn('cannot identify', errors[0])
         # 例外がなければ、各違反の場所をそのまま報告する。
         self.assertEqual(apply_exceptions(violations, []), list(violations.values()))
+
+    def test_unrelated_suppressions_need_no_exception(self):
+        violations, _ = self.check({'compiler/src/lib.rs': """//! Root.
+#[allow(dead_code)] fn f() {}
+#[expect(clippy::too_many_arguments)] fn g() {}
+fn h() { outer!(#[allow(dead_code)] fn unused() {}); }
+"""})
+        self.assertEqual(violations, {})
+
+    def test_suppression_exception_overflow_reports_all_candidate_lines(self):
+        name = 'compiler/src/lib.rs'
+        for kind in ('allow', 'expect'):
+            # 同じ属性を先頭・途中・末尾へ追加しても、既存の行を新規箇所と断定しない。
+            for inserted in (0, 1, 2):
+                lines = [f'#[{kind}(clippy::map_err_ignore)] {{ old_a(); }}',
+                         f'#[{kind}(clippy::map_err_ignore)] {{ old_b(); }}']
+                lines.insert(inserted, f'#[{kind}(clippy::map_err_ignore)] {{ new(); }}')
+                source = '//! Root.\nfn f() {\n' + '\n'.join(lines) + '\n}'
+                violations, _ = self.check({name: source})
+                entries = [dict(rule='impl.no-silent', path=name,
+                                item=f'#[{kind}]:f:clippy::map_err_ignore#{n}') for n in (1, 2)]
+                errors = apply_exceptions(violations, entries)
+                self.assertEqual(len(errors), 1)
+                self.assertIn(f'#[{kind}] without reason', errors[0])
+                self.assertIn('3 violations, 2 exceptions, 1 over limit', errors[0])
+                self.assertIn('Candidate locations (including existing exceptions):', errors[0])
+                for line in (3, 4, 5):
+                    self.assertIn(f'{name}:{line}: Missing lint suppression reason', errors[0])
+                self.assertNotIn('f:allow: clippy', errors[0])
 
     def test_clippy_target_lints_and_other_warnings(self):
         def message(code, level='warning', spans=True):

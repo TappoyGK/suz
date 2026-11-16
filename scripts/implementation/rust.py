@@ -266,7 +266,7 @@ def apply_exceptions(violations, entries):
     groups = {}
     for key in list(remaining):
         rule, name, item = key
-        if rule == 'impl.no-silent' and item and re.fullmatch(r'.+:clippy::[^#]+#[0-9]+', item):
+        if rule == 'impl.no-silent' and item and re.fullmatch(r'(?:#\[(?:allow|expect)\]:.*|.+:clippy::(?:' + '|'.join(LINTS) + r'))#[0-9]+', item):
             group = (name, item.rsplit('#', 1)[0])
             groups.setdefault(group, []).append(key)
     for (name, group), keys in groups.items():
@@ -275,10 +275,19 @@ def apply_exceptions(violations, entries):
                     and item.rsplit('#', 1)[0] == group)
         allowed = total - len(keys)
         if allowed:
-            scope, lint = group.rsplit(':clippy::', 1)
-            errors.append(f'{name}: {scope}: clippy::{lint}: {total} violations, '
+            if group.startswith(('#[allow]:', '#[expect]:')):
+                attribute, target = group.split(':', 1)
+                label = f'{attribute} without reason: {target}'
+            else:
+                scope, lint = group.rsplit(':clippy::', 1)
+                label = f'{scope}: clippy::{lint}'
+            candidates = [message for (rule, path, item), message in violations.items()
+                          if rule == 'impl.no-silent' and path == name and item
+                          and item.rsplit('#', 1)[0] == group]
+            errors.append(f'{name}: {label}: {total} violations, '
                           f'{allowed} exceptions, {len(keys)} over limit; '
-                          'occurrence order cannot identify the newly added location [impl.no-silent]')
+                          'occurrence order cannot identify the newly added location [impl.no-silent]\n'
+                          'Candidate locations (including existing exceptions):\n' + '\n'.join(candidates))
             for key in keys:
                 del remaining[key]
     return errors + list(remaining.values())

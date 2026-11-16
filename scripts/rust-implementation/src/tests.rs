@@ -201,7 +201,7 @@ impl D { fn mk() { Self::new(a, b, c, "lex.z", "bad"); } }
 }
 
 #[test]
-fn all_suppressions_require_nonempty_reasons() {
+fn targeted_suppressions_require_nonempty_reasons() {
     let report = scan(
         r#"
 #![allow(clippy::map_err_ignore)]
@@ -214,7 +214,7 @@ fn all_suppressions_require_nonempty_reasons() {
 "#,
     )
     .unwrap();
-    assert_eq!(report["lint_allows"].as_array().unwrap().len(), 6);
+    assert_eq!(report["lint_allows"].as_array().unwrap().len(), 5);
 }
 
 #[test]
@@ -231,5 +231,42 @@ fn f() {
 "#,
     )
     .unwrap();
-    assert_eq!(report["lint_allows"].as_array().unwrap().len(), 4);
+    assert_eq!(report["lint_allows"].as_array().unwrap().len(), 3);
+}
+
+#[test]
+fn unrelated_lints_are_allowed_and_target_groups_need_reasons() {
+    for kind in ["allow", "expect"] {
+        for lint in [
+            "dead_code",
+            "clippy::too_many_arguments",
+            "clippy::all",
+            "clippy::pedantic",
+        ] {
+            let report = scan(&format!("#[{kind}({lint})] fn f() {{}}")).unwrap();
+            assert!(
+                report["lint_allows"].as_array().unwrap().is_empty(),
+                "{kind}({lint})"
+            );
+        }
+        for lint in [
+            "clippy::let_underscore_must_use",
+            "clippy::unused_result_ok",
+            "clippy::map_err_ignore",
+            "clippy::restriction",
+            "warnings",
+        ] {
+            let report = scan(&format!("#[{kind}({lint})] fn f() {{}}")).unwrap();
+            assert_eq!(
+                report["lint_allows"].as_array().unwrap().len(),
+                1,
+                "{kind}({lint})"
+            );
+            let report = scan(&format!(
+                "#[{kind}({lint}, reason = \"Handled.\")] fn f() {{}}"
+            ))
+            .unwrap();
+            assert!(report["lint_allows"].as_array().unwrap().is_empty());
+        }
+    }
 }
