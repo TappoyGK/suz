@@ -4,7 +4,7 @@
 //! enumerate only a rule's scalar inputs, never replay statements or expressions.
 use crate::ast::{FloatType, IntegerType, ScalarType, Type};
 
-pub(crate) const COUNT: usize = crate::ast::NUMERIC_COMBINATIONS;
+pub(crate) const COUNT: usize = 16;
 pub(crate) fn indices() -> std::ops::Range<usize> {
     0..COUNT
 }
@@ -13,7 +13,7 @@ pub(crate) fn any(predicate: impl FnMut(usize) -> bool) -> bool {
 }
 pub(crate) fn uniform<T: PartialEq>(mut value: impl FnMut(usize) -> Option<T>) -> Option<T> {
     let first = value(0)?;
-    for index in 1..COUNT {
+    for index in indices().skip(1) {
         if value(index)? != first {
             return None;
         }

@@ -80,8 +80,8 @@ pub(super) struct Instances {
     ids: BTreeMap<(usize, GenericTypes), usize>,
     pub queue: VecDeque<Instance>,
     next_id: usize,
-    pub visited: BTreeSet<usize>,
-    pub analyzed: BTreeSet<usize>,
+    pub checked_instances: BTreeSet<usize>,
+    pub analyzed_functions: BTreeMap<usize, Result<Vec<Location>, Diagnostic>>,
 }
 impl Instances {
     // [num.monomorphize] Declared function IDs occupy the initial range; generated

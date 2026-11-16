@@ -2,36 +2,6 @@
 
 [目次と書式](../spec-cases.md)
 
-### type-032 charのフィールドをコピーし、コピー先だけを変更する
-
-主根拠：`[char.type]`。
-
-**ソース：**
-
-```suz
-struct Letter { ch: char }
-fn echo(ch: char) -> char { return ch }
-fn main() -> u8 {
-    fix original = Letter { ch: 'a' }
-    var copy = original
-    copy.ch = echo('b')
-    log info `${original.ch} ${copy.ch}`
-    return 0
-}
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | 正常終了 | 0 | 0 |
-
-**標準エラー：**
-
-```text
-info type-032.suz:7: a b
-```
-
 ### type-001 整数でboolの変数を初期化する
 
 主根拠：`[type.bool]`。
@@ -342,32 +312,6 @@ valueは初期化時にi64と決まる。returnの要求するu8へ暗黙変換�
 |---|---|---:|---:|
 | 通常 | `[type.expected]` | 3 | 12 |
 
-### type-033 引数・戻り値・フィールド・分岐の拡大変換
-
-主根拠：`[conv.widen-places]`。
-
-**ソース：**
-
-```suz
-struct Point { x: i32 }
-fn widen(value: u16) -> f64 { return value }
-fn main() -> u8 {
-    fix small: u8 = 7
-    fix negative: i8 = -1
-    fix point = Point { x: small }
-    fix joined = ifexpr false { small } else { negative }
-    fix result: f64 = widen(small)
-    return ifexpr point.x == 7 && joined == -1 && result == 7.0 { 0 } else { 1 }
-}
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | 正常終了 | 0 | 0 |
-
-u8をu16の実引数、i32のフィールドへ広げ、u16の戻り値をf64へ広げる。分岐のu8とi8はi16にそろえる。
 ### type-013 構造体を宣言して値をコピーする
 
 主根拠：`[type.value-copy]`。
@@ -938,7 +882,136 @@ fn main() -> u8 {
 
 列挙子名は各enumの中で区別する。外側の定数名や別のenumの列挙子名と同じでもよい。整数値は各enumで0から始まる。
 
-### type-034 floatを関数名に使う
+### type-032 charのフィールドをコピーし、コピー先だけを変更する
+
+主根拠：`[char.type]`。
+
+**ソース：**
+
+```suz
+struct Letter { ch: char }
+fn echo(ch: char) -> char { return ch }
+fn main() -> u8 {
+    fix original = Letter { ch: 'a' }
+    var copy = original
+    copy.ch = echo('b')
+    log info `${original.ch} ${copy.ch}`
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+**標準エラー：**
+
+```text
+info type-032.suz:7: a b
+```
+
+### type-033 引数・戻り値・フィールド・分岐の拡大変換
+
+主根拠：`[conv.widen-places]`。
+
+**ソース：**
+
+```suz
+struct Point { x: i32 }
+fn widen(value: u16) -> f64 { return value }
+fn main() -> u8 {
+    fix small: u8 = 7
+    fix negative: i8 = -1
+    fix point = Point { x: small }
+    fix joined = ifexpr false { small } else { negative }
+    fix result: f64 = widen(small)
+    return ifexpr point.x == 7 && joined == -1 && result == 7.0 { 0 } else { 1 }
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+u8をu16の実引数、i32のフィールドへ広げ、u16の戻り値をf64へ広げる。分岐のu8とi8はi16にそろえる。
+### type-034 intを8種類の整数型で使う
+
+主根拠：`[num.int]`。
+
+各呼び出しの `int` は、引数と受け取り先に指定した整数型になる。
+
+**ソース：**
+
+```suz
+fn identity(value: int) -> int {
+    return value
+}
+fn main() -> u8 {
+    fix value_i8: i8 = 1
+    fix result_i8: i8 = identity(value_i8)
+    if result_i8 != 1 { return 1 }
+    fix value_i16: i16 = 1
+    fix result_i16: i16 = identity(value_i16)
+    if result_i16 != 1 { return 1 }
+    fix value_i32: i32 = 1
+    fix result_i32: i32 = identity(value_i32)
+    if result_i32 != 1 { return 1 }
+    fix value_i64: i64 = 1
+    fix result_i64: i64 = identity(value_i64)
+    if result_i64 != 1 { return 1 }
+    fix value_u8: u8 = 1
+    fix result_u8: u8 = identity(value_u8)
+    if result_u8 != 1 { return 1 }
+    fix value_u16: u16 = 1
+    fix result_u16: u16 = identity(value_u16)
+    if result_u16 != 1 { return 1 }
+    fix value_u32: u32 = 1
+    fix result_u32: u32 = identity(value_u32)
+    if result_u32 != 1 { return 1 }
+    fix value_u64: u64 = 1
+    fix result_u64: u64 = identity(value_u64)
+    if result_u64 != 1 { return 1 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### type-035 floatをf32とf64で使う
+
+主根拠：`[num.float]`。
+
+`float` は呼び出しごとに `f32` または `f64` になる。`f32` では加算結果が丸められ、`f64` では1増える。
+
+**ソース：**
+
+```suz
+fn increment(value: float) -> float {
+    return value + 1.0
+}
+fn main() -> u8 {
+    fix narrow: f32 = 16777216.0
+    fix wide: f64 = 16777216.0
+    fix a = increment(narrow)
+    fix b = increment(wide)
+    return ifexpr a == 16777216.0 && b == 16777217.0 { 0 } else { 1 }
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+### type-036 floatを関数名に使う
 
 主根拠：`[num.reserved]`。
 
@@ -967,7 +1040,7 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | `[src.ident]` | 1 | 4 |
 
-### type-035 通常の関数のローカル変数にintを指定する
+### type-037 通常の関数のローカル変数にintを指定する
 
 主根拠：`[num.places]`。
 

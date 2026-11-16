@@ -290,9 +290,6 @@ pub(super) fn use_value(
         super::expression::expression(expr, None, bindings)
     }
 }
-pub(super) fn dependent(value: &CheckedExpression) -> bool {
-    value.ty.symbolic() || matches!(&value.value, Value::Exact(e) if e.domains.is_some())
-}
 pub(super) fn range_at(value: &CheckedExpression, index: usize) -> Option<Range> {
     match &value.value {
         Value::Exact(e) => e.range_at(index).ok().flatten(),
@@ -483,7 +480,7 @@ pub(super) fn constant_comparison(
     if super::constants::is_constant(a) && super::constants::is_constant(b) {
         return None;
     }
-    if dependent(a) || dependent(b) {
+    if super::constants::depends_on_generic(a) || super::constants::depends_on_generic(b) {
         domain::uniform(|i| compare_ranges(range_at(a, i)?, range_at(b, i)?, op))
     } else {
         compare_ranges(value_range(a)?, value_range(b)?, op)

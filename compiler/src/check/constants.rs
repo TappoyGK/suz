@@ -486,79 +486,48 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
 
 // Grammar and type checking cover unselected operands too; evaluation below
 // visits only the selected path and reports the first failing operation.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ConstantKind {
+    Nonconstant,
+    Scalar,
+    Generic,
+}
+
+// Classify constantness and type dependence together. Ordinary constant
+// evaluation visits each node once, rather than doing a second generic scan.
+fn constant_kind(expr: &CheckedExpression) -> ConstantKind {
+    let mut kind = if expr.ty.symbolic() || expr.value.symbolic_range() {
+        ConstantKind::Generic
+    } else {
+        ConstantKind::Scalar
+    };
+    let admitted = expr.value.visit_constant_children(&mut |child| {
+        if kind == ConstantKind::Nonconstant {
+            return;
+        }
+        match constant_kind(child) {
+            ConstantKind::Nonconstant => kind = ConstantKind::Nonconstant,
+            ConstantKind::Generic => kind = ConstantKind::Generic,
+            ConstantKind::Scalar => {}
+        }
+    });
+    if admitted {
+        kind
+    } else {
+        ConstantKind::Nonconstant
+    }
+}
+
 pub(super) fn is_constant(expr: &CheckedExpression) -> bool {
-    if let Value::Exact(e)
-    | Value::IntegerArithmetic {
-        operation: IntegerOperation::Exact(e),
-        ..
-    } = &expr.value
-    {
-        let mut constant = true;
-        e.leaves(&mut |v| constant &= is_constant(v));
-        if let Value::IntegerArithmetic {
-            handler: Some(CheckedHandler::Value(v)),
-            ..
-        } = &expr.value
-        {
-            constant &= is_constant(v);
-        }
-        return constant;
-    }
-    match &expr.value {
-        Value::TextView(inner) | Value::Intern { operand: inner, .. } => is_constant(inner),
-        Value::Slice {
-            target,
-            start,
-            end,
-            handler,
-            ..
-        } => {
-            is_constant(target)
-                && [start, end]
-                    .into_iter()
-                    .flatten()
-                    .all(|value| is_constant(value))
-                && match handler {
-                    None => true,
-                    Some(CheckedHandler::Value(value)) => is_constant(value),
-                    _ => false,
-                }
-        }
-        Value::Struct { fields } => fields.iter().all(|(_, value)| is_constant(value)),
-        Value::Field { target, .. } => is_constant(target),
-        Value::Text { .. } => true,
-        Value::Template { parts, .. } => parts.iter().all(|part| match part {
-            crate::ast::TemplatePart::Text(_) => true,
-            crate::ast::TemplatePart::Value(value) => is_constant(value),
-        }),
-        Value::GenericFloatLiteral(_)
-        | Value::Integer { .. }
-        | Value::Float(_)
-        | Value::Bool(_) => true,
-        Value::Cast(inner)
-        | Value::Negate(inner)
-        | Value::Truncate(inner)
-        | Value::BitNot(inner)
-        | Value::Not(inner) => is_constant(inner),
-        Value::CheckedCast {
-            operand, fallback, ..
-        } => is_constant(operand) && is_constant(fallback),
-        Value::IntegerArithmetic {
-            operation, handler, ..
-        } => {
-            operation.operands().all(is_constant)
-                && match handler {
-                    None => true,
-                    Some(CheckedHandler::Value(value)) => is_constant(value),
-                    Some(CheckedHandler::Return(_)) => false,
-                }
-        }
-        Value::Binary { left, right, .. } | Value::Logical { left, right, .. } => {
-            is_constant(left) && is_constant(right)
-        }
-        Value::Comparison { operands, .. } => operands.iter().all(is_constant),
-        _ => false,
-    }
+    constant_kind(expr) != ConstantKind::Nonconstant
+}
+
+// A value depends on a generic type through its result/range or a constant
+// subexpression. Concrete intermediate casts do not erase that dependence.
+pub(super) fn depends_on_generic(expr: &CheckedExpression) -> bool {
+    expr.ty.symbolic()
+        || expr.value.symbolic_range()
+        || constant_kind(expr) == ConstantKind::Generic
 }
 
 fn cast_succeeds(operand: &CheckedExpression, target: Type, wrap: bool) -> bool {
@@ -767,7 +736,7 @@ fn validate_evaluation(expr: &CheckedExpression) -> Result<(), Diagnostic> {
 pub(super) fn evaluate(expr: &CheckedExpression) -> Result<Option<CheckedExpression>, Diagnostic> {
     // Symbolic constants must be substituted before ordinary evaluation. This
     // also covers symbolic children behind a concrete result type.
-    if !is_constant(expr) || generic::dependent(expr) {
+    if constant_kind(expr) != ConstantKind::Scalar {
         return Ok(None);
     }
     validate_evaluation(expr)?;

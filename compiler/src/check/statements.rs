@@ -22,6 +22,11 @@ pub(super) struct Binding {
 }
 
 impl Binding {
+    // Type hints never emit IR or inspect assignment state.
+    pub(super) fn hint(ty: Type, location: Location) -> Self {
+        Self::local(0, ty, false, false, location)
+    }
+
     fn local(id: usize, ty: Type, mutable: bool, loop_variable: bool, location: Location) -> Self {
         Self {
             constant: None,

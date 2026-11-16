@@ -211,3 +211,106 @@ pub(crate) enum Value {
     },
     Local(usize),
 }
+
+impl Value {
+    // Visit the children admitted by the constant-expression grammar. Exact
+    // leaves and value handlers are children too; a return handler is not a
+    // constant expression. The caller combines properties in one traversal.
+    pub fn visit_constant_children(&self, visit: &mut impl FnMut(&CheckedExpression)) -> bool {
+        let handler = |handler: &Option<CheckedHandler>,
+                       visit: &mut dyn FnMut(&CheckedExpression)| {
+            match handler {
+                None => true,
+                Some(CheckedHandler::Value(value)) => {
+                    visit(value);
+                    true
+                }
+                Some(CheckedHandler::Return(_)) => false,
+            }
+        };
+        match self {
+            Self::Exact(exact) => exact.leaves(visit),
+            Self::IntegerArithmetic {
+                operation,
+                handler: h,
+                ..
+            } => {
+                match operation {
+                    IntegerOperation::Exact(exact) => exact.leaves(visit),
+                    _ => operation.operands().for_each(&mut *visit),
+                }
+                return handler(h, visit);
+            }
+            Self::Cast(v)
+            | Self::Negate(v)
+            | Self::Truncate(v)
+            | Self::BitNot(v)
+            | Self::Not(v)
+            | Self::TextView(v)
+            | Self::Intern { operand: v, .. }
+            | Self::Field { target: v, .. } => visit(v),
+            Self::CheckedCast {
+                operand,
+                fallback,
+                constant_struct,
+                ..
+            } => {
+                visit(operand);
+                visit(fallback);
+                if let Some(value) = constant_struct {
+                    visit(value);
+                }
+            }
+            Self::Binary { left, right, .. } | Self::Logical { left, right, .. } => {
+                visit(left);
+                visit(right);
+            }
+            Self::Comparison { operands, .. } => operands.iter().for_each(visit),
+            Self::Template { parts, .. } => {
+                for part in parts {
+                    if let crate::ast::TemplatePart::Value(value) = part {
+                        visit(value);
+                    }
+                }
+            }
+            Self::Struct { fields } => fields.iter().for_each(|(_, v)| visit(v)),
+            Self::Slice {
+                target,
+                start,
+                end,
+                handler: h,
+                ..
+            } => {
+                visit(target);
+                for value in [start, end].into_iter().flatten() {
+                    visit(value);
+                }
+                return handler(h, visit);
+            }
+            Self::GenericFloatLiteral(_)
+            | Self::Integer { .. }
+            | Self::Float(_)
+            | Self::Bool(_)
+            | Self::Text { .. } => {}
+            Self::Local(_)
+            | Self::Void
+            | Self::Call { .. }
+            | Self::Block { .. }
+            | Self::Match { .. }
+            | Self::If { .. }
+            | Self::CastReturn { .. } => return false,
+        }
+        true
+    }
+
+    pub fn symbolic_range(&self) -> bool {
+        match self {
+            Self::Exact(e)
+            | Self::IntegerArithmetic {
+                operation: IntegerOperation::Exact(e),
+                ..
+            } => e.domains.is_some(),
+            _ => false,
+        }
+    }
+}

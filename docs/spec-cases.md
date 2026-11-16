@@ -115,14 +115,18 @@ IDは分野の接頭辞と番号で構成し、期待結果の種類を含めな
 |---|---|---|---:|
 | [字句](spec-cases/lex.md) | `lex` | 第3章 | 35 |
 | [プログラムの構造](spec-cases/prog.md) | `prog` | 第4章 | 18 |
-| [型](spec-cases/type.md) | `type` | 第5章 | 35 |
+| [型](spec-cases/type.md) | `type` | 第5章 | 37 |
 | [symbolとtext](spec-cases/text.md) | `text` | 第5・6・7・8・10章 | 33 |
 | [定数・変数・代入](spec-cases/bind.md) | `bind` | 第6章 | 29 |
 | [式](spec-cases/expr.md) | `expr` | 第7章 | 77 |
-| [関数と制御](spec-cases/flow.md) | `flow` | 第8章 | 81 |
+| [関数と制御](spec-cases/flow.md) | `flow` | 第8章 | 87 |
 | [実行時の検査](spec-cases/runtime.md) | `runtime` | 第9章 | 18 |
 | [ログ](spec-cases/log.md) | `log` | 第10章 | 11 |
 | [警告と診断設定](spec-cases/diag.md) | `diag` | 第11章 | 14 |
-| 合計 | | | 351 |
+| 合計 | | | 359 |
 
 結果別：受理158例、コンパイルエラー169例、実行時パニック13例、診断設定の比較11例。バイト列による4例も、それぞれの期待結果に含めている。
+
+## 生成結果の検証
+
+`[num.monomorphize]` の関数生成数と共有は、プログラムの出力だけでは確認できない。`compiler/src/check/tests/generic.rs` の内部表現の検査で、使用する具体型の組み合わせだけを生成することと、同じ組み合わせを共有することを確認する。

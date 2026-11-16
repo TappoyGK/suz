@@ -277,23 +277,25 @@ pub(in crate::check) fn require_handler(
     location: crate::ast::Location,
     scope: &Scope,
 ) -> Result<(), Diagnostic> {
-    // A concrete result type does not erase symbolic constant values inside it
-    // (for example a handled cast of `1 as% int` to u16). Inspect the constant
-    // before evaluation, then judge it after each scalar substitution.
-    let dependent = super::super::exact::dependent(operand)
-        || target.symbolic()
-        || (!type_safe
-            && scope.generic_check()
-            && super::super::constants::is_constant(operand)
-            && super::super::constants::generic::dependent(operand));
-    cast_risk(operand, target, type_safe, scope, dependent)?
+    // [num.fn-cast] is a universal policy. A forward instance must stop at
+    // the known policy failure even when this scalar conversion is safe.
+    if let Some(error) = &scope.generic_error
+        && error.rule() == "num.fn-cast"
+        && (error.line, error.column) == (location.line, location.column)
+    {
+        return Err(error.as_ref().clone());
+    }
+    if type_safe {
+        return Ok(());
+    }
+    let dependent = target.symbolic() || super::super::constants::depends_on_generic(operand);
+    cast_risk(operand, target, scope, dependent)?
         .require_handler_for(location, scope.generic_check() && dependent)
 }
 
 fn cast_risk(
     operand: &CheckedExpression,
     target: Type,
-    type_safe: bool,
     bindings: &Scope,
     dependent: bool,
 ) -> Result<CastRisk, Diagnostic> {
@@ -331,7 +333,7 @@ fn cast_risk(
             CastRisk::Dynamic
         });
     }
-    scalar_cast_risk(operand, target, type_safe)
+    scalar_cast_risk(operand, target, false)
 }
 
 fn scalar_cast_risk(

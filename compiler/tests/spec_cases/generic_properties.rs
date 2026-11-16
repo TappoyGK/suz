@@ -9,6 +9,8 @@ fn check(source: &str) -> Result<Vec<suz::Warning>, Diagnostic> {
 fn generic_instantiations_agree_with_explicit_scalar_functions() {
     // [num.fn-check-judge], [num.fn-body]: an accepted generic body must have
     // the same acceptance as a scalar copy for each actual substitution.
+    // A body that passes generic checking can fail after substitution only
+    // at a judgment deferred by that generic check.
     // Casts here either have handlers or are always safe, so the universal
     // generic cast policy does not intentionally differ from the scalar policy.
     for expression in [

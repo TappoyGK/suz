@@ -43,7 +43,7 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     let mut functions = Vec::new();
     for (id, function) in program.functions.iter().enumerate() {
         if globals.functions[&function.name].is_generic() {
-            analyze_once(function, id, &globals, &mut warnings)?;
+            warnings.extend(analyze_once(function, id, &globals)?);
             continue;
         }
         let result = check_function(function, globals.clone(), id);
@@ -89,12 +89,17 @@ fn analyze_once(
     function: &crate::ast::Function,
     id: usize,
     scope: &Scope,
-    warnings: &mut Vec<crate::ast::Location>,
-) -> Result<(), Diagnostic> {
-    if scope.instances.borrow_mut().analyzed.insert(id) {
-        warnings.extend(super::generic::analyze(function, scope)?);
+) -> Result<Vec<crate::ast::Location>, Diagnostic> {
+    if let Some(result) = scope.instances.borrow().analyzed_functions.get(&id) {
+        return result.clone();
     }
-    Ok(())
+    let result = super::generic::analyze(function, scope);
+    scope
+        .instances
+        .borrow_mut()
+        .analyzed_functions
+        .insert(id, result.clone());
+    result
 }
 
 fn check_instances(
@@ -123,18 +128,39 @@ fn check_instances(
             Task::Check(instance) => {
                 // Re-entrant recursion uses its existing signature; a completed
                 // instance is shared. Every body is constructed at most once.
-                if !globals.instances.borrow_mut().visited.insert(instance.id) {
+                if !globals
+                    .instances
+                    .borrow_mut()
+                    .checked_instances
+                    .insert(instance.id)
+                {
                     continue;
                 }
                 let function = &program.functions[instance.function];
-                analyze_once(function, instance.function, globals, warnings)?;
+                // Forward calls need the generic result, but an unconditional
+                // error belongs to the declaration's turn, not to this call.
+                let generic_error = analyze_once(function, instance.function, globals).err();
                 let mut context = globals.clone();
                 context.generic_calls = Some(instance.calls.clone());
                 context.mode = super::scope::Mode::Instance(instance.types);
+                context.generic_error = generic_error.clone().map(Rc::new);
                 // Rebuild concrete IR with the shared checker. Once generic
                 // checking succeeds, only deferred rules can fail here.
                 let result = check_function(function, context, instance.id);
-                tasks.push(Task::Finish(instance, result));
+                let blocked = generic_error.as_ref().is_some_and(|known| match &result {
+                    Err(error) => {
+                        (error.line, error.column, error.rule())
+                            == (known.line, known.column, known.rule())
+                    }
+                    Ok(_) => true,
+                });
+                // The symbolic pass established this universal failure. Match
+                // its site AND rule to distinguish an earlier deferred rule at
+                // the same position (call resolution before a bool constraint).
+                // Report the cached failure when visiting its declaration.
+                if !blocked {
+                    tasks.push(Task::Finish(instance, result));
+                }
                 tasks.extend(
                     globals
                         .instances

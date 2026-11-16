@@ -51,19 +51,9 @@ pub(super) fn operand_type(
                 .map(|ty| bindings.resolve_type(ty))
                 .or_else(|| super::operand_type(initializer, &local))
                 .unwrap_or_else(|| super::default_type(initializer, &local));
-            local.locals.insert(
-                name.clone(),
-                statements::Binding {
-                    constant: None,
-                    id: 0,
-                    ty,
-                    mutable: false,
-                    parameter: false,
-                    loop_variable: false,
-                    assigned: Default::default(),
-                    location: *location,
-                },
-            );
+            local
+                .locals
+                .insert(name.clone(), statements::Binding::hint(ty, *location));
         }
     }
     super::operand_type(value, &local)

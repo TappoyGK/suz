@@ -660,3 +660,50 @@ fn generic_deferred_calls_precede_later_local_errors_and_sibling_calls() {
         "type.expected",
     );
 }
+
+#[test]
+fn forward_generic_errors_respect_declaration_and_call_order() {
+    // A forward declaration's unconditional error is not a call-site error.
+    for body in [
+        "fix b: bool = n\nreturn n",
+        "return true",
+        "fix narrowed = n as u8\nfix later: i8 = n\nreturn n",
+        "fix narrowed = (n as u8)\nfix later: i8 = n\nreturn n",
+        "fix narrowed = expr { n as u8 }\nfix later: i8 = n\nreturn n",
+    ] {
+        let source = format!(
+            "fn main() -> u8 {{\nfix a: u8 = 200\nfix k = f(a)\nfix b: bool = @1\nreturn 0\n}}\nfn f(n: int) -> int {{\n{body}\n}}"
+        );
+        marked_error(&source, "type.expected");
+    }
+    // A deferred failure before the unconditional error belongs to the call.
+    for body in [
+        "fix w: i64 = n\nfix b: bool = n\nreturn n",
+        "fix w = expr { fix small: i64 = n\nsmall }\nreturn true",
+        "fix w: i64 = n\nfix narrowed = n as u8\nreturn n",
+    ] {
+        let source = format!(
+            "fn main() -> u8 {{\nfix a: u64 = 1\nfix k = @f(a)\nfix b: bool = 1\nreturn 0\n}}\nfn f(n: int) -> int {{\n{body}\n}}"
+        );
+        let error = marked_error(&source, "num.fn-body");
+        assert_eq!(error.related.last().unwrap().rule(), "type.expected");
+    }
+    // Without an earlier caller error, the cached declaration error is reported.
+    marked_error(
+        "fn main() -> u8 { fix n = f(1)\nreturn 0 }\nfn f(n: int) -> int { fix small = n @as u8\nreturn true }",
+        "num.fn-cast",
+    );
+    // Declaration order still wins when the invalid generic function comes first.
+    marked_error(
+        "fn f(n: int) -> int { return @true }\nfn main() -> u8 { fix n = f(1)\nfix b: bool = 1\nreturn 0 }",
+        "type.expected",
+    );
+}
+
+#[test]
+fn deferred_and_universal_failures_at_one_expression_keep_distinct_rules() {
+    marked_error(
+        "fn main() -> u8 { fix n: i64 = 1\nfix b = @f(n)\nfix later: bool = 1\nreturn 0 }\nfn f(n: int) -> bool { fix wide: u64 = 1\nreturn g(n, wide) }\nfn g(a: int, b: int) -> int { return a }",
+        "num.fn-body",
+    );
+}

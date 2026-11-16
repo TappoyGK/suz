@@ -1,4 +1,3 @@
-pub(crate) const NUMERIC_COMBINATIONS: usize = 16;
 pub(crate) mod visit;
 
 use crate::{Diagnostic, ErrorKind};
@@ -131,7 +130,7 @@ pub(crate) enum ScalarType {
 pub(crate) enum Type {
     GenericInt,
     GenericFloat,
-    Numeric([Option<ScalarType>; NUMERIC_COMBINATIONS]), // Internal type function of int and float.
+    Numeric([Option<ScalarType>; crate::check::generic::domain::COUNT]), // Internal type function of int and float.
     Exact, // Internal mathematical integer; never a source-level storage type.
     Struct(usize),
     Enum(EnumType),
