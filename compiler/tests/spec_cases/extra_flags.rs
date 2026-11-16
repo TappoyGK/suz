@@ -80,6 +80,7 @@ done
         "-O3",
         "-Ofast",
         "-ffast-math",
+        "-ffinite-math-only",
         "-fno-signed-zeros",
         "-ffp-contract=fast",
         "-DTEST",

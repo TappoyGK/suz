@@ -39,7 +39,7 @@ fn c_headers_require_clang_c23_and_wide_integers() {
 }
 
 #[test]
-fn generated_c_and_runtime_reject_fast_and_finite_only_math_modes() {
+fn generated_c_and_runtime_reject_active_unsafe_math_macros() {
     let directory = TemporaryDirectory::new();
     let source = directory.0.join("program.c");
     fs::write(
@@ -54,6 +54,7 @@ fn generated_c_and_runtime_reject_fast_and_finite_only_math_modes() {
         &runtime.join("suz_float.c"),
         &runtime.join("suz_format_float.c"),
     ] {
+        // 固定フラグで打ち消さず、危険な設定のマクロが残る場合の拒否を確認する。
         for flag in ["-ffast-math", "-ffinite-math-only"] {
             let output = Command::new(std::env::var_os("CC").unwrap_or_else(|| "clang".into()))
                 .args(["-std=c23", "-fsyntax-only", flag, "-I"])
@@ -286,6 +287,8 @@ int main(void) {
         "-fno-honor-nans",
         "-fno-honor-infinities",
         "-ffp-model=fast",
+        "-ffast-math",
+        "-ffinite-math-only",
     ] {
         let executable = directory.0.join("precise");
         // 意図的に競合するフラグを渡すため、上書き通知だけはエラーにしない。

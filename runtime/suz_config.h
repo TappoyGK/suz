@@ -20,6 +20,7 @@
 #error "C23 checked integer arithmetic required [runtime.c-check]"
 #endif
 
+/* フラグの指定履歴ではなく、最終的に危険な設定が残っている場合を拒否する。 */
 #if defined(__FAST_MATH__) || (defined(__FINITE_MATH_ONLY__) && __FINITE_MATH_ONLY__ > 0)
 #error "unsafe floating-point optimization [runtime.float-environment]"
 #endif

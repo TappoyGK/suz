@@ -47,7 +47,11 @@
 
 **[runtime.unsafe-math]** 共通の設定ヘッダーで `#pragma float_control(precise, on)` と `#pragma STDC FP_CONTRACT OFF` を指定する。生成Cとランタイムのコンパイルでは、[tool.build-settings](tool.md) に従い `-fhonor-nans`、`-fhonor-infinities`、`-ffp-contract=off`、`-fdenormal-fp-math=ieee` を指定する。これらの固定フラグは追加フラグより後に置く。
 
-この設定では、`-fno-signed-zeros`、`-freciprocal-math`、`-funsafe-math-optimizations`、`-fno-honor-nans`、`-fno-honor-infinities`、`-ffp-model=fast` が追加フラグとして指定されても、NaN・無限大・符号付きゼロを無視した最適化、逆数乗算への置換、演算の再結合・積和への縮約でSuzの結果を変えてはならない。`-ffast-math` と `-ffinite-math-only` はマクロの検査でコンパイルエラーにする。Clangの `contract=fast` はpragmaだけでは縮約を防げないため、固定フラグの `-ffp-contract=off` は必須である。また、NaN・無限大を無視する個別のフラグはマクロで検出できず、`float_control(precise, on)` だけでも打ち消せない。生成Cを手でコンパイルする場合も、これら4つの固定フラグを他の数値関連フラグより後に指定しなければならない。ヘッダーを読み込むだけで、任意のコンパイル設定に対して結果を保証するものではない。
+この設定では、`-fno-signed-zeros`、`-freciprocal-math`、`-funsafe-math-optimizations`、`-fno-honor-nans`、`-fno-honor-infinities`、`-ffp-model=fast`、`-ffast-math`、`-ffinite-math-only` が固定フラグより前に指定されても、NaN・無限大・符号付きゼロを無視した最適化、逆数乗算への置換、演算の再結合・積和への縮約でSuzの結果を変えてはならない。
+
+共通ヘッダーは、`__FAST_MATH__` が定義されている場合、または `__FINITE_MATH_ONLY__` が正の場合にコンパイルエラーにする。この検査は、フラグの指定履歴ではなく、最終的なマクロの状態を検査する。後続の固定フラグでこれらのマクロが無効になった場合は、この検査では拒否しない。Clangがフラグの上書きに警告を出した場合は、通常の `-Werror` によりビルドが失敗することがある。`SUZ_CFLAGS` では、これらの危険なフラグを許可リストで拒否する。
+
+Clangの `contract=fast` はpragmaだけでは縮約を防げないため、固定フラグの `-ffp-contract=off` は必須である。また、NaN・無限大を無視する個別のフラグはマクロで検出できず、`float_control(precise, on)` だけでも打ち消せない。生成Cを手でコンパイルする場合も、これら4つの固定フラグを他の数値関連フラグより後に指定しなければならない。ヘッダーを読み込むだけで、任意のコンパイル設定に対して結果を保証するものではない。
 
 生成したCのコンパイルでは、演算の再結合、積和への縮約、非正規化数のゼロへの置換などによってSuzの結果が変わる最適化を行わない。Cの式の途中だけ余分な精度が保持されることによって結果が変わる場合も、Suzの型の精度へ丸める処理を入れる。
 
