@@ -17,6 +17,10 @@ spec.loader.exec_module(ci)
 
 
 class ChangeTests(unittest.TestCase):
+    def test_implementation_rules_alone_require_checks(self):
+        # [impl.exceptions] 規則IDの照合元だけの変更でも検査する。
+        self.assertTrue(ci.requires_checks(['docs/implementation.md']))
+
     def test_documentation_and_executable_inputs(self):
         self.assertFalse(ci.requires_checks(['HUMANS.md', 'docs/releasing.md', 'compiler/README.md']))
         self.assertFalse(ci.requires_checks([]))

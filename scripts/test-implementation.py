@@ -33,11 +33,14 @@ def exception_text(**changes):
 
 class SourceTests(unittest.TestCase):
     # [impl.file-length] BOMを除き、Cの文字リテラルと数値を区別する。
-    def test_rust_initial_bom(self):
-        self.assertEqual(code_lines('\ufeff// bom\n', 'rust'), 0)
-        self.assertEqual(code_lines('\ufeff', 'rust'), 0)
-        self.assertEqual(code_lines('\ufefflet x = "\ufeff";\n', 'rust'), 1)
-        self.assertEqual(code_lines('// comment\n\ufeff\n', 'rust'), 1)
+    def test_initial_bom(self):
+        for language in ('rust', 'c'):
+            with self.subTest(language=language):
+                self.assertEqual(code_lines('\ufeff// bom\n', language), 0)
+                self.assertEqual(code_lines('\ufeff/* bom */\r\n', language), 0)
+                self.assertEqual(code_lines('\ufeff', language), 0)
+                self.assertEqual(code_lines('\ufeff"\ufeff";\n', language), 1)
+                self.assertEqual(code_lines('// comment\n\ufeff\n', language), 1)
 
     def test_c_prefixed_character_literals(self):
         for prefix in ('u8', 'u', 'U', 'L', ''):
@@ -213,6 +216,36 @@ class ExceptionTests(unittest.TestCase):
 
 
 class RepositoryTests(unittest.TestCase):
+    def test_all_exception_rules_require_existing_files(self):
+        # [impl.exceptions] 個別の規則の検査が未実装でも、対象の不在は拒否する。
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(['git', 'init', '-q', directory], check=True)
+            (root / 'docs').mkdir()
+            (root / 'docs/implementation.md').write_text(
+                '**[impl.format]**\n**[impl.file-length]**\n', encoding='utf-8')
+            config = root / EXCEPTIONS
+            config.parent.mkdir(parents=True)
+            source = root / 'compiler/src/example.rs'
+            source.parent.mkdir(parents=True)
+            for rule in ('impl.format', 'impl.file-length'):
+                entry = exception_text(rule=rule)
+                if rule != 'impl.file-length':
+                    entry = entry.replace('max_code_lines = 510\n', '')
+                config.write_text(entry, encoding='utf-8')
+                with self.subTest(rule=rule):
+                    source.write_text('code\n' * 510, encoding='utf-8')
+                    counts, exceptions, errors = check_repository(root)
+                    self.assertEqual(bool(exceptions), rule == 'impl.file-length')
+                    self.assertEqual(bool(errors), rule != 'impl.file-length')
+                    source.unlink()
+                    with self.assertRaisesRegex(ValueError, 'exception source is missing'):
+                        check_repository(root)
+                    source.mkdir()
+                    with self.assertRaisesRegex(ValueError, 'exception source is missing'):
+                        check_repository(root)
+                    source.rmdir()
+
     # [impl.file-length] 実際のGit索引と未追跡ファイルを使い、列挙から判定まで検証する。
     def test_git_sources_and_exception_lifecycle(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -243,7 +276,8 @@ class RepositoryTests(unittest.TestCase):
             write('compiler/src/example.rs', 'code\n' * 500)
             self.assertIn('obsolete exception', check_repository(root)[2][0])
             (root / 'compiler/src/example.rs').unlink()
-            self.assertIn('exception source is missing', check_repository(root)[2][0])
+            with self.assertRaisesRegex(ValueError, 'exception source is missing'):
+                check_repository(root)
             write(EXCEPTIONS, '# All exceptions resolved.\n')
             self.assertEqual(check_repository(root)[2], [])
 

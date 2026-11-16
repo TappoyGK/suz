@@ -40,7 +40,7 @@ def source_counts(root):
     return counts
 
 
-def read_exceptions(text, known_rules=None):
+def read_exceptions(text, known_rules=None, *, root=None):
     """共通の形式を検査し、行数検査が扱う例外だけを返す。"""
     document = tomllib.loads(text)
     if not document:
@@ -65,6 +65,8 @@ def read_exceptions(text, known_rules=None):
         path = PurePosixPath(name)
         if path.is_absolute() or '..' in path.parts or str(path) != name or name == '.':
             raise ValueError(f'Invalid exception path: {name}')
+        if root is not None and not (root / name).is_file():
+            raise ValueError(f'{name}: exception source is missing [impl.exceptions]')
         if not isinstance(entry['reason'], str) or not entry['reason'].strip():
             raise ValueError(f'Missing exception reason: {name}')
         item = entry.get('item')
@@ -110,6 +112,6 @@ def check_repository(root):
     """ソースの実測値と、レビュー対象となる例外一覧を照合する。"""
     rules = set(re.findall(r'\*\*\[(impl\.[a-z-]+)\]\*\*',
                            (root / 'docs/implementation.md').read_text(encoding='utf-8')))
-    exceptions = read_exceptions((root / EXCEPTIONS).read_text(encoding='utf-8'), rules)
+    exceptions = read_exceptions((root / EXCEPTIONS).read_text(encoding='utf-8'), rules, root=root)
     counts = source_counts(root)
     return counts, exceptions, check_counts(counts, exceptions)

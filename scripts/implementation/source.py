@@ -14,7 +14,7 @@ def code_lines(source, language):
     """文字列内のコメント記号を保ち、空行・コメントだけの行を除く。"""
     if language not in {'rust', 'c'}:
         raise ValueError(f'Unsupported source language: {language}')
-    if language == 'rust' and source.startswith('\ufeff'):
+    if source.startswith('\ufeff'):
         source = source[1:]
     # Cの行継続はコメントの解釈より先に処理する。各文字の元の行番号を保持する。
     chars, lines = [], []
