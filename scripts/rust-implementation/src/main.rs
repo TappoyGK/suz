@@ -127,6 +127,22 @@ impl<'ast> Visit<'ast> for Strings {
         self.0.push(node.value());
     }
     fn visit_macro(&mut self, node: &'ast syn::Macro) {
+        let expression = syn::Expr::Macro(syn::ExprMacro {
+            attrs: vec![],
+            mac: node.clone(),
+        });
+        if let Some(text) = literal(&expression) {
+            self.0.push(text);
+            return;
+        }
+        if let Ok(args) =
+            Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated.parse2(node.tokens.clone())
+        {
+            for arg in &args {
+                self.visit_expr(arg);
+            }
+            return;
+        }
         for t in node.tokens.clone() {
             match t {
                 TokenTree::Literal(l) => {
@@ -224,7 +240,7 @@ impl Scanner<'_> {
             .map(|e| e.to_token_stream().to_string())
             .unwrap_or_default();
         let mut strings = Strings::default();
-        if let Some(message) = args.get(rule_index + 1) {
+        for message in args.iter().skip(rule_index + 1) {
             if let Some(s) = literal(message) {
                 strings.0.push(s);
             }

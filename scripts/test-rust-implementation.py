@@ -118,6 +118,19 @@ fn h() { let text = "#[rustfmt::skip]"; }
 '''})
         self.assertEqual(sum(rule == 'impl.format' for rule, _, _ in violations), 1)
 
+    def test_rule_ids_embedded_through_format_arguments_are_rejected(self):
+        violations, index = self.check({'compiler/src/lib.rs': r'''//! Root。
+fn f() {
+    // [a.b] 条件を確認する。
+    diagnostic!("a.b", "message {}", "[a.b]");
+    // [a.c] 別の条件を確認する。
+    diagnostic!("a.c", "message {detail}", detail = concat!("[a", ".c]"));
+}
+'''})
+        self.assertEqual(len(index), 2)
+        self.assertEqual(len(violations), 2)
+        self.assertTrue(all(rule == 'impl.diagnostic' for rule, _, _ in violations))
+
     def test_exceptions_match_one_violation_and_fail_after_resolution(self):
         key = ('impl.rule-index', 'compiler/src/lib.rs', 'f:diagnostic!:a.b#1')
         entry = dict(rule=key[0], path=key[1], item=key[2], reason='段階5で対応する。')
