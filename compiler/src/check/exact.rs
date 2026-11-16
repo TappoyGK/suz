@@ -2,17 +2,22 @@ use super::{
     ir::{CheckedExpression, IntegerOperation, Value},
     scope::Scope,
 };
+use crate::check::generic::domain;
 use crate::{
     Diagnostic, ErrorKind,
     ast::{BinaryOperator, Expression, ExpressionKind, FloatType, IntegerType, Location, Type},
     numeric::{Int, Range},
 };
 
+// Per substitution: Err is an unrepresentable range; Ok(None) always divides by zero.
+type SubstitutionRanges = [Result<Option<Range>, ()>; domain::NUMERIC_COMBINATIONS];
+
 #[derive(Clone)]
 pub(crate) struct Exact {
     pub arithmetic: bool,
     pub kind: ExactKind,
     pub range: Option<Range>,
+    pub domains: Option<Box<SubstitutionRanges>>,
     pub location: Location,
 }
 #[derive(Clone)]
@@ -22,17 +27,40 @@ pub(crate) enum ExactKind {
     Negate(Box<Exact>),
     Binary(BinaryOperator, Box<Exact>, Box<Exact>),
 }
-impl Exact {
-    pub fn leaves(&self, f: &mut impl FnMut(&CheckedExpression)) {
-        match &self.kind {
-            ExactKind::Leaf(e) => f(e),
-            ExactKind::Negate(e) => e.leaves(f),
-            ExactKind::Binary(_, a, b) => {
-                a.leaves(f);
-                b.leaves(f);
+// The same definition visits read-only/mutable nodes and leaves in one pass.
+// rustfmt does not format this macro body; keep its layout consistent manually.
+macro_rules! exact_visitor {
+    ($name:ident, ($($mutable:tt)?)) => {
+        pub fn $name(
+            &$($mutable)? self,
+            node: &mut impl FnMut(&$($mutable)? Exact),
+            leaf: &mut impl FnMut(&$($mutable)? CheckedExpression),
+        ) {
+            node(self);
+            match &$($mutable)? self.kind {
+                ExactKind::Literal(_) => {}
+                ExactKind::Leaf(value) => leaf(value),
+                ExactKind::Negate(value) => value.$name(node, leaf),
+                ExactKind::Binary(_, left, right) => {
+                    left.$name(node, leaf);
+                    right.$name(node, leaf);
+                }
             }
-            _ => {}
         }
+    };
+}
+
+impl Exact {
+    pub fn range_at(&self, index: usize) -> Result<Option<Range>, ()> {
+        self.domains
+            .as_ref()
+            .map_or(Ok(self.range), |ranges| ranges[index])
+    }
+    exact_visitor!(visit, ());
+    exact_visitor!(visit_mut, (mut));
+
+    pub fn leaves(&self, leaf: &mut impl FnMut(&CheckedExpression)) {
+        self.visit(&mut |_| {}, leaf);
     }
 }
 pub(super) fn is_operator(expr: &Expression) -> bool {
@@ -52,14 +80,17 @@ pub(super) fn is_operator(expr: &Expression) -> bool {
     }
 }
 pub(super) fn integer(expr: &Expression, bindings: &Scope) -> bool {
-    !super::expression::has_float_literal(expr, bindings)
-        && matches!(
-            super::expression::operand_type(expr, bindings),
-            None | Some(Type::Integer(_))
-        )
+    !super::expression::has_float_source(expr, bindings)
+        && super::expression::operand_type(expr, bindings).is_none_or(Type::is_integer)
 }
 fn error(location: Location) -> Diagnostic {
-    location.error(ErrorKind::InvalidSource, "exact integer expression exceeds 128 bits; store an intermediate value or use as [arith.width]")
+    location.error(
+        ErrorKind::InvalidSource,
+        crate::diagnostic!(
+            "arith.width",
+            "exact integer expression exceeds 128 bits; store an intermediate value or use as"
+        ),
+    )
 }
 fn build(expr: &Expression, bindings: &Scope) -> Result<Exact, Diagnostic> {
     let location = expr.location;
@@ -84,9 +115,13 @@ fn build(expr: &Expression, bindings: &Scope) -> Result<Exact, Diagnostic> {
         } if is_operator(expr) => {
             let left = build(left, bindings)?;
             let right = build(right, bindings)?;
-            let range = match (left.range, right.range) {
-                (Some(a), Some(b)) => a.binary(*operator, b).map_err(|_| error(location))?,
-                _ => None,
+            let range = if left.domains.is_some() || right.domains.is_some() {
+                None
+            } else {
+                match (left.range, right.range) {
+                    (Some(a), Some(b)) => a.binary(*operator, b).map_err(|_| error(location))?,
+                    _ => None,
+                }
             };
             (
                 ExactKind::Binary(*operator, Box::new(left), Box::new(right)),
@@ -95,31 +130,86 @@ fn build(expr: &Expression, bindings: &Scope) -> Result<Exact, Diagnostic> {
         }
         _ => {
             let value = super::expression::expression(expr, None, bindings)?;
-            let Type::Integer(ty) = value.ty else {
+            if !value.ty.is_integer() {
                 return Err(location.error(
                     ErrorKind::InvalidSource,
                     if matches!(value.ty, Type::Float(_)) {
-                        "integer arithmetic requires an integer operand [arith.exact]"
+                        crate::diagnostic!(
+                            "arith.exact",
+                            "integer arithmetic requires an integer operand"
+                        )
                     } else {
-                        "integer arithmetic requires integer operands [expr.operator-types]"
+                        crate::diagnostic!(
+                            "expr.operator-types",
+                            "integer arithmetic requires integer operands"
+                        )
                     },
                 ));
-            };
-            let (min, max) = ty.bounds();
+            }
+            let (min, max) = domain::bounds(value.ty).unwrap();
             (
                 ExactKind::Leaf(Box::new(value)),
                 Some(Range::bounds(min, max)),
             )
         }
     };
-    if range.is_some_and(|r| !r.fits()) {
-        return Err(error(location));
-    }
+    let domains = match &kind {
+        ExactKind::Leaf(value) if value.ty.symbolic() => Some(Box::new(std::array::from_fn(|i| {
+            let ty = domain::at(value.ty, i).ok_or(())?;
+            Ok(ty.integer_bounds().map(|(lo, hi)| Range::bounds(lo, hi)))
+        }))),
+        ExactKind::Negate(value) if value.domains.is_some() => {
+            Some(Box::new(std::array::from_fn(|i| {
+                let range = value.range_at(i)?.map(|r| Range {
+                    min: r.max.neg(),
+                    max: r.min.neg(),
+                });
+                if range.is_some_and(|r| !r.fits()) {
+                    Err(())
+                } else {
+                    Ok(range)
+                }
+            })))
+        }
+        ExactKind::Binary(op, a, b) if a.domains.is_some() || b.domains.is_some() => {
+            Some(Box::new(std::array::from_fn(|i| {
+                let range = match (a.range_at(i)?, b.range_at(i)?) {
+                    (Some(a), Some(b)) => a.binary(*op, b)?,
+                    _ => None,
+                };
+                if range.is_some_and(|r| !r.fits()) {
+                    Err(())
+                } else {
+                    Ok(range)
+                }
+            })))
+        }
+        _ => None,
+    };
+    let range = if let Some(ranges) = &domains {
+        if ranges.iter().all(Result::is_err) {
+            return Err(error(location));
+        }
+        bindings.defer_rule(|i| ranges[i].is_err().then(|| error(location)));
+        ranges
+            .iter()
+            .filter_map(|r| r.ok().flatten())
+            .reduce(|a, b| Range {
+                min: a.min.min(b.min),
+                max: a.max.max(b.max),
+            })
+    } else {
+        if range.is_some_and(|r| !r.fits()) {
+            return Err(error(location));
+        }
+        range
+    };
     Ok(Exact {
         arithmetic: is_operator(expr)
             || matches!(expr.kind, ExpressionKind::Integer { negative: true, .. }),
         kind,
         range,
+        domains,
         location,
     })
 }
@@ -133,8 +223,24 @@ pub(super) fn check(
     if exact.range.is_none() && !handled {
         return Err(exact.location.error(
             ErrorKind::InvalidSource,
-            "integer expression always divides by zero and requires or [arith.div-zero-always]",
+            crate::diagnostic!(
+                "arith.div-zero-always",
+                "integer expression always divides by zero and requires or"
+            ),
         ));
+    }
+    if !handled && exact.domains.is_some() {
+        bindings.defer_rule(|i| {
+            exact.range_at(i).is_ok_and(|r| r.is_none()).then(|| {
+                exact.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "arith.div-zero-always",
+                        "integer expression always divides by zero and requires or"
+                    ),
+                )
+            })
+        });
     }
     let ty = if let Some(ty) = expected {
         ty
@@ -156,8 +262,21 @@ pub(super) fn check(
         if incompatible {
             return Err(expr.location.error(
                 ErrorKind::InvalidSource,
-                "integer operands have no common storage type [conv.join]",
+                crate::diagnostic!("conv.join", "integer operands have no common storage type"),
             ));
+        }
+        if let Some(ty) = known {
+            bindings.defer_rule(|i| {
+                domain::at(ty, i).is_none().then(|| {
+                    expr.location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "conv.join",
+                            "integer operands have no common storage type"
+                        ),
+                    )
+                })
+            });
         }
         known.unwrap_or(Type::Integer(IntegerType::I64))
     };
@@ -167,21 +286,40 @@ pub(super) fn check(
             value: Value::Exact(Box::new(exact)),
         });
     }
-    if let Type::Float(float) = ty {
-        if exact
-            .range
-            .is_some_and(|r| !r.exact_float(float == FloatType::F32))
+    if !ty.is_integer() {
+        let storage_error = |i| {
+            let ty = domain::at(ty, i)?;
+            let range = exact.range_at(i).ok()?;
+            match ty {
+                Type::Integer(_) => None,
+                Type::Float(float) => range
+                    .is_some_and(|r| !r.exact_float(float == FloatType::F32))
+                    .then(|| {
+                        exact.location.error(
+                            ErrorKind::InvalidSource,
+                            crate::diagnostic!(
+                                "arith.store-float",
+                                "integer range is not exactly representable; use as"
+                            ),
+                        )
+                    }),
+                _ => Some(expr.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "type.expected",
+                        "integer arithmetic requires a numeric destination"
+                    ),
+                )),
+            }
+        };
+        // Missing type/range entries belong to an earlier deferred failure.
+        if !domain::any(|i| {
+            domain::at(ty, i).is_some() && exact.range_at(i).is_ok() && storage_error(i).is_none()
+        }) && let Some(error) = domain::indices().find_map(storage_error)
         {
-            return Err(exact.location.error(
-                ErrorKind::InvalidSource,
-                "integer range is not exactly representable; use as [arith.store-float]",
-            ));
+            return Err(error);
         }
-    } else if !matches!(ty, Type::Integer(_)) {
-        return Err(expr.location.error(
-            ErrorKind::InvalidSource,
-            "integer arithmetic requires a numeric destination [type.expected]",
-        ));
+        bindings.defer_rule(storage_error);
     }
     let location = exact.location;
     Ok(CheckedExpression {
@@ -205,10 +343,18 @@ pub(super) fn use_value(
         super::expression::expression(expr, None, bindings)
     }
 }
+pub(super) fn range_at(value: &CheckedExpression, index: usize) -> Option<Range> {
+    match &value.value {
+        Value::Exact(e) => e.range_at(index).ok().flatten(),
+        _ => domain::at(value.ty, index)?
+            .integer_bounds()
+            .map(|(a, b)| Range::bounds(a, b)),
+    }
+}
 pub(super) fn value_range(expr: &CheckedExpression) -> Option<Range> {
     match &expr.value {
         Value::Exact(e) => e.range,
-        _ => expr.ty.integer_bounds().map(|(a, b)| Range::bounds(a, b)),
+        _ => domain::bounds(expr.ty).map(|(a, b)| Range::bounds(a, b)),
     }
 }
 pub(super) fn evaluate(e: &Exact) -> Option<Result<Int, Location>> {
@@ -248,6 +394,9 @@ pub(super) fn constant(expr: &CheckedExpression) -> Option<Int> {
     }
 }
 pub(super) fn widening(from: Type, to: Type) -> bool {
+    if from.symbolic() || to.symbolic() {
+        return domain::judge(from, to, widening).possible();
+    }
     match (from, to) {
         (a, b) if a == b => true,
         (Type::Integer(a), Type::Integer(b)) => {
@@ -264,6 +413,11 @@ pub(super) fn widening(from: Type, to: Type) -> bool {
     }
 }
 pub(super) fn join(a: Type, b: Type) -> Option<Type> {
+    if a.symbolic() || b.symbolic() {
+        return domain::from_types(std::array::from_fn(|i| {
+            join(domain::at(a, i)?, domain::at(b, i)?)
+        }));
+    }
     if a == b {
         return Some(a);
     }
@@ -310,13 +464,16 @@ pub(super) fn cast(
         if fallback.is_some() {
             return Err(location.error(
                 ErrorKind::InvalidSource,
-                "integer as% does not accept or [expr.cast-wrap-handler-syntax]",
+                crate::diagnostic!(
+                    "expr.cast-wrap-handler-syntax",
+                    "integer as% does not accept or"
+                ),
             ));
         }
-        if !matches!(target, Type::Integer(_)) {
+        if !target.is_integer() {
             return Err(location.error(
                 ErrorKind::InvalidSource,
-                "as% requires an integer target [expr.as-trunc]",
+                crate::diagnostic!("expr.as-trunc", "as% requires an integer target"),
             ));
         }
         return Ok(CheckedExpression {
@@ -326,11 +483,17 @@ pub(super) fn cast(
     }
     if !matches!(
         target,
-        Type::Integer(_) | Type::Float(_) | Type::Enum(_) | Type::Char
+        Type::Integer(_)
+            | Type::Float(_)
+            | Type::GenericInt
+            | Type::GenericFloat
+            | Type::Numeric(_)
+            | Type::Enum(_)
+            | Type::Char
     ) {
         return Err(location.error(
             ErrorKind::InvalidSource,
-            "invalid exact integer conversion [expr.as]",
+            crate::diagnostic!("expr.as", "invalid exact integer conversion"),
         ));
     }
     let fits = |r: Range| match target {
@@ -356,16 +519,7 @@ pub(super) fn cast(
         };
         return Ok(CheckedExpression { ty: target, value });
     }
-    if !safe && !constant(&operand).is_some_and(|n| fits(Range::point(n))) {
-        return Err(location.error(
-            ErrorKind::InvalidSource,
-            if super::constants::is_constant(&operand) {
-                "constant cast is out of range and requires or [const.cast-check]"
-            } else {
-                "this cast requires or [expr.cast-handler]"
-            },
-        ));
-    }
+    super::expression::casts::require_handler(&operand, target, safe, location, bindings)?;
     Ok(CheckedExpression {
         ty: target,
         value: Value::Cast(Box::new(operand)),
@@ -379,8 +533,13 @@ pub(super) fn constant_comparison(
     if super::constants::is_constant(a) && super::constants::is_constant(b) {
         return None;
     }
-    let a = value_range(a)?;
-    let b = value_range(b)?;
+    if super::constants::depends_on_generic(a) || super::constants::depends_on_generic(b) {
+        domain::uniform(|i| compare_ranges(range_at(a, i)?, range_at(b, i)?, op))
+    } else {
+        compare_ranges(value_range(a)?, value_range(b)?, op)
+    }
+}
+fn compare_ranges(a: Range, b: Range, op: crate::ast::ComparisonOperator) -> Option<bool> {
     use crate::ast::ComparisonOperator::*;
     match op {
         Less if a.max < b.min => Some(true),

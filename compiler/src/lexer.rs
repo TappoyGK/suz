@@ -37,7 +37,7 @@ const KEYWORDS: &[&str] = &[
 ];
 const TYPES: &[&str] = &[
     "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "bool", "char", "text",
-    "symbol", "void",
+    "symbol", "void", "int", "float",
 ];
 const SYMBOLS: &[&str] = &[
     "(", ")", "[", "]", "{", "}", ",", ":", ".", "->", "=>", "=", "+=", "-=", "*=", "/=", "%=",
@@ -77,13 +77,13 @@ pub(crate) fn position(prefix: &str) -> (usize, usize) {
     )
 }
 
-fn error(line: usize, column: usize, kind: ErrorKind, message: impl Into<String>) -> Diagnostic {
-    Diagnostic {
-        kind,
-        line,
-        column,
-        message: message.into(),
-    }
+fn error(
+    line: usize,
+    column: usize,
+    kind: ErrorKind,
+    message: crate::DiagnosticMessage,
+) -> Diagnostic {
+    Diagnostic::new(kind, line, column, message.rule, message.text)
 }
 
 fn valid_digit_separators(text: &str) -> bool {
@@ -96,7 +96,7 @@ fn valid_digit_separators(text: &str) -> bool {
     })
 }
 
-fn number(rest: &str) -> Result<(Kind<'_>, usize), &'static str> {
+fn number(rest: &str) -> Result<(Kind<'_>, usize), crate::DiagnosticMessage> {
     let integer_end = rest
         .bytes()
         .take_while(|b| b.is_ascii_digit() || *b == b'_')
@@ -124,24 +124,32 @@ fn number(rest: &str) -> Result<(Kind<'_>, usize), &'static str> {
                 .take_while(|b| b.is_ascii_digit() || **b == b'_')
                 .count();
             if start == end {
-                return Err("a floating-point exponent requires digits [lit.float]");
+                return Err(crate::diagnostic!(
+                    "lit.float",
+                    "a floating-point exponent requires digits"
+                ));
             }
         }
         if !valid_digit_separators(&rest[..end]) {
-            return Err(
-                "a floating-point separator must be a single underscore between digits [lit.float]",
-            );
+            return Err(crate::diagnostic!(
+                "lit.float",
+                "a floating-point separator must be a single underscore between digits"
+            ));
         }
         return Ok((Kind::Float(&rest[..end]), end));
     }
     let text = &rest[..end];
     if !valid_digit_separators(text) {
-        return Err(
-            "an integer separator must be a single underscore between digits [lit.integer]",
-        );
+        return Err(crate::diagnostic!(
+            "lit.integer",
+            "an integer separator must be a single underscore between digits"
+        ));
     }
     if bytes.get(end) == Some(&b'e') {
-        return Err("a floating-point exponent requires a decimal point [lit.float]");
+        return Err(crate::diagnostic!(
+            "lit.float",
+            "a floating-point exponent requires a decimal point"
+        ));
     }
     // Keep range operators and named field access separate from numbers.
     if bytes.get(end) == Some(&b'.')
@@ -149,7 +157,10 @@ fn number(rest: &str) -> Result<(Kind<'_>, usize), &'static str> {
             .get(end + 1)
             .is_some_and(|next| *next == b'.' || next.is_ascii_alphabetic() || *next == b'_')
     {
-        return Err("a decimal point requires digits on both sides [lit.float]");
+        return Err(crate::diagnostic!(
+            "lit.float",
+            "a decimal point requires digits on both sides"
+        ));
     }
     Ok((Kind::Integer(text), end))
 }
@@ -323,7 +334,7 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
                 line,
                 column,
                 ErrorKind::InvalidSource,
-                "a decimal point requires digits on both sides [lit.float]",
+                crate::diagnostic!("lit.float", "a decimal point requires digits on both sides"),
             ));
         } else if let Some(symbol) = SYMBOLS
             .iter()
@@ -336,7 +347,7 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
                 line,
                 column,
                 ErrorKind::InvalidSource,
-                format!("unexpected character {ch:?} [syntax.grammar]"),
+                crate::diagnostic!("syntax.grammar", "unexpected character {ch:?}"),
             ));
         };
         continuation = continues_line(kind, tokens.last().map(|token| token.kind));
@@ -390,7 +401,10 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
                     token.line,
                     token.column,
                     ErrorKind::InvalidSource,
-                    "range bounds must touch the range operator [for.range-spacing]",
+                    crate::diagnostic!(
+                        "for.range-spacing",
+                        "range bounds must touch the range operator"
+                    ),
                 ));
             }
         }
@@ -399,7 +413,7 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
 }
 
 // Share literal parsing with text-to-structure conversion at runtime.
-pub(crate) fn char_literal(input: &str) -> Result<(u32, usize), &'static str> {
+pub(crate) fn char_literal(input: &str) -> Result<(u32, usize), crate::DiagnosticMessage> {
     unsafe extern "C" {
         fn suz_parse_char_literal_status(
             bytes: *const u8,
@@ -421,11 +435,26 @@ pub(crate) fn char_literal(input: &str) -> Result<(u32, usize), &'static str> {
     };
     match status {
         0 => Ok((value, consumed as usize)),
-        2 => Err("Unicode escape requires at least one hexadecimal digit [char.literal]"),
-        3 => Err("Unicode escape accepts at most six hexadecimal digits [char.literal]"),
-        4 => Err("Unicode escape cannot represent a surrogate (U+D800..U+DFFF) [char.literal]"),
-        5 => Err("Unicode escape exceeds U+10FFFF [char.literal]"),
-        _ => Err("expected one Unicode scalar in a character literal [char.literal]"),
+        2 => Err(crate::diagnostic!(
+            "char.literal",
+            "Unicode escape requires at least one hexadecimal digit"
+        )),
+        3 => Err(crate::diagnostic!(
+            "char.literal",
+            "Unicode escape accepts at most six hexadecimal digits"
+        )),
+        4 => Err(crate::diagnostic!(
+            "char.literal",
+            "Unicode escape cannot represent a surrogate (U+D800..U+DFFF)"
+        )),
+        5 => Err(crate::diagnostic!(
+            "char.literal",
+            "Unicode escape exceeds U+10FFFF"
+        )),
+        _ => Err(crate::diagnostic!(
+            "char.literal",
+            "expected one Unicode scalar in a character literal"
+        )),
     }
 }
 

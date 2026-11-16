@@ -23,7 +23,7 @@ fn character_literals_and_conversions_reject_invalid_values_and_operations() {
         let source = format!("fn main() -> u8 {{ fix ch = {literal}\nreturn 0 }}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert!(
-            error.message.contains("[char.literal]"),
+            error.message().contains("[char.literal]"),
             "{source}: {error}"
         );
     }
@@ -64,7 +64,7 @@ fn character_literals_and_conversions_reject_invalid_values_and_operations() {
         let source = format!("fn main() -> u8 {{\n{body}\nreturn 0 }}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert!(
-            error.message.contains(&format!("[{rule}]")),
+            error.message().contains(&format!("[{rule}]")),
             "{source}: {error}"
         );
     }
@@ -228,7 +228,7 @@ fn unicode_escape_diagnostics_identify_the_failure_in_each_expression_context() 
             let source = format!("fn main() -> u8 {{\n{prefix}{literal}{suffix}\nreturn 0 }}");
             let error = suz::compile(source.as_bytes()).unwrap_err();
             assert_eq!(
-                error.message,
+                error.message(),
                 format!("{reason} [char.literal]"),
                 "{source}"
             );
@@ -253,7 +253,7 @@ fn mutable_loop_inputs_have_a_diagnostic_shared_by_symbol_and_ranges() {
             );
             let error = suz::compile(source.as_bytes()).unwrap_err();
             assert_eq!(
-                error.message,
+                error.message(),
                 "loop inputs cannot reference var bindings [for.bound-reference]"
             );
             assert_eq!(error.line, 3);

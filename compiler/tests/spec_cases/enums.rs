@@ -109,7 +109,7 @@ fn enum_numbering_and_narrowing_cover_signed_and_unsigned_limits() {
         let invalid = source.replace(&format!("V{max} }}"), &format!("V{max}, Overflow }}"));
         let error = suz::compile(invalid.as_bytes()).unwrap_err();
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
-        assert!(error.message.contains("[enum.variant]"));
+        assert!(error.message().contains("[enum.variant]"));
     }
     // A signed storage type must not introduce mixed-sign C comparisons.
     let variants = (0..=128)
@@ -168,11 +168,11 @@ fn enum_types_remain_nominal_and_require_checked_conversions() {
             "{source}: {error}"
         );
         assert!(
-            error.message.contains(&format!("[{rule}]")),
+            error.message().contains(&format!("[{rule}]")),
             "{source}: {error}"
         );
         if body.starts_with("fix wrong: Second") {
-            assert!(error.message.contains("expected Second, found First"));
+            assert!(error.message().contains("expected Second, found First"));
         }
     }
     for declaration in ["struct First { value: u8 }", "enum First: i8 { A }"] {
@@ -180,7 +180,7 @@ fn enum_types_remain_nominal_and_require_checked_conversions() {
         assert!(
             suz::compile(source.as_bytes())
                 .unwrap_err()
-                .message
+                .message()
                 .contains("[decl.duplicate]")
         );
     }

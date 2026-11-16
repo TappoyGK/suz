@@ -13,36 +13,17 @@ pub(super) fn check(expr: &Expression, scope: &Scope) -> Result<CheckedExpressio
     match &expr.kind {
         ExpressionKind::Struct { id, fields } => {
             let declaration = &scope.structs[*id];
-            let mut seen = BTreeSet::new();
-            let mut values = Vec::new();
-            for field in fields {
-                let index = declaration
-                    .fields
-                    .iter()
-                    .position(|f| f.name == field.name)
-                    .ok_or_else(|| {
-                        field.location.error(
-                            ErrorKind::InvalidSource,
-                            "unknown field in struct literal [struct.literal]",
-                        )
-                    })?;
-                if !seen.insert(index) {
-                    return Err(field.location.error(
-                        ErrorKind::InvalidSource,
-                        "duplicate field initializer [struct.literal]",
-                    ));
-                }
-                values.push((
-                    index,
-                    super::coerced(&field.value, Some(declaration.fields[index].ty), scope)?,
-                ));
-            }
-            if seen.len() != declaration.fields.len() {
-                return Err(expr.location.error(
-                    ErrorKind::InvalidSource,
-                    "struct literal must initialize every field [struct.literal]",
-                ));
-            }
+            let indices = initializer_indices(declaration, fields, expr.location)?;
+            let values = fields
+                .iter()
+                .zip(indices)
+                .map(|(field, index)| {
+                    Ok((
+                        index,
+                        super::coerced(&field.value, Some(declaration.fields[index].ty), scope)?,
+                    ))
+                })
+                .collect::<Result<_, Diagnostic>>()?;
             Ok(CheckedExpression {
                 ty: Type::Struct(*id),
                 value: Value::Struct { fields: values },
@@ -72,7 +53,7 @@ pub(crate) fn field(
     let Type::Struct(id) = ty else {
         return Err(location.error(
             ErrorKind::InvalidSource,
-            "field access requires a struct value [struct.access]",
+            crate::diagnostic!("struct.access", "field access requires a struct value"),
         ));
     };
     scope.structs[id]
@@ -84,7 +65,46 @@ pub(crate) fn field(
         .ok_or_else(|| {
             location.error(
                 ErrorKind::InvalidSource,
-                "unknown struct field [struct.access]",
+                crate::diagnostic!("struct.access", "unknown struct field"),
             )
         })
+}
+
+// Field membership and completeness do not depend on numeric substitutions.
+pub(crate) fn initializer_indices(
+    declaration: &crate::ast::StructDeclaration,
+    fields: &[crate::ast::FieldInitializer],
+    location: crate::ast::Location,
+) -> Result<Vec<usize>, Diagnostic> {
+    let mut seen = BTreeSet::new();
+    let mut indices = Vec::new();
+    for field in fields {
+        let index = declaration
+            .fields
+            .iter()
+            .position(|f| f.name == field.name)
+            .ok_or_else(|| {
+                field.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("struct.literal", "unknown field in struct literal"),
+                )
+            })?;
+        if !seen.insert(index) {
+            return Err(field.location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("struct.literal", "duplicate field initializer"),
+            ));
+        }
+        indices.push(index);
+    }
+    if seen.len() != declaration.fields.len() {
+        return Err(location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "struct.literal",
+                "struct literal must initialize every field"
+            ),
+        ));
+    }
+    Ok(indices)
 }

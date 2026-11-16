@@ -60,7 +60,6 @@ pub(crate) enum CheckedStatement {
     Loop {
         condition: Option<CheckedExpression>,
         body: Vec<CheckedStatement>,
-        unconditional: bool,
     },
     Break,
     Continue,
@@ -106,18 +105,33 @@ pub(crate) enum IntegerOperation {
     // positive magnitude need not fit the type (for example, -128 as i8).
     NegatedLiteral(i128),
 }
-impl IntegerOperation {
-    pub fn operands(&self) -> impl Iterator<Item = &CheckedExpression> {
-        let (first, second) = match self {
-            Self::Binary { left, right, .. } => (Some(left.as_ref()), Some(right.as_ref())),
-            Self::Negate(operand) => (Some(operand.as_ref()), None),
-            Self::NegatedLiteral(_) | Self::Exact(_) => (None, None),
-        };
-        first.into_iter().chain(second)
-    }
+// rustfmt does not format this macro body; keep its layout consistent manually.
+macro_rules! integer_operands {
+    ($name:ident, ($($mutable:tt)?), $borrow:ident) => {
+        pub fn $name(&$($mutable)? self) -> impl Iterator<Item = &$($mutable)? CheckedExpression> {
+            let (first, second) = match self {
+                Self::Binary { left, right, .. } => (Some(left.$borrow()), Some(right.$borrow())),
+                Self::Negate(operand) => (Some(operand.$borrow()), None),
+                Self::NegatedLiteral(_) | Self::Exact(_) => (None, None),
+            };
+            first.into_iter().chain(second)
+        }
+    };
 }
+impl IntegerOperation {
+    integer_operands!(operands, (), as_ref);
+    integer_operands!(operands_mut, (mut), as_mut);
+}
+
 #[derive(Clone)]
 pub(crate) enum Value {
+    // Spelling retained until a scalar type determines the representation.
+    GenericNumericLiteral {
+        text: String,
+        negative: bool,
+        floating: bool,
+        location: Location,
+    },
     Exact(Box<super::exact::Exact>),
     TextView(Box<CheckedExpression>),
     Intern {
@@ -210,4 +224,103 @@ pub(crate) enum Value {
         operands: Vec<CheckedExpression>,
     },
     Local(usize),
+}
+
+// Keep the read-only and mutable constant grammar in one definition. The
+// mutability and visitor methods are the only differences between them.
+// rustfmt does not format this macro body; keep its layout consistent manually.
+macro_rules! constant_children_visitor {
+    ($name:ident, ($($mutable:tt)?), $walk:ident, $operands:ident) => {
+        pub fn $name(
+            &$($mutable)? self,
+            visit: &mut impl FnMut(&$($mutable)? CheckedExpression),
+            exact_node: &mut impl FnMut(&$($mutable)? super::exact::Exact),
+        ) -> bool {
+            let handler = |handler: &$($mutable)? Option<CheckedHandler>,
+                           visit: &mut dyn FnMut(&$($mutable)? CheckedExpression)| {
+                match handler {
+                    None => true,
+                    Some(CheckedHandler::Value(value)) => {
+                        visit(value);
+                        true
+                    }
+                    Some(CheckedHandler::Return(_)) => false,
+                }
+            };
+            match self {
+                Self::Exact(exact) => exact.$walk(exact_node, visit),
+                Self::IntegerArithmetic { operation, handler: h, .. } => {
+                    match operation {
+                        IntegerOperation::Exact(exact) => exact.$walk(exact_node, visit),
+                        _ => operation.$operands().for_each(&mut *visit),
+                    }
+                    return handler(h, visit);
+                }
+                Self::Cast(v) | Self::Negate(v) | Self::Truncate(v) | Self::BitNot(v)
+                | Self::Not(v) | Self::TextView(v) | Self::Intern { operand: v, .. }
+                | Self::Field { target: v, .. } => visit(v),
+                // constant_struct is a derived, concrete cache of parsing the
+                // operand, not a source operand. It cannot contain generic types:
+                // struct fields have concrete types ([num.places]).
+                Self::CheckedCast { operand, fallback, .. } => {
+                    visit(operand);
+                    visit(fallback);
+                }
+                Self::Binary { left, right, .. } | Self::Logical { left, right, .. } => {
+                    visit(left);
+                    visit(right);
+                }
+                Self::Comparison { operands, .. } => {
+                    for value in operands {
+                        visit(value);
+                    }
+                }
+                Self::Template { parts, .. } => {
+                    for part in parts {
+                        if let crate::ast::TemplatePart::Value(value) = part {
+                            visit(value);
+                        }
+                    }
+                }
+                Self::Struct { fields } => {
+                    for (_, value) in fields {
+                        visit(value);
+                    }
+                }
+                Self::Slice { target, start, end, handler: h, .. } => {
+                    visit(target);
+                    for value in [start, end].into_iter().flatten() {
+                        visit(value);
+                    }
+                    return handler(h, visit);
+                }
+                Self::GenericNumericLiteral { .. } | Self::Integer { .. } | Self::Float(_)
+                | Self::Bool(_) | Self::Text { .. } => {}
+                Self::Local(_) | Self::Void | Self::Call { .. } | Self::Block { .. }
+                | Self::Match { .. } | Self::If { .. } | Self::CastReturn { .. } => return false,
+            }
+            true
+        }
+    };
+}
+
+impl Value {
+    // Exact leaves and value handlers are children too; return handlers are
+    // outside the constant-expression grammar.
+    constant_children_visitor!(visit_constant_parts, (), visit, operands);
+    pub fn visit_constant_children(&self, visit: &mut impl FnMut(&CheckedExpression)) -> bool {
+        self.visit_constant_parts(visit, &mut |_| {})
+    }
+    constant_children_visitor!(visit_constant_parts_mut, (mut), visit_mut, operands_mut);
+
+    pub fn symbolic_range(&self) -> bool {
+        match self {
+            Self::Exact(e)
+            | Self::IntegerArithmetic {
+                operation: IntegerOperation::Exact(e),
+                ..
+            } => e.domains.is_some(),
+            _ => false,
+        }
+    }
 }

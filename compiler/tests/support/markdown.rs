@@ -39,13 +39,17 @@ pub(super) fn block(lines: &[&str], i: &mut usize, language: &str) -> Result<Str
 }
 
 pub(super) fn cells(line: &str) -> Result<Vec<&str>> {
+    table_cells(line, 4)
+}
+
+pub(super) fn table_cells(line: &str, columns: usize) -> Result<Vec<&str>> {
     let inner = line
         .strip_prefix('|')
         .and_then(|s| s.strip_suffix('|'))
         .ok_or("invalid table row")?;
     let values: Vec<_> = inner.split('|').map(str::trim).collect();
-    if values.len() != 4 {
-        return Err("expected four table columns".into());
+    if values.len() != columns {
+        return Err(format!("expected {columns} table columns"));
     }
     Ok(values)
 }
@@ -58,7 +62,11 @@ pub(super) fn number<T: std::str::FromStr>(text: &str) -> Result<T> {
 }
 
 pub(super) fn separator(lines: &[&str], i: &mut usize) -> Result<()> {
-    let separator = cells(lines.get(*i).ok_or("missing table separator")?)?;
+    table_separator(lines, i, 4)
+}
+
+pub(super) fn table_separator(lines: &[&str], i: &mut usize, columns: usize) -> Result<()> {
+    let separator = table_cells(lines.get(*i).ok_or("missing table separator")?, columns)?;
     if separator.iter().any(|c| {
         let dashes = c.trim_matches(':');
         dashes.len() < 3 || !dashes.bytes().all(|b| b == b'-')

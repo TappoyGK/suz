@@ -5,6 +5,7 @@ mod diagnostics;
 pub(crate) mod exact;
 mod expression;
 mod functions;
+mod generic;
 pub(crate) mod ir;
 mod matches;
 mod ranges;
@@ -48,3 +49,7 @@ mod loop_tests;
 #[cfg(test)]
 #[path = "check/tests/bindings.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "check/tests/generic.rs"]
+mod generic_tests;

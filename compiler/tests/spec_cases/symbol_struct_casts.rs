@@ -103,6 +103,6 @@ fn struct_symbol_casts_require_handlers_and_validate_constant_fallbacks() {
     ] {
         let source = format!("struct Item {{ value: u8 }}\n{body}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
-        assert!(error.message.contains(rule), "{source}: {error:?}");
+        assert!(error.message().contains(rule), "{source}: {error:?}");
     }
 }

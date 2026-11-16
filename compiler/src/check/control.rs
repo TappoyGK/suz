@@ -19,9 +19,20 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
         match fallback {
             Some(FailureHandler::Return { value, location }) => {
                 if in_value || !allowed {
-                    return Err(location.error(ErrorKind::InvalidSource, if in_value {
-                        "control transfers are forbidden inside value expressions [expr.jump-prohibited]"
-                    } else { "or return must apply to the entire initializer or assignment RHS [expr.or-return-position]" }));
+                    return Err(location.error(
+                        ErrorKind::InvalidSource,
+                        if in_value {
+                            crate::diagnostic!(
+                                "expr.jump-prohibited",
+                                "control transfers are forbidden inside value expressions"
+                            )
+                        } else {
+                            crate::diagnostic!(
+                                "expr.or-return-position",
+                                "or return must apply to the entire initializer or assignment RHS"
+                            )
+                        },
+                    ));
                 }
                 visit(value, false, in_value)?;
             }
@@ -250,6 +261,7 @@ pub(super) fn lower_return_handler(
         let id = *next_id;
         *next_id += 1;
         let replacement = super::exact::Exact {
+            domains: None,
             arithmetic: false,
             kind: super::exact::ExactKind::Leaf(Box::new(CheckedExpression {
                 ty: crate::ast::Type::Exact,
@@ -323,33 +335,34 @@ pub(super) fn lower_return_handler(
     true
 }
 
-fn contains_break(statements: &[CheckedStatement]) -> bool {
+fn contains_break(statements: &[Statement]) -> bool {
     statements.iter().any(|statement| match statement {
-        CheckedStatement::Match { arms, .. } => arms.iter().any(|(_, body)| contains_break(body)),
-        CheckedStatement::Break => true,
-        CheckedStatement::Block(inner) => contains_break(inner),
-        CheckedStatement::If {
+        Statement::Match { arms, .. } => arms.iter().any(|arm| contains_break(&arm.body)),
+        Statement::Break(_) => true,
+        Statement::Block(inner) => contains_break(inner),
+        Statement::If {
             branches,
             otherwise,
         } => {
             branches.iter().any(|(_, body)| contains_break(body))
                 || otherwise.as_ref().is_some_and(|body| contains_break(body))
         }
-        // Breaks inside a nested loop belong to that loop.
+        // Breaks inside nested loops belong to those loops.
         _ => false,
     })
 }
-pub(super) fn stops(statements: &[CheckedStatement]) -> bool {
+fn stops(statements: &[Statement]) -> bool {
     statements.iter().any(|statement| match statement {
-        CheckedStatement::Match { arms, .. } => arms.iter().all(|(_, body)| stops(body)),
-        CheckedStatement::Return(_) | CheckedStatement::Break | CheckedStatement::Continue => true,
-        CheckedStatement::Loop {
-            unconditional,
-            body,
-            ..
-        } => *unconditional && !contains_break(body),
-        CheckedStatement::Block(inner) => stops(inner),
-        CheckedStatement::If {
+        Statement::Match { arms, .. } => arms.iter().all(|arm| stops(&arm.body)),
+        Statement::Return(_) | Statement::Break(_) | Statement::Continue(_) => true,
+        Statement::Loop { condition, body } => {
+            condition
+                .as_ref()
+                .is_none_or(|e| matches!(e.kind, ExpressionKind::Bool(true)))
+                && !contains_break(body)
+        }
+        Statement::Block(inner) => stops(inner),
+        Statement::If {
             branches,
             otherwise,
         } => {
@@ -358,4 +371,47 @@ pub(super) fn stops(statements: &[CheckedStatement]) -> bool {
         }
         _ => false,
     })
+}
+pub(super) fn check_return_shape(function: &crate::ast::Function) -> Result<(), Diagnostic> {
+    use crate::ast::visit::{self, Visitor};
+    if function.result == crate::ast::Type::Void {
+        return Ok(());
+    }
+    struct Returns(bool);
+    impl Visitor for Returns {
+        fn statement(&mut self, statement: &Statement) -> Result<(), Diagnostic> {
+            self.0 |= matches!(statement, Statement::Return(_));
+            visit::walk_statement(self, statement)
+        }
+        fn expression(&mut self, expr: &Expression) -> Result<(), Diagnostic> {
+            if let ExpressionKind::Cast { fallback, .. }
+            | ExpressionKind::ArithmeticHandler { fallback, .. }
+            | ExpressionKind::Slice { fallback, .. } = &expr.kind
+            {
+                self.0 |= matches!(fallback, Some(FailureHandler::Return { .. }));
+            }
+            visit::walk_expression(self, expr)
+        }
+    }
+    let mut returns = Returns(false);
+    returns.scope(&function.statements, None)?;
+    if !returns.0 {
+        return Err(function.end.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "fn.value-return-required",
+                "a value-returning function requires a return expression"
+            ),
+        ));
+    }
+    if !stops(&function.statements) {
+        return Err(function.end.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "fn.fallthrough",
+                "a value-returning function may reach its end"
+            ),
+        ));
+    }
+    Ok(())
 }

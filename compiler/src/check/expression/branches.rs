@@ -23,7 +23,7 @@ pub(super) fn check(
             if ty == Type::Void {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
-                    "value branches cannot return void [branch.expression]",
+                    crate::diagnostic!("branch.expression", "value branches cannot return void"),
                 ));
             }
             let mut checked = Vec::new();
@@ -49,7 +49,7 @@ pub(super) fn check(
             if ty == Type::Void {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
-                    "value branches cannot return void [branch.expression]",
+                    crate::diagnostic!("branch.expression", "value branches cannot return void"),
                 ));
             }
             let mut checked = Vec::new();
@@ -58,7 +58,10 @@ pub(super) fn check(
                 if checked_condition.ty != Type::Bool {
                     return Err(condition.location.error(
                         ErrorKind::InvalidSource,
-                        "ifexpr and elif conditions must be bool [if.condition]",
+                        crate::diagnostic!(
+                            "if.condition",
+                            "ifexpr and elif conditions must be bool"
+                        ),
                     ));
                 }
                 checked.push((

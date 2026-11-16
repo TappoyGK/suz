@@ -58,8 +58,8 @@ fn generated_bindings_handle_c_names_and_large_integer_literals() {
     fix signed_maximum: i64 = 9223372036854775807
     fix wide: u32 = 4294967295
     fix negative: i32 = -2147483648
-    fix int: u8 = 7
-    fix suz_main = (int)
+    fix unsigned: u8 = 7
+    fix suz_main = (unsigned)
     fix suz_local_0 = suz_main
     return suz_local_0
 }
@@ -270,7 +270,7 @@ fn compound_assignments_check_mutability_types_and_statement_position() {
         let source = format!("fn main() -> u8 {{\n{body}\n}}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
-        assert!(error.message.contains(rule), "{error:?}");
+        assert!(error.message().contains(rule), "{error:?}");
     }
     // Wrapping and bitwise compound operators are not arithmetic diagnostic targets.
     let source = r#"fn main() -> u8 {

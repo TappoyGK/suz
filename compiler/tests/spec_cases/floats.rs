@@ -57,7 +57,7 @@ fn float_types_reject_overflow_and_implicit_conversions() {
         let source = format!("fn main() -> u8 {{\n{body}\n}}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
-        assert!(error.message.contains(rule), "{error:?}");
+        assert!(error.message().contains(rule), "{error:?}");
     }
     let source = b"fn main() -> u8 { fix x: f32 = -1\nfix y: f64 = -0\nfix z = -inf\nreturn 0 }";
     for mode in [
@@ -140,7 +140,7 @@ fn float_arithmetic_checks_types_and_stays_out_of_integer_diagnostics() {
         let source = format!("fn main() -> u8 {{\n{body}\n}}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
-        assert!(error.message.contains(rule), "{error:?}");
+        assert!(error.message().contains(rule), "{error:?}");
     }
     let source = b"fn main() -> u8 { var x: f32 = -(1.0)\nx += -x * (2.0 - 1.0) / 2.0\nreturn 0 }";
     for mode in [

@@ -9,13 +9,8 @@ pub(crate) struct Location {
 }
 
 impl Location {
-    pub fn error(self, kind: ErrorKind, message: impl Into<String>) -> Diagnostic {
-        Diagnostic {
-            kind,
-            line: self.line,
-            column: self.column,
-            message: message.into(),
-        }
+    pub fn error(self, kind: ErrorKind, message: crate::DiagnosticMessage) -> Diagnostic {
+        Diagnostic::new(kind, self.line, self.column, message.rule, message.text)
     }
 }
 
@@ -126,7 +121,19 @@ pub(crate) struct EnumDeclaration {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ScalarType {
+    Integer(IntegerType),
+    Float(FloatType),
+}
+
+// Number of independent int/float substitutions in an internal type function.
+pub(crate) const NUMERIC_COMBINATIONS: usize = 16;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Type {
+    GenericInt,
+    GenericFloat,
+    Numeric([Option<ScalarType>; NUMERIC_COMBINATIONS]), // Internal type function of int and float.
     Exact, // Internal mathematical integer; never a source-level storage type.
     Struct(usize),
     Enum(EnumType),
@@ -140,6 +147,38 @@ pub(crate) enum Type {
 }
 
 impl Type {
+    pub fn generic(self) -> bool {
+        matches!(self, Self::GenericInt | Self::GenericFloat)
+    }
+    pub fn symbolic(self) -> bool {
+        self.generic() || matches!(self, Self::Numeric(_))
+    }
+    /// Includes symbolic types whose possible results are all integers.
+    pub fn is_integer(self) -> bool {
+        match self {
+            Self::Integer(_) | Self::GenericInt => true,
+            Self::Numeric(types) => types
+                .iter()
+                .flatten()
+                .all(|ty| matches!(ty, ScalarType::Integer(_))),
+            _ => false,
+        }
+    }
+    /// Includes symbolic types whose possible results are all floating-point types.
+    pub fn is_float(self) -> bool {
+        match self {
+            Self::Float(_) | Self::GenericFloat => true,
+            Self::Numeric(types) => types
+                .iter()
+                .flatten()
+                .all(|ty| matches!(ty, ScalarType::Float(_))),
+            _ => false,
+        }
+    }
+    /// Includes concrete and symbolic integer/floating-point types.
+    pub fn is_numeric(self) -> bool {
+        matches!(self, Self::Numeric(_)) || self.is_integer() || self.is_float()
+    }
     pub fn is_text(self) -> bool {
         matches!(self, Self::Symbol | Self::Text)
     }
@@ -160,7 +199,11 @@ impl Type {
         }
     }
     pub fn from_name(name: &str) -> Option<Self> {
-        if name == "char" {
+        if name == "int" {
+            Some(Self::GenericInt)
+        } else if name == "float" {
+            Some(Self::GenericFloat)
+        } else if name == "char" {
             Some(Self::Char)
         } else if name == "symbol" {
             Some(Self::Symbol)
@@ -181,6 +224,15 @@ impl Type {
     pub fn name(self) -> &'static str {
         match self {
             Self::Exact => "exact integer",
+            Self::GenericInt => "int",
+            Self::GenericFloat => "float",
+            Self::Numeric(_) => {
+                if self.is_integer() {
+                    "int"
+                } else {
+                    "float"
+                }
+            }
             Self::Integer(ty) => ty.name(),
             Self::Float(ty) => ty.name(),
             Self::Char => "char",
@@ -195,6 +247,9 @@ impl Type {
     pub fn c_name(self) -> String {
         match self {
             Self::Exact => "suz_exact".into(),
+            Self::GenericInt | Self::GenericFloat | Self::Numeric(_) => {
+                unreachable!("generic types are resolved before code generation")
+            }
             Self::Struct(id) => format!("suz_struct_{id}"),
             Self::Integer(ty) => ty.c_name().into(),
             Self::Float(ty) => ty.c_name().into(),
@@ -224,6 +279,7 @@ pub(crate) struct StructDeclaration {
     pub end: usize,
 }
 
+#[derive(Clone)]
 pub(crate) struct FieldInitializer {
     pub name: String,
     pub value: Expression,
@@ -261,6 +317,13 @@ pub(crate) struct Function {
     pub end: Location,
 }
 
+impl Function {
+    pub fn declares_numeric(&self, ty: Type) -> bool {
+        self.result == ty || self.parameters.iter().any(|parameter| parameter.ty == ty)
+    }
+}
+
+#[derive(Clone)]
 pub(crate) struct MatchArm<T = Vec<Statement>> {
     pub pattern: Option<Expression>,
     pub location: Location,
@@ -273,6 +336,7 @@ pub(crate) enum LogLevel {
     Warn,
 }
 
+#[derive(Clone)]
 pub(crate) enum Statement {
     Log {
         level: LogLevel,
@@ -322,6 +386,7 @@ pub(crate) enum Statement {
     Return(Expression),
 }
 
+#[derive(Clone)]
 pub(crate) struct Expression {
     pub kind: ExpressionKind,
     pub location: Location,
@@ -469,6 +534,7 @@ impl BinaryOperator {
     }
 }
 
+#[derive(Clone)]
 pub(crate) enum FailureHandler {
     Value(Box<Expression>),
     Return {
@@ -477,6 +543,7 @@ pub(crate) enum FailureHandler {
     },
 }
 
+#[derive(Clone)]
 pub(crate) enum ExpressionKind {
     Slice {
         target: Box<Expression>,

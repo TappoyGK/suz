@@ -67,7 +67,10 @@ pub(crate) fn collect(
             }) {
                 return Err(item.location.error(
                     ErrorKind::InvalidSource,
-                    "an enclosing allow already suppresses this rule [allow.nested]",
+                    crate::diagnostic!(
+                        "allow.nested",
+                        "an enclosing allow already suppresses this rule"
+                    ),
                 ));
             }
             if !candidates
@@ -76,7 +79,7 @@ pub(crate) fn collect(
             {
                 return Err(item.location.error(
                     ErrorKind::InvalidSource,
-                    "allow has no matching warning sites [allow.unused]",
+                    crate::diagnostic!("allow.unused", "allow has no matching warning sites"),
                 ));
             }
         }
@@ -86,7 +89,10 @@ pub(crate) fn collect(
     {
         return Err(location.error(
             ErrorKind::InvalidSource,
-            "integer arithmetic has no 'or' handler [diagnostic.arithmetic]",
+            crate::diagnostic!(
+                "diagnostic.arithmetic",
+                "integer arithmetic has no 'or' handler"
+            ),
         ));
     }
     Ok(candidates
@@ -105,6 +111,7 @@ pub(crate) fn collect(
                 return None;
             }
             Some(Warning {
+                rule_id: rule.to_owned(),
                 line: location.line,
                 column: location.column,
                 message: format!("{message} [{rule}]"),

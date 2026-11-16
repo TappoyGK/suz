@@ -18,19 +18,64 @@ pub enum ErrorKind {
     Unsupported,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Diagnostic {
+    pub related: Vec<Diagnostic>,
     pub kind: ErrorKind,
     pub line: usize,
     pub column: usize,
-    pub message: String,
+    message: String,
+    rule_id: String,
 }
 
 impl fmt::Display for Diagnostic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}: {}", self.line, self.column, self.message)
+        write!(f, "{}:{}: {}", self.line, self.column, self.message)?;
+        for related in &self.related {
+            write!(f, "\n  note: {related}")?;
+        }
+        Ok(())
     }
 }
+
+impl Diagnostic {
+    pub fn new(
+        kind: ErrorKind,
+        line: usize,
+        column: usize,
+        rule: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        let rule_id = rule.into();
+        Self {
+            related: Vec::new(),
+            kind,
+            line,
+            column,
+            message: format!("{} [{}]", message.into(), rule_id),
+            rule_id,
+        }
+    }
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+    /// The structured rule identifier, independent of the rendered message.
+    pub fn rule(&self) -> &str {
+        &self.rule_id
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct DiagnosticMessage {
+    pub rule: &'static str,
+    pub text: String,
+}
+macro_rules! diagnostic {
+    ($rule:expr, $($message:tt)*) => {
+        $crate::DiagnosticMessage { rule: $rule, text: format!($($message)*) }
+    };
+}
+pub(crate) use diagnostic;
 
 impl std::error::Error for Diagnostic {}
 
@@ -63,6 +108,15 @@ impl TextPoolLimit {
     }
 }
 
+impl Warning {
+    pub fn rule(&self) -> &str {
+        &self.rule_id
+    }
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CompilationOptions {
     pub log_allow: bool,
@@ -72,10 +126,11 @@ pub struct CompilationOptions {
 
 #[derive(Debug)]
 pub struct Warning {
+    rule_id: String,
     pub allowed_reason: Option<String>,
     pub line: usize,
     pub column: usize,
-    pub message: String,
+    message: String,
 }
 
 pub struct Compilation {
@@ -147,22 +202,24 @@ fn analyze(
     let source = std::str::from_utf8(bytes).map_err(|error| {
         let prefix = std::str::from_utf8(&bytes[..error.valid_up_to()]).unwrap();
         let (line, column) = lexer::position(prefix);
-        Diagnostic {
-            kind: ErrorKind::InvalidSource,
+        Diagnostic::new(
+            ErrorKind::InvalidSource,
             line,
             column,
-            message: "source is not valid UTF-8 [src.encoding]".into(),
-        }
+            "src.encoding",
+            "source is not valid UTF-8",
+        )
     })?;
     for (offset, _) in source.match_indices('\r') {
         if source.as_bytes().get(offset + 1) != Some(&b'\n') {
             let (line, column) = lexer::position(&source[..offset]);
-            return Err(Diagnostic {
-                kind: ErrorKind::InvalidSource,
+            return Err(Diagnostic::new(
+                ErrorKind::InvalidSource,
                 line,
                 column,
-                message: "CR must be followed by LF [src.newline]".into(),
-            });
+                "src.newline",
+                "CR must be followed by LF",
+            ));
         }
     }
     let source = source.replace("\r\n", "\n");

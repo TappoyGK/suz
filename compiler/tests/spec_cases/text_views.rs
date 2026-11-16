@@ -41,7 +41,7 @@ fn views_reject_missing_handlers_wrong_types_and_hidden_returns() {
         let source = format!("fn main() -> u8 {{\n{body}\nreturn 0 }}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert!(
-            error.message.contains(&format!("[{rule}]")),
+            error.message().contains(&format!("[{rule}]")),
             "{source}: {error}"
         );
     }
@@ -227,7 +227,7 @@ fn constant_views_preserve_diagnostics_and_lazy_failure_evaluation() {
         b"const PART = `abc`[-1:] or (`x`[1 / (0 as u8):] or ``)\nfn main() -> u8 { return 0 }",
     )
     .unwrap_err();
-    assert!(error.message.contains("[const.evaluation]"));
+    assert!(error.message().contains("[const.evaluation]"));
 }
 
 #[test]
@@ -253,7 +253,7 @@ fn conversion_diagnostics_identify_the_source_type() {
             let source =
                 format!("fn main() -> u8 {{ fix value = ({value}) {conversion}\nreturn 0 }}");
             assert_eq!(
-                suz::compile(source.as_bytes()).unwrap_err().message,
+                suz::compile(source.as_bytes()).unwrap_err().message(),
                 message
             );
         }

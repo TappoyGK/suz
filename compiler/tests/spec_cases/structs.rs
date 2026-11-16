@@ -79,7 +79,7 @@ fn struct_literals_require_parentheses_in_each_control_target() {
         let source = format!("struct Item {{ x: u8 }}\nfn main() -> u8 {{\n{body}\nreturn 0\n}}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert!(
-            error.message.contains("[expr.struct-in-cond]"),
+            error.message().contains("[expr.struct-in-cond]"),
             "{source}: {error}"
         );
         let grouped = source
@@ -149,7 +149,7 @@ fn struct_fields_reject_invalid_declarations_access_and_overlapping_writes() {
             "{source}: {error}"
         );
         assert!(
-            error.message.contains(&format!("[{rule}]")),
+            error.message().contains(&format!("[{rule}]")),
             "{source}: {error}"
         );
     }

@@ -56,7 +56,7 @@ fn shifts_check_types_diagnostics_and_constant_evaluation() {
         let source = format!("fn main() -> u8 {{\n{body}\n}}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
-        assert!(error.message.contains("expr.operator-types"), "{error:?}");
+        assert!(error.message().contains("expr.operator-types"), "{error:?}");
     }
     for declaration in [
         "const VALUE: u8 = 1 << 8",
@@ -69,7 +69,7 @@ fn shifts_check_types_diagnostics_and_constant_evaluation() {
         let source = format!("{declaration}\nfn main() -> u8 {{ return 0 }}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert!(
-            error.message.contains("const.evaluation"),
+            error.message().contains("const.evaluation"),
             "{source}: {error:?}"
         );
     }

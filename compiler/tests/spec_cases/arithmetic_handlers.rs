@@ -173,11 +173,11 @@ fn arithmetic_handlers_check_types_and_control_transfer_positions() {
             suz::ErrorKind::InvalidSource,
             "{source}: {error:?}"
         );
-        assert!(error.message.contains(rule), "{source}: {error:?}");
+        assert!(error.message().contains(rule), "{source}: {error:?}");
     }
     let error =
         suz::compile(b"const VALUE = 1 + 2 or return 7\nfn main() -> u8 { return 0 }").unwrap_err();
-    assert!(error.message.contains("const.expression"));
+    assert!(error.message().contains("const.expression"));
 }
 
 #[test]

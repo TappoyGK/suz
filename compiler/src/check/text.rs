@@ -22,7 +22,10 @@ pub(super) fn parts(
                     if matches!(result.ty, Type::Void | Type::Struct(_)) {
                         return Err(value.location.error(
                             ErrorKind::InvalidSource,
-                            "this type cannot be interpolated [symbol.interpolation]",
+                            crate::diagnostic!(
+                                "symbol.interpolation",
+                                "this type cannot be interpolated"
+                            ),
                         ));
                     }
                     TemplatePart::Value(result)
@@ -38,7 +41,22 @@ pub(super) fn template(
     bindings: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
     let parts = parts(input, bindings)?;
-    let constant = parts
+    let constant = constant_parts(&parts, bindings);
+    Ok(CheckedExpression {
+        ty: Type::Symbol,
+        value: Value::Template {
+            parts,
+            location,
+            constant,
+        },
+    })
+}
+
+pub(super) fn constant_parts(
+    parts: &[TemplatePart<CheckedExpression>],
+    bindings: &Scope,
+) -> Option<String> {
+    parts
         .iter()
         .map(|part| match part {
             TemplatePart::Text(text) => Some(text.clone()),
@@ -58,15 +76,7 @@ pub(super) fn template(
                 })
             }
         })
-        .collect::<Option<String>>();
-    Ok(CheckedExpression {
-        ty: Type::Symbol,
-        value: Value::Template {
-            parts,
-            location,
-            constant,
-        },
-    })
+        .collect::<Option<String>>()
 }
 
 // Use the same bundled Ryu formatter as generated programs. Rust's default
@@ -100,19 +110,31 @@ pub(super) fn register_constants(value: &CheckedExpression, scope: &Scope) {
     match &value.value {
         Value::TextView(inner) => register_constants(inner, scope),
         Value::Text { text, .. } if value.ty == Type::Symbol => {
-            scope.constant_texts.borrow_mut().insert(text.clone());
+            scope
+                .outputs
+                .constant_texts
+                .borrow_mut()
+                .insert(text.clone());
         }
         Value::Intern {
             constant: Some(text),
             ..
         } => {
-            scope.constant_texts.borrow_mut().insert(text.clone());
+            scope
+                .outputs
+                .constant_texts
+                .borrow_mut()
+                .insert(text.clone());
         }
         Value::Template {
             constant: Some(text),
             ..
         } => {
-            scope.constant_texts.borrow_mut().insert(text.clone());
+            scope
+                .outputs
+                .constant_texts
+                .borrow_mut()
+                .insert(text.clone());
         }
         Value::Struct { fields } => {
             for (_, field) in fields {

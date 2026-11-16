@@ -245,7 +245,7 @@ fn main() -> u8 {
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
         assert!(
             error
-                .message
+                .message()
                 .contains(if source.contains(" / 0") || source.contains(" % 0") {
                     "arith.div-zero-always"
                 } else {

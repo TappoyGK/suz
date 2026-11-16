@@ -97,7 +97,7 @@ fn templates_validate_syntax_escapes_and_embedded_expressions() {
             suz::ErrorKind::InvalidSource,
             "{source}: {error:?}"
         );
-        assert!(error.message.contains(rule), "{source}: {error:?}");
+        assert!(error.message().contains(rule), "{source}: {error:?}");
     }
 }
 

@@ -26,6 +26,9 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
         return super::exact::stored(expr, context);
     }
     match expr.value {
+        Value::GenericNumericLiteral { .. } => {
+            unreachable!("generic values are substituted before code generation")
+        }
         Value::Exact(ref e) => format!(
             "suz_exact_require({}, {})",
             super::exact::tree(e, context),

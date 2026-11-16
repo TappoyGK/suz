@@ -42,13 +42,13 @@ impl<'a, 's> Parser<'a, 's> {
         }
     }
 
-    fn error(&self, kind: ErrorKind, message: &str) -> Diagnostic {
+    fn error(&self, kind: ErrorKind, message: crate::DiagnosticMessage) -> Diagnostic {
         // Valid range operators are consumed by the for header. If parsing
         // fails at one, report its restricted use instead of a missing token.
         let message = if kind == ErrorKind::InvalidSource
             && matches!(self.token().kind, Kind::Symbol("..<" | "..="))
         {
-            "range notation is only allowed in for or rev [for.range]"
+            crate::diagnostic!("for.range", "range notation is only allowed in for or rev")
         } else {
             message
         };
@@ -63,7 +63,7 @@ impl<'a, 's> Parser<'a, 's> {
         if self.token().kind != kind {
             return Err(self.error(
                 ErrorKind::InvalidSource,
-                &format!("expected '{text}' [syntax.grammar]"),
+                crate::diagnostic!("syntax.grammar", "expected '{text}'"),
             ));
         }
         self.cursor += 1;
@@ -85,7 +85,7 @@ impl<'a, 's> Parser<'a, 's> {
             _ => {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
-                    "expected a non-reserved constant name [src.ident]",
+                    crate::diagnostic!("src.ident", "expected a non-reserved constant name"),
                 ));
             }
         };
@@ -97,7 +97,7 @@ impl<'a, 's> Parser<'a, 's> {
             if ty == Type::Void {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
-                    "bindings cannot have type void [type.void]",
+                    crate::diagnostic!("type.void", "bindings cannot have type void"),
                 ));
             }
             Some(ty)
@@ -107,7 +107,7 @@ impl<'a, 's> Parser<'a, 's> {
         if self.token().kind != Kind::Symbol("=") {
             return Err(self.error(
                 ErrorKind::InvalidSource,
-                "a constant requires an initializer [const.decl]",
+                crate::diagnostic!("const.decl", "a constant requires an initializer"),
             ));
         }
         self.cursor += 1;
@@ -166,26 +166,35 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
             Kind::Keyword("return") => {
                 return Err(p.error(
                     ErrorKind::InvalidSource,
-                    "return requires an enclosing function [fn.return]",
+                    crate::diagnostic!("fn.return", "return requires an enclosing function"),
                 ));
             }
             Kind::Keyword("fix" | "var") => {
                 return Err(p.error(
                     ErrorKind::InvalidSource,
-                    "variables must be declared inside a block [decl.location]",
+                    crate::diagnostic!(
+                        "decl.location",
+                        "variables must be declared inside a block"
+                    ),
                 ));
             }
             _ => {
                 return Err(p.error(
                     ErrorKind::InvalidSource,
-                    "expected a const, fn, struct or enum declaration [decl.top-level]",
+                    crate::diagnostic!(
+                        "decl.top-level",
+                        "expected a const, fn, struct or enum declaration"
+                    ),
                 ));
             }
         }
         if !matches!(p.token().kind, Kind::Newline | Kind::End) {
             return Err(p.error(
                 ErrorKind::InvalidSource,
-                "declarations must be separated by a newline [src.statement-end]",
+                crate::diagnostic!(
+                    "src.statement-end",
+                    "declarations must be separated by a newline"
+                ),
             ));
         }
         p.newlines();
@@ -193,7 +202,7 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
     if !main {
         return Err(p.error(
             ErrorKind::InvalidSource,
-            "main must be declared exactly once [prog.main]",
+            crate::diagnostic!("prog.main", "main must be declared exactly once"),
         ));
     }
     Ok(Program {
