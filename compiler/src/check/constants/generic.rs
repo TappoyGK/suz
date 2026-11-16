@@ -136,3 +136,75 @@ fn substitute(value: &mut CheckedExpression, index: usize, scope: &Scope) -> Opt
     }
     Some(())
 }
+
+// A concrete outer type can still contain a symbolic constant. Inspect its
+// structure before evaluation: the ordinary evaluator requires scalar types.
+pub(in crate::check) fn dependent(value: &CheckedExpression) -> bool {
+    if value.ty.symbolic() {
+        return true;
+    }
+    let exact = |e: &Exact| {
+        let mut found = e.domains.is_some();
+        e.leaves(&mut |leaf| found |= dependent(leaf));
+        found
+    };
+    let handler = |h: &Option<CheckedHandler>| match h {
+        Some(CheckedHandler::Value(v) | CheckedHandler::Return(v)) => dependent(v),
+        None => false,
+    };
+    match &value.value {
+        Value::Exact(e) => exact(e),
+        Value::Cast(e)
+        | Value::Negate(e)
+        | Value::Truncate(e)
+        | Value::BitNot(e)
+        | Value::Not(e)
+        | Value::TextView(e)
+        | Value::Intern { operand: e, .. }
+        | Value::Field { target: e, .. } => dependent(e),
+        Value::CheckedCast {
+            operand, fallback, ..
+        } => dependent(operand) || dependent(fallback),
+        Value::IntegerArithmetic {
+            operation,
+            handler: h,
+            ..
+        } => {
+            let found = match operation {
+                IntegerOperation::Exact(e) => exact(e),
+                _ => operation.operands().any(dependent),
+            };
+            found || handler(h)
+        }
+        Value::Binary { left, right, .. } | Value::Logical { left, right, .. } => {
+            dependent(left) || dependent(right)
+        }
+        Value::Comparison { operands, .. } => operands.iter().any(dependent),
+        Value::Template { parts, .. } => parts.iter().any(|part| match part {
+            crate::ast::TemplatePart::Value(v) => dependent(v),
+            crate::ast::TemplatePart::Text(_) => false,
+        }),
+        Value::Struct { fields } => fields.iter().any(|(_, v)| dependent(v)),
+        Value::Slice {
+            target,
+            start,
+            end,
+            handler: h,
+            ..
+        } => {
+            dependent(target)
+                || [start, end].into_iter().flatten().any(|v| dependent(v))
+                || handler(h)
+        }
+        Value::GenericFloatLiteral(_) => true,
+        Value::Integer { .. } | Value::Float(_) | Value::Bool(_) | Value::Text { .. } => false,
+        // These values are outside the constant-expression grammar.
+        Value::Local(_)
+        | Value::Void
+        | Value::Call { .. }
+        | Value::Block { .. }
+        | Value::Match { .. }
+        | Value::If { .. }
+        | Value::CastReturn { .. } => false,
+    }
+}

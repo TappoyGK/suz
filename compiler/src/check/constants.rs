@@ -765,7 +765,9 @@ fn validate_evaluation(expr: &CheckedExpression) -> Result<(), Diagnostic> {
 }
 
 pub(super) fn evaluate(expr: &CheckedExpression) -> Result<Option<CheckedExpression>, Diagnostic> {
-    if !is_constant(expr) {
+    // Symbolic constants must be substituted before ordinary evaluation. This
+    // also covers symbolic children behind a concrete result type.
+    if !is_constant(expr) || generic::dependent(expr) {
         return Ok(None);
     }
     validate_evaluation(expr)?;

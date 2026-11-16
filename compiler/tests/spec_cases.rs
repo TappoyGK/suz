@@ -38,6 +38,8 @@ mod format;
 mod functions;
 #[path = "spec_cases/generic_numeric.rs"]
 mod generic_numeric;
+#[path = "spec_cases/generic_properties.rs"]
+mod generic_properties;
 #[path = "support/integer_bounds.rs"]
 mod integer_bounds;
 #[path = "spec_cases/invalid_inputs.rs"]

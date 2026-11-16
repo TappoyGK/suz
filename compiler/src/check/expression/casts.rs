@@ -277,18 +277,27 @@ pub(in crate::check) fn require_handler(
     location: crate::ast::Location,
     scope: &Scope,
 ) -> Result<(), Diagnostic> {
-    let dependent = super::super::exact::dependent(operand) || target.symbolic();
-    cast_risk(operand, target, type_safe, scope)?
+    // A concrete result type does not erase symbolic constant values inside it
+    // (for example a handled cast of `1 as% int` to u16). Inspect the constant
+    // before evaluation, then judge it after each scalar substitution.
+    let dependent = super::super::exact::dependent(operand)
+        || target.symbolic()
+        || (!type_safe
+            && scope.generic_check()
+            && super::super::constants::is_constant(operand)
+            && super::super::constants::generic::dependent(operand));
+    cast_risk(operand, target, type_safe, scope, dependent)?
         .require_handler_for(location, scope.generic_check() && dependent)
 }
 
-pub(in crate::check) fn cast_risk(
+fn cast_risk(
     operand: &CheckedExpression,
     target: Type,
     type_safe: bool,
     bindings: &Scope,
+    dependent: bool,
 ) -> Result<CastRisk, Diagnostic> {
-    if super::super::exact::dependent(operand) || target.symbolic() {
+    if dependent {
         // [num.fn-cast] Safety is universal, unlike ordinary deferred judgments.
         let safe = domain::try_all(|i| {
             if let (Some(from), Some(to)) = (domain::at(operand.ty, i), domain::at(target, i)) {
@@ -310,7 +319,7 @@ pub(in crate::check) fn cast_risk(
                 } else {
                     conversion_safety(from, to).unwrap_or(false)
                 };
-                if !matches!(cast_risk(&scalar, to, safe, bindings)?, CastRisk::Safe) {
+                if !matches!(scalar_cast_risk(&scalar, to, safe)?, CastRisk::Safe) {
                     return Ok(false);
                 }
             }
@@ -322,6 +331,14 @@ pub(in crate::check) fn cast_risk(
             CastRisk::Dynamic
         });
     }
+    scalar_cast_risk(operand, target, type_safe)
+}
+
+fn scalar_cast_risk(
+    operand: &CheckedExpression,
+    target: Type,
+    type_safe: bool,
+) -> Result<CastRisk, Diagnostic> {
     if type_safe {
         return Ok(CastRisk::Safe);
     }

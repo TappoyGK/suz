@@ -1,5 +1,5 @@
 //! Numeric type functions used by the single generic-body traversal.
-//! Indices identify the same int/float substitution across all operands. We
+//! Indices identify the same int/float substitution across all operands.
 //! Index i denotes (INTS[i / 2], [f32, f64][i % 2]). We
 //! enumerate only a rule's scalar inputs, never replay statements or expressions.
 use crate::ast::{FloatType, IntegerType, ScalarType, Type};
