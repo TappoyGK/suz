@@ -14,6 +14,8 @@ def code_lines(source, language):
     """文字列内のコメント記号を保ち、空行・コメントだけの行を除く。"""
     if language not in {'rust', 'c'}:
         raise ValueError(f'Unsupported source language: {language}')
+    if language == 'rust' and source.startswith('\ufeff'):
+        source = source[1:]
     # Cの行継続はコメントの解釈より先に処理する。各文字の元の行番号を保持する。
     chars, lines = [], []
     line, i = 1, 0
@@ -45,6 +47,7 @@ def code_lines(source, language):
             end = text.find('\n', i + 2)
             i = len(text) if end < 0 else end
         elif text.startswith('/*', i):
+            start = i
             depth = 1
             i += 2
             while i < len(text) and depth:
@@ -57,20 +60,20 @@ def code_lines(source, language):
                 else:
                     i += 1
             if depth:
-                raise ValueError('Unterminated block comment')
+                raise ValueError(f'line {lines[start]}: Unterminated block comment')
         else:
             start = i
             boundary = i == 0 or not (text[i - 1].isalnum() or text[i - 1] == '_')
             raw = RAW_STRING.match(text, i) if language == 'rust' and boundary else None
             char = RUST_CHAR.match(text, i) if language == 'rust' else None
-            number = C_NUMBER.match(text, i) if language == 'c' else None
+            number = C_NUMBER.match(text, i) if language == 'c' and boundary else None
             if number:
                 i = number.end()
             elif raw:
                 closing = '"' + raw[1]
                 end = text.find(closing, raw.end())
                 if end < 0:
-                    raise ValueError('Unterminated raw string')
+                    raise ValueError(f'line {lines[start]}: Unterminated raw string')
                 i = end + len(closing)
             elif char:
                 i = char.end()
@@ -86,9 +89,9 @@ def code_lines(source, language):
                     else:
                         i += 1
                 else:
-                    raise ValueError('Unterminated quoted literal')
+                    raise ValueError(f'line {lines[start]}: Unterminated quoted literal')
                 if i > len(text):
-                    raise ValueError('Unterminated escape')
+                    raise ValueError(f'line {lines[start]}: Unterminated escape')
             else:
                 i += 1
             mark(start, i)

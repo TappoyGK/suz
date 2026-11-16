@@ -32,6 +32,36 @@ def exception_text(**changes):
 
 
 class SourceTests(unittest.TestCase):
+    # [impl.file-length] BOMを除き、Cの文字リテラルと数値を区別する。
+    def test_rust_initial_bom(self):
+        self.assertEqual(code_lines('\ufeff// bom\n', 'rust'), 0)
+        self.assertEqual(code_lines('\ufeff', 'rust'), 0)
+        self.assertEqual(code_lines('\ufefflet x = "\ufeff";\n', 'rust'), 1)
+        self.assertEqual(code_lines('// comment\n\ufeff\n', 'rust'), 1)
+
+    def test_c_prefixed_character_literals(self):
+        for prefix in ('u8', 'u', 'U', 'L', ''):
+            with self.subTest(prefix=prefix):
+                self.assertEqual(code_lines(
+                    f'char c = {prefix}\'a\'; char *s = "//";\n// comment\n', 'c'), 1)
+        self.assertEqual(code_lines("int n = 1'000; char c = u8'/';\n", 'c'), 1)
+
+    # [impl.file-length] 解析失敗は行継続前の物理行番号で報告する。
+    def test_error_line_numbers(self):
+        for source, language, expected in [
+            ('// header\n/*', 'rust', 2),
+            ('// header\nr#"text', 'rust', 2),
+            ('// header\n"text', 'rust', 2),
+            ('// header\n#error don\'t\n', 'c', 2),
+            ('#if 0\ndon\'t\n#endif\n', 'c', 2),
+            ('// header\n#include <a\'b.h>\n', 'c', 2),
+            ('// header\\\ncontinued\n"text\\', 'c', 3),
+        ]:
+            for newline in ('\n', '\r\n'):
+                with self.subTest(source=source, newline=newline):
+                    with self.assertRaisesRegex(ValueError, f'line {expected}: Unterminated'):
+                        code_lines(source.replace('\n', newline), language)
+
     # [impl.file-length] 空行・コメントのみの行と、コードを含む行を区別する。
     def test_comments_and_code_on_the_same_line(self):
         source = '''// comment
@@ -113,23 +143,44 @@ let c = '/'; // comment
 class ExceptionTests(unittest.TestCase):
     # [impl.exceptions] 誤記を黙認せず、必要な例外だけを適用する。
     def test_valid_and_empty_lists(self):
+        self.assertEqual(read_exceptions(''), {})
+        self.assertEqual(read_exceptions('# All exceptions resolved.\n'), {})
         self.assertEqual(read_exceptions('exceptions = []'), {})
         self.assertEqual(read_exceptions(exception_text()), {'compiler/src/example.rs': 510})
+        self.assertEqual(read_exceptions(exception_text(item='a_function')),
+                         {'compiler/src/example.rs': 510})
+
+    def test_other_rules_validate_without_applying_line_limits(self):
+        # [impl.exceptions] 共通一覧には後続段階で検査する規則も保存できる。
+        other = exception_text(rule='impl.format', item='a_function').replace(
+            'max_code_lines = 510\n', '')
+        rules = {'impl.format', 'impl.file-length'}
+        self.assertEqual(read_exceptions(other, rules), {})
+        self.assertEqual(read_exceptions(other + exception_text(), rules),
+                         {'compiler/src/example.rs': 510})
+        self.assertEqual(read_exceptions(other + other.replace('a_function', 'b_function'), rules), {})
+        for invalid in [other + other, other.replace('impl.format', 'impl.unknown'),
+                        other.replace('reason = ', 'unknown = '),
+                        other.replace('"a_function"', '3'),
+                        other.replace('compiler/src/example.rs', '../outside.rs'),
+                        other + 'max_code_lines = 510\n']:
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                read_exceptions(invalid, rules)
 
     def test_invalid_fields_and_values(self):
         for change in [
-            {'rule': 'impl.unknown'}, {'reason': ''}, {'reason': '  '}, {'reason': 1},
+            {'rule': '[impl.file-length]'}, {'rule': 1}, {'reason': ''}, {'reason': '  '}, {'reason': 1},
             {'max_code_lines': 500}, {'max_code_lines': True}, {'max_code_lines': '510'},
             {'path': '/compiler/src/example.rs'}, {'path': '../compiler/src/example.rs'},
             {'path': 'compiler/../runtime/a.c'}, {'path': 'compiler//a.rs'},
             {'path': './compiler/a.rs'}, {'path': 'compiler\\a.rs'}, {'path': 1},
             {'path': 'runtime/third_party/a.c'}, {'path': 'docs/example.md'},
-            {'max_lines': 600}, {'item': 'a_function'},
+            {'max_lines': 600}, {'item': ''}, {'item': 1},
         ]:
             with self.subTest(change=change):
                 with self.assertRaises(ValueError):
                     read_exceptions(exception_text(**change))
-        for text in ['', 'exceptions = 3', 'exceptions = [1]',
+        for text in ['exceptions = 3', 'exceptions = [1]',
                      exception_text() + exception_text(),
                      exception_text().replace('max_code_lines = 510', ''),
                      'unknown = 1\n' + exception_text()]:
@@ -174,6 +225,7 @@ class RepositoryTests(unittest.TestCase):
                 path.write_text(text, encoding='utf-8')
 
             write('.gitignore', 'compiler/generated/\n')
+            write('docs/implementation.md', '**[impl.file-length]**\n')
             write('compiler/src/example.rs', 'code\n' * 510)
             subprocess.run(['git', '-C', directory, 'add', '.'], check=True)
             write('compiler/src/new.rs', 'code\n' * 501)
@@ -192,7 +244,7 @@ class RepositoryTests(unittest.TestCase):
             self.assertIn('obsolete exception', check_repository(root)[2][0])
             (root / 'compiler/src/example.rs').unlink()
             self.assertIn('exception source is missing', check_repository(root)[2][0])
-            write(EXCEPTIONS, 'exceptions = []')
+            write(EXCEPTIONS, '# All exceptions resolved.\n')
             self.assertEqual(check_repository(root)[2], [])
 
     def test_command_exit_status_and_output(self):
@@ -204,6 +256,8 @@ class RepositoryTests(unittest.TestCase):
             (root / 'scripts').mkdir()
             shutil.copy(scripts / 'check-implementation.py', root / 'scripts')
             shutil.copytree(scripts / 'implementation', root / 'scripts/implementation')
+            (root / 'docs').mkdir()
+            shutil.copy(scripts.parent / 'docs/implementation.md', root / 'docs')
             source = root / 'compiler/src/example.rs'
             source.parent.mkdir(parents=True)
             config = root / EXCEPTIONS
@@ -236,8 +290,8 @@ class RepositoryTests(unittest.TestCase):
             root = Path(directory)
             subprocess.run(['git', 'init', '-q', directory], check=True)
             (root / 'compiler').mkdir()
-            (root / 'compiler/broken.rs').write_text('/*', encoding='utf-8')
-            with self.assertRaisesRegex(ValueError, 'compiler/broken.rs'):
+            (root / 'compiler/broken.rs').write_text('// header\n/*', encoding='utf-8')
+            with self.assertRaisesRegex(ValueError, r'compiler/broken.rs: line 2:'):
                 source_counts(root)
 
 
