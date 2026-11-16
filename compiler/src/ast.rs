@@ -19,7 +19,7 @@ impl Location {
     }
 }
 
-/// Suzの具体的な整数型。ビット幅・符号・格納範囲と対応するC型を定める。
+/// Suzの具体的な整数型。格納範囲と対応するC型を定める。Lenはビット演算を持たない個数用の型。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum IntegerType {
     I8,
@@ -30,6 +30,7 @@ pub(crate) enum IntegerType {
     U16,
     U32,
     U64,
+    Len,
 }
 
 impl IntegerType {
@@ -43,6 +44,7 @@ impl IntegerType {
             "u16" => Some(Self::U16),
             "u32" => Some(Self::U32),
             "u64" => Some(Self::U64),
+            "len_t" => Some(Self::Len),
             _ => None,
         }
     }
@@ -56,6 +58,7 @@ impl IntegerType {
             Self::U16 => "u16",
             Self::U32 => "u32",
             Self::U64 => "u64",
+            Self::Len => "len_t",
         }
     }
     pub fn c_name(self) -> &'static str {
@@ -68,10 +71,13 @@ impl IntegerType {
             Self::U16 => "uint16_t",
             Self::U32 => "uint32_t",
             Self::U64 => "uint64_t",
+            Self::Len => "int32_t",
         }
     }
+    // len_t の31は値域のビット数。言語上のビット幅ではなく、Cではint32_tを使う。
     pub fn bits(self) -> u32 {
         match self {
+            Self::Len => 31,
             Self::I8 | Self::U8 => 8,
             Self::I16 | Self::U16 => 16,
             Self::I32 | Self::U32 => 32,
@@ -137,7 +143,7 @@ pub(crate) enum ScalarType {
 }
 
 // 内部の型関数で扱う、独立したintとfloatの型代入の組み合わせ数。
-pub(crate) const NUMERIC_COMBINATIONS: usize = 16;
+pub(crate) const NUMERIC_COMBINATIONS: usize = 18;
 
 /// ASTと意味検査で共有する型表現。
 /// 具体的な型に加え、汎用のint・float、型の組み合わせごとの結果、内部の正確な整数を表す。
@@ -622,6 +628,7 @@ pub(crate) enum ExpressionKind {
         target: Type,
         fallback: Option<FailureHandler>,
     },
+    Len(Box<Expression>),
     Negate(Box<Expression>),
     Float(String),
     If {

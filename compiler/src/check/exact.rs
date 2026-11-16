@@ -435,6 +435,7 @@ pub(super) fn join(a: Type, b: Type) -> Option<Type> {
             IntegerType::I8,
             IntegerType::U16,
             IntegerType::I16,
+            IntegerType::Len,
             IntegerType::U32,
             IntegerType::I32,
             IntegerType::U64,

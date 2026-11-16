@@ -227,6 +227,15 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             format!("({})({})", expr.ty.c_name(), expression(inner, context))
         }
 
+        Value::Len(ref inner) => {
+            let value = expression(inner, context);
+            // 実体またはビューが保持する個数を読む。オペランドは一度だけ評価する。
+            if inner.ty == crate::ast::Type::Symbol {
+                format!("((int32_t)suz_text_as_view({value}).scalars)")
+            } else {
+                format!("((int32_t)({value}).scalars)")
+            }
+        }
         Value::Negate(ref inner) => format!("(-({}))", expression(inner, context)),
         Value::Float(bits) => {
             let crate::ast::Type::Float(ty) = expr.ty else {

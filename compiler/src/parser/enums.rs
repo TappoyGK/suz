@@ -51,7 +51,9 @@ impl Parser<'_, '_> {
         }
         self.cursor += 1;
         let base = match self.token().kind {
-            Kind::TypeName(name) => IntegerType::from_name(name),
+            Kind::TypeName(name) => {
+                IntegerType::from_name(name).filter(|ty| *ty != IntegerType::Len)
+            }
             _ => None,
         }
         .ok_or_else(|| {

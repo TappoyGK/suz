@@ -87,12 +87,20 @@ uint64_t suz_text_pool_used(void) {
     return pool.used;
 }
 
-static uint32_t hash_bytes(const char *bytes, uint64_t length, uint64_t *scalars) {
+/* [rt.len-limit] UTF-8の先頭バイトだけを数える。バイト長とプール容量は縮めない。
+   個数の加算を独立させ、巨大な文字列を確保せず境界を検証できるようにする。 */
+static uint64_t count_scalar(uint64_t count, unsigned char byte, suz_text_location location) {
+    if ((byte & 0xc0) == 0x80) return count;
+    if (count >= INT32_MAX) length_failure(location);
+    return count + 1;
+}
+
+static uint32_t hash_bytes(const char *bytes, uint64_t length, uint64_t *scalars, suz_text_location location) {
     uint32_t hash = UINT32_C(2166136261);
     *scalars = 0;
     for (uint64_t i = 0; i < length; ++i) {
         unsigned char byte = (unsigned char)bytes[i];
-        if ((byte & 0xc0) != 0x80) ++*scalars;
+        *scalars = count_scalar(*scalars, byte, location);
         hash ^= byte;
         hash *= UINT32_C(16777619);
     }
@@ -134,7 +142,7 @@ suz_text suz_text_intern(const char *bytes, uint64_t length, bool constant,
                          suz_text_location location) {
     allocation_size(length, location);
     uint64_t scalars;
-    uint32_t hash = hash_bytes(bytes, length, &scalars);
+    uint32_t hash = hash_bytes(bytes, length, &scalars, location);
     if (pool.capacity != 0) {
         uint64_t index = slot_for(pool.slots, pool.capacity, hash, bytes, length);
         if (pool.slots[index] != NULL) return pool.slots[index];

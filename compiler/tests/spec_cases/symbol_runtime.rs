@@ -36,7 +36,6 @@ fn executable(optimized: bool) -> &'static Path {
             .arg("-I")
             .arg(&runtime)
             .arg(root.join("tests/spec_cases/symbol_runtime.c"))
-            .arg(runtime.join("suz_text.c"))
             .arg(runtime.join("suz_parse.c"))
             .arg(runtime.join("suz_parse_float.c"))
             .arg(runtime.join("suz_runtime.c"))
@@ -335,4 +334,13 @@ fn float_parsers_ignore_numeric_locales() {
         );
         assert!(output.stderr.is_empty());
     }
+}
+
+#[test]
+fn scalar_count_limit_is_independent_of_unlimited_pool() {
+    let output = run(false, "scalar-limit", "0", 101);
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("symbol length exceeds the supported range")
+    );
 }

@@ -96,6 +96,18 @@ pub(super) fn check(
                 }
             );
             let type_error = |ty: Type| {
+                if ty == Type::Integer(IntegerType::Len)
+                    && (!arithmetic
+                        || matches!(&expr.kind, ExpressionKind::Binary { operator, .. } if operator.is_shift()))
+                {
+                    return Some(expr.location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "expr.operator-types",
+                            "len_t does not support bit-width operations"
+                        ),
+                    ));
+                }
                 if matches!(&expr.kind, ExpressionKind::Negate(_))
                     && matches!(ty, Type::Integer(integer) if integer.bounds().0 == 0)
                 {

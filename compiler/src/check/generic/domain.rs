@@ -32,7 +32,7 @@ pub(crate) fn judge_one(ty: Type, mut predicate: impl FnMut(Type) -> bool) -> Ju
     judge(ty, ty, |ty, _| predicate(ty))
 }
 
-pub(super) const INTS: [IntegerType; 8] = [
+pub(super) const INTS: [IntegerType; 9] = [
     IntegerType::I8,
     IntegerType::I16,
     IntegerType::I32,
@@ -41,6 +41,7 @@ pub(super) const INTS: [IntegerType; 8] = [
     IntegerType::U16,
     IntegerType::U32,
     IntegerType::U64,
+    IntegerType::Len,
 ];
 
 pub(crate) fn at(ty: Type, index: usize) -> Option<Type> {
@@ -101,12 +102,12 @@ pub(crate) fn judge_with_failures(
     a: Type,
     b: Type,
     mut predicate: impl FnMut(Type, Type) -> bool,
-) -> (Judgment, u16) {
+) -> (Judgment, u32) {
     if !a.symbolic() && !b.symbolic() {
         return if predicate(a, b) {
             (Judgment::Valid, 0)
         } else {
-            (Judgment::Invalid, u16::MAX)
+            (Judgment::Invalid, u32::MAX)
         };
     }
     let mut yes = false;

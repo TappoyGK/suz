@@ -50,6 +50,7 @@ pub(super) fn dependencies(
         | ExpressionKind::Variant { .. } => {}
         ExpressionKind::Group(inner)
         | ExpressionKind::Negate(inner)
+        | ExpressionKind::Len(inner)
         | ExpressionKind::Not(inner)
         | ExpressionKind::BitNot(inner) => dependencies(inner, names)?,
         ExpressionKind::Binary { left, right, .. }

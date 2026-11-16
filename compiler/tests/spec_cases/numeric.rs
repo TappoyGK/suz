@@ -270,11 +270,10 @@ fn main() -> u8 {
 }
 
 #[test]
-fn widening_is_not_applied_to_bounds_or_match_patterns() {
+fn widening_is_not_applied_to_loop_bounds_or_match_patterns() {
     for body in [
         "fix a: u16 = 0\nfix b: u8 = 3\nfor i in a..<b {}",
         "fix a: u16 = 0\nfix b: u8 = 3\nrev i in a..<b {}",
-        "fix a: u16 = 0\nfix b: u8 = 3\nfix t: text = `abc`\nfix part = t[a:b] or `x`",
         "fix x: u16 = 1\nmatch x { SMALL => {}\n_ => {} }",
         "fix x: u16 = 1\nfix result = matchexpr x { SMALL => 1\n_ => 2 }",
     ] {

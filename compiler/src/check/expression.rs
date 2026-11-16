@@ -39,6 +39,7 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
     super::generic::work();
     match &expr.kind {
         ExpressionKind::Slice { index, .. } => Some(if *index { Type::Char } else { Type::Text }),
+        ExpressionKind::Len(_) => Some(Type::Integer(IntegerType::Len)),
         ExpressionKind::Template(_) => Some(Type::Symbol),
         ExpressionKind::Struct { id, .. } => Some(Type::Struct(*id)),
         ExpressionKind::Field { target, name } => {
@@ -372,6 +373,19 @@ fn expression_inner(
             }
             ExpressionKind::Block { statements, value } => {
                 blocks::check(statements, value, inference_hint, bindings)?
+            }
+            ExpressionKind::Len(inner) => {
+                let operand = expression(inner, None, bindings)?;
+                if !operand.ty.is_text() {
+                    return Err(expr.location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!("len.targets", "len requires symbol or text"),
+                    ));
+                }
+                CheckedExpression {
+                    ty: Type::Integer(IntegerType::Len),
+                    value: Value::Len(Box::new(operand)),
+                }
             }
             ExpressionKind::ArithmeticHandler { .. }
             | ExpressionKind::BitNot(_)

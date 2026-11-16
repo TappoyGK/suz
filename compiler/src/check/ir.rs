@@ -222,6 +222,7 @@ pub(crate) enum Value {
         operand: Box<CheckedExpression>,
         fallback: Box<CheckedExpression>,
     },
+    Len(Box<CheckedExpression>),
     Negate(Box<CheckedExpression>),
     Float(u64),
     If {
@@ -282,7 +283,7 @@ macro_rules! constant_children_visitor {
                     }
                     return handler(h, visit);
                 }
-                Self::Cast(v) | Self::Negate(v) | Self::Truncate(v) | Self::BitNot(v)
+                Self::Len(v) | Self::Cast(v) | Self::Negate(v) | Self::Truncate(v) | Self::BitNot(v)
                 | Self::Not(v) | Self::TextView(v) | Self::Intern { operand: v, .. }
                 | Self::Field { target: v, .. } => visit(v),
                 // constant_structはオペランドの解析から得た具体的なキャッシュであり、ソースのオペランドではない。
