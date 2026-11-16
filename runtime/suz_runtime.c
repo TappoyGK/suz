@@ -13,6 +13,7 @@ _Static_assert(CHAR_BIT == 8, "Suz requires 8-bit bytes");
 _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
 
 void suz_runtime_init(void) {
+#pragma STDC FENV_ACCESS ON
     /* 丸めだけでなく、例外マスクとフラグも初期化する。
        fesetroundだけでは、継承した浮動小数点トラップが有効なまま残る。 */
     if (fesetenv(FE_DFL_ENV) != 0) abort();

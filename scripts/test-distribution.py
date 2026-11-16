@@ -32,7 +32,7 @@ def require(condition, message):
 
 def verify(binary, version, cc, directory):
     env = os.environ.copy()
-    for name in ("CFLAGS", "CPPFLAGS", "LDFLAGS", "CC"):
+    for name in ("CFLAGS", "CPPFLAGS", "LDFLAGS", "SUZ_CFLAGS", "CC"):
         env.pop(name, None)
     copied = directory / "suz"
     shutil.copy2(binary, copied)

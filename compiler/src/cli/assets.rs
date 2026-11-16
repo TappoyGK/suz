@@ -14,6 +14,7 @@ bundled!(
     "LICENSE-MIT",
     "LICENSE-APACHE",
     "scripts/build-c.sh",
+    "scripts/cflags.txt",
     "runtime/suz_config.h",
     "runtime/suz_env.h",
     "runtime/suz_env.c",

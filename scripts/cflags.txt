@@ -1,0 +1,14 @@
+# SUZ_CFLAGSの許可リスト。末尾が=の項目は空でない値を取る。
+# -fsanitize=の値だけはaddressとundefinedのカンマ区切りに制限する。
+-march=
+-mcpu=
+-mtune=
+-g
+-fno-omit-frame-pointer
+-flto
+-flto=thin
+-flto=full
+-fprofile-instr-generate
+-fprofile-instr-generate=
+-fprofile-instr-use=
+-fsanitize=
