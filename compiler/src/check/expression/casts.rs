@@ -134,6 +134,21 @@ pub(in crate::check) fn check(
                     crate::diagnostic!("expr.as", "invalid source and target types for as"),
                 ));
             }
+            if operand.ty.symbolic() || target.symbolic() {
+                bindings.defer_rule(|i| {
+                    conversion_safety(domain::at(operand.ty, i)?, domain::at(target, i)?)
+                        .is_none()
+                        .then(|| {
+                            expr.location.error(
+                                ErrorKind::InvalidSource,
+                                crate::diagnostic!(
+                                    "expr.as",
+                                    "invalid source and target types for as"
+                                ),
+                            )
+                        })
+                });
+            }
             if fallback.is_none() && !operand.ty.is_text() {
                 let safe = conversion_safety(operand.ty, target).unwrap_or(false);
                 require_handler(&operand, target, safe, expr.location, bindings)?;
@@ -175,6 +190,12 @@ pub(in crate::check) fn check(
                 } else {
                     None
                 };
+                if let Some(value) = &constant_struct {
+                    debug_assert!(
+                        !super::super::constants::depends_on_generic(value),
+                        "parsed structure caches must contain only concrete values"
+                    );
+                }
                 return Ok(CheckedExpression {
                     ty: target,
                     value: Value::CheckedCast {
@@ -277,14 +298,6 @@ pub(in crate::check) fn require_handler(
     location: crate::ast::Location,
     scope: &Scope,
 ) -> Result<(), Diagnostic> {
-    // [num.fn-cast] is a universal policy. A forward instance must stop at
-    // the known policy failure even when this scalar conversion is safe.
-    if scope
-        .forced_cast_policy
-        .is_some_and(|site| (site.line, site.column) == (location.line, location.column))
-    {
-        return CastRisk::Dynamic.require_handler_for(location, true);
-    }
     if type_safe {
         return Ok(());
     }

@@ -4,9 +4,9 @@
 //! enumerate only a rule's scalar inputs, never replay statements or expressions.
 use crate::ast::{FloatType, IntegerType, ScalarType, Type};
 
-pub(crate) use crate::ast::NUMERIC_COMBINATIONS as COUNT;
+pub(crate) use crate::ast::NUMERIC_COMBINATIONS;
 pub(crate) fn indices() -> std::ops::Range<usize> {
-    0..COUNT
+    0..NUMERIC_COMBINATIONS
 }
 pub(crate) fn any(predicate: impl FnMut(usize) -> bool) -> bool {
     indices().any(predicate)
@@ -59,7 +59,7 @@ pub(crate) fn at(ty: Type, index: usize) -> Option<Type> {
     }
 }
 
-pub(crate) fn from_types(types: [Option<Type>; COUNT]) -> Option<Type> {
+pub(crate) fn from_types(types: [Option<Type>; NUMERIC_COMBINATIONS]) -> Option<Type> {
     if types.iter().all(Option::is_none) {
         return None;
     }

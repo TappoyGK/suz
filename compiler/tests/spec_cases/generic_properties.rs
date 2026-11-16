@@ -172,3 +172,99 @@ fn main() -> u8 {
         "info generic-constants.suz:7: 2,1,3.0\n"
     );
 }
+
+#[test]
+fn invalid_generic_bodies_preserve_all_earlier_deferred_judgments() {
+    // Appending a universal error must not erase an earlier deferred rule.
+    // Compare with the same prefix in a valid generic body, whose concrete
+    // instance is checked by the ordinary checker.
+    for prefix in [
+        "fix value = helper(n)",
+        "fix value = helper(helper(n))",
+        "fix value = helper(1)",
+        "f(n, x)\nfix small: u8 = n",
+        "fix value: i64 = n",
+        "fix value: u8 = n",
+        "fix value: f32 = x",
+        "fix value: f64 = n",
+        "fix value: int = 300",
+        "fix value: float = 1.0e300",
+        "fix value = n +% 300",
+        "fix value = n + x",
+        "fix value = x + n",
+        "fix value: f32 = n + n",
+        "fix wide: u64 = 1\nfix value = n + wide",
+        "fix value: u16 = ~n",
+        "fix value: u16 = n << 1",
+        "fix value = n * n * n",
+        "fix value = ifexpr true { n } else { 300 }",
+        "fix value = ifexpr true { n } else { x }",
+        "fix value = ifexpr true { x } else { n }",
+        "fix value = `value=${expr { ifexpr true { x } else { n } }}`",
+        "fix value = (ifexpr true { x } else { n }) as f32 or 0",
+        "fix value = ((300 as% int)) == x",
+        "fix value = (ifexpr true { 300 } else { (300 as% int) }) >= (300 as f32 or 0)",
+        "fix value = expr { fix small: i8 = n\nsmall }",
+        "for i in n..<300 {}",
+        "match n { 300 => {}\n_ => {} }",
+        "match n { 0 => {}\n(256 as% int) => {}\n_ => {} }",
+        "match n { -0 => {}\n_ => {} }",
+        "match n { -1 => {}\n_ => {} }",
+        "match n { (-0) => {}\n_ => {} }",
+        "match n { 150 + 150 => {}\n_ => {} }",
+    ] {
+        for (integer, _, _) in INTEGER_BOUNDS {
+            for float in ["f32", "f64"] {
+                let main = format!(
+                    "fn main() -> u8 {{\nfix n: {integer} = 1\nfix x: {float} = 1.0\nf(n, x)\nfix invalid: bool = true\nreturn 0\n}}\n"
+                );
+                let helper =
+                    "\nfn helper(value: int) -> int { fix small: u8 = value\nreturn value }";
+                let before = check(&format!(
+                    "{main}{helper}\nfn f(n: int, x: float) -> void {{\n{prefix}\n}}"
+                ));
+                if before.as_ref().is_err_and(|e| e.rule() != "num.fn-body") {
+                    continue;
+                }
+                let after = check(&format!(
+                    "{}{helper}\nfn f(n: int, x: float) -> void {{\n{prefix}\nfix impossible: text = 1\n}}",
+                    main.replace("bool = true", "bool = 1")
+                ))
+                .unwrap_err();
+                match before {
+                    Err(expected) => {
+                        assert_eq!(
+                            (after.rule(), after.line, after.column),
+                            (expected.rule(), expected.line, expected.column),
+                            "{prefix}, {integer}/{float}: {after}"
+                        );
+                        let positions = |error: &Diagnostic| {
+                            error
+                                .related
+                                .iter()
+                                .map(|e| {
+                                    (
+                                        e.rule().to_owned(),
+                                        e.line,
+                                        e.column,
+                                        e.message().to_owned(),
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                        };
+                        assert_eq!(
+                            positions(&after),
+                            positions(&expected),
+                            "{prefix}, {integer}/{float}"
+                        );
+                    }
+                    Ok(_) => assert_eq!(
+                        (after.rule(), after.line),
+                        ("type.expected", 5),
+                        "{prefix}, {integer}/{float}: {after}"
+                    ),
+                }
+            }
+        }
+    }
+}

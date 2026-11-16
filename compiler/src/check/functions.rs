@@ -43,7 +43,7 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     let mut functions = Vec::new();
     for (id, function) in program.functions.iter().enumerate() {
         if globals.functions[&function.name].is_generic() {
-            match analyze_once(function, id, &globals).as_ref() {
+            match &analyze_once(function, id, &globals).result {
                 Ok(found) => warnings.extend(found.iter().copied()),
                 Err(error) => return Err(error.clone()),
             }
@@ -92,7 +92,7 @@ fn analyze_once(
     function: &crate::ast::Function,
     id: usize,
     scope: &Scope,
-) -> Rc<Result<Vec<crate::ast::Location>, Diagnostic>> {
+) -> Rc<super::generic::Analysis> {
     if let Some(result) = scope.instances.borrow().analyzed_functions.get(&id) {
         return result.clone();
     }
@@ -105,29 +105,6 @@ fn analyze_once(
     result
 }
 
-// The symbolic pass establishes the declaration failure. Concrete checking
-// must still report any earlier deferred failure, including another rule at
-// the same source position. Universal cast policy is retained in the scope.
-fn reaches_declaration_failure<T>(
-    known: Option<&Diagnostic>,
-    result: &Result<T, Diagnostic>,
-) -> bool {
-    let Some(known) = known else {
-        return false;
-    };
-    debug_assert!(
-        result.is_err(),
-        "an invalid generic body must fail concrete checking"
-    );
-    match result {
-        Err(error) => {
-            (error.line, error.column, error.rule()) == (known.line, known.column, known.rule())
-        }
-        // Keep invalid IR out of code generation even in builds without assertions.
-        Ok(_) => true,
-    }
-}
-
 fn check_instances(
     program: &Program,
     globals: &Scope,
@@ -136,6 +113,11 @@ fn check_instances(
 ) -> Result<(), Diagnostic> {
     enum Task {
         Check(super::generic::Instance),
+        Deferred(
+            super::generic::Instance,
+            Rc<super::generic::Analysis>,
+            usize,
+        ),
         Finish(
             super::generic::Instance,
             Result<(CheckedFunction, Vec<crate::ast::Location>), Diagnostic>,
@@ -166,22 +148,18 @@ fn check_instances(
                 // Forward calls need the generic result, but an unconditional
                 // error belongs to the declaration's turn, not to this call.
                 let analysis = analyze_once(function, instance.function, globals);
-                let generic_error = analysis.as_ref().as_ref().err();
+                if analysis.result.is_err() {
+                    for index in (0..analysis.deferred.len()).rev() {
+                        tasks.push(Task::Deferred(instance.clone(), analysis.clone(), index));
+                    }
+                    continue;
+                }
                 let mut context = globals.clone();
                 context.generic_calls = Some(instance.calls.clone());
                 context.mode = super::scope::Mode::Instance(instance.types);
-                context.forced_cast_policy = generic_error
-                    .filter(|error| error.rule() == "num.fn-cast")
-                    .map(|error| crate::ast::Location {
-                        line: error.line,
-                        column: error.column,
-                    });
-                // Rebuild concrete IR with the shared checker. Once generic
-                // checking succeeds, only deferred rules can fail here.
+                // Only a valid generic body is rebuilt with concrete types.
                 let result = check_function(function, context, instance.id);
-                if !reaches_declaration_failure(generic_error, &result) {
-                    tasks.push(Task::Finish(instance, result));
-                }
+                tasks.push(Task::Finish(instance, result));
                 tasks.extend(
                     globals
                         .instances
@@ -192,32 +170,69 @@ fn check_instances(
                         .map(Task::Check),
                 );
             }
+            Task::Deferred(instance, analysis, index) => match &analysis.deferred[index] {
+                super::generic::Deferred::Rule(errors) => {
+                    if let Some(error) = &errors[instance.types.index()] {
+                        return Err(instance_error(program, &instance, error.clone()));
+                    }
+                }
+                super::generic::Deferred::Call {
+                    function,
+                    types,
+                    location,
+                } => {
+                    if let Some(types) = types[instance.types.index()] {
+                        globals.instances.borrow_mut().request(
+                            *function,
+                            types,
+                            &Some(instance.calls.clone()),
+                            *location,
+                        );
+                        tasks.extend(
+                            globals
+                                .instances
+                                .borrow_mut()
+                                .queue
+                                .drain(..)
+                                .rev()
+                                .map(Task::Check),
+                        );
+                    }
+                }
+            },
             Task::Finish(instance, result) => {
-                let (checked, found) = result.map_err(|error| {
-                    let calls = instance.calls.locations();
-                    let mut diagnostic = calls[0].error(
-                        error.kind,
-                        crate::diagnostic!(
-                            "num.fn-body",
-                            "generic call to '{}' is invalid for these concrete types",
-                            program.functions[instance.function].name
-                        ),
-                    );
-                    diagnostic.related.extend(calls.iter().skip(1).map(|site| {
-                        site.error(
-                            ErrorKind::InvalidSource,
-                            crate::diagnostic!("num.fn-body", "instantiated through this call"),
-                        )
-                    }));
-                    diagnostic.related.push(error);
-                    diagnostic
-                })?;
+                let (checked, found) =
+                    result.map_err(|error| instance_error(program, &instance, error))?;
                 functions.push(checked);
                 warnings.extend(found);
             }
         }
     }
     Ok(())
+}
+
+fn instance_error(
+    program: &Program,
+    instance: &super::generic::Instance,
+    error: Diagnostic,
+) -> Diagnostic {
+    let calls = instance.calls.locations();
+    let mut diagnostic = calls[0].error(
+        error.kind,
+        crate::diagnostic!(
+            "num.fn-body",
+            "generic call to '{}' is invalid for these concrete types",
+            program.functions[instance.function].name
+        ),
+    );
+    diagnostic.related.extend(calls.iter().skip(1).map(|site| {
+        site.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!("num.fn-body", "instantiated through this call"),
+        )
+    }));
+    diagnostic.related.push(error);
+    diagnostic
 }
 
 pub(super) fn check_function(
@@ -330,6 +345,9 @@ pub(super) fn call(
             }
         })
         .collect::<Result<_, _>>()?;
+    if generic && scope.generic_check() {
+        scope.defer_call(signature.id, types.int, types.float, expr.location);
+    }
     let id = if generic && !scope.generic_check() {
         scope.instances.borrow_mut().request(
             signature.id,

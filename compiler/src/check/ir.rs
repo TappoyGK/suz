@@ -105,16 +105,24 @@ pub(crate) enum IntegerOperation {
     // positive magnitude need not fit the type (for example, -128 as i8).
     NegatedLiteral(i128),
 }
-impl IntegerOperation {
-    pub fn operands(&self) -> impl Iterator<Item = &CheckedExpression> {
-        let (first, second) = match self {
-            Self::Binary { left, right, .. } => (Some(left.as_ref()), Some(right.as_ref())),
-            Self::Negate(operand) => (Some(operand.as_ref()), None),
-            Self::NegatedLiteral(_) | Self::Exact(_) => (None, None),
-        };
-        first.into_iter().chain(second)
-    }
+// rustfmt does not format this macro body; keep its layout consistent manually.
+macro_rules! integer_operands {
+    ($name:ident, ($($mutable:tt)?), $borrow:ident) => {
+        pub fn $name(&$($mutable)? self) -> impl Iterator<Item = &$($mutable)? CheckedExpression> {
+            let (first, second) = match self {
+                Self::Binary { left, right, .. } => (Some(left.$borrow()), Some(right.$borrow())),
+                Self::Negate(operand) => (Some(operand.$borrow()), None),
+                Self::NegatedLiteral(_) | Self::Exact(_) => (None, None),
+            };
+            first.into_iter().chain(second)
+        }
+    };
 }
+impl IntegerOperation {
+    integer_operands!(operands, (), as_ref);
+    integer_operands!(operands_mut, (mut), as_mut);
+}
+
 #[derive(Clone)]
 pub(crate) enum Value {
     GenericFloatLiteral(String), // Decimal spelling retained during generic checking only.
@@ -213,12 +221,14 @@ pub(crate) enum Value {
 }
 
 // Keep the read-only and mutable constant grammar in one definition. The
-// mutability and Exact leaf visitor are the only differences between them.
+// mutability and visitor methods are the only differences between them.
+// rustfmt does not format this macro body; keep its layout consistent manually.
 macro_rules! constant_children_visitor {
-    ($name:ident, ($($mutable:tt)?), $leaves:ident) => {
+    ($name:ident, ($($mutable:tt)?), $walk:ident, $operands:ident) => {
         pub fn $name(
             &$($mutable)? self,
             visit: &mut impl FnMut(&$($mutable)? CheckedExpression),
+            exact_node: &mut impl FnMut(&$($mutable)? super::exact::Exact),
         ) -> bool {
             let handler = |handler: &$($mutable)? Option<CheckedHandler>,
                            visit: &mut dyn FnMut(&$($mutable)? CheckedExpression)| {
@@ -232,16 +242,11 @@ macro_rules! constant_children_visitor {
                 }
             };
             match self {
-                Self::Exact(exact) => exact.$leaves(visit),
+                Self::Exact(exact) => exact.$walk(exact_node, visit),
                 Self::IntegerArithmetic { operation, handler: h, .. } => {
                     match operation {
-                        IntegerOperation::Exact(exact) => exact.$leaves(visit),
-                        IntegerOperation::Binary { left, right, .. } => {
-                            visit(left);
-                            visit(right);
-                        }
-                        IntegerOperation::Negate(value) => visit(value),
-                        IntegerOperation::NegatedLiteral(_) => {}
+                        IntegerOperation::Exact(exact) => exact.$walk(exact_node, visit),
+                        _ => operation.$operands().for_each(&mut *visit),
                     }
                     return handler(h, visit);
                 }
@@ -296,8 +301,11 @@ macro_rules! constant_children_visitor {
 impl Value {
     // Exact leaves and value handlers are children too; return handlers are
     // outside the constant-expression grammar.
-    constant_children_visitor!(visit_constant_children, (), leaves);
-    constant_children_visitor!(visit_constant_children_mut, (mut), leaves_mut);
+    constant_children_visitor!(visit_constant_parts, (), visit, operands);
+    pub fn visit_constant_children(&self, visit: &mut impl FnMut(&CheckedExpression)) -> bool {
+        self.visit_constant_parts(visit, &mut |_| {})
+    }
+    constant_children_visitor!(visit_constant_parts_mut, (mut), visit_mut, operands_mut);
 
     pub fn symbolic_range(&self) -> bool {
         match self {

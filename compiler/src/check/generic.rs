@@ -1,4 +1,6 @@
 mod analysis;
+mod deferred;
+pub(super) use deferred::{Analysis, Deferred};
 pub(crate) mod domain;
 mod validation;
 
@@ -81,7 +83,7 @@ pub(super) struct Instances {
     pub queue: VecDeque<Instance>,
     next_id: usize,
     pub checked_instances: BTreeSet<usize>,
-    pub analyzed_functions: BTreeMap<usize, std::rc::Rc<Result<Vec<Location>, Diagnostic>>>,
+    pub analyzed_functions: BTreeMap<usize, std::rc::Rc<Analysis>>,
 }
 impl Instances {
     // [num.monomorphize] Declared function IDs occupy the initial range; generated
@@ -125,8 +127,8 @@ impl Instances {
 }
 
 pub(super) struct ResolvedTypes {
-    int: Option<Type>,
-    float: Option<Type>,
+    pub(super) int: Option<Type>,
+    pub(super) float: Option<Type>,
 }
 impl ResolvedTypes {
     pub fn resolve(&self, ty: Type) -> Type {
@@ -150,7 +152,7 @@ impl ResolvedTypes {
     }
 }
 
-fn without_groups(mut expr: &Expression) -> &Expression {
+pub(super) fn without_groups(mut expr: &Expression) -> &Expression {
     while let ExpressionKind::Group(inner) = &expr.kind {
         expr = inner;
     }
@@ -234,6 +236,19 @@ pub(super) fn resolve(
                         ),
                     )
                 })?,
+            });
+        }
+        if let Some(ty) = joined {
+            scope.defer_rule(|i| {
+                domain::at(ty, i).is_none().then(|| {
+                    location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "num.fn-resolve",
+                            "generic arguments have no common numeric type"
+                        ),
+                    )
+                })
             });
         }
         match family {

@@ -39,7 +39,7 @@ pub(super) fn patterns<T>(
     let mut seen = vec![
         BTreeSet::new();
         if bindings.generic_check() {
-            domain::COUNT
+            domain::NUMERIC_COMBINATIONS
         } else {
             1
         }
@@ -105,6 +105,22 @@ pub(super) fn patterns<T>(
                 ),
             ));
         }
+        if ty.symbolic() && checked.ty != Type::Exact {
+            bindings.defer_rule(|i| {
+                let (to, from) = (domain::at(ty, i)?, domain::at(checked.ty, i)?);
+                (to != from).then(|| {
+                    pattern.location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "type.expected",
+                            "expected {}, found {}",
+                            bindings.type_name(to),
+                            bindings.type_name(from)
+                        ),
+                    )
+                })
+            });
+        }
         if ty.symbolic()
             && let Some(n) = super::exact::constant(&checked)
         {
@@ -122,18 +138,27 @@ pub(super) fn patterns<T>(
         let mut representative = None;
         let mut first_error = None;
         let mut all_duplicate = true;
+        let mut deferred_errors = vec![None; seen.len()];
         for (i, seen) in seen.iter_mut().enumerate() {
             let evaluated = if bindings.generic_check() {
-                constants::generic::at(&checked, i, bindings)
+                evaluate_generic_pattern(&checked, pattern, ty, i, bindings)
             } else {
                 constants::evaluate(&checked)
             };
             match evaluated {
                 Ok(Some(value)) => {
-                    all_duplicate &= !seen.insert(pattern_key(&value));
+                    let duplicate = !seen.insert(pattern_key(&value));
+                    all_duplicate &= duplicate;
+                    if duplicate {
+                        deferred_errors[i] = Some(arm.location.error(
+                            ErrorKind::InvalidSource,
+                            crate::diagnostic!("match.pattern", "duplicate evaluated pattern"),
+                        ));
+                    }
                     representative.get_or_insert(value);
                 }
                 Err(error) => {
+                    deferred_errors[i] = Some(error.clone());
                     first_error.get_or_insert(error);
                     all_duplicate = false;
                 }
@@ -155,6 +180,9 @@ pub(super) fn patterns<T>(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!("match.pattern", "duplicate evaluated pattern"),
             ));
+        }
+        if bindings.generic_check() {
+            bindings.defer_rule(|i| deferred_errors[i].clone());
         }
         if ty == Type::Exact && value.ty != Type::Exact {
             let n = super::exact::constant(&value).ok_or_else(|| {
@@ -202,4 +230,34 @@ fn pattern_key(value: &CheckedExpression) -> String {
         Value::Text { text, .. } => text.clone(),
         _ => unreachable!("constant match pattern has a validated type"),
     }
+}
+
+// Literal spelling (notably -0) has its own typed rule. Other exact constants
+// are evaluated with the target's storage range, just like concrete patterns.
+fn evaluate_generic_pattern(
+    checked: &CheckedExpression,
+    pattern: &crate::ast::Expression,
+    target: Type,
+    index: usize,
+    bindings: &Scope,
+) -> Result<Option<CheckedExpression>, Diagnostic> {
+    let Some(target) = domain::at(target, index) else {
+        return Ok(None);
+    };
+    let pattern = super::generic::without_groups(pattern);
+    if let (Type::Integer(ty), crate::ast::ExpressionKind::Integer { digits, negative }) =
+        (target, &pattern.kind)
+    {
+        return super::expression::integer_literal(digits, *negative, ty, pattern.location)
+            .map(Some);
+    }
+    let mut stored;
+    let checked = if checked.ty == Type::Exact && target.is_integer() {
+        stored = checked.clone();
+        stored.ty = target;
+        &stored
+    } else {
+        checked
+    };
+    constants::generic::at(checked, index, bindings)
 }

@@ -37,6 +37,16 @@ pub enum Outcome {
     Panic,
 }
 
+impl Outcome {
+    pub fn inventory_name(&self) -> &'static str {
+        match self {
+            Self::Exit => "受理",
+            Self::CompileError => "コンパイルエラー",
+            Self::Panic => "実行時パニック",
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Run {
     pub mode: Mode,

@@ -10,7 +10,7 @@ use crate::{
 };
 
 // Per substitution: Err is an unrepresentable range; Ok(None) always divides by zero.
-type SubstitutionRanges = [Result<Option<Range>, ()>; domain::COUNT];
+type SubstitutionRanges = [Result<Option<Range>, ()>; domain::NUMERIC_COMBINATIONS];
 
 #[derive(Clone)]
 pub(crate) struct Exact {
@@ -27,33 +27,40 @@ pub(crate) enum ExactKind {
     Negate(Box<Exact>),
     Binary(BinaryOperator, Box<Exact>, Box<Exact>),
 }
+// The same definition visits read-only/mutable nodes and leaves in one pass.
+// rustfmt does not format this macro body; keep its layout consistent manually.
+macro_rules! exact_visitor {
+    ($name:ident, ($($mutable:tt)?)) => {
+        pub fn $name(
+            &$($mutable)? self,
+            node: &mut impl FnMut(&$($mutable)? Exact),
+            leaf: &mut impl FnMut(&$($mutable)? CheckedExpression),
+        ) {
+            node(self);
+            match &$($mutable)? self.kind {
+                ExactKind::Literal(_) => {}
+                ExactKind::Leaf(value) => leaf(value),
+                ExactKind::Negate(value) => value.$name(node, leaf),
+                ExactKind::Binary(_, left, right) => {
+                    left.$name(node, leaf);
+                    right.$name(node, leaf);
+                }
+            }
+        }
+    };
+}
+
 impl Exact {
     pub fn range_at(&self, index: usize) -> Result<Option<Range>, ()> {
         self.domains
             .as_ref()
             .map_or(Ok(self.range), |ranges| ranges[index])
     }
-    pub fn leaves(&self, f: &mut impl FnMut(&CheckedExpression)) {
-        match &self.kind {
-            ExactKind::Leaf(e) => f(e),
-            ExactKind::Negate(e) => e.leaves(f),
-            ExactKind::Binary(_, a, b) => {
-                a.leaves(f);
-                b.leaves(f);
-            }
-            _ => {}
-        }
-    }
-    pub fn leaves_mut(&mut self, f: &mut impl FnMut(&mut CheckedExpression)) {
-        match &mut self.kind {
-            ExactKind::Leaf(e) => f(e),
-            ExactKind::Negate(e) => e.leaves_mut(f),
-            ExactKind::Binary(_, a, b) => {
-                a.leaves_mut(f);
-                b.leaves_mut(f);
-            }
-            _ => {}
-        }
+    exact_visitor!(visit, ());
+    exact_visitor!(visit_mut, (mut));
+
+    pub fn leaves(&self, leaf: &mut impl FnMut(&CheckedExpression)) {
+        self.visit(&mut |_| {}, leaf);
     }
 }
 pub(super) fn is_operator(expr: &Expression) -> bool {
@@ -183,6 +190,7 @@ fn build(expr: &Expression, bindings: &Scope) -> Result<Exact, Diagnostic> {
         if ranges.iter().all(Result::is_err) {
             return Err(error(location));
         }
+        bindings.defer_rule(|i| ranges[i].is_err().then(|| error(location)));
         ranges
             .iter()
             .filter_map(|r| r.ok().flatten())
@@ -221,6 +229,19 @@ pub(super) fn check(
             ),
         ));
     }
+    if !handled && exact.domains.is_some() {
+        bindings.defer_rule(|i| {
+            exact.range_at(i).is_ok_and(|r| r.is_none()).then(|| {
+                exact.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "arith.div-zero-always",
+                        "integer expression always divides by zero and requires or"
+                    ),
+                )
+            })
+        });
+    }
     let ty = if let Some(ty) = expected {
         ty
     } else {
@@ -243,6 +264,19 @@ pub(super) fn check(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!("conv.join", "integer operands have no common storage type"),
             ));
+        }
+        if let Some(ty) = known {
+            bindings.defer_rule(|i| {
+                domain::at(ty, i).is_none().then(|| {
+                    expr.location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "conv.join",
+                            "integer operands have no common storage type"
+                        ),
+                    )
+                })
+            });
         }
         known.unwrap_or(Type::Integer(IntegerType::I64))
     };
@@ -270,6 +304,23 @@ pub(super) fn check(
                 ),
             ));
         }
+        bindings.defer_rule(|i| {
+            let Type::Float(float) = domain::at(ty, i)? else {
+                return None;
+            };
+            let range = exact.range_at(i).ok()?;
+            range
+                .is_some_and(|r| !r.exact_float(float == FloatType::F32))
+                .then(|| {
+                    exact.location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "arith.store-float",
+                            "integer range is not exactly representable; use as"
+                        ),
+                    )
+                })
+        });
     } else if !ty.is_integer() {
         return Err(expr.location.error(
             ErrorKind::InvalidSource,

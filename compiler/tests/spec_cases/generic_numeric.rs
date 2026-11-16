@@ -688,6 +688,15 @@ fn forward_generic_errors_respect_declaration_and_call_order() {
         let error = marked_error(&source, "num.fn-body");
         assert_eq!(error.related.last().unwrap().rule(), "type.expected");
     }
+    // Deferred calls traverse invalid callees too. A successful earlier
+    // substitution must not suppress the later instance's deferred failure.
+    let error = marked_error(
+        "fn main() -> u8 { fix small: u8 = 1\nfix first = f(small)\nfix wide: u64 = 1\nfix second = @f(wide)\nfix bad: bool = 1\nreturn 0 }\nfn f(n: int) -> int { fix value = g(n)\nreturn true }\nfn g(n: int) -> int { fix small: i64 = n\nreturn true }",
+        "num.fn-body",
+    );
+    assert_eq!(error.related.len(), 2);
+    assert_eq!(error.related[0].rule(), "num.fn-body");
+    assert_eq!(error.related[1].rule(), "type.expected");
     // Without an earlier caller error, the cached declaration error is reported.
     marked_error(
         "fn main() -> u8 { fix n = f(1)\nreturn 0 }\nfn f(n: int) -> int { fix small = n @as u8\nreturn true }",

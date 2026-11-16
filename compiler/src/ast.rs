@@ -177,7 +177,7 @@ impl Type {
     }
     /// Includes concrete and symbolic integer/floating-point types.
     pub fn is_numeric(self) -> bool {
-        self.is_integer() || self.is_float()
+        matches!(self, Self::Numeric(_)) || self.is_integer() || self.is_float()
     }
     pub fn is_text(self) -> bool {
         matches!(self, Self::Symbol | Self::Text)

@@ -92,6 +92,22 @@ pub(super) fn check(
                     ),
                 ));
             }
+            if matches!(&expr.kind, ExpressionKind::Negate(_)) && ty.symbolic() {
+                bindings.defer_rule(|i| {
+                    let Type::Integer(integer) = domain::at(ty, i)? else {
+                        return None;
+                    };
+                    (integer.bounds().0 == 0).then(|| {
+                        expr.location.error(
+                            ErrorKind::InvalidSource,
+                            crate::diagnostic!(
+                                "expr.operator-types",
+                                "integer negation requires a signed type"
+                            ),
+                        )
+                    })
+                });
+            }
             let integer_only = matches!(
                 &expr.kind,
                 ExpressionKind::Binary {
@@ -138,16 +154,8 @@ pub(super) fn check(
                     }
                 }
                 ExpressionKind::BitNot(inner) => {
-                    if operand_type(inner, bindings).is_some_and(|known| !domain::same(known, ty))
-                        && !super::super::exact::is_operator(inner)
-                    {
-                        return Err(inner.location.error(
-                            ErrorKind::InvalidSource,
-                            crate::diagnostic!(
-                                "width.same-type",
-                                "bit-width operands must have the same integer type"
-                            ),
-                        ));
+                    if !super::super::exact::is_operator(inner) {
+                        same_width(operand_type(inner, bindings), ty, inner.location, bindings)?;
                     }
                     Value::BitNot(Box::new(expression(inner, Some(ty), bindings)?))
                 }
@@ -163,16 +171,8 @@ pub(super) fn check(
                             if operator.is_shift() && std::ptr::eq(operand, right) {
                                 continue;
                             }
-                            if known.is_some_and(|t| !domain::same(t, ty))
-                                && !super::super::exact::is_operator(operand)
-                            {
-                                return Err(operand.location.error(
-                                    ErrorKind::InvalidSource,
-                                    crate::diagnostic!(
-                                        "width.same-type",
-                                        "bit-width operands must have the same integer type"
-                                    ),
-                                ));
+                            if !super::super::exact::is_operator(operand) {
+                                same_width(known, ty, operand.location, bindings)?;
                             }
                         }
                     }
@@ -343,6 +343,33 @@ pub(super) fn check(
     })
 }
 
+fn same_width(
+    known: Option<Type>,
+    ty: Type,
+    location: crate::ast::Location,
+    bindings: &Scope,
+) -> Result<(), Diagnostic> {
+    let Some(from) = known else {
+        return Ok(());
+    };
+    let error = || {
+        location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "width.same-type",
+                "bit-width operands must have the same integer type"
+            ),
+        )
+    };
+    if !domain::same(from, ty) {
+        return Err(error());
+    }
+    if from.symbolic() || ty.symbolic() {
+        bindings.defer_rule(|i| (domain::at(from, i)? != domain::at(ty, i)?).then(error));
+    }
+    Ok(())
+}
+
 // An integer subtree retains exact integer division even inside float arithmetic.
 fn numeric_operand(
     expr: &Expression,
@@ -362,6 +389,24 @@ fn numeric_operand(
                 "integer operand is not losslessly convertible; use as"
             ),
         ));
+    }
+    if ty.is_float()
+        && !super::super::exact::is_operator(expr)
+        && let Some(from) = operand_type(expr, bindings)
+        && from.is_integer()
+        && (from.symbolic() || ty.symbolic())
+    {
+        bindings.defer_rule(|i| {
+            (!super::super::exact::widening(domain::at(from, i)?, domain::at(ty, i)?)).then(|| {
+                expr.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "arith.mix",
+                        "integer operand is not losslessly convertible; use as"
+                    ),
+                )
+            })
+        });
     }
     let checked = if ty.is_float() {
         super::coerced(expr, Some(ty), bindings)?

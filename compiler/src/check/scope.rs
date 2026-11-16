@@ -40,9 +40,7 @@ pub(super) enum Mode {
 #[derive(Clone)]
 pub(super) struct Scope {
     pub mode: Mode,
-    // Preserve universal cast policy in forward instances of an invalid body;
-    // all other unconditional violations also fail under scalar substitution.
-    pub forced_cast_policy: Option<crate::ast::Location>,
+    pub deferred: Option<Rc<std::cell::RefCell<Vec<super::generic::Deferred>>>>,
     // Persistent path from the initiating call to this instance.
     pub generic_calls: Option<Rc<super::generic::CallTrace>>,
     pub instances: Rc<std::cell::RefCell<super::generic::Instances>>,
@@ -95,7 +93,7 @@ impl Default for Scope {
     fn default() -> Self {
         Self {
             mode: Default::default(),
-            forced_cast_policy: None,
+            deferred: None,
             generic_calls: None,
             instances: Rc::default(),
             type_hints: Rc::default(),
