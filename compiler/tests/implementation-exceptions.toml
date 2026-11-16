@@ -1,41 +1,42 @@
+# 対応計画: https://github.com/TappoyGK/suz/issues/48 の「実装の段階」。
 [[exceptions]]
 rule = "impl.file-length"
 path = "compiler/src/ast.rs"
-reason = "既存のAST定義と関連する型の操作を、責任ごとの分割として別PRで整理するため"
+reason = "#48 の段階2（機械で確かめる検査）で既存の行数超過を一時的に許容する。段階6（ファイルの長さ）で概念ごとに分割し、この例外を削除する。"
 max_code_lines = 585
 
 [[exceptions]]
 rule = "impl.file-length"
 path = "compiler/src/check/constants.rs"
-reason = "既存の定数評価を演算や変換ごとに分割する変更を、検査導入と分けてレビューするため"
+reason = "#48 の段階2（機械で確かめる検査）で既存の行数超過を一時的に許容する。段階6（ファイルの長さ）で概念ごとに分割し、この例外を削除する。"
 max_code_lines = 772
 
 [[exceptions]]
 rule = "impl.file-length"
 path = "compiler/src/check/exact.rs"
-reason = "既存の値の範囲の計算と汎用検査の処理を、別PRで整理するため"
+reason = "#48 の段階2（機械で確かめる検査）で既存の行数超過を一時的に許容する。段階6（ファイルの長さ）で概念ごとに分割し、この例外を削除する。"
 max_code_lines = 561
 
 [[exceptions]]
 rule = "impl.file-length"
 path = "compiler/src/check/expression.rs"
-reason = "既存の式の検査を構文ごとの責任に分割する変更を、別PRでレビューするため"
+reason = "#48 の段階2（機械で確かめる検査）で既存の行数超過を一時的に許容する。段階6（ファイルの長さ）で概念ごとに分割し、この例外を削除する。"
 max_code_lines = 642
 
 [[exceptions]]
 rule = "impl.file-length"
 path = "compiler/src/codegen/expressions.rs"
-reason = "既存の式のC生成処理を分割する変更を、検査導入と分けてレビューするため"
+reason = "#48 の段階2（機械で確かめる検査）で既存の行数超過を一時的に許容する。段階6（ファイルの長さ）で概念ごとに分割し、この例外を削除する。"
 max_code_lines = 505
 
 [[exceptions]]
 rule = "impl.file-length"
 path = "compiler/src/lexer.rs"
-reason = "既存の字句解析をトークンごとの処理に分割する変更を、別PRでレビューするため"
+reason = "#48 の段階2（機械で確かめる検査）で既存の行数超過を一時的に許容する。段階6（ファイルの長さ）で概念ごとに分割し、この例外を削除する。"
 max_code_lines = 708
 
 [[exceptions]]
 rule = "impl.file-length"
 path = "compiler/tests/spec_cases/generic_numeric.rs"
-reason = "既存の汎用数値型の検証を検証対象ごとに分割する変更を、別PRでレビューするため"
+reason = "#48 の段階2（機械で確かめる検査）で既存の行数超過を一時的に許容する。段階6（ファイルの長さ）で概念ごとに分割し、この例外を削除する。"
 max_code_lines = 722
