@@ -48,7 +48,7 @@ def source_counts(root, files=None):
     return counts
 
 
-def read_exceptions(text, known_rules=None, *, files=None):
+def read_exceptions(text, known_rules=None, *, files=None, entries=None):
     """共通の形式を検査し、行数検査が扱う例外だけを返す。"""
     document = tomllib.loads(text)
     if not document:
@@ -87,6 +87,8 @@ def read_exceptions(text, known_rules=None, *, files=None):
         if rule != 'impl.file-length':
             if 'max_code_lines' in entry:
                 raise ValueError(f'Unexpected code line limit: {name}')
+            if entries is not None:
+                entries.append(entry)
             continue
         if not source_language(name):
             raise ValueError(f'Invalid file-length exception path: {name}')
@@ -98,6 +100,8 @@ def read_exceptions(text, known_rules=None, *, files=None):
         if name in result:
             raise ValueError(f'Duplicate exception: {name}')
         result[name] = limit
+        if entries is not None:
+            entries.append(entry)
     return result
 
 

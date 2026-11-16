@@ -40,3 +40,1861 @@ rule = "impl.file-length"
 path = "compiler/tests/spec_cases/generic_numeric.rs"
 reason = "#48 の段階2（機械で確かめる検査）で既存の行数超過を一時的に許容する。段階6（ファイルの長さ）で概念ごとに分割し、この例外を削除する。"
 max_code_lines = 722
+
+[[exceptions]]
+rule = "impl.layers"
+path = "compiler/src/ast.rs"
+item = "ast -> warnings"
+reason = "#48 の段階2で既存の依存違反を記録する。段階5（段ごとのエラー）で処理と受け渡す型を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.layers"
+path = "compiler/src/check/ir.rs"
+item = "check::ir -> check"
+reason = "#48 の段階2で既存の依存違反を記録する。段階5（段ごとのエラー）で処理と受け渡す型を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.layers"
+path = "compiler/src/numeric.rs"
+item = "numeric -> ast"
+reason = "#48 の段階2で既存の依存違反を記録する。段階5（段ごとのエラー）で処理と受け渡す型を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.layers"
+path = "compiler/src/parser.rs"
+item = "parser -> warnings"
+reason = "#48 の段階2で既存の依存違反を記録する。段階5（段ごとのエラー）で処理と受け渡す型を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.layers"
+path = "compiler/src/parser/allows.rs"
+item = "parser::allows -> warnings"
+reason = "#48 の段階2で既存の依存違反を記録する。段階5（段ごとのエラー）で処理と受け渡す型を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/ast.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/ast/visit.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/check.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/check/constants.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/check/control.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/check/declarations.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/check/diagnostics.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/check/exact.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/check/expression.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/check/expression/blocks.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/check/expression/branches.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/check/expression/casts.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/check/expression/operators.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/check/expression/slices.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/check/expression/structs.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/check/functions.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/check/generic.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/check/generic/analysis.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/check/generic/validation.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/check/ir.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/check/matches.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/check/ranges.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/check/scope.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/check/statements.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/check/text.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/check/text_parse.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/check/text_structure.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/check/writes.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/cli/arguments.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/cli/assets.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/cli/emit.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/cli/help.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/cli/mod.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/cli/native.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/cli/output.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/cli/signals.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/codegen.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/codegen/arithmetic.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/codegen/blocks.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/codegen/casts.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/codegen/characters.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/codegen/exact.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/codegen/exact/native.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/codegen/expressions.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/codegen/functions.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/codegen/helpers.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/codegen/logs.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/codegen/slices.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/codegen/statements.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/codegen/structs.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/codegen/text.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/codegen/text_structure.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/lexer.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/lexer/allows.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/lexer/templates.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/lib.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/main.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/parser.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/parser/allows.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/parser/branches.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/parser/enums.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/parser/expressions.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/parser/functions.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/parser/logs.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/parser/names.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/parser/statements.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/parser/structs.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.module-doc"
+path = "compiler/src/warnings.rs"
+reason = "#48 の段階2で既存の文書不足を記録する。段階7（ドキュメント）で先頭に //! を追加し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.no-silent"
+path = "compiler/src/check/exact.rs"
+item = "clippy::map_err_ignore:100:68"
+reason = "#48 の段階2で既存のエラー破棄を記録する。段階8（そのほかの規則）で失敗の扱いを見直し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.no-silent"
+path = "compiler/src/check/exact.rs"
+item = "clippy::map_err_ignore:122:74"
+reason = "#48 の段階2で既存のエラー破棄を記録する。段階8（そのほかの規則）で失敗の扱いを見直し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.no-silent"
+path = "compiler/src/cli/output.rs"
+item = "clippy::let_underscore_must_use:52:13"
+reason = "#48 の段階2で既存のエラー破棄を記録する。段階8（そのほかの規則）で失敗の扱いを見直し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.no-silent"
+path = "compiler/src/cli/signals.rs"
+item = "clippy::let_underscore_must_use:68:9"
+reason = "#48 の段階2で既存のエラー破棄を記録する。段階8（そのほかの規則）で失敗の扱いを見直し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.no-silent"
+path = "compiler/src/cli/signals.rs"
+item = "clippy::let_underscore_must_use:69:9"
+reason = "#48 の段階2で既存のエラー破棄を記録する。段階8（そのほかの規則）で失敗の扱いを見直し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.no-silent"
+path = "compiler/src/codegen/tests.rs"
+item = "clippy::let_underscore_must_use:115:13"
+reason = "#48 の段階2で既存のエラー破棄を記録する。段階8（そのほかの規則）で失敗の扱いを見直し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.no-silent"
+path = "compiler/src/codegen/tests.rs"
+item = "clippy::let_underscore_must_use:178:13"
+reason = "#48 の段階2で既存のエラー破棄を記録する。段階8（そのほかの規則）で失敗の扱いを見直し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.no-silent"
+path = "compiler/src/codegen/tests.rs"
+item = "clippy::let_underscore_must_use:28:13"
+reason = "#48 の段階2で既存のエラー破棄を記録する。段階8（そのほかの規則）で失敗の扱いを見直し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.no-silent"
+path = "compiler/src/main.rs"
+item = "clippy::let_underscore_must_use:21:13"
+reason = "#48 の段階2で既存のエラー破棄を記録する。段階8（そのほかの規則）で失敗の扱いを見直し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.no-silent"
+path = "compiler/tests/support/markdown.rs"
+item = "clippy::map_err_ignore:61:26"
+reason = "#48 の段階2で既存のエラー破棄を記録する。段階8（そのほかの規則）で失敗の扱いを見直し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.no-silent"
+path = "compiler/tests/support/test_util.rs"
+item = "clippy::let_underscore_must_use:27:9"
+reason = "#48 の段階2で既存のエラー破棄を記録する。段階8（そのほかの規則）で失敗の扱いを見直し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/ast.rs"
+item = "Location::error:Diagnostic::new:message . rule#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/constants.rs"
+item = "validate_evaluation:diagnostic!:const.evaluation#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/constants.rs"
+item = "validate_evaluation:diagnostic!:const.evaluation#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/control.rs"
+item = "check_return_shape:diagnostic!:fn.fallthrough#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/control.rs"
+item = "check_return_shape:diagnostic!:fn.value-return-required#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/control.rs"
+item = "validate_statements::visit_handler:diagnostic!:expr.jump-prohibited#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/control.rs"
+item = "validate_statements::visit_handler:diagnostic!:expr.or-return-position#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/declarations.rs"
+item = "Resolver < '_ >::resolve:diagnostic!:const.expression#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/declarations.rs"
+item = "Resolver < '_ >::resolve:diagnostic!:const.initializer#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/declarations.rs"
+item = "Resolver < '_ >::resolve:diagnostic!:const.initializer#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/declarations.rs"
+item = "dependencies:diagnostic!:const.expression#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/declarations.rs"
+item = "handler_dependencies:diagnostic!:const.expression#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/declarations.rs"
+item = "resolve:diagnostic!:decl.duplicate#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/exact.rs"
+item = "build:diagnostic!:arith.exact#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/exact.rs"
+item = "build:diagnostic!:expr.operator-types#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/exact.rs"
+item = "cast:diagnostic!:expr.as#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/exact.rs"
+item = "cast:diagnostic!:expr.as-trunc#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/exact.rs"
+item = "cast:diagnostic!:expr.cast-wrap-handler-syntax#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/exact.rs"
+item = "check:diagnostic!:arith.div-zero-always#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/exact.rs"
+item = "check:diagnostic!:arith.div-zero-always#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/exact.rs"
+item = "check:diagnostic!:arith.store-float#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/exact.rs"
+item = "check:diagnostic!:conv.join#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/exact.rs"
+item = "check:diagnostic!:conv.join#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/exact.rs"
+item = "check:diagnostic!:type.expected#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/exact.rs"
+item = "error:diagnostic!:arith.width#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression.rs"
+item = "conversion_error:diagnostic!:num.fn-convert#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression.rs"
+item = "conversion_error:diagnostic!:num.fn-convert#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression.rs"
+item = "conversion_error:diagnostic!:type.expected#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression.rs"
+item = "expression_inner:diagnostic!:decl.local-scope#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression.rs"
+item = "expression_inner:diagnostic!:enum.access#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression.rs"
+item = "expression_inner:diagnostic!:enum.access#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression.rs"
+item = "float_literal:diagnostic!:lit.float-range#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression.rs"
+item = "integer_literal_value:diagnostic!:expr.operator-types#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression.rs"
+item = "integer_literal_value:diagnostic!:lit.range#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression.rs"
+item = "literal:diagnostic!:lit.float-range#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression.rs"
+item = "literal:diagnostic!:lit.range#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression.rs"
+item = "literal:diagnostic!:type.expected#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression.rs"
+item = "scalar_literal:diagnostic!:type.expected#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression.rs"
+item = "scalar_literal:diagnostic!:type.expected#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/blocks.rs"
+item = "check:diagnostic!:block.value#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/branches.rs"
+item = "check:diagnostic!:branch.expression#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/branches.rs"
+item = "check:diagnostic!:branch.expression#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/branches.rs"
+item = "check:diagnostic!:if.condition#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/casts.rs"
+item = "CastRisk::require_handler:diagnostic!:const.cast-check#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/casts.rs"
+item = "CastRisk::require_handler:diagnostic!:expr.cast-handler#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/casts.rs"
+item = "CastRisk::require_handler_for:diagnostic!:num.fn-cast#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/casts.rs"
+item = "check:diagnostic!:expr.as#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/casts.rs"
+item = "check:diagnostic!:expr.as#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/casts.rs"
+item = "check:diagnostic!:expr.as-trunc#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/casts.rs"
+item = "check:diagnostic!:expr.cast-wrap-handler-syntax#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/casts.rs"
+item = "check:diagnostic!:symbol.cast#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/casts.rs"
+item = "check:diagnostic!:symbol.cast-handler#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/casts.rs"
+item = "check:diagnostic!:symbol.cast-wrap#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/casts.rs"
+item = "check:diagnostic!:text.to-symbol#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/operators.rs"
+item = "check:diagnostic!:expr.arithmetic-handler#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/operators.rs"
+item = "check:diagnostic!:expr.arithmetic-handler#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/operators.rs"
+item = "check:diagnostic!:expr.not#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/operators.rs"
+item = "check:diagnostic!:expr.operator-types#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/operators.rs"
+item = "check:diagnostic!:expr.operator-types#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/operators.rs"
+item = "check:diagnostic!:expr.operator-types#3"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/operators.rs"
+item = "check:diagnostic!:expr.operator-types#4"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/operators.rs"
+item = "check:diagnostic!:expr.operator-types#5"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/operators.rs"
+item = "check:diagnostic!:expr.operator-types#6"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/operators.rs"
+item = "check:diagnostic!:symbol.operations#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/operators.rs"
+item = "check:diagnostic!:text.operations#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/operators.rs"
+item = "numeric_operand:diagnostic!:arith.mix#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/operators.rs"
+item = "same_width:diagnostic!:width.same-type#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/slices.rs"
+item = "check:diagnostic!:text.slice-bounds#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/slices.rs"
+item = "check:diagnostic!:text.slice-handler#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/slices.rs"
+item = "check:diagnostic!:text.slice-handler#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/structs.rs"
+item = "field:diagnostic!:struct.access#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/structs.rs"
+item = "field:diagnostic!:struct.access#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/structs.rs"
+item = "initializer_indices:diagnostic!:struct.literal#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/structs.rs"
+item = "initializer_indices:diagnostic!:struct.literal#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/expression/structs.rs"
+item = "initializer_indices:diagnostic!:struct.literal#3"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/functions.rs"
+item = "call:diagnostic!:fn.call#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/functions.rs"
+item = "call:diagnostic!:fn.call#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/functions.rs"
+item = "check:diagnostic!:decl.duplicate#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/functions.rs"
+item = "check_function:diagnostic!:decl.shadowing#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/functions.rs"
+item = "check_function:diagnostic!:fn.parameter-scope#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/functions.rs"
+item = "instance_error:diagnostic!:num.fn-body#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/functions.rs"
+item = "instance_error:diagnostic!:num.fn-body#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/functions.rs"
+item = "return_value:diagnostic!:fn.return#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/generic.rs"
+item = "resolve:diagnostic!:num.fn-resolve#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/generic.rs"
+item = "resolve:diagnostic!:num.fn-resolve#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/generic/validation.rs"
+item = "Places::ty:diagnostic!:num.fn-undeclared#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/generic/validation.rs"
+item = "place_error:diagnostic!:num.places#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/matches.rs"
+item = "patterns:diagnostic!:arith.match#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/matches.rs"
+item = "patterns:diagnostic!:const.expression#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/matches.rs"
+item = "patterns:diagnostic!:const.expression#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/matches.rs"
+item = "patterns:diagnostic!:lit.range#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/matches.rs"
+item = "patterns:diagnostic!:match.exhaustive#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/matches.rs"
+item = "patterns:diagnostic!:match.pattern#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/matches.rs"
+item = "patterns:diagnostic!:match.pattern#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/matches.rs"
+item = "patterns:diagnostic!:match.pattern#3"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/matches.rs"
+item = "patterns:diagnostic!:match.pattern#4"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/matches.rs"
+item = "patterns:diagnostic!:match.target#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/matches.rs"
+item = "patterns:diagnostic!:type.expected#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/matches.rs"
+item = "patterns:diagnostic!:type.expected#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/ranges.rs"
+item = "References::expression:diagnostic!:for.bound-reference#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/ranges.rs"
+item = "bounds:diagnostic!:for.bounds#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/statements.rs"
+item = "check_assign:diagnostic!:const.decl#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/statements.rs"
+item = "check_assign:diagnostic!:decl.local-scope#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/statements.rs"
+item = "check_assign:diagnostic!:fn.parameter#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/statements.rs"
+item = "check_assign:diagnostic!:for.variable#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/statements.rs"
+item = "check_assign:diagnostic!:var.fix-assign#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/statements.rs"
+item = "check_binding:diagnostic!:decl.duplicate#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/statements.rs"
+item = "check_binding:diagnostic!:decl.shadowing#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/statements.rs"
+item = "check_binding:diagnostic!:decl.shadowing#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/statements.rs"
+item = "check_binding:diagnostic!:fn.parameter-scope#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/statements.rs"
+item = "check_binding:diagnostic!:type.void#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/statements.rs"
+item = "check_for:diagnostic!:char.for-type#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/statements.rs"
+item = "check_for:diagnostic!:decl.shadowing#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/statements.rs"
+item = "check_statement:diagnostic!:if.condition#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/statements.rs"
+item = "check_statement:diagnostic!:loop.jump-context#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/statements.rs"
+item = "check_statement:diagnostic!:while.loop#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/statements.rs"
+item = "finish_scope:diagnostic!:var.never-reassigned#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/text.rs"
+item = "parts:diagnostic!:symbol.interpolation#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/check/writes.rs"
+item = "Writes < '_ >::statement:diagnostic!:assign.rhs-write#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/lexer.rs"
+item = "char_literal:diagnostic!:char.literal#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/lexer.rs"
+item = "char_literal:diagnostic!:char.literal#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/lexer.rs"
+item = "char_literal:diagnostic!:char.literal#3"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/lexer.rs"
+item = "char_literal:diagnostic!:char.literal#4"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/lexer.rs"
+item = "char_literal:diagnostic!:char.literal#5"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/lexer.rs"
+item = "error:Diagnostic::new:message . rule#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/lexer.rs"
+item = "lex:diagnostic!:for.range-spacing#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/lexer.rs"
+item = "lex:diagnostic!:lit.float#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/lexer.rs"
+item = "lex:diagnostic!:syntax.grammar#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/lexer.rs"
+item = "number:diagnostic!:lit.float#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/lexer.rs"
+item = "number:diagnostic!:lit.float#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/lexer.rs"
+item = "number:diagnostic!:lit.float#3"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/lexer.rs"
+item = "number:diagnostic!:lit.float#4"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/lexer.rs"
+item = "number:diagnostic!:lit.integer#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/lexer/allows.rs"
+item = "scan:diagnostic!:allow.item#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/lexer/allows.rs"
+item = "scan:diagnostic!:allow.reason#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/lexer/templates.rs"
+item = "scan:diagnostic!:symbol.escape#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/lexer/templates.rs"
+item = "scan:diagnostic!:symbol.interpolation#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/lexer/templates.rs"
+item = "scan:diagnostic!:symbol.interpolation#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/lexer/templates.rs"
+item = "scan:diagnostic!:symbol.template#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/lexer/templates.rs"
+item = "scan:diagnostic!:symbol.template-line#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/lexer/templates.rs"
+item = "scan:diagnostic!:symbol.template-line#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/lexer/templates.rs"
+item = "scan:diagnostic!:symbol.template-line#3"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/lexer/templates.rs"
+item = "scan:diagnostic!:symbol.template-line#4"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/lib.rs"
+item = "analyze:Diagnostic::new:src.encoding#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/lib.rs"
+item = "analyze:Diagnostic::new:src.newline#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser.rs"
+item = "Parser < 'a , 's >::constant:diagnostic!:const.decl#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser.rs"
+item = "Parser < 'a , 's >::constant:diagnostic!:src.ident#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser.rs"
+item = "Parser < 'a , 's >::constant:diagnostic!:type.void#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser.rs"
+item = "Parser < 'a , 's >::error:diagnostic!:for.range#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser.rs"
+item = "Parser < 'a , 's >::expect:diagnostic!:syntax.grammar#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser.rs"
+item = "parse:diagnostic!:decl.location#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser.rs"
+item = "parse:diagnostic!:decl.top-level#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser.rs"
+item = "parse:diagnostic!:fn.return#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser.rs"
+item = "parse:diagnostic!:prog.main#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser.rs"
+item = "parse:diagnostic!:src.statement-end#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/allows.rs"
+item = "Parser < '_ , '_ >::allow_clause:diagnostic!:allow.contains-block#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/allows.rs"
+item = "Parser < '_ , '_ >::allow_items:diagnostic!:allow.item#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/allows.rs"
+item = "Parser < '_ , '_ >::allow_items:diagnostic!:allow.item#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/allows.rs"
+item = "Parser < '_ , '_ >::allow_items:diagnostic!:allow.item#3"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/allows.rs"
+item = "Parser < '_ , '_ >::allow_items:diagnostic!:allow.reason#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/allows.rs"
+item = "Parser < '_ , '_ >::allow_items:diagnostic!:allow.rule-check#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/branches.rs"
+item = "Parser < '_ , '_ >::check_branch_line:diagnostic!:expr.else-line#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/branches.rs"
+item = "Parser < '_ , '_ >::if_expression:diagnostic!:expr.if-value#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/branches.rs"
+item = "Parser < '_ , '_ >::if_statement:diagnostic!:if.elif#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/branches.rs"
+item = "Parser < '_ , '_ >::match_arms:diagnostic!:match.separator#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/branches.rs"
+item = "Parser < '_ , '_ >::match_value_body:diagnostic!:expr.jump-prohibited#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/branches.rs"
+item = "Parser < '_ , '_ >::value_block:diagnostic!:block.value#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/enums.rs"
+item = "Parser < '_ , '_ >::enum_declaration:diagnostic!:enum.base#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/enums.rs"
+item = "Parser < '_ , '_ >::enum_declaration:diagnostic!:enum.base#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/enums.rs"
+item = "Parser < '_ , '_ >::enum_declaration:diagnostic!:enum.nonempty#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/enums.rs"
+item = "Parser < '_ , '_ >::enum_declaration:diagnostic!:enum.variant#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/enums.rs"
+item = "Parser < '_ , '_ >::enum_declaration:diagnostic!:enum.variant#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/enums.rs"
+item = "Parser < '_ , '_ >::enum_declaration:diagnostic!:src.ident#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/enums.rs"
+item = "Parser < '_ , '_ >::variant:diagnostic!:enum.variant#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/enums.rs"
+item = "Parser < '_ , '_ >::variant:diagnostic!:enum.variant#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/enums.rs"
+item = "collect:diagnostic!:decl.duplicate#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/expressions.rs"
+item = "Parser < '_ , '_ >::comparison:diagnostic!:expr.comparison-chain#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/expressions.rs"
+item = "Parser < '_ , '_ >::comparison:diagnostic!:expr.comparison-chain#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/expressions.rs"
+item = "Parser < '_ , '_ >::failure_handler:diagnostic!:const.expression#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/expressions.rs"
+item = "Parser < '_ , '_ >::slice_bound:diagnostic!:text.slice-omit#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/expressions.rs"
+item = "Parser < '_ , '_ >::unary:diagnostic!:assign.statement#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/expressions.rs"
+item = "Parser < '_ , '_ >::unary:diagnostic!:const.expression#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/expressions.rs"
+item = "Parser < '_ , '_ >::unary:diagnostic!:const.expression#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/expressions.rs"
+item = "Parser < '_ , '_ >::unary:diagnostic!:enum.access#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/expressions.rs"
+item = "Parser < '_ , '_ >::unary:diagnostic!:expr.block#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/expressions.rs"
+item = "Parser < '_ , '_ >::unary:diagnostic!:expr.if-value#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/expressions.rs"
+item = "Parser < '_ , '_ >::unary:diagnostic!:expr.struct-in-cond#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/expressions.rs"
+item = "Parser < '_ , '_ >::unary:diagnostic!:struct.access#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/expressions.rs"
+item = "Parser < '_ , '_ >::unary:diagnostic!:syntax.grammar#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/functions.rs"
+item = "Parser < '_ , '_ >::delimited_list:diagnostic!:src.list-comma#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/functions.rs"
+item = "Parser < '_ , '_ >::delimited_list:diagnostic!:src.trailing-comma#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/functions.rs"
+item = "Parser < '_ , '_ >::delimited_list:diagnostic!:syntax.grammar#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/functions.rs"
+item = "Parser < '_ , '_ >::function:diagnostic!:fn.return-type#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/functions.rs"
+item = "Parser < '_ , '_ >::function:diagnostic!:prog.main#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/functions.rs"
+item = "Parser < '_ , '_ >::function:diagnostic!:prog.main#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/functions.rs"
+item = "Parser < '_ , '_ >::function:diagnostic!:src.ident#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/functions.rs"
+item = "Parser < '_ , '_ >::parameter:diagnostic!:fn.parameter#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/functions.rs"
+item = "Parser < '_ , '_ >::parameter:diagnostic!:src.ident#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/functions.rs"
+item = "Parser < '_ , '_ >::parameter:diagnostic!:type.void#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/functions.rs"
+item = "Parser < '_ , '_ >::parse_type:diagnostic!:syntax.grammar#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/functions.rs"
+item = "Parser < '_ , '_ >::parse_type:diagnostic!:type.name#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/logs.rs"
+item = "Parser < '_ , '_ >::log:diagnostic!:log.level#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/logs.rs"
+item = "Parser < '_ , '_ >::log:diagnostic!:log.syntax#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/logs.rs"
+item = "Parser < '_ , '_ >::template:diagnostic!:symbol.interpolation#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/logs.rs"
+item = "Parser < '_ , '_ >::template:diagnostic!:symbol.interpolation#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/names.rs"
+item = "check:diagnostic!:rule#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/statements.rs"
+item = "Parser < '_ , '_ >::block:diagnostic!:if.elif#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/statements.rs"
+item = "Parser < '_ , '_ >::block:diagnostic!:src.statement-end#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/statements.rs"
+item = "Parser < '_ , '_ >::block:diagnostic!:src.statement-end#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/statements.rs"
+item = "Parser < '_ , '_ >::block:diagnostic!:syntax.grammar#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/statements.rs"
+item = "Parser < '_ , '_ >::statement_inner:diagnostic!:decl.location#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/statements.rs"
+item = "Parser < '_ , '_ >::statement_inner:diagnostic!:expr.jump-prohibited#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/statements.rs"
+item = "Parser < '_ , '_ >::statement_inner:diagnostic!:for.range#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/statements.rs"
+item = "Parser < '_ , '_ >::statement_inner:diagnostic!:for.range#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/statements.rs"
+item = "Parser < '_ , '_ >::statement_inner:diagnostic!:if.elif#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/statements.rs"
+item = "Parser < '_ , '_ >::statement_inner:diagnostic!:loop.break#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/statements.rs"
+item = "Parser < '_ , '_ >::statement_inner:diagnostic!:loop.continue#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/statements.rs"
+item = "Parser < '_ , '_ >::statement_inner:diagnostic!:src.ident#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/statements.rs"
+item = "Parser < '_ , '_ >::statement_inner:diagnostic!:src.ident#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/statements.rs"
+item = "Parser < '_ , '_ >::statement_inner:diagnostic!:src.or-line#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/statements.rs"
+item = "Parser < '_ , '_ >::statement_inner:diagnostic!:type.void#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/statements.rs"
+item = "Parser < '_ , '_ >::statement_inner:diagnostic!:var.decl#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/statements.rs"
+item = "Parser < '_ , '_ >::statement_inner:diagnostic!:var.initializer#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/structs.rs"
+item = "Parser < '_ , '_ >::field_declaration:diagnostic!:struct.field#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/structs.rs"
+item = "Parser < '_ , '_ >::field_declaration:diagnostic!:struct.field#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/structs.rs"
+item = "Parser < '_ , '_ >::field_declaration:diagnostic!:type.void#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/structs.rs"
+item = "Parser < '_ , '_ >::field_initializer:diagnostic!:struct.literal#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/structs.rs"
+item = "Parser < '_ , '_ >::field_initializer:diagnostic!:struct.literal#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/structs.rs"
+item = "collect::visit:diagnostic!:struct.recursion#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/structs.rs"
+item = "collect:diagnostic!:decl.duplicate#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/structs.rs"
+item = "collect:diagnostic!:src.ident#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/structs.rs"
+item = "collect:diagnostic!:struct.field#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/structs.rs"
+item = "collect:diagnostic!:struct.field#2"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/parser/structs.rs"
+item = "collect:diagnostic!:struct.nonempty#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/warnings.rs"
+item = "collect:diagnostic!:allow.nested#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/warnings.rs"
+item = "collect:diagnostic!:allow.unused#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+[[exceptions]]
+rule = "impl.rule-index"
+path = "compiler/src/warnings.rs"
+item = "collect:diagnostic!:diagnostic.arithmetic#1"
+reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"

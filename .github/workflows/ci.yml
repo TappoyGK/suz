@@ -81,6 +81,16 @@ jobs:
         run: |
           python3 scripts/test-implementation.py
           python3 scripts/check-implementation.py
+          cargo fmt --manifest-path scripts/rust-implementation/Cargo.toml -- --check
+          cargo clippy --locked --manifest-path scripts/rust-implementation/Cargo.toml --all-targets -- -D warnings
+          cargo test --locked --manifest-path scripts/rust-implementation/Cargo.toml
+          python3 scripts/test-rust-implementation.py
+          python3 scripts/check-rust-implementation.py
+
+      - name: Check internal documentation
+        env:
+          RUSTDOCFLAGS: '-D warnings'
+        run: cargo doc --locked --no-deps --document-private-items
 
       - name: Check formatting and lint
         if: github.event_name == 'pull_request'

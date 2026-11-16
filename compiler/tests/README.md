@@ -17,6 +17,41 @@ python3 scripts/check-implementation.py
 
 例外は [implementation-exceptions.toml](implementation-exceptions.toml) に記す。上限を超えたファイル、記録の誤記や重複、削除済みのファイルに対する例外、500コード行以下になったファイルに対する例外は、検査を失敗させる。例外の追加・変更・削除は `[impl.exceptions]` の手続きに従う。
 
+Rustの構文を使う検査とClippyによる検査は、次のコマンドで実行する。Rustのバージョンは `rust-toolchain.toml` に従う。
+
+```sh
+cargo fmt --manifest-path scripts/rust-implementation/Cargo.toml -- --check
+cargo clippy --locked --manifest-path scripts/rust-implementation/Cargo.toml --all-targets -- -D warnings
+cargo test --locked --manifest-path scripts/rust-implementation/Cargo.toml
+python3 scripts/test-rust-implementation.py
+python3 scripts/check-rust-implementation.py
+RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps --document-private-items
+```
+
+| 規則 | 自動検査の内容 |
+|---|---|
+| `impl.layers` | `mod` と `use` をたどり、`crate`・`self`・`super`・別名・再公開を解決して依存方向を検査する。ASTとIRの型定義、処理モジュール、共通モジュールを区別する |
+| `impl.format` | `rustfmt::skip` 属性の直前に空でない理由コメントがあることを検査する。通常の `cargo fmt` もCIで実行する |
+| `impl.module-doc` | テスト専用のモジュールを除き、`compiler/src` のファイルが `//!` で始まることを検査する |
+| `impl.rule-index` | `diagnostic!` と `Diagnostic::new` の箇所を抽出し、規則ID・場所・処理の段・条件説明を保存した対応表と照合する |
+| `impl.diagnostic` | 診断の文面の文字列に `[規則ID]` が埋め込まれていないことを検査する。一般の文字列や生成Cは対象外とする |
+| `impl.no-silent` | Clippyの `let_underscore_must_use`・`unused_result_ok`・`map_err_ignore` を全ターゲットで実行し、既存例外以外の警告を失敗にする |
+| `impl.doc-check` | 非公開項目も含むrustdocを生成し、警告をエラーにする |
+
+構文解析には `scripts/rust-implementation/` の独立したRustツールを使う。その依存とロックファイルはコンパイラ本体のビルドに含めない。コメントや文字列内のコード例を構文と取り違えず、テスト専用でない条件付きコードも検査する。マクロは展開せず、定義・呼び出しのトークンから明示された依存パスと診断箇所を抽出する。条件説明の意味、依存先の設計上の役割、マクロ展開で構築される名前はレビューで確認する。
+
+診断対応表は [implementation-rule-index.json](implementation-rule-index.json) に保存する。診断を追加・移動した場合や条件コメントを変えた場合は、次のコマンドで更新する。このコマンドは例外を自動追加しない。
+
+```sh
+python3 scripts/check-rust-implementation.py --write-index
+```
+
+段階2では、既存の条件コメント不足や動的に渡している規則IDを例外として記録する。対応表にはそれらの箇所も載せ、不足した情報は `null`、動的な規則IDは元の式も表示する。例外の `item` は診断の関数・種類・規則IDまたは式・同一箇所の出現順、依存の始点と終点、またはClippyのリント名と位置で識別する。行番号を含む例外はコード移動時も対象を確認して更新する。
+
+例外はGit管理対象と無視されていない未追跡ファイルの一覧に照合する。パスの大小文字の違い、存在しないファイル、新しい違反、解消済みの例外、対応表の更新漏れは失敗にする。Clippyは対象3リントを警告として全件報告し、Python側で例外を照合する。それ以外の警告・コンパイルエラーも失敗にする。通常の `cargo clippy --all-targets -- -D warnings` は別途維持する。
+
+これらの検査は `work checks` とリリース検査の両方で実行する。既存例外の解消は #48 の後続段階で行い、段階2ではコンパイラとランタイムの動作を変更しない。
+
 ## 実行方法
 
 リポジトリのルートで実行する。
@@ -25,7 +60,7 @@ python3 scripts/check-implementation.py
 |---|---|---|
 | 普段の確認 | `cargo test` | Suzの構文・型検査、CLI・環境層・テスト基盤の確認、例集の書式と全例の実行 |
 | 配布検査 | `python3 scripts/test-distribution.py PATH --version VERSION` | 指定した配布バイナリをソースツリー外へコピーして検証 |
-| リリース検査 | `./scripts/test-release.sh` | 書式・Clippy、Rustのreleaseビルドで全テスト、生成Cを `-O2` にした例集全体の実行 |
+| リリース検査 | `./scripts/test-release.sh` | 実装規則・rustdoc・書式・Clippy、Rustのreleaseビルドで全テスト、生成Cを `-O2` にした例集全体の実行 |
 
 Cを繰り返しビルドする追加の型・演算・制御の組合せ検査、テキストプール上限を設定別・コマンド別に検証する実行検査、大量の変形入力、浮動小数点ログの全指数・疑似乱数値、最適化別の境界値検査は、リリース検査用の `#[ignore]` テストにする。通常の `cargo test` では理由とともに `ignored` と表示される。
 
