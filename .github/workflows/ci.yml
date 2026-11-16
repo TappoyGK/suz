@@ -2,9 +2,9 @@ name: CI
 
 on:
   pull_request:
-    branches: [main, 'release/**']
+    branches: [main, 'release/**', 'issue/**']
   push:
-    branches: [main, 'release/**']
+    branches: [main, 'release/**', 'issue/**']
   workflow_dispatch:
 
 permissions:
@@ -47,8 +47,12 @@ jobs:
     if: >-
       always() && !cancelled() &&
       (needs.changes.result != 'success' || needs.changes.outputs.required != 'false') && (
-      (github.event_name == 'pull_request' && startsWith(github.event.pull_request.stack.base.ref || github.base_ref, 'release/')) ||
-      (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/'))
+      (github.event_name == 'pull_request' && (
+      startsWith(github.event.pull_request.stack.base.ref || github.base_ref, 'release/') ||
+      startsWith(github.event.pull_request.stack.base.ref || github.base_ref, 'issue/'))) ||
+      (github.event_name == 'push' && (
+      startsWith(github.ref, 'refs/heads/release/') ||
+      startsWith(github.ref, 'refs/heads/issue/')))
       )
     runs-on: macos-26
     timeout-minutes: 10

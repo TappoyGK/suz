@@ -140,7 +140,7 @@ SUZ_TIMINGS=1 ./scripts/test-spec-cases.sh
 
 ## CI
 
-GitHub Actionsの `CI` ワークフローは、`release/*` 向けの作業PRでは `work checks` として書式・Clippy・通常テストを実行し、リリースブランチへのpushでは通常テストを実行する。main向けのリリースPRとmainへのpushでは `release checks` として全検査・配布検査を実行する。手動実行でも選択したブランチの全検査を行う。起動条件とマージ手順は[リリース手順](../../docs/releasing.md)に従う。
+GitHub Actionsの `CI` ワークフローは、`release/*` または `issue/*` 向けの作業PRでは `work checks` として書式・Clippy・通常テストを実行し、リリースブランチとイシューブランチへのpushでは通常テストを実行する。main向けのリリースPRとmainへのpushでは `release checks` として全検査・配布検査を実行する。手動実行でも選択したブランチの全検査を行う。起動条件とマージ手順は[リリース手順](../../docs/releasing.md)に従う。
 
 `main` の検査が成功すると、検証済みバイナリ・SHA-256・コミットIDを含むアーカイブをActionsの成果物として30日間保存する。公開には、[リリース手順](../../docs/releasing.md)に従って対象コミットの成果物を使う。
 
