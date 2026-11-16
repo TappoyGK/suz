@@ -198,6 +198,32 @@ fn valid() { let _ = "1".parse::<u8>(); }
         self.assertEqual(check(''), expected)
         self.assertEqual(check('// unrelated\n\n'), expected)
 
+    def test_group_and_macro_suppressions_are_rejected(self):
+        violations, _ = self.check({'compiler/src/lib.rs': """//! Root.
+#[allow(clippy::restriction)]
+pub fn grouped() { let _ = "1".parse::<u8>(); }
+fn f() { vec![#[allow(clippy::map_err_ignore)] { 1 }]; }
+"""})
+        self.assertEqual(len(violations), 2)
+        self.assertTrue(all(rule == 'impl.no-silent' for rule, _, _ in violations))
+
+    def test_extra_violation_reports_scope_and_count_not_wrong_line(self):
+        name = 'compiler/src/check/exact.rs'
+        violations = {
+            ('impl.no-silent', name, f'build:clippy::map_err_ignore#{n}'):
+                f'{name}:{line}: discarded [impl.no-silent]'
+            for n, line in enumerate((97, 101, 123), 1)
+        }
+        entries = [dict(rule='impl.no-silent', path=name, item=f'build:clippy::map_err_ignore#{n}')
+                   for n in (1, 2)]
+        errors = apply_exceptions(violations, entries)
+        self.assertEqual(len(errors), 1)
+        self.assertIn('build: clippy::map_err_ignore: 3 violations, 2 exceptions, 1 over limit', errors[0])
+        self.assertNotIn(':123:', errors[0])
+        self.assertIn('cannot identify', errors[0])
+        # 例外がなければ、各違反の場所をそのまま報告する。
+        self.assertEqual(apply_exceptions(violations, []), list(violations.values()))
+
     def test_clippy_target_lints_and_other_warnings(self):
         def message(code, level='warning', spans=True):
             return json.dumps({'reason': 'compiler-message', 'message': {

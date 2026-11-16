@@ -262,6 +262,25 @@ def apply_exceptions(violations, entries):
             errors.append(f'{entry["path"]}: obsolete or unmatched exception {entry.get("item", "")} [{entry["rule"]}]')
         else:
             del remaining[key]
+    # 出現順だけでは追加箇所を特定できないので、残った末尾を新規違反と断定しない。
+    groups = {}
+    for key in list(remaining):
+        rule, name, item = key
+        if rule == 'impl.no-silent' and item and re.fullmatch(r'.+:clippy::[^#]+#[0-9]+', item):
+            group = (name, item.rsplit('#', 1)[0])
+            groups.setdefault(group, []).append(key)
+    for (name, group), keys in groups.items():
+        total = sum(1 for rule, path, item in violations
+                    if rule == 'impl.no-silent' and path == name and item
+                    and item.rsplit('#', 1)[0] == group)
+        allowed = total - len(keys)
+        if allowed:
+            scope, lint = group.rsplit(':clippy::', 1)
+            errors.append(f'{name}: {scope}: clippy::{lint}: {total} violations, '
+                          f'{allowed} exceptions, {len(keys)} over limit; '
+                          'occurrence order cannot identify the newly added location [impl.no-silent]')
+            for key in keys:
+                del remaining[key]
     return errors + list(remaining.values())
 
 

@@ -1898,3 +1898,10 @@ rule = "impl.rule-index"
 path = "compiler/src/warnings.rs"
 item = "collect:diagnostic!:diagnostic.arithmetic#1"
 reason = "#48 の段階2で既存の規則ID・条件説明の不足を記録する。段階5（段ごとのエラー）で判定箇所を整理し、この例外を削除する。"
+
+
+[[exceptions]]
+rule = "impl.no-silent"
+path = "compiler/src/codegen/characters.rs"
+item = "emit_text_loop:allow:clippy::too_many_arguments#1"
+reason = "#48 の段階2で既存の理由のないリント抑制を記録する。段階8（そのほかの規則）で抑制の必要性を見直し、理由を明記するか抑制を削除して、この例外を削除する。"

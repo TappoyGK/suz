@@ -201,7 +201,7 @@ impl D { fn mk() { Self::new(a, b, c, "lex.z", "bad"); } }
 }
 
 #[test]
-fn targeted_suppressions_require_nonempty_reasons() {
+fn all_suppressions_require_nonempty_reasons() {
     let report = scan(
         r#"
 #![allow(clippy::map_err_ignore)]
@@ -214,5 +214,22 @@ fn targeted_suppressions_require_nonempty_reasons() {
 "#,
     )
     .unwrap();
-    assert_eq!(report["lint_allows"].as_array().unwrap().len(), 5);
+    assert_eq!(report["lint_allows"].as_array().unwrap().len(), 6);
+}
+
+#[test]
+fn macro_arguments_and_groups_require_suppression_reasons() {
+    let report = scan(
+        r#"
+#[allow(clippy::restriction)] fn grouped() {}
+fn f() {
+    vec![#[allow(clippy::map_err_ignore)] { 1 }];
+    outer!({ #![allow(warnings)] fn inner() {} });
+    outer!(#[cfg_attr(unix, allow(dead_code))] fn g() {});
+    vec![#[allow(clippy::map_err_ignore, reason = "Handled.")] { 1 }];
+}
+"#,
+    )
+    .unwrap();
+    assert_eq!(report["lint_allows"].as_array().unwrap().len(), 4);
 }

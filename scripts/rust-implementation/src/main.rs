@@ -290,21 +290,23 @@ impl Scanner<'_> {
                 matches!(m, syn::Meta::NameValue(n) if n.path.is_ident("reason")
                     && literal(&n.value).is_some_and(|s| !s.trim().is_empty()))
             });
-            for child in &children {
-                let lint = path(child.path()).join("::");
-                if !reason
-                    && matches!(
-                        lint.as_str(),
-                        "clippy::let_underscore_must_use"
-                            | "clippy::unused_result_ok"
-                            | "clippy::map_err_ignore"
-                    )
-                {
-                    let key = format!("{}:allow:{lint}", self.scope.join("::"));
-                    let ordinal = self.ordinals.entry(key.clone()).or_default();
-                    *ordinal += 1;
-                    self.lint_allows.push(json!({"item": format!("{key}#{ordinal}"), "line": attr.span().start().line}));
-                }
+            if !reason {
+                let lints = children
+                    .iter()
+                    .filter(|m| !m.path().is_ident("reason"))
+                    .map(|m| path(m.path()).join("::"))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let key = format!(
+                    "{}:{}:{lints}",
+                    self.scope.join("::"),
+                    list.path.to_token_stream()
+                );
+                let ordinal = self.ordinals.entry(key.clone()).or_default();
+                *ordinal += 1;
+                self.lint_allows.push(
+                    json!({"item": format!("{key}#{ordinal}"), "line": attr.span().start().line}),
+                );
             }
         }
         if let syn::Meta::List(list) = meta
@@ -517,6 +519,27 @@ impl Scanner<'_> {
         let tokens: Vec<_> = tokens.into_iter().collect();
         let mut i = 0;
         while i < tokens.len() {
+            // マクロ引数はsynの通常の属性走査を通らないため、属性を構文として取り出す。
+            if tokens[i].to_string() == "#" {
+                let inner = tokens.get(i + 1).is_some_and(|t| t.to_string() == "!");
+                let end = i + if inner { 3 } else { 2 };
+                if let Some(TokenTree::Group(group)) = tokens.get(end - 1)
+                    && group.delimiter() == proc_macro2::Delimiter::Bracket
+                {
+                    let attribute: TokenStream = tokens[i..end].iter().cloned().collect();
+                    let parsed = if inner {
+                        syn::Attribute::parse_inner.parse2(attribute)
+                    } else {
+                        syn::Attribute::parse_outer.parse2(attribute)
+                    };
+                    if let Ok(attrs) = parsed {
+                        for attr in &attrs {
+                            self.visit_attribute(attr);
+                        }
+                    }
+                }
+            }
+
             if let TokenTree::Group(g) = &tokens[i] {
                 self.macro_tokens(g.stream());
             }
