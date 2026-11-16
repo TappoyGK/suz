@@ -1,3 +1,8 @@
+//! 式の型を推論して検査し、型と参照先を持つIRの式へ変換する。構文別の判定は子モジュールへ渡す。
+//!
+//! 利用元: [`crate::check::statements`]、[`crate::check::functions`]。
+//! 主な対象規則: `[decl.local-scope]`、`[enum.access]`、`[expr.operator-types]`、`[lit.float-range]`、`[lit.range]`、`[num.fn-convert]`。
+
 use crate::check::generic::domain;
 use crate::check::scope::Scope;
 mod blocks;
@@ -13,9 +18,8 @@ use crate::{
     ast::{Expression, ExpressionKind, FloatType, IntegerType, Location, Type},
 };
 
-// Find a known type through expressions that preserve their operand type.
-// Numeric literals receive a type from the other operand before defaulting.
-// The comparison's bool result never supplies the operand type.
+// オペランドの型を保つ式をたどって、既知の型を探す。数値リテラルは既定型を選ぶ前に他方の型を受け取る。
+// 比較結果のboolをオペランドの型として使わない。
 pub(super) fn operand_type(expr: &Expression, bindings: &Scope) -> Option<Type> {
     let key = std::ptr::from_ref(expr) as usize;
     if bindings.hint_depth.get() > 0
@@ -111,8 +115,8 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
     }
 }
 
-// Float literals and generic float results select floating-point arithmetic.
-// Only result-producing operands participate; conditions and cast sources do not.
+// 浮動小数点リテラルと汎用floatの結果は、浮動小数点演算を選択する。
+// 結果を作るオペランドだけを調べ、条件や型変換前の値は含めない。
 pub(super) fn has_float_source(expr: &Expression, bindings: &Scope) -> bool {
     let key = std::ptr::from_ref(expr) as usize;
     if bindings.hint_depth.get() > 0
@@ -214,8 +218,8 @@ pub(in crate::check) fn float_bits(text: &str, ty: FloatType) -> Option<u64> {
     Some(bits)
 }
 
-// Hints are shared only while checking one live AST expression. Clear them at
-// the boundary so pointer keys cannot outlive their expressions or bindings.
+// 型のヒントは、生存している1つのAST式の検査中だけ共有する。境界で消去し、
+// ポインターを鍵とする項目が式や束縛より長く残らないようにする。
 struct HintSession<'a>(&'a Scope);
 impl<'a> HintSession<'a> {
     fn new(scope: &'a Scope) -> Self {
@@ -248,7 +252,7 @@ pub(super) fn expression(
     Ok(checked)
 }
 
-// Numeric widening is opt-in at the contexts listed in conv.widen-places.
+// 数値の拡大変換は、conv.widen-placesに列挙した文脈だけで有効にする。
 pub(super) fn coerced(
     expr: &Expression,
     expected: Option<Type>,
@@ -260,8 +264,8 @@ pub(super) fn coerced(
     Ok(checked)
 }
 
-// This context belongs only to the argument boundary. Parentheses preserve
-// that boundary; other subexpressions use their own ordinary checking context.
+// この文脈は引数の境界だけに適用する。括弧はその境界を保ち、
+// その他の部分式はそれぞれ通常の検査文脈を使う。
 pub(super) fn generic_argument(
     expr: &Expression,
     expected: Type,
@@ -309,8 +313,8 @@ fn expression_inner(
     widen: Widening,
     argument: Option<super::generic::Family>,
 ) -> Result<CheckedExpression, Diagnostic> {
-    // Infer an incompatible family independently so that the outer parameter
-    // owns the conversion diagnostic, including for nested generic calls.
+    // 互換性のない数値の種類は独立して推論する。入れ子の汎用呼び出しでも、
+    // 変換の診断は外側の仮引数に対して報告する。
     let inference_hint = if argument == Some(super::generic::Family::Int)
         && (has_float_source(expr, bindings)
             || operand_type(expr, bindings).is_some_and(Type::is_float))
@@ -422,8 +426,7 @@ fn expression_inner(
                     value: Value::Local(binding.id),
                 })
             }
-            // Parentheses preserve the argument boundary; they do not create
-            // a new expression context or an independent conversion.
+            // 括弧は引数の境界を保つ。新しい式の文脈や独立した変換を作らない。
             ExpressionKind::Group(inner) => {
                 expression_inner(inner, required, bindings, widen, argument)?
             }
@@ -529,8 +532,8 @@ pub(super) fn joined_type(types: impl Iterator<Item = Option<Type>>) -> Option<T
     types.flatten().reduce(joined_or_first)
 }
 
-// Apply the fallback per substitution too: a missing common type must still
-// reach the ordinary conversion judgment against the first operand's type.
+// 代替の型選択も型の代入ごとに適用する。共通型がなくても、
+// 先頭オペランドの型への通常の変換判定まで進む。
 fn joined_or_first(a: Type, b: Type) -> Type {
     if a.symbolic() || b.symbolic() {
         return domain::from_types(std::array::from_fn(|i| {
@@ -594,8 +597,8 @@ fn integer_literal_value(
     Ok(value)
 }
 
-// A literal rule uses the same scalar checker in ordinary and symbolic contexts.
-// Preserve spelling until substitution when its representation can vary by type.
+// リテラルの規則は通常検査と記号的な検査で同じスカラー検査を使う。
+// 型によって表現が変わる場合は、具体化まで元の綴りを保持する。
 fn literal(
     text: &str,
     negative: bool,
@@ -612,8 +615,8 @@ fn literal(
     });
     let representative = results.iter().flatten().find_map(|r| r.as_ref().ok());
     let Some(representative) = representative else {
-        // Keep declaration diagnostics symbolic, rather than naming an arbitrary
-        // scalar type. The range rule is otherwise the ordinary literal rule.
+        // 宣言の診断に任意のスカラー型名を使わず、記号的な名前を保つ。
+        // 値域の判定には通常のリテラル規則を使う。
         return Err(location.error(
             ErrorKind::InvalidSource,
             if floating && !ty.is_float() {

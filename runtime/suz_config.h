@@ -24,7 +24,7 @@
 #error "unsafe floating-point optimization [runtime.float-environment]"
 #endif
 
-/* Honor the environment initialized at entry and keep each operation separate. */
+/* 入口で初期化した環境に従い、各演算を分離したまま実行する。 */
 #pragma STDC FENV_ACCESS ON
 #pragma STDC FP_CONTRACT OFF
 

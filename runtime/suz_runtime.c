@@ -13,8 +13,8 @@ _Static_assert(CHAR_BIT == 8, "Suz requires 8-bit bytes");
 _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
 
 void suz_runtime_init(void) {
-    /* Reset exception masks and flags as well as rounding; fesetround alone
-       would leave inherited floating-point traps enabled. */
+    /* 丸めだけでなく、例外マスクとフラグも初期化する。
+       fesetroundだけでは、継承した浮動小数点トラップが有効なまま残る。 */
     if (fesetenv(FE_DFL_ENV) != 0) abort();
 }
 
@@ -40,7 +40,7 @@ bool suz_try_mul_i64(int64_t a, int64_t b, int64_t min, int64_t max, int64_t *re
 }
 
 bool suz_try_div_i64(int64_t a, int64_t b, int64_t min, int64_t max, int64_t *result) {
-    (void)max; /* Explicitly discard max to suppress unused-parameter warnings; no value is changed or checked. */
+    (void)max; /* maxを明示的に捨てて未使用引数の警告を抑える。値の変更や検査は行わない。 */
     if (b == 0 || (a == min && b == -1)) return false;
     *result = a / b;
     return true;
@@ -90,8 +90,8 @@ bool suz_try_rem_u64(uint64_t a, uint64_t b, uint64_t max, uint64_t *result) {
 
 bool suz_try_shl_i64(int64_t a, uint64_t count, unsigned width, int64_t *result) {
     if (count >= width) return false;
-    /* Multiplication avoids shifting a negative signed value. All 64-bit
-       operands and valid shift counts fit exactly in this intermediate. */
+    /* 負の符号付き値をシフトせず、乗算で処理する。
+       64ビットの全オペランドと有効なシフト量は、この中間表現に正確に収まる。 */
     _BitInt(128) value = (_BitInt(128))a * ((_BitInt(128))1 << count);
     _BitInt(128) limit = (_BitInt(128))1 << (width - 1);
     if (value < -limit || value >= limit) return false;
@@ -101,8 +101,8 @@ bool suz_try_shl_i64(int64_t a, uint64_t count, unsigned width, int64_t *result)
 
 bool suz_try_shr_i64(int64_t a, uint64_t count, unsigned width, int64_t *result) {
     if (count >= width) return false;
-    /* Shift a nonnegative value, then restore the sign. This gives arithmetic
-       right shift without relying on C's implementation-defined negative shift. */
+    /* 非負の値をシフトしてから符号を戻す。
+       Cで処理系定義の負数シフトに頼らず、算術右シフトを実現する。 */
     *result = a < 0 ? -1 - (int64_t)((uint64_t)(-(a + 1)) >> count)
                     : (int64_t)((uint64_t)a >> count);
     return true;
@@ -122,7 +122,7 @@ bool suz_try_shr_u64(uint64_t a, uint64_t count, unsigned width, uint64_t *resul
     return true;
 }
 
-/* Accessed only while output_lock is held. */
+/* output_lockを保持している間だけアクセスする。 */
 static suz_log_level output_level;
 
 static void write_text(const char *text) {
@@ -131,7 +131,7 @@ static void write_text(const char *text) {
 }
 
 static void write_position(size_t value) {
-    /* At most 3 decimal digits per byte, plus a terminating NUL. */
+    /* 1バイトにつき最大3桁の十進数字と、終端のNULが必要。 */
     char text[3 * sizeof(size_t) + 1];
     int len = snprintf(text, sizeof(text), "%zu", value);
     if (len > 0) suz_env_log(output_level, text, (size_t)len);

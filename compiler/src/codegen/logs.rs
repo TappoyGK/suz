@@ -1,3 +1,7 @@
+//! ログの補間値を先に評価し、出力ロックの取得から解放までのCコードを生成する。
+//!
+//! 利用元: [`crate::codegen::statements`]。
+
 use super::{
     ExpressionContext,
     expressions::{c_string, expression},
@@ -18,8 +22,8 @@ pub(super) fn emit(
 ) {
     let indent = "    ".repeat(depth);
     writeln!(c, "{indent}{{").unwrap();
-    // Evaluate all values before acquiring the output lock. Nested logs and
-    // panics in these expressions must complete before this log begins.
+    // 出力ロックを取得する前に全補間値を評価する。
+    // 補間式中のログやパニックは、このログを開始する前に完了させる。
     for (index, part) in parts.iter().enumerate() {
         if let TemplatePart::Value(value) = part {
             let evaluated = expression(value, context);

@@ -1,3 +1,7 @@
+//! 検査済みの整数演算を、Cの演算または失敗検査付きのランタイム呼び出しへ変換する。
+//!
+//! 利用元: [`crate::codegen::expressions`]、[`crate::codegen::statements`]。
+
 use super::{ExpressionContext, expressions::expression};
 use crate::check::{CheckedExpression, IntegerOperation, Value};
 
@@ -55,8 +59,8 @@ pub(super) fn integer_parts(
     else {
         unreachable!()
     };
-    // A valid literal count cannot fail. Keep this common unsigned shift in C
-    // instead of calling the checked runtime on every loop iteration.
+    // 有効なリテラルのシフト量は失敗しない。この頻出する符号なしシフトはCで行い、
+    // ループの各反復で検査付きランタイムを呼ぶのを避ける。
     if matches!(operator, BinaryOperator::ShiftRight)
         && ty.bounds().0 == 0
         && let Value::Integer { value: count, .. } = right.value
@@ -106,8 +110,7 @@ pub(super) fn integer_parts(
     } else {
         format!("{limit}_MAX")
     };
-    // Conversion to uint64_t preserves every valid count and makes negative
-    // counts larger than any supported bit width, so the runtime rejects them.
+    // uint64_tへの変換は有効なシフト量を保ち、負の値は対応する全ビット幅より大きくなるため、ランタイムで拒否される。
     let right_argument = if operator.is_shift() {
         if exact_count {
             format!(

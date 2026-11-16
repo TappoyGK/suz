@@ -1,11 +1,15 @@
+//! 正確な整数式の各オペランドと中間値がCの整数型に収まる場合、Cの演算へ変換する。
+//!
+//! 利用元: [`crate::codegen::exact`]。
+
 use super::*;
 use crate::{
     ast::{BinaryOperator, IntegerType},
     numeric::Range,
 };
 
-// Every operand and intermediate must fit the chosen C type. In particular,
-// a small remainder does not make INT64_MIN % -1 safe in signed C arithmetic.
+// すべてのオペランドと中間値が選んだC型に収まる必要がある。
+// 特に、剰余が小さくてもINT64_MIN % -1はCの符号付き演算では安全にならない。
 pub(super) fn ty(e: &Exact) -> Option<Type> {
     if can_fail(e) {
         return None;

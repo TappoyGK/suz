@@ -1,7 +1,7 @@
-//! Numeric type functions used by the single generic-body traversal.
-//! Indices identify the same int/float substitution across all operands.
-//! Index i denotes (INTS[i / 2], [f32, f64][i % 2]). We
-//! enumerate only a rule's scalar inputs, never replay statements or expressions.
+//! intとfloatの型の組み合わせごとに、型・値域・規則の成否を求める。全オペランドで同じ添字が同じ型の代入を表す。
+//!
+//! 利用元: [`crate::check::expression`]、[`crate::check::exact`]。
+
 use crate::ast::{FloatType, IntegerType, ScalarType, Type};
 
 pub(crate) use crate::ast::NUMERIC_COMBINATIONS;
@@ -92,7 +92,7 @@ impl Judgment {
     }
 }
 
-// [num.fn-check-judge]: all valid, all invalid, or deferred until instantiation.
+// [num.fn-check-judge]: すべて成功、すべて失敗、または具体化まで保留のいずれかに分類する。
 pub(crate) fn judge(a: Type, b: Type, predicate: impl FnMut(Type, Type) -> bool) -> Judgment {
     judge_with_failures(a, b, predicate).0
 }

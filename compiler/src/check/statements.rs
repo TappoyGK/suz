@@ -1,3 +1,8 @@
+//! 文を順に検査し、束縛・代入・分岐・反復のIRを作る。スコープ内の再代入や制御移動の条件を確認する。
+//!
+//! 利用元: [`crate::check::functions`]、[`crate::check::expression`] のブロック検査。
+//! 主な対象規則: `[char.for-type]`、`[const.decl]`、`[decl.duplicate]`、`[decl.local-scope]`、`[decl.shadowing]`、`[fn.parameter]`。
+
 use super::{
     control::lower_return_handler,
     expression::expression,
@@ -22,7 +27,7 @@ pub(super) struct Binding {
 }
 
 impl Binding {
-    // Type hints never emit IR or inspect assignment state.
+    // 型のヒント取得では、IRを出力せず代入状態も調べない。
     pub(super) fn hint(ty: Type, location: Location) -> Self {
         Self::local(0, ty, false, false, location)
     }
@@ -330,7 +335,7 @@ fn check_binding(
             },
         ));
     }
-    // Resolve before inserting: a binding is not visible in its own initializer.
+    // 登録する前に解決する。束縛は自身の初期化式から参照できない。
     let mut initializer = super::expression::coerced(
         initializer,
         annotation.map(|t| context.bindings.resolve_type(t)),
@@ -422,7 +427,7 @@ fn check_assign(
     Ok(())
 }
 
-// Conditions use the same bool rule in ordinary and generic functions.
+// 通常の関数と汎用関数で、条件には同じboolの規則を適用する。
 fn condition_value(
     expr: &crate::ast::Expression,
     scope: &Scope,

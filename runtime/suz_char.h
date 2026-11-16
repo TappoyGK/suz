@@ -8,7 +8,7 @@ static inline bool suz_char_valid(uint32_t value) {
     return value <= 0x10ffff && (value < 0xd800 || value > 0xdfff);
 }
 
-/* Decode one scalar, accepting only canonical UTF-8. Outputs change on success. */
+/* 正規のUTF-8だけを受理し、一つのスカラー値を復号する。成功時だけ出力を更新する。 */
 static inline bool suz_char_decode(const char *bytes, uint64_t length,
                                    uint32_t *output, uint64_t *consumed) {
     if (!length) return false;
@@ -32,7 +32,7 @@ static inline bool suz_char_decode(const char *bytes, uint64_t length,
     return true;
 }
 
-/* value is a Unicode scalar. Output has room for four bytes. */
+/* valueはUnicodeスカラー値。出力には4バイト分の領域が必要。 */
 static inline size_t suz_char_encode(uint32_t value, char output[4]) {
     if (value < 0x80) { output[0] = (char)value; return 1; }
     if (value < 0x800) {

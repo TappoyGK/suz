@@ -41,7 +41,7 @@ done
 for variable in CFLAGS CPPFLAGS LDFLAGS; do
     [[ -z "${!variable:-}" ]] || fail "$variable is not accepted; use -O0 or -O2 [runtime.float-environment]"
 done
-# Pass paths as paths even when a relative filename starts with '@'.
+# 相対ファイル名が「@」で始まっても、パスとして渡す。
 [[ "$source_file" == /* ]] || source_file="./$source_file"
 [[ "$environment_file" == /* ]] || environment_file="./$environment_file"
 [[ "$output_file" == /* ]] || output_file="./$output_file"

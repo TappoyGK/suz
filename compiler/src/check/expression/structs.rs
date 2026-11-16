@@ -1,3 +1,8 @@
+//! 構造体リテラルのフィールドの対応と完全性を検査し、フィールド名を番号へ解決する。
+//!
+//! 利用元: [`crate::check::expression`]。
+//! 主な対象規則: `[struct.access]`、`[struct.literal]`。
+
 use super::expression;
 use crate::{
     Diagnostic, ErrorKind,
@@ -70,7 +75,7 @@ pub(crate) fn field(
         })
 }
 
-// Field membership and completeness do not depend on numeric substitutions.
+// フィールドの所属と完全性は、数値型の代入に依存しない。
 pub(crate) fn initializer_indices(
     declaration: &crate::ast::StructDeclaration,
     fields: &[crate::ast::FieldInitializer],

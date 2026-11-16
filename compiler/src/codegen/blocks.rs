@@ -1,3 +1,7 @@
+//! 値ブロックをCの補助関数にし、捕捉した外側の束縛を引数で渡す。
+//!
+//! 利用元: [`crate::codegen::expressions`]。
+
 use super::{ExpressionContext, expressions::expression, statements::emit_block};
 use crate::{
     ast::Type,
@@ -54,7 +58,7 @@ pub(super) fn emit(
     }
     function.push_str(&body);
     function.push_str("}\n\n");
-    // Nested helpers have already been emitted, before their callers.
+    // 入れ子の補助関数は、呼び出す側より前に出力済み。
     context.functions.push_str(&function);
     context.temporaries = saved_temporaries;
     context.references = saved_references;

@@ -1,3 +1,8 @@
+//! 文字列の添字・切り出し範囲と、失敗時のハンドラーを検査する。
+//!
+//! 利用元: [`crate::check::expression`]。
+//! 主な対象規則: `[text.slice-bounds]`、`[text.slice-handler]`。
+
 use super::{expression, operand_type};
 use crate::check::{
     ir::{CheckedExpression, CheckedHandler, Value},

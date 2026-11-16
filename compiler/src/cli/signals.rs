@@ -1,3 +1,7 @@
+//! 子プロセスの実行とシグナル転送を扱い、CLIの終了時に受け取ったシグナルを再送する。
+//!
+//! 利用元: [`crate::cli`]、[`crate::main`]。
+
 use std::{
     io,
     process::{Command, ExitStatus},
@@ -6,7 +10,7 @@ use std::{
 
 static CHILD: AtomicI32 = AtomicI32::new(0);
 static PENDING: AtomicI32 = AtomicI32::new(0);
-const FORWARDED: [i32; 4] = [1, 2, 3, 15]; // HUP, INT, QUIT, TERM on supported Unix targets.
+const FORWARDED: [i32; 4] = [1, 2, 3, 15]; // 対応するUnix環境のHUP、INT、QUIT、TERM。
 unsafe extern "C" {
     fn signal(number: i32, handler: usize) -> usize;
     fn kill(pid: i32, number: i32) -> i32;

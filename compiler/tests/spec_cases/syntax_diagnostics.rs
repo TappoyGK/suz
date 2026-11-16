@@ -125,7 +125,7 @@ fn list_commas_follow_elements_before_statement_newlines() {
         assert!(error.message().ends_with("[syntax.grammar]"), "{error}");
         assert_eq!(error.column, 1);
     }
-    // Physical newlines inside parentheses are removed by the lexer.
+    // 括弧内の物理的な改行は、字句解析で取り除かれる。
     suz::compile(
         b"fn sum(a: u8\n, b: u8) -> u8 { return a + b }\nfn main() -> u8 { return sum(1\n, 2) }",
     )

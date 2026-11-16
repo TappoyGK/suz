@@ -6,16 +6,16 @@
 
 static bool exponential(double value) {
     double magnitude = value < 0 ? -value : value;
-    /* 10^-6 lies strictly between this binary64 value and its successor.
-       Compare to the lower neighbor inclusively, not to a rounded 1e-6
-       literal exclusively. Promotion from binary32 to binary64 is exact. */
+    /* 10^-6は、このbinary64値と次の値の間にある。
+       丸めた1e-6リテラルとの厳密な大小比較ではなく、下側の隣接値を含めて比較する。
+       binary32からbinary64への拡大は正確である。 */
     return magnitude >= 1e21 ||
            (magnitude > 0 && magnitude <= 0x1.0c6f7a0b5ed8dp-20);
 }
 
-/* Ryu supplies at most 17 significant digits, in d.ddE[-]ddd form.
-   Suz's fixed form needs at most 21 integer digits or 6 leading fractional
-   zeroes. Both forms, including a sign and decimal point, fit in 32 bytes. */
+/* Ryuは最大17桁の有効数字をd.ddE[-]ddd形式で返す。
+   Suzの固定表記は整数部最大21桁、または小数部先頭のゼロ最大6桁を必要とする。
+   どちらの形式も符号と小数点を含めて32バイトに収まる。 */
 static size_t format_float(const char *shortest, int length, bool scientific, char output[32]) {
     size_t used = 0;
     int cursor = 0;

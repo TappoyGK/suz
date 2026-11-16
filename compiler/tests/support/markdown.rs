@@ -77,7 +77,7 @@ pub(super) fn table_separator(lines: &[&str], i: &mut usize, columns: usize) -> 
     Ok(())
 }
 
-// Only ATX headings delimit sections; fenced content is always data.
+// 節の区切りはATX形式の見出しだけ。コードフェンス内は常にデータとして扱う。
 pub(super) fn heading(line: &str) -> Option<(usize, &str)> {
     let text = line.trim_start_matches(' ');
     if line.len() - text.len() > 3 {

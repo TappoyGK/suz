@@ -1,3 +1,8 @@
+//! 構造体宣言を収集し、フィールドの名前・型・再帰とリテラルの構文を検査する。
+//!
+//! 利用元: [`crate::parser`]。
+//! 主な対象規則: `[decl.duplicate]`、`[src.ident]`、`[struct.field]`、`[struct.literal]`、`[struct.nonempty]`、`[struct.recursion]`。
+
 use super::{FixedToken, Parser};
 use crate::{
     Diagnostic, ErrorKind,

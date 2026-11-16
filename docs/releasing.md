@@ -95,8 +95,8 @@ PRを作成しただけで作業を終えず、スタックへの組み込みと
 
 | 起動条件 | 必須チェック | 検査 |
 |---|---|---|
-| 作業PR → `release/*` | `work checks` | 書式、Clippy、通常テスト |
-| `release/*` へのpush | `work checks` | 通常テスト。取り込んだ変更の組み合わせを検証する |
+| 作業PR → `release/*` | `work checks` | 書式、Clippy、rustdoc、通常テスト |
+| `release/*` へのpush | `work checks` | rustdoc、通常テスト。取り込んだ変更の組み合わせを検証する |
 | リリースPR → `main` | `release checks` | 全検査、最適化別の仕様例集、サニタイザー、配布検査 |
 | `main` へのpush | `release checks` | 全検査、配布検査、公開用成果物の保存 |
 | 手動実行 | `release checks` | 選択したブランチで全検査と配布検査 |

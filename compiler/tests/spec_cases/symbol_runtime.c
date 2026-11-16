@@ -97,7 +97,7 @@ static void identity(void) {
     suz_text empty = suz_text_intern(NULL, 0, false, location);
     assert(empty == intern("", true));
     assert(suz_text_length(empty) == 0);
-    /* Growing the index must not invalidate previously returned references. */
+    /* 索引を拡張しても、以前返した参照を無効にしてはならない。 */
     for (unsigned i = 0; i < 1000; ++i) {
         char text[32];
         int length = snprintf(text, sizeof(text), "entry %u", i);
@@ -111,7 +111,7 @@ static void identity(void) {
 }
 
 static void collision(void) {
-    /* These different strings have the same 32-bit FNV-1a hash. */
+    /* この異なる文字列は、32ビットFNV-1aで同じハッシュ値を持つ。 */
     suz_text a = intern("lrgmpljekmot", false);
     suz_text b = intern("ukvnvtragfjx", true);
     assert(a != b);
@@ -140,8 +140,7 @@ static void accounting(void) {
 }
 
 static void growth(void) {
-    /* Stop at the first replacement of the index. During the allocation,
-       both old and new index sizes must appear in the pool's accounting. */
+    /* 索引を最初に置き換える時点で止める。確保中は新旧両方の索引サイズをプール使用量に含める。 */
     while (frees == 0) {
         char text[32];
         snprintf(text, sizeof(text), "entry %zu", calls);
@@ -150,7 +149,7 @@ static void growth(void) {
     }
     assert(peak > live);
     assert(frees == 1);
-    /* The final allocation was an entry, after releasing the old index. */
+    /* 最後の確保は、古い索引を解放した後のエントリーだった。 */
     assert(peak == live + allocations[1].size - last_size);
     printf("%llu\n", (unsigned long long)peak);
 }
@@ -189,7 +188,7 @@ static void order(void) {
 }
 
 static void scalar_parsing(void) {
-    /* Deliberately unterminated slices expose accidental C-string reads. */
+    /* 意図的に終端を付けないスライスで、誤ったC文字列としての読み取りを検出する。 */
     const char integer[] = {'2', '5', '5'};
     uint64_t value = 7;
     assert(suz_parse_integer(integer, sizeof(integer), 8, false, false, &value));
@@ -237,7 +236,7 @@ static void float_parsing(void) {
     memcpy(long_input, tie, sizeof(tie) - 1);
     long_input[sizeof(long_input) - 1] = '1';
     assert(suz_parse_float_bits(long_input, sizeof(long_input), 32, &bits) && bits == UINT64_C(0x3f800001));
-    /* 2e-324 plus a distant nonzero digit requires the 10^1123 denominator. */
+    /* 2e-324に遠く離れた非ゼロの桁を加えると、分母10^1123が必要になる。 */
     memset(long_input, '0', sizeof(long_input));
     long_input[1] = '.';
     long_input[325] = '2';

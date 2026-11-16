@@ -59,7 +59,15 @@ cd generated
 cargo test
 ```
 
-リリース前は、書式・Clippyと、最適化・サニタイザー・大量入力を含む全検査を実行する。
+内部実装の説明は、非公開項目も含めたrustdocで読める。生成後に `target/doc/suz/index.html` を開く。CIとリリース検査でも、リンク切れなどの警告をエラーとして生成を確認する。
+
+```sh
+RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps --document-private-items
+```
+
+コードのコメント・rustdocとMarkdown文書は日本語で書く。コマンドの出力と診断メッセージは英語とする。
+
+リリース前は、書式・Clippy・rustdocと、最適化・サニタイザー・大量入力を含む全検査を実行する。
 
 ```sh
 ./scripts/test-release.sh

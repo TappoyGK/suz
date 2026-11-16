@@ -1,3 +1,7 @@
+//! CLIの使い方を表示するヘルプ文字列を組み立てる。
+//!
+//! 利用元: [`crate::cli`]。
+
 use super::arguments::Command;
 
 pub const USAGE: &str = "Usage:

@@ -234,7 +234,7 @@ int main(int argc, char **argv) {
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        // Close the only reader before letting the child write to the pipe.
+        // 子プロセスにパイプへ書かせる前に、唯一の読み取り側を閉じる。
         drop(child.stderr.take());
         child.stdin.take().unwrap().write_all(b"x").unwrap();
         let result = child.wait_with_output().unwrap();

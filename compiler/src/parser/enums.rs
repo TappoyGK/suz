@@ -1,3 +1,8 @@
+//! 列挙型の宣言を先に収集し、基底型・列挙子・名前の条件を検査する。
+//!
+//! 利用元: [`crate::parser`]。
+//! 主な対象規則: `[decl.duplicate]`、`[enum.base]`、`[enum.nonempty]`、`[enum.variant]`、`[src.ident]`。
+
 use super::Parser;
 use crate::{
     Diagnostic, ErrorKind,
@@ -96,8 +101,8 @@ impl Parser<'_, '_> {
     }
 }
 
-// Register enum types before parsing annotations, allowing references to later
-// declarations. Function and expression blocks are skipped by delimiter depth.
+// 後方の宣言も参照できるよう、型注釈を解析する前に列挙型を登録する。
+// 関数と式のブロックは区切りの深さを使って読み飛ばす。
 pub(super) fn collect(tokens: &[Token<'_>]) -> Result<Vec<EnumDeclaration>, Diagnostic> {
     let mut p = Parser {
         allows: Vec::new(),

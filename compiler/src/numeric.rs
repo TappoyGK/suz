@@ -1,5 +1,7 @@
-//! Exact integers used by range analysis and constant evaluation. The sign is
-//! separate so unsigned 128-bit values never pass through a signed conversion.
+//! 値域解析と定数評価で使う正確な整数を定義する。符号を分離し、符号なし128ビット値を符号付きへ変換せず扱う。
+//!
+//! 利用元: [`crate::check::exact`]、[`crate::check`] の定数評価。
+
 use std::cmp::Ordering;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -1,3 +1,8 @@
+//! ログレベルとテンプレートの構文を解析し、ログ文のASTを作る。
+//!
+//! 利用元: [`crate::parser::statements`]。
+//! 主な対象規則: `[log.level]`、`[log.syntax]`、`[symbol.interpolation]`。
+
 use super::Parser;
 use crate::{
     Diagnostic, ErrorKind,

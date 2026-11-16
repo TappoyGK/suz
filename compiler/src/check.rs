@@ -1,3 +1,7 @@
+//! ASTの名前・型・値と制御の条件を検査し、C生成へ渡すIRを作る。具体的な判定は子モジュールに分担する。
+//!
+//! 利用元: [`crate::analyze`]。
+
 mod constants;
 mod control;
 mod declarations;

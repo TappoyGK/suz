@@ -1,3 +1,7 @@
+//! 出力を一時ディレクトリに準備し、既存の出力先を上書きせずに公開する。失敗時には一時領域を片付ける。
+//!
+//! 利用元: [`crate::cli::emit`]、[`crate::cli::native`]。
+
 use std::{
     fs, io,
     path::{Path, PathBuf},
@@ -65,8 +69,8 @@ pub fn rename_new(source: &Path, destination: &Path) -> io::Result<()> {
     }
     let from = CString::new(source.as_os_str().as_bytes())?;
     let to = CString::new(destination.as_os_str().as_bytes())?;
-    // RENAME_EXCL from sys/stdio.h atomically refuses any existing destination,
-    // including an empty directory created after the initial output check.
+    // sys/stdio.hのRENAME_EXCLは、出力先が既にあれば不可分に拒否する。
+    // 最初の確認後に作られた空ディレクトリも上書きしない。
     let result = unsafe { renamex_np(from.as_ptr(), to.as_ptr(), 0x00000004) };
     if result == 0 {
         Ok(())

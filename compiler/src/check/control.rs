@@ -1,11 +1,16 @@
+//! 型検査前に制御移動の位置を検査し、許可された失敗時returnをIRの文へ変換する。戻り値と関数末尾の制御も確認する。
+//!
+//! 利用元: [`crate::check::functions`]、[`crate::check::statements`]。
+//! 主な対象規則: `[expr.jump-prohibited]`、`[expr.or-return-position]`、`[fn.fallthrough]`、`[fn.value-return-required]`。
+
 use super::ir::{CheckedExpression, CheckedHandler, CheckedStatement, IntegerOperation, Value};
 use crate::{
     Diagnostic, ErrorKind,
     ast::{Expression, ExpressionKind, FailureHandler, Statement},
 };
 
-// Validate positions before type checking, including unsupported arithmetic
-// whose operands may contain an otherwise hidden control transfer.
+// 型検査の前に制御移動の位置を検査する。未対応の演算でも、そのオペランド内に
+// 隠れた制御移動がないか調べる。
 pub(super) fn validate_return_positions(statements: &[Statement]) -> Result<(), Diagnostic> {
     validate_statements(statements, false)
 }
@@ -203,8 +208,7 @@ fn has_return_handler(expr: &CheckedExpression) -> bool {
     }
 }
 
-// Hoist permitted failure returns into statements. Checked value expressions
-// passed to the backend then contain no function exits.
+// 許可された失敗時returnを文へ持ち上げる。これによりC生成へ渡す値の式には関数からの脱出が残らない。
 pub(super) fn lower_return_handler(
     expr: &mut CheckedExpression,
     statements: &mut Vec<CheckedStatement>,
@@ -291,7 +295,7 @@ pub(super) fn lower_return_handler(
         if !has_return_handler(right) {
             return false;
         }
-        // Compound assignment reads the old value before evaluating its RHS.
+        // 複合代入は右辺を評価する前に、代入先の古い値を読む。
         let id = *next_id;
         *next_id += 1;
         let ty = left.ty;
@@ -347,7 +351,7 @@ fn contains_break(statements: &[Statement]) -> bool {
             branches.iter().any(|(_, body)| contains_break(body))
                 || otherwise.as_ref().is_some_and(|body| contains_break(body))
         }
-        // Breaks inside nested loops belong to those loops.
+        // 入れ子のループ内のbreakは、その内側のループに属する。
         _ => false,
     })
 }

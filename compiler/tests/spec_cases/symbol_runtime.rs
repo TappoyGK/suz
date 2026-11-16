@@ -6,8 +6,8 @@ use std::{
     sync::OnceLock,
 };
 
-// Release checks retain sanitizer coverage for both -O0 and -O2. Daily
-// checks execute the same assertions without sanitizer startup overhead.
+// リリース検査では-O0と-O2の両方でサニタイザーを使う。
+// 日常の検査は、サニタイザーの起動負荷なしで同じ検証を実行する。
 fn sanitizer_flags(optimized: bool) -> &'static [&'static str] {
     if optimized || !cfg!(debug_assertions) {
         &["-fsanitize=address,undefined", "-fno-sanitize-recover=all"]
@@ -49,9 +49,8 @@ fn executable(optimized: bool) -> &'static Path {
             "{}",
             String::from_utf8_lossy(&result.stderr)
         );
-        // Keep one executable inode for all child processes. Rewriting the
-        // executable for each run repeats macOS executable validation.
-        // Cargo's output directory owns this replaceable build artifact.
+        // 全子プロセスで同じ実行ファイルのinodeを使う。実行ごとに書き直すとmacOSの実行ファイル検証が繰り返される。
+        // この置き換え可能なビルド生成物は、Cargoの出力ディレクトリで管理する。
         let path = PathBuf::from(env!("OUT_DIR")).join(if optimized {
             "symbol-runtime-O2"
         } else {

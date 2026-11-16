@@ -1,3 +1,8 @@
+//! 字句解析済みトークンからASTを作る。宣言を収集し、文・式・型注釈の構文を解析する。
+//!
+//! 利用元: [`crate::analyze`]。
+//! 主な対象規則: `[const.decl]`、`[decl.location]`、`[decl.top-level]`、`[fn.return]`、`[for.range]`、`[prog.main]`。
+
 mod allows;
 mod branches;
 mod enums;
@@ -43,8 +48,8 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     fn error(&self, kind: ErrorKind, message: crate::DiagnosticMessage) -> Diagnostic {
-        // Valid range operators are consumed by the for header. If parsing
-        // fails at one, report its restricted use instead of a missing token.
+        // 有効な範囲演算子はforのヘッダーで消費する。それ以外で解析に失敗した場合は、
+        // トークンの欠落ではなく、使用場所の制約を報告する。
         let message = if kind == ErrorKind::InvalidSource
             && matches!(self.token().kind, Kind::Symbol("..<" | "..="))
         {

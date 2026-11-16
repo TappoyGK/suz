@@ -69,7 +69,7 @@ fn comparisons_preserve_integer_boundaries_and_boolean_precedence() {
                     "if (left {operator} left) != {expected} {{ return 5 }}\n"
                 ));
             }
-            // Type inference must work regardless of which side contains the literal.
+            // リテラルが左右のどちらにあっても、型推論が機能しなければならない。
             source.push_str(&format!("if not (left == {left}) {{ return 2 }}\nif not ({right} == right) {{ return 3 }}\n}}\n"));
         }
     }

@@ -1,3 +1,8 @@
+//! 単項・二項演算のオペランド型と整数幅を検査し、整数の正確な演算と浮動小数点演算を区別する。
+//!
+//! 利用元: [`crate::check::expression`]。
+//! 主な対象規則: `[arith.mix]`、`[expr.arithmetic-handler]`、`[expr.not]`、`[expr.operator-types]`、`[symbol.operations]`、`[text.operations]`。
+
 use super::super::ir::{CheckedExpression, Value};
 use super::super::ir::{CheckedHandler, IntegerOperation};
 use super::expression;
@@ -367,7 +372,7 @@ fn same_width(
     Ok(())
 }
 
-// An integer subtree retains exact integer division even inside float arithmetic.
+// 浮動小数点演算の中でも、整数の部分木では正確な整数除算を維持する。
 fn numeric_operand(
     expr: &Expression,
     ty: Type,

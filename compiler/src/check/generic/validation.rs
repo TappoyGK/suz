@@ -1,3 +1,8 @@
+//! 汎用数値型の名前を記述できる場所を検査する。通常の名前解決や型変換の判定は関数・式の検査に任せる。
+//!
+//! 利用元: [`crate::check::functions`]。
+//! 主な対象規則: `[num.fn-undeclared]`、`[num.places]`。
+
 use crate::{
     Diagnostic, ErrorKind,
     ast::{
@@ -6,8 +11,8 @@ use crate::{
     },
 };
 
-// This pass only validates where generic type names may be written. The
-// ordinary checker owns names, scope, control flow, and conversion semantics.
+// ここでは汎用型名を記述できる場所だけを検査する。
+// 名前・スコープ・制御・変換の意味は通常の検査が担当する。
 pub(crate) fn validate(program: &Program) -> Result<(), Diagnostic> {
     for declaration in &program.constants {
         if declaration.annotation.is_some_and(Type::generic) {

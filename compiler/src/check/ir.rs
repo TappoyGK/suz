@@ -1,22 +1,39 @@
+//! 意味検査で得たIRを定義する。ASTの名前を番号へ解決し、式の型・値域・失敗時の処理を保持してC生成へ渡す。
+//!
+//! 利用元: [`crate::check`]、[`crate::codegen`]。
+
 use crate::ast::{BinaryOperator, ComparisonOperator, Location, LogicalOperator, Type};
 
+/// [`crate::ast::Program`] の意味検査結果。
+/// 型・名前を解決した関数、入口の関数番号、文字列定数と診断候補を保持する。
+/// 型宣言はASTの表現を共有し、関数は必要な汎用型の具体化も含めてC生成へ渡す。
 pub(crate) struct CheckedProgram {
+    /// 整数除算を含む浮動小数点演算の警告候補。
     pub division_warnings: Vec<Location>,
+    /// 定数として決まる比較の位置と結果。
     pub comparison_warnings: Vec<(Location, bool)>,
+    /// 実行開始時に登録する文字列定数。
     pub constant_texts: std::collections::BTreeSet<String>,
     pub main_location: Location,
     pub structs: Vec<crate::ast::StructDeclaration>,
     pub enums: Vec<crate::ast::EnumDeclaration>,
     pub functions: Vec<CheckedFunction>,
+    /// Cの入口から呼び出す関数の番号。
     pub main_id: usize,
+    /// 明示的な失敗処理のない整数演算の位置。警告設定の適用に使う。
     pub unhandled_arithmetic: Vec<Location>,
 }
+/// [`crate::ast::Function`] を検査・具体化した関数。
+/// 名前を関数番号へ置き換え、仮引数と戻り値の型、本体のIRを保持する。
 pub(crate) struct CheckedFunction {
     pub id: usize,
     pub parameters: Vec<Type>,
     pub result: Type,
     pub statements: Vec<CheckedStatement>,
 }
+/// [`crate::ast::Statement`] の検査結果。
+/// 束縛と参照を番号へ解決し、束縛・代入の型を確定する。
+/// 式内の失敗時returnは専用の文へ移し、C生成で制御を組み立てられるようにする。
 #[derive(Clone)]
 pub(crate) enum CheckedStatement {
     SliceReturn {
@@ -82,16 +99,22 @@ pub(crate) enum CheckedStatement {
     },
     Return(CheckedExpression),
 }
+/// [`crate::ast::Expression`] の検査結果。
+/// 推論・検査した型と、参照先を解決した [`Value`] を対にする。
+/// 汎用検査中は型が記号的な場合もあり、C生成に渡す前に具体化する。
 #[derive(Clone)]
 pub(crate) struct CheckedExpression {
     pub ty: Type,
     pub value: Value,
 }
+/// [`crate::ast::FailureHandler`] の検査結果。代替値または戻り値を型付きの式として保持する。
 #[derive(Clone)]
 pub(crate) enum CheckedHandler {
     Value(Box<CheckedExpression>),
     Return(Box<CheckedExpression>),
 }
+/// [`crate::ast::ExpressionKind`] の整数演算を検査した表現。
+/// 正確な整数式、型付きの二項演算・符号反転、範囲を確認済みの負のリテラルを区別する。
 #[derive(Clone)]
 pub(crate) enum IntegerOperation {
     Exact(Box<super::exact::Exact>),
@@ -101,11 +124,11 @@ pub(crate) enum IntegerOperation {
         right: Box<CheckedExpression>,
     },
     Negate(Box<CheckedExpression>),
-    // Directly negated literals are range-checked with their sign. Their
-    // positive magnitude need not fit the type (for example, -128 as i8).
+    // 直接符号を反転したリテラルは、符号付きの値で範囲を検査する。
+    // 正の絶対値が型に収まる必要はない（例: i8の-128）。
     NegatedLiteral(i128),
 }
-// rustfmt does not format this macro body; keep its layout consistent manually.
+// rustfmtはこのマクロ本体を整形しないため、同じ書式を手動で保つ。
 macro_rules! integer_operands {
     ($name:ident, ($($mutable:tt)?), $borrow:ident) => {
         pub fn $name(&$($mutable)? self) -> impl Iterator<Item = &$($mutable)? CheckedExpression> {
@@ -123,9 +146,13 @@ impl IntegerOperation {
     integer_operands!(operands_mut, (mut), as_mut);
 }
 
+/// [`crate::ast::ExpressionKind`] に対応する検査済みの値・演算。
+/// ローカルと関数は番号、フィールドは添字で参照する。型は外側の [`CheckedExpression`] に持つ。
+/// 正確な整数式には値域があり、変換・演算・切り出しには必要な失敗処理を保持する。
+/// 値ブロックには捕捉した変数を、汎用リテラルには具体化まで必要な綴りを残す。
 #[derive(Clone)]
 pub(crate) enum Value {
-    // Spelling retained until a scalar type determines the representation.
+    // スカラー型によって表現が決まるまで、元の綴りを保持する。
     GenericNumericLiteral {
         text: String,
         negative: bool,
@@ -226,9 +253,8 @@ pub(crate) enum Value {
     Local(usize),
 }
 
-// Keep the read-only and mutable constant grammar in one definition. The
-// mutability and visitor methods are the only differences between them.
-// rustfmt does not format this macro body; keep its layout consistent manually.
+// 参照用と変更用の定数式の文法を一つの定義で保つ。違いは可変性と訪問メソッドだけ。
+// rustfmtはこのマクロ本体を整形しないため、同じ書式を手動で保つ。
 macro_rules! constant_children_visitor {
     ($name:ident, ($($mutable:tt)?), $walk:ident, $operands:ident) => {
         pub fn $name(
@@ -259,9 +285,8 @@ macro_rules! constant_children_visitor {
                 Self::Cast(v) | Self::Negate(v) | Self::Truncate(v) | Self::BitNot(v)
                 | Self::Not(v) | Self::TextView(v) | Self::Intern { operand: v, .. }
                 | Self::Field { target: v, .. } => visit(v),
-                // constant_struct is a derived, concrete cache of parsing the
-                // operand, not a source operand. It cannot contain generic types:
-                // struct fields have concrete types ([num.places]).
+                // constant_structはオペランドの解析から得た具体的なキャッシュであり、ソースのオペランドではない。
+                // 構造体のフィールドは具体型なので、汎用型を含まない（[num.places]）。
                 Self::CheckedCast { operand, fallback, .. } => {
                     visit(operand);
                     visit(fallback);
@@ -305,8 +330,7 @@ macro_rules! constant_children_visitor {
 }
 
 impl Value {
-    // Exact leaves and value handlers are children too; return handlers are
-    // outside the constant-expression grammar.
+    // 正確な整数式の葉と値ハンドラーも子に含める。returnハンドラーは定数式の文法に含まれない。
     constant_children_visitor!(visit_constant_parts, (), visit, operands);
     pub fn visit_constant_children(&self, visit: &mut impl FnMut(&CheckedExpression)) -> bool {
         self.visit_constant_parts(visit, &mut |_| {})

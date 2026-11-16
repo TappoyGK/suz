@@ -108,7 +108,7 @@ fn constant_and_dynamic_float_templates_agree_at_format_boundaries() {
         f64::NEG_INFINITY,
     ];
     let singles = [
-        // Exact decimal midpoints: 1048576.25 and 1048576.75.
+        // 正確な十進の中点: 1048576.25と1048576.75。
         f32::from_bits(0x4980_0002),
         f32::from_bits(0x4980_0006),
         0.0,

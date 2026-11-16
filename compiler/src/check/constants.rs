@@ -1,11 +1,16 @@
+//! 検査済みの定数式を評価し、整数・浮動小数点・文字列の値と評価失敗を求める。
+//!
+//! 利用元: [`crate::check::declarations`]、[`crate::check::expression`]。
+//! 主な対象規則: `[const.evaluation]`。
+
 pub(super) mod generic;
 use super::ir::{CheckedExpression, CheckedHandler, IntegerOperation, Value};
 use crate::ast::{BinaryOperator, FloatType, IntegerType, Type};
 use crate::numeric::Int;
 use crate::{Diagnostic, ErrorKind};
 
-// Rust's saturating float-to-i128 conversion is used only for the range
-// check; every Suz integer range is strictly inside i128's bounds.
+// Rustの飽和するfloatからi128への変換は値域の確認だけに使う。
+// Suzのすべての整数型の値域はi128の範囲の内側に収まる。
 pub(super) fn float_to_integer(value: f64, ty: IntegerType) -> Option<i128> {
     let integer = value.trunc() as i128;
     let (min, max) = ty.bounds();
@@ -62,8 +67,7 @@ fn operation_result(operation: &IntegerOperation, ty: IntegerType) -> Option<i12
     }
 }
 
-// Evaluate the integer constant-expression forms supported by the checker.
-// Local bindings and value blocks are not constant expressions.
+// 検査器が受理する整数の定数式を評価する。ローカル束縛と値ブロックは定数式に含めない。
 fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
     if expr.ty == Type::Exact {
         return super::exact::constant(expr)?.to_i128();
@@ -103,7 +107,7 @@ fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
                     .and_then(|value| constant_integer_raw(&value))
                     .or_else(|| constant_integer_raw(fallback));
             }
-            // Both sides must belong to the constant-expression grammar.
+            // 両辺とも定数式の文法に従っていなければならない。
             if matches!(operand.ty, Type::Float(_)) {
                 let value = constant_float_raw(operand)?;
                 return float_to_integer(value, ty).or_else(|| constant_integer_raw(fallback));
@@ -154,7 +158,7 @@ fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
             Some(wrap(match operator {
                 BinaryOperator::WrapAdd => left + right,
                 BinaryOperator::WrapSubtract => left - right,
-                // Only the low 64 bits can affect an integer wrapping result.
+                // 整数のラップ変換の結果に影響するのは下位64ビットだけ。
                 BinaryOperator::WrapMultiply => (left as u64).wrapping_mul(right as u64) as i128,
                 BinaryOperator::And => left & right,
                 BinaryOperator::Or => left | right,
@@ -167,7 +171,7 @@ fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
 }
 
 fn integer_as_float(value: i128, ty: FloatType) -> f64 {
-    // Convert directly to f32, avoiding a second rounding through f64.
+    // f64を経由した二重丸めを避け、直接f32へ変換する。
     match ty {
         FloatType::F32 => (value as f32) as f64,
         FloatType::F64 => value as f64,
@@ -242,8 +246,7 @@ fn constant_float_raw(expr: &CheckedExpression) -> Option<f64> {
         } => {
             let left = constant_float_raw(left)?;
             let right = constant_float_raw(right)?;
-            // Evaluate f32 operations at their own precision, without an
-            // intermediate f64 rounding (notably for division).
+            // f32の演算はその精度で評価する。特に除算で、途中にf64の丸めを挟まない。
             match ty {
                 FloatType::F32 => {
                     let (left, right) = (left as f32, right as f32);
@@ -484,8 +487,8 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
     Some(CheckedExpression { ty: expr.ty, value })
 }
 
-// Grammar and type checking cover unselected operands too; evaluation below
-// visits only the selected path and reports the first failing operation.
+// 文法と型は選択されないオペランドも検査する。以下の評価は選択された経路だけをたどり、
+// 最初に失敗した演算を報告する。
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ConstantKind {
     Nonconstant,
@@ -493,8 +496,8 @@ enum ConstantKind {
     Generic,
 }
 
-// Classify constantness and type dependence together. Ordinary constant
-// evaluation visits each node once, rather than doing a second generic scan.
+// 定数性と型への依存を同時に分類する。通常の定数評価では各ノードを一度だけ訪問し、
+// 汎用型を調べるための再走査をしない。
 fn constant_kind(expr: &CheckedExpression) -> ConstantKind {
     let mut kind = if expr.ty.symbolic() || expr.value.symbolic_range() {
         ConstantKind::Generic
@@ -522,11 +525,9 @@ pub(super) fn is_constant(expr: &CheckedExpression) -> bool {
     constant_kind(expr) != ConstantKind::Nonconstant
 }
 
-// A value depends on a generic type through its result/range or a constant
-// subexpression. Concrete intermediate casts do not erase that dependence.
-// The direct type/range check also covers nonconstant values (parameters and
-// exact expressions containing them): constant_kind deliberately classifies
-// those as Nonconstant even when their type depends on a substitution.
+// 結果の型・値域または定数の部分式を通じて、値は汎用型に依存する。途中の具体型への変換では依存は消えない。
+// 型・値域の直接検査は、引数やそれを含む正確な整数式などの非定数にも適用する。
+// constant_kindは、型が代入に依存していても、これらを意図的にNonconstantへ分類する。
 pub(super) fn depends_on_generic(expr: &CheckedExpression) -> bool {
     expr.ty.symbolic()
         || expr.value.symbolic_range()
@@ -562,8 +563,8 @@ fn cast_succeeds(operand: &CheckedExpression, target: Type, wrap: bool) -> bool 
     }
 }
 
-// A handled arithmetic failure does not catch failures in stored operands.
-// Stop visiting when the exact expression has already failed.
+// 演算失敗のハンドラーは、格納済みオペランド内の失敗を捕捉しない。
+// 正確な整数式が既に失敗していれば、それ以上たどらない。
 fn validate_exact_leaves(e: &super::exact::Exact) -> Result<(), Diagnostic> {
     use super::exact::ExactKind;
     match &e.kind {
@@ -737,8 +738,7 @@ fn validate_evaluation(expr: &CheckedExpression) -> Result<(), Diagnostic> {
 }
 
 pub(super) fn evaluate(expr: &CheckedExpression) -> Result<Option<CheckedExpression>, Diagnostic> {
-    // Symbolic constants must be substituted before ordinary evaluation. This
-    // also covers symbolic children behind a concrete result type.
+    // 記号的な定数は通常の評価前に具体化する。結果が具体型でも、子に記号的な値がある場合を含む。
     if constant_kind(expr) != ConstantKind::Scalar {
         return Ok(None);
     }

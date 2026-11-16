@@ -1,3 +1,7 @@
+//! 名前から束縛・定数・関数宣言を引くスコープを保持する。汎用検査の状態と診断の出力先も共有する。
+//!
+//! 利用元: [`crate::check::functions`]、[`crate::check::statements`]、[`crate::check::expression`]。
+
 use super::statements::Binding;
 use crate::ast::{IntegerType, Type};
 use std::{collections::BTreeMap, rc::Rc};
@@ -21,7 +25,7 @@ impl Signature {
     }
 }
 
-// Diagnostics and runtime constants share their destinations across lexical scopes.
+// 診断とランタイム定数の出力先を、字句スコープ間で共有する。
 #[derive(Clone, Default)]
 pub(super) struct Outputs {
     pub divisions: Rc<std::cell::RefCell<std::collections::BTreeSet<(usize, usize)>>>,
@@ -41,16 +45,16 @@ pub(super) enum Mode {
 pub(super) struct Scope {
     pub mode: Mode,
     pub deferred: Option<Rc<std::cell::RefCell<Vec<super::generic::Deferred>>>>,
-    // Persistent path from the initiating call to this instance.
+    // 起点の呼び出しから、この具体化までの共有可能な経路。
     pub generic_calls: Option<Rc<super::generic::CallTrace>>,
     pub instances: Rc<std::cell::RefCell<super::generic::Instances>>,
-    // Expression-pointer caches live for one hint session and one substitution.
+    // 式のポインターを鍵とするキャッシュは、一回のヒント取得と一つの型代入の間だけ保持する。
     pub type_hints: Rc<std::cell::RefCell<BTreeMap<usize, Option<Type>>>>,
     pub float_hints: Rc<std::cell::RefCell<BTreeMap<usize, bool>>>,
     pub hint_depth: Rc<std::cell::Cell<usize>>,
     pub outputs: Outputs,
     pub locals: BTreeMap<String, Binding>,
-    // Immutable declarations are shared; only local binding state is copied.
+    // 不変の宣言は共有し、ローカル束縛の状態だけを複製する。
     pub constants: Rc<BTreeMap<String, Binding>>,
     pub enums: Rc<Vec<crate::ast::EnumDeclaration>>,
     pub structs: Rc<Vec<crate::ast::StructDeclaration>>,

@@ -1,3 +1,7 @@
+//! 生成Cと一緒に出力するランタイムのソース・ヘッダーをバイナリへ埋め込む。
+//!
+//! 利用元: [`crate::cli::emit`]。
+
 macro_rules! bundled {
     ($($path:literal),* $(,)?) => {
         pub const FILES: &[(&str, &[u8])] = &[

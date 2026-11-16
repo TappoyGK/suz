@@ -233,7 +233,7 @@ fn malformed_output_blocks_are_rejected() {
 
 #[test]
 fn cases_and_modes_come_from_the_document() {
-    // A new category and different case counts need no parser changes.
+    // 新しい分類と異なる例数を加えても、解析処理の変更は不要。
     let row = "| 通常 | 正常終了 | 0 | 0 |";
     let second = SMALL.replace("lex-001", "example-042").replace(
         row,
@@ -250,7 +250,7 @@ fn cases_and_modes_come_from_the_document() {
     assert_eq!(runs[1].result, Outcome::CompileError);
     assert_eq!(runs[1].code, None);
     assert!(runs[1].stdout.is_none());
-    // The group name does not select modes.
+    // グループ名によって実行モードを選ばない。
     assert_eq!(
         extract(&SMALL.replace("lex-001", "diag-001")).unwrap()["diag-001"]
             .runs
@@ -289,7 +289,7 @@ fn inventory_is_checked_against_the_parsed_cases() {
         SMALL.replace("lex-001", "lex-002")
     );
     validate_inventory(&extended, &extract(&extended).unwrap()).unwrap();
-    // Two settings count as one comparison case even when both exit normally.
+    // 二つの設定が両方とも正常終了しても、比較例としては一例に数える。
     let compared = format!(
         "{}{}",
         ONE_CASE_INVENTORY
@@ -407,7 +407,7 @@ This is not an expectation table.
     assert_eq!(cases["lex-001"].rule, "src.encoding");
     assert_eq!(cases["lex-001"].bytes, b"fn main() -> u8 { return 0 }\n");
 
-    // Every heading at the case level or above closes the case.
+    // 例と同じ階層かそれより上の見出しは、現在の例を終了させる。
     for heading in ["# Appendix", "## Appendix", "### Further reading"] {
         let input = document.replace("### Further reading", heading);
         assert_eq!(extract(&input).unwrap().len(), 1);

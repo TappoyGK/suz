@@ -1,3 +1,8 @@
+//! if式の条件と各分岐の値を検査し、分岐の結果型を揃える。
+//!
+//! 利用元: [`crate::check::expression`]。
+//! 主な対象規則: `[branch.expression]`、`[if.condition]`。
+
 use super::super::ir::{CheckedExpression, Value};
 use super::super::matches;
 use super::expression;

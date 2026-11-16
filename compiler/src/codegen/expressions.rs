@@ -1,3 +1,7 @@
+//! 検査済みの式をCへ変換し、短絡評価やオペランドの評価順を保つ。
+//!
+//! 利用元: [`crate::codegen::statements`]、[`crate::codegen::functions`]。
+
 use super::{ExpressionContext, arithmetic::integer_parts, casts::cast_parts};
 use crate::check::{CheckedExpression, CheckedHandler, IntegerOperation, Value};
 use std::fmt::Write;
@@ -391,8 +395,7 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             {
                 context.helpers.insert(unsigned);
             }
-            // Declarations have no evaluation effects. Assignments remain in
-            // the expression so logical short circuit and loop reevaluation hold.
+            // 宣言には評価の副作用がない。代入は式の中に残し、論理演算の短絡評価とループの再評価を保つ。
             let names: Vec<_> = operands
                 .iter()
                 .map(|operand| {

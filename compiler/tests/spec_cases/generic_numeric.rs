@@ -71,7 +71,7 @@ fn main() -> u8 {
 
 #[test]
 fn generic_numeric_types_reject_invalid_places_names_and_instantiations() {
-    // @ marks the exact expected diagnostic position and is removed before parsing.
+    // @は診断の期待位置を示し、構文解析の前に取り除く。
     for (marked, rule) in [
         (
             "const @N: int = 1\nfn main() -> u8 { return 0 }",
@@ -153,9 +153,9 @@ fn generic_numeric_types_reject_invalid_places_names_and_instantiations() {
     ] {
         marked_error(marked, rule);
     }
-    // [num.fn-main] The ordinary entry-point contract owns this diagnostic.
+    // [num.fn-main] この診断は通常の入口関数の規則で扱う。
     marked_error("fn main() -> @int { return 0 }", "prog.main");
-    // Type-dependent errors in an unused function are deferred until a call.
+    // 未使用関数内の型に依存するエラーは、呼び出しまで保留する。
     suz::compile(b"fn small(n: int) -> u8 { return n }\nfn main() -> u8 { return 0 }").unwrap();
 }
 
@@ -219,8 +219,8 @@ fn generic_resolution_respects_family_and_concrete_result_boundaries() {
         );
         suz::compile(source.as_bytes()).unwrap();
     }
-    // A fixed return type separates the two choices: inner remains u8 even
-    // though the outer function receives and returns u16.
+    // 戻り値を具体型に固定して二つの選択を分ける。
+    // 外側の関数がu16を受け取り返しても、innerはu8のままになる。
     let source = b"fn inner(x: int) -> u16 { return x as u16 or 0 }\nfn outer(x: int) -> int { return x }\nfn main() -> u8 { fix a: u8 = 1\nfix b: u16 = outer(inner(a))\nreturn 0 }";
     suz::compile(source).unwrap();
     let source = b"fn first(a: int, b: int) -> int { return a }\nfn main() -> u8 { fix a: i64 = 1\nfix b: u64 = 1\nfix c = first(a, b)\nreturn 0 }";
@@ -251,8 +251,7 @@ fn generic_unused_bodies_share_ordinary_diagnostics_and_report_independent_error
         );
         assert!(a.related.is_empty());
     }
-    // A type-dependent failure earlier in some substitutions must not hide a
-    // later type-independent error. The binding's declared type is retained.
+    // 一部の型の代入で先に失敗しても、後の型によらないエラーを隠してはならない。束縛の宣言型を保つ。
     let source = b"fn f(n: int) -> u8 {\nfix a: u8 = n\nfix t: text = 5\nreturn a\n}\nfn main() -> u8 { return 0 }";
     let error = suz::compile(source).unwrap_err();
     assert_eq!(
@@ -363,7 +362,7 @@ fn generic_result_conversion_and_arithmetic_contexts_follow_their_own_rules() {
             "{prefix}fn main() -> u8 {{\nfix a: u8 = 200\nfix result{annotation} = {expression}\nreturn 0\n}}"
         );
         let result = compile_and_run_c23(&source, "arithmetic-context.suz");
-        // square is instantiated with u8; 200 * 200 panics before any outer widening.
+        // squareはu8で具体化されるため、外側で拡大変換する前に200 * 200がパニックになる。
         assert_eq!(result.status.code(), Some(101));
     }
 }
@@ -437,7 +436,7 @@ fn generic_unused_arithmetic_sites_apply_warning_modes_and_allow() {
     );
 }
 
-// A single marker helper keeps rule, physical location and wording checks separate.
+// 一つの目印処理で、規則・物理的な位置・文面の検証を分ける。
 fn marked_error(marked: &str, rule: &str) -> suz::Diagnostic {
     let offset = marked.find('@').unwrap();
     let prefix = &marked[..offset];
@@ -635,8 +634,8 @@ fn generic_constant_patterns_keep_type_dependent_values_and_duplicates() {
 #[test]
 fn generic_deferred_calls_precede_later_local_errors_and_sibling_calls() {
     let prefix = "fn bad(n: int) -> int { fix w: i64 = n\nreturn n }\n";
-    // A shared dependency already requested by a later sibling still belongs
-    // to the earlier call path. A recursive edge cannot postpone later checks.
+    // 後の兄弟から既に要求された共有依存も、先の呼び出し経路に属する。
+    // 再帰の辺によって後続の検査を遅らせてはならない。
     for declarations in [
         "fn f(n: int) -> int { fix w: i64 = n\nreturn n }",
         "fn f(n: int) -> int { fix w = bad(n)\nreturn n }",
@@ -648,13 +647,12 @@ fn generic_deferred_calls_precede_later_local_errors_and_sibling_calls() {
         let error = marked_error(&marked, "num.fn-body");
         assert_eq!(error.related.last().unwrap().rule(), "type.expected");
     }
-    // A shared unconditional body error stays at its declaration, even if the
-    // generic function is declared after its first call.
+    // 共有される本体の型によらないエラーは、汎用関数が最初の呼び出しより後に宣言されていても宣言位置に残る。
     marked_error(
         "fn main() -> u8 { fix n = f(1)\nreturn 0 }\nfn f(n: int) -> int { return @true }",
         "type.expected",
     );
-    // Errors in arguments are checked before the callee's deferred rules.
+    // 引数内のエラーは、呼び出し先の保留した規則より先に検査する。
     marked_error(
         "fn f(n: int, b: bool) -> int { fix w: i64 = n\nreturn n }\nfn main() -> u8 { fix a: u64 = 1\nfix k = f(a, @3)\nreturn 0 }",
         "type.expected",
@@ -663,7 +661,7 @@ fn generic_deferred_calls_precede_later_local_errors_and_sibling_calls() {
 
 #[test]
 fn forward_generic_errors_respect_declaration_and_call_order() {
-    // A forward declaration's unconditional error is not a call-site error.
+    // 前方宣言の型によらないエラーを、呼び出し箇所のエラーにしてはならない。
     for body in [
         "fix b: bool = n\nreturn n",
         "return true",
@@ -676,7 +674,7 @@ fn forward_generic_errors_respect_declaration_and_call_order() {
         );
         marked_error(&source, "type.expected");
     }
-    // A deferred failure before the unconditional error belongs to the call.
+    // 型によらないエラーより前の保留した失敗は、呼び出し箇所に属する。
     for body in [
         "fix w: i64 = n\nfix b: bool = n\nreturn n",
         "fix w = expr { fix small: i64 = n\nsmall }\nreturn true",
@@ -688,8 +686,8 @@ fn forward_generic_errors_respect_declaration_and_call_order() {
         let error = marked_error(&source, "num.fn-body");
         assert_eq!(error.related.last().unwrap().rule(), "type.expected");
     }
-    // Deferred calls traverse invalid callees too. A successful earlier
-    // substitution must not suppress the later instance's deferred failure.
+    // 保留した呼び出しでは、不正な呼び出し先もたどる。
+    // 先の型の代入で成功しても、後の具体化での保留した失敗を隠してはならない。
     let error = marked_error(
         "fn main() -> u8 { fix small: u8 = 1\nfix first = f(small)\nfix wide: u64 = 1\nfix second = @f(wide)\nfix bad: bool = 1\nreturn 0 }\nfn f(n: int) -> int { fix value = g(n)\nreturn true }\nfn g(n: int) -> int { fix small: i64 = n\nreturn true }",
         "num.fn-body",
@@ -697,7 +695,7 @@ fn forward_generic_errors_respect_declaration_and_call_order() {
     assert_eq!(error.related.len(), 2);
     assert_eq!(error.related[0].rule(), "num.fn-body");
     assert_eq!(error.related[1].rule(), "type.expected");
-    // Only judgments encountered before the first universal error are retained.
+    // 最初の全型でのエラーより前に現れた判定だけを保持する。
     let error = marked_error(
         "fn main() -> u8 { fix n: u8 = 1\nfix k = @f(n)\nreturn 0 }\nfn f(n: int) -> int { fix y = n +% 300\nfix z: bool = 1\nreturn n }",
         "num.fn-body",
@@ -716,12 +714,12 @@ fn forward_generic_errors_respect_declaration_and_call_order() {
         "type.expected",
     );
     assert!(error.related.is_empty());
-    // Without an earlier caller error, the cached declaration error is reported.
+    // 呼び出し元に先行するエラーがなければ、保存済みの宣言エラーを報告する。
     marked_error(
         "fn main() -> u8 { fix n = f(1)\nreturn 0 }\nfn f(n: int) -> int { fix small = n @as u8\nreturn true }",
         "num.fn-cast",
     );
-    // Declaration order still wins when the invalid generic function comes first.
+    // 不正な汎用関数が先にあっても、宣言順を優先する。
     marked_error(
         "fn f(n: int) -> int { return @true }\nfn main() -> u8 { fix n = f(1)\nfix b: bool = 1\nreturn 0 }",
         "type.expected",
@@ -746,15 +744,15 @@ fn forward_generic_cast_policy_survives_scalar_safe_intermediate_casts() {
     ] {
         for (ty, _, _) in crate::integer_bounds::INTEGER_BOUNDS {
             let declaration = format!("fn f(n: int) -> u8 {{ return {expression} }}");
-            // The universal policy failure is retained even for u8/i8, where
-            // wrapping or a fallback makes the final scalar cast safe.
+            // u8/i8ではラップ変換や代替値により最終的なスカラー変換が安全でも、
+            // 全型で満たすべき規則の違反は保持する。
             marked_error(
                 &format!(
                     "fn main() -> u8 {{ fix n: {ty} = 1\nfix value = f(n)\nreturn 0 }}\n{declaration}"
                 ),
                 "num.fn-cast",
             );
-            // Reporting that declaration still waits for earlier functions.
+            // その宣言の報告も、先行する関数の検査が終わってから行う。
             marked_error(
                 &format!(
                     "fn main() -> u8 {{ fix n: {ty} = 1\nfix value = f(n)\nfix invalid: bool = @1\nreturn 0 }}\n{}",

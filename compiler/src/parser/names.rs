@@ -1,3 +1,8 @@
+//! 宣言の種類に応じて名前の綴りを検査する。
+//!
+//! 利用元: [`crate::parser::functions`]、[`crate::parser::structs`]、[`crate::parser::enums`]。
+//! 主な対象規則: `[name.constant]`、`[name.type]`、`[name.value]`、`[name.variant]`。
+
 use crate::{Diagnostic, ErrorKind, ast::Location};
 
 pub(super) enum Shape {

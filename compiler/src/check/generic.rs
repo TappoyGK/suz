@@ -1,3 +1,8 @@
+//! 汎用数値型の候補解決、具体化した関数の共有、呼び出し経路と検査作業量を管理する。
+//!
+//! 利用元: [`crate::check::functions`]、[`crate::check::expression`]。
+//! 主な対象規則: `[num.fn-resolve]`。
+
 mod analysis;
 mod deferred;
 pub(super) use deferred::{Analysis, Deferred};
@@ -51,8 +56,8 @@ impl Family {
     }
 }
 
-// A persistent call chain: appending and sharing a prefix are constant time.
-// Materialize the sequence only when a diagnostic needs to display it.
+// 呼び出し経路の末尾追加と先頭部分の共有は定数時間で行う。
+// 診断で表示するときだけ、経路を列へ展開する。
 pub(super) struct CallTrace {
     pub parent: Option<std::rc::Rc<CallTrace>>,
     pub location: Location,
@@ -86,8 +91,8 @@ pub(super) struct Instances {
     pub analyzed_functions: BTreeMap<usize, std::rc::Rc<Analysis>>,
 }
 impl Instances {
-    // [num.monomorphize] Declared function IDs occupy the initial range; generated
-    // instances have distinct IDs and identical substitutions share one ID.
+    // [num.monomorphize] 宣言した関数の番号を先頭に置き、具体化には別の番号を付ける。
+    // 同じ型の代入には同じ番号を共有する。
     pub fn new(first_id: usize) -> Self {
         Self {
             next_id: first_id,
@@ -110,8 +115,8 @@ impl Instances {
             self.ids.insert(key, id);
             id
         };
-        // Record each dependency even if another caller already requested it.
-        // The traversal, not request order, decides which path is visited first.
+        // 別の呼び出し元から既に要求されていても、各依存を記録する。
+        // 最初にたどる経路は、要求順ではなく走査順で決まる。
         let calls = std::rc::Rc::new(CallTrace {
             parent: parent.clone(),
             location: call,
@@ -174,7 +179,7 @@ fn candidates(
             && let Some(inner) = scope.functions.get(name)
             && Family::of(inner.result) == Some(family)
         {
-            // [num.fn-nested] Collect the connected calls before applying defaults.
+            // [num.fn-nested] 既定型を適用する前に、つながった呼び出しを集める。
             candidates(inner, arguments, family, scope, into);
             continue;
         }
