@@ -175,7 +175,7 @@ fn functions_reject_invalid_parameters_void_values_and_returns() {
             "{source}: {error}"
         );
         assert!(
-            error.message.contains(&format!("[{rule}]")),
+            error.message().contains(&format!("[{rule}]")),
             "{source}: {error}"
         );
     }

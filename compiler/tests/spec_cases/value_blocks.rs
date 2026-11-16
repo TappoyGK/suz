@@ -193,7 +193,7 @@ fn value_blocks_enforce_scope_control_and_assignment_constraints() {
             "{source}: {error}"
         );
         assert!(
-            error.message.contains(&format!("[{rule}]")),
+            error.message().contains(&format!("[{rule}]")),
             "{source}: {error}"
         );
     }
@@ -213,5 +213,5 @@ fn value_block_arithmetic_diagnostics_include_statements_and_final_value_once() 
         .err()
         .unwrap();
     assert_eq!((error.line, error.column), (4, 7));
-    assert!(error.message.contains("[diagnostic.arithmetic]"));
+    assert!(error.message().contains("[diagnostic.arithmetic]"));
 }

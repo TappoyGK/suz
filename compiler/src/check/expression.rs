@@ -1,3 +1,4 @@
+use crate::check::generic::domain;
 use crate::check::scope::Scope;
 mod blocks;
 mod branches;
@@ -270,12 +271,11 @@ pub(super) fn generic_argument(
 
 fn expression_inner(
     expr: &Expression,
-    expected: Option<Type>,
+    required: Option<Type>,
     bindings: &Scope,
     widen: bool,
     argument: Option<super::generic::Family>,
 ) -> Result<CheckedExpression, Diagnostic> {
-    let required = expected;
     // Infer an incompatible family independently so that the outer parameter
     // owns the conversion diagnostic, including for nested generic calls.
     let inference_hint = if argument == Some(super::generic::Family::Int)
@@ -284,7 +284,7 @@ fn expression_inner(
     {
         None
     } else {
-        expected
+        required
     };
     let checked = if super::exact::is_operator(expr) && super::exact::integer(expr, bindings) {
         super::exact::check(expr, inference_hint, bindings, false)?
@@ -474,6 +474,8 @@ fn expression_inner(
                     value: Value::Local(binding.id),
                 })
             }
+            // Parentheses preserve the argument boundary; they do not create
+            // a new expression context or an independent conversion.
             ExpressionKind::Group(inner) => {
                 expression_inner(inner, required, bindings, widen, argument)?
             }
@@ -496,7 +498,7 @@ fn expression_inner(
             value: Value::TextView(Box::new(checked)),
         });
     }
-    if required.is_some_and(|ty| !super::generic::domain::same(ty, checked.ty)) {
+    if required.is_some_and(|ty| !domain::same(ty, checked.ty)) {
         let numeric = Type::is_numeric;
         let generic_result = matches!(&expr.kind, ExpressionKind::Call { name, .. }
             if bindings.functions.get(name).is_some_and(|f| f.result.generic()));
@@ -558,14 +560,14 @@ fn symbolic_literal(
     ty: Type,
     location: Location,
 ) -> Result<CheckedExpression, Diagnostic> {
-    use super::generic::domain::{at, judge};
+    use domain::judge_one;
     if ty.is_integer() {
         let value = text
             .parse::<i128>()
             .ok()
             .and_then(|n| if negative { n.checked_neg() } else { Some(n) });
         if let Some(value) = value
-            && judge(ty, ty, |t, _| {
+            && judge_one(ty, |t| {
                 let (lo, hi) = t.integer_bounds().unwrap();
                 value >= lo && value <= hi && (!negative || lo < 0)
             })
@@ -590,14 +592,13 @@ fn symbolic_literal(
         } else {
             text.to_owned()
         };
-        for i in 0..16 {
-            if let Some(Type::Float(t)) = at(ty, i)
-                && let Ok(mut value) = float_literal(&text, t, location)
-            {
-                value.ty = ty;
-                value.value = Value::GenericFloatLiteral(text.clone());
-                return Ok(value);
-            }
+        if domain::any(
+            |i| matches!(domain::at(ty, i), Some(Type::Float(t)) if float_bits(&text, t).is_some()),
+        ) {
+            return Ok(CheckedExpression {
+                ty,
+                value: Value::GenericFloatLiteral(text),
+            });
         }
         return Err(location.error(
             ErrorKind::InvalidSource,

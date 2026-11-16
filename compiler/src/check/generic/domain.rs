@@ -1,7 +1,36 @@
 //! Numeric type functions used by the single generic-body traversal.
 //! Indices identify the same int/float substitution across all operands. We
+//! Index i denotes (INTS[i / 2], [f32, f64][i % 2]). We
 //! enumerate only a rule's scalar inputs, never replay statements or expressions.
 use crate::ast::{FloatType, IntegerType, ScalarType, Type};
+
+pub(crate) const COUNT: usize = crate::ast::NUMERIC_COMBINATIONS;
+pub(crate) fn indices() -> std::ops::Range<usize> {
+    0..COUNT
+}
+pub(crate) fn any(predicate: impl FnMut(usize) -> bool) -> bool {
+    indices().any(predicate)
+}
+pub(crate) fn uniform<T: PartialEq>(mut value: impl FnMut(usize) -> Option<T>) -> Option<T> {
+    let first = value(0)?;
+    for index in 1..COUNT {
+        if value(index)? != first {
+            return None;
+        }
+    }
+    Some(first)
+}
+pub(crate) fn try_all<E>(mut predicate: impl FnMut(usize) -> Result<bool, E>) -> Result<bool, E> {
+    for index in indices() {
+        if !predicate(index)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+pub(crate) fn judge_one(ty: Type, mut predicate: impl FnMut(Type) -> bool) -> Judgment {
+    judge(ty, ty, |ty, _| predicate(ty))
+}
 
 pub(super) const INTS: [IntegerType; 8] = [
     IntegerType::I8,
@@ -30,7 +59,7 @@ pub(crate) fn at(ty: Type, index: usize) -> Option<Type> {
     }
 }
 
-pub(crate) fn from_types(types: [Option<Type>; 16]) -> Option<Type> {
+pub(crate) fn from_types(types: [Option<Type>; COUNT]) -> Option<Type> {
     if types.iter().all(Option::is_none) {
         return None;
     }
@@ -38,7 +67,7 @@ pub(crate) fn from_types(types: [Option<Type>; 16]) -> Option<Type> {
         return types[0];
     }
     for ty in [Type::GenericInt, Type::GenericFloat] {
-        if (0..16).all(|i| types[i] == at(ty, i)) {
+        if indices().all(|i| types[i] == at(ty, i)) {
             return Some(ty);
         }
     }
@@ -73,7 +102,7 @@ pub(crate) fn judge(a: Type, b: Type, mut predicate: impl FnMut(Type, Type) -> b
         };
     }
     let (mut yes, mut no) = (false, false);
-    for i in 0..16 {
+    for i in indices() {
         if let (Some(a), Some(b)) = (at(a, i), at(b, i)) {
             if predicate(a, b) {
                 yes = true;
@@ -97,7 +126,7 @@ pub(crate) fn bounds(ty: Type) -> Option<(i128, i128)> {
     if !ty.symbolic() {
         return ty.integer_bounds();
     }
-    (0..16)
+    indices()
         .filter_map(|i| at(ty, i)?.integer_bounds())
         .reduce(|(lo, hi), (a, b)| (lo.min(a), hi.max(b)))
 }

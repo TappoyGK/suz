@@ -1,5 +1,5 @@
+mod analysis;
 pub(crate) mod domain;
-mod policy;
 mod validation;
 
 use super::{
@@ -10,8 +10,8 @@ use crate::{
     Diagnostic, ErrorKind,
     ast::{Expression, ExpressionKind, FloatType, IntegerType, Location, Type},
 };
-pub(super) use policy::analyze;
-use std::collections::{BTreeMap, VecDeque};
+pub(super) use analysis::analyze;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 pub(super) use validation::validate;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -26,9 +26,6 @@ impl GenericTypes {
             Type::GenericFloat => Type::Float(self.float.expect("float declared in signature")),
             _ => ty,
         }
-    }
-    pub fn is_empty(self) -> bool {
-        self.int.is_none() && self.float.is_none()
     }
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -83,9 +80,11 @@ pub(super) struct Instances {
     ids: BTreeMap<(usize, GenericTypes), usize>,
     pub queue: VecDeque<Instance>,
     next_id: usize,
+    pub visited: BTreeSet<usize>,
+    pub analyzed: BTreeSet<usize>,
 }
 impl Instances {
-    // [num.monomorphize] Template IDs occupy the initial range; generated
+    // [num.monomorphize] Declared function IDs occupy the initial range; generated
     // instances have distinct IDs and identical substitutions share one ID.
     pub fn new(first_id: usize) -> Self {
         Self {
@@ -101,12 +100,16 @@ impl Instances {
         call: Location,
     ) -> usize {
         let key = (function, types);
-        if let Some(id) = self.ids.get(&key) {
-            return *id;
-        }
-        let id = self.next_id;
-        self.next_id += 1;
-        self.ids.insert(key, id);
+        let id = if let Some(id) = self.ids.get(&key) {
+            *id
+        } else {
+            let id = self.next_id;
+            self.next_id += 1;
+            self.ids.insert(key, id);
+            id
+        };
+        // Record each dependency even if another caller already requested it.
+        // The traversal, not request order, decides which path is visited first.
         let calls = std::rc::Rc::new(CallTrace {
             parent: parent.clone(),
             location: call,

@@ -8,9 +8,9 @@ use crate::{
 // Each rule judges its own type function; no diagnostic intersection or recovery.
 pub(crate) fn analyze(function: &Function, globals: &Scope) -> Result<Vec<Location>, Diagnostic> {
     let mut scope = globals.clone();
-    scope.analyzing_generic = true;
+    scope.mode = super::super::scope::Mode::GenericCheck;
     // Only concrete emitted instances contribute runtime constant registrations.
     scope.outputs.constant_texts = Default::default();
-    let (_, warnings) = functions::check_function(function, scope, 0, Default::default())?;
+    let (_, warnings) = functions::check_function(function, scope, 0)?;
     Ok(warnings)
 }

@@ -29,14 +29,19 @@ pub(super) struct Outputs {
     pub constant_texts: Rc<std::cell::RefCell<std::collections::BTreeSet<String>>>,
 }
 
+#[derive(Clone, Copy, Default)]
+pub(super) enum Mode {
+    #[default]
+    Ordinary,
+    GenericCheck,
+    Instance(super::generic::GenericTypes),
+}
+
 #[derive(Clone)]
 pub(super) struct Scope {
-    // Concrete substitution, used only while constructing an emitted instance.
-    pub generic_types: super::generic::GenericTypes,
+    pub mode: Mode,
     // Persistent path from the initiating call to this instance.
     pub generic_calls: Option<Rc<super::generic::CallTrace>>,
-    // The shared checker uses symbolic int/float types in the generic pass.
-    pub analyzing_generic: bool,
     pub instances: Rc<std::cell::RefCell<super::generic::Instances>>,
     // Expression-pointer caches live for one hint session and one substitution.
     pub type_hints: Rc<std::cell::RefCell<BTreeMap<usize, Option<Type>>>>,
@@ -59,23 +64,16 @@ impl Scope {
         self.get(name).is_some()
     }
     pub fn resolve_type(&self, ty: Type) -> Type {
-        if self.analyzing_generic {
-            ty
-        } else {
-            self.generic_types.resolve(ty)
+        match self.mode {
+            Mode::Instance(types) => types.resolve(ty),
+            Mode::Ordinary | Mode::GenericCheck => ty,
         }
     }
-    pub fn in_generic(&self) -> bool {
-        !self.generic_types.is_empty()
+    pub fn generic_check(&self) -> bool {
+        matches!(self.mode, Mode::GenericCheck)
     }
-    // Type discovery isolates effects while retaining the current type caches.
-    // This is a read-only probe of an expression, not a generic checking mode.
-    pub fn speculative(&self) -> Self {
-        Self {
-            instances: Default::default(),
-            outputs: Default::default(),
-            ..self.clone()
-        }
+    pub fn instance(&self) -> bool {
+        matches!(self.mode, Mode::Instance(_))
     }
 
     pub fn type_name(&self, ty: Type) -> &str {
@@ -93,9 +91,8 @@ impl Scope {
 impl Default for Scope {
     fn default() -> Self {
         Self {
-            generic_types: Default::default(),
+            mode: Default::default(),
             generic_calls: None,
-            analyzing_generic: false,
             instances: Rc::default(),
             type_hints: Rc::default(),
             hint_depth: Rc::default(),

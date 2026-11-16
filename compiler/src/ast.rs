@@ -1,3 +1,4 @@
+pub(crate) const NUMERIC_COMBINATIONS: usize = 16;
 pub(crate) mod visit;
 
 use crate::{Diagnostic, ErrorKind};
@@ -130,7 +131,7 @@ pub(crate) enum ScalarType {
 pub(crate) enum Type {
     GenericInt,
     GenericFloat,
-    Numeric([Option<ScalarType>; 16]), // Internal type function of int and float.
+    Numeric([Option<ScalarType>; NUMERIC_COMBINATIONS]), // Internal type function of int and float.
     Exact, // Internal mathematical integer; never a source-level storage type.
     Struct(usize),
     Enum(EnumType),
@@ -150,6 +151,7 @@ impl Type {
     pub fn symbolic(self) -> bool {
         self.generic() || matches!(self, Self::Numeric(_))
     }
+    /// Includes symbolic types whose possible results are all integers.
     pub fn is_integer(self) -> bool {
         match self {
             Self::Integer(_) | Self::GenericInt => true,
@@ -160,6 +162,7 @@ impl Type {
             _ => false,
         }
     }
+    /// Includes symbolic types whose possible results are all floating-point types.
     pub fn is_float(self) -> bool {
         match self {
             Self::Float(_) | Self::GenericFloat => true,
@@ -170,6 +173,7 @@ impl Type {
             _ => false,
         }
     }
+    /// Includes concrete and symbolic integer/floating-point types.
     pub fn is_numeric(self) -> bool {
         self.is_integer() || self.is_float()
     }

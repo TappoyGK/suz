@@ -2,6 +2,7 @@ use super::{
     ir::{CheckedExpression, IntegerOperation, Value},
     scope::Scope,
 };
+use crate::check::generic::domain;
 use crate::{
     Diagnostic, ErrorKind,
     ast::{BinaryOperator, Expression, ExpressionKind, FloatType, IntegerType, Location, Type},
@@ -9,7 +10,7 @@ use crate::{
 };
 
 // Per substitution: Err is an unrepresentable range; Ok(None) always divides by zero.
-type SubstitutionRanges = [Result<Option<Range>, ()>; 16];
+type SubstitutionRanges = [Result<Option<Range>, ()>; domain::COUNT];
 
 #[derive(Clone)]
 pub(crate) struct Exact {
@@ -127,7 +128,7 @@ fn build(expr: &Expression, bindings: &Scope) -> Result<Exact, Diagnostic> {
                     },
                 ));
             }
-            let (min, max) = super::generic::domain::bounds(value.ty).unwrap();
+            let (min, max) = domain::bounds(value.ty).unwrap();
             (
                 ExactKind::Leaf(Box::new(value)),
                 Some(Range::bounds(min, max)),
@@ -136,7 +137,7 @@ fn build(expr: &Expression, bindings: &Scope) -> Result<Exact, Diagnostic> {
     };
     let domains = match &kind {
         ExactKind::Leaf(value) if value.ty.symbolic() => Some(Box::new(std::array::from_fn(|i| {
-            let ty = super::generic::domain::at(value.ty, i).ok_or(())?;
+            let ty = domain::at(value.ty, i).ok_or(())?;
             Ok(ty.integer_bounds().map(|(lo, hi)| Range::bounds(lo, hi)))
         }))),
         ExactKind::Negate(value) if value.domains.is_some() => {
@@ -241,8 +242,8 @@ pub(super) fn check(
         });
     }
     if ty.is_float() {
-        let possible = (0..16).any(|i| {
-            let Some(Type::Float(float)) = super::generic::domain::at(ty, i) else {
+        let possible = domain::any(|i| {
+            let Some(Type::Float(float)) = domain::at(ty, i) else {
                 return false;
             };
             exact
@@ -295,7 +296,7 @@ pub(super) fn dependent(value: &CheckedExpression) -> bool {
 pub(super) fn range_at(value: &CheckedExpression, index: usize) -> Option<Range> {
     match &value.value {
         Value::Exact(e) => e.range_at(index).ok().flatten(),
-        _ => super::generic::domain::at(value.ty, index)?
+        _ => domain::at(value.ty, index)?
             .integer_bounds()
             .map(|(a, b)| Range::bounds(a, b)),
     }
@@ -303,7 +304,7 @@ pub(super) fn range_at(value: &CheckedExpression, index: usize) -> Option<Range>
 pub(super) fn value_range(expr: &CheckedExpression) -> Option<Range> {
     match &expr.value {
         Value::Exact(e) => e.range,
-        _ => super::generic::domain::bounds(expr.ty).map(|(a, b)| Range::bounds(a, b)),
+        _ => domain::bounds(expr.ty).map(|(a, b)| Range::bounds(a, b)),
     }
 }
 pub(super) fn evaluate(e: &Exact) -> Option<Result<Int, Location>> {
@@ -344,7 +345,7 @@ pub(super) fn constant(expr: &CheckedExpression) -> Option<Int> {
 }
 pub(super) fn widening(from: Type, to: Type) -> bool {
     if from.symbolic() || to.symbolic() {
-        return super::generic::domain::judge(from, to, widening).possible();
+        return domain::judge(from, to, widening).possible();
     }
     match (from, to) {
         (a, b) if a == b => true,
@@ -363,11 +364,8 @@ pub(super) fn widening(from: Type, to: Type) -> bool {
 }
 pub(super) fn join(a: Type, b: Type) -> Option<Type> {
     if a.symbolic() || b.symbolic() {
-        return super::generic::domain::from_types(std::array::from_fn(|i| {
-            join(
-                super::generic::domain::at(a, i)?,
-                super::generic::domain::at(b, i)?,
-            )
+        return domain::from_types(std::array::from_fn(|i| {
+            join(domain::at(a, i)?, domain::at(b, i)?)
         }));
     }
     if a == b {
@@ -471,11 +469,7 @@ pub(super) fn cast(
         };
         return Ok(CheckedExpression { ty: target, value });
     }
-    let risk = super::expression::casts::cast_risk(&operand, target, safe, bindings)?;
-    risk.require_handler_for(
-        location,
-        bindings.analyzing_generic && (dependent(&operand) || target.symbolic()),
-    )?;
+    super::expression::casts::require_handler(&operand, target, safe, location, bindings)?;
     Ok(CheckedExpression {
         ty: target,
         value: Value::Cast(Box::new(operand)),
@@ -490,15 +484,7 @@ pub(super) fn constant_comparison(
         return None;
     }
     if dependent(a) || dependent(b) {
-        let mut result = None;
-        for i in 0..16 {
-            let value = compare_ranges(range_at(a, i)?, range_at(b, i)?, op)?;
-            if result.is_some_and(|previous| previous != value) {
-                return None;
-            }
-            result = Some(value);
-        }
-        result
+        domain::uniform(|i| compare_ranges(range_at(a, i)?, range_at(b, i)?, op))
     } else {
         compare_ranges(value_range(a)?, value_range(b)?, op)
     }

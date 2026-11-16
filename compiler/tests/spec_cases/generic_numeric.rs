@@ -173,7 +173,7 @@ fn generic_cast_requirements_do_not_depend_on_the_called_type() {
         );
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert!(
-            error.message.contains("[num.fn-cast]"),
+            error.message().contains("[num.fn-cast]"),
             "{source}\n{error:?}"
         );
     }
@@ -203,7 +203,7 @@ fn main() -> u8 {
     assert_eq!(warnings[0].line, 2);
     assert!(
         warnings[0]
-            .message
+            .message()
             .contains("[diagnostic.constant-comparison]")
     );
 }
@@ -225,7 +225,7 @@ fn generic_resolution_respects_family_and_concrete_result_boundaries() {
     suz::compile(source).unwrap();
     let source = b"fn first(a: int, b: int) -> int { return a }\nfn main() -> u8 { fix a: i64 = 1\nfix b: u64 = 1\nfix c = first(a, b)\nreturn 0 }";
     let error = suz::compile(source).unwrap_err();
-    assert!(error.message.contains("[num.fn-resolve]"));
+    assert!(error.message().contains("[num.fn-resolve]"));
 }
 
 #[test]
@@ -245,8 +245,8 @@ fn generic_unused_bodies_share_ordinary_diagnostics_and_report_independent_error
         let a = suz::compile(template.as_bytes()).unwrap_err();
         let b = suz::compile(concrete.as_bytes()).unwrap_err();
         assert_eq!(
-            (a.line, a.column, &a.message),
-            (b.line, b.column, &b.message),
+            (a.line, a.column, &a.message()),
+            (b.line, b.column, &b.message()),
             "{template}"
         );
         assert!(a.related.is_empty());
@@ -282,18 +282,16 @@ fn generic_unused_bodies_share_ordinary_diagnostics_and_report_independent_error
         marked_error(&source.replace("text = 5", "text = @5"), "type.expected");
     }
     for (expression, rule) in [
-        ("x as u8", "num.fn-cast"),
-        ("`5` as% int", "symbol.cast-handler"),
-        ("t as% int", "symbol.cast-handler"),
-        ("x as% float", "expr.as-trunc"),
-        ("y as int", "num.fn-cast"),
+        ("x @as u8", "num.fn-cast"),
+        ("`5` @as% int", "symbol.cast-handler"),
+        ("t @as% int", "symbol.cast-handler"),
+        ("x @as% float", "expr.as-trunc"),
+        ("y @as int", "num.fn-cast"),
     ] {
         let source = format!(
             "fn f(x: int, y: float, t: text) -> int {{\n    fix value = {expression}\n    return x\n}}\nfn main() -> u8 {{ return 0 }}"
         );
-        let error = suz::compile(source.as_bytes()).unwrap_err();
-        assert_eq!(error.rule(), rule, "{source}: {error:?}");
-        assert_eq!(error.line, 2);
+        let error = marked_error(&source, rule);
         assert!(error.related.is_empty());
     }
     let source = b"fn f(x: int) -> bool {\nfix y: u8 = 5\nreturn y >= 0\n}\nfn divide(x: int) -> f64 {\nreturn (x / 2) * 1.0\n}\nfn main() -> u8 { return 0 }";
@@ -302,13 +300,13 @@ fn generic_unused_bodies_share_ordinary_diagnostics_and_report_independent_error
     assert!(
         warnings
             .iter()
-            .any(|w| w.line == 3 && w.message.ends_with("[diagnostic.constant-comparison]"))
+            .any(|w| w.line == 3 && w.rule() == "diagnostic.constant-comparison")
     );
-    assert!(warnings.iter().any(|w| {
-        w.line == 6
-            && w.message
-                .ends_with("[diagnostic.integer-division-to-float]")
-    }));
+    assert!(
+        warnings
+            .iter()
+            .any(|w| { w.line == 6 && w.rule() == "diagnostic.integer-division-to-float" })
+    );
 }
 
 #[test]
@@ -336,7 +334,7 @@ fn generic_instantiation_errors_retain_the_call_chain_and_body_rule() {
         ),
         ("type.expected", 2, 12)
     );
-    assert_eq!(error.message.matches('[').count(), 1);
+    assert_eq!(error.message().matches('[').count(), 1);
 }
 
 #[test]
@@ -387,7 +385,7 @@ fn generic_boundaries_preserve_inner_errors_and_reject_non_numeric_values() {
         if rule == "num.fn-convert" {
             assert!(
                 error
-                    .message
+                    .message()
                     .starts_with("floating-point values cannot be passed to an int parameter")
             );
         }
@@ -506,7 +504,7 @@ fn generic_check_reports_symbolic_types_and_preserves_ordinary_error_order() {
         ),
     ] {
         let error = marked_error(marked, rule);
-        assert!(error.message.contains(message), "{error}");
+        assert!(error.message().contains(message), "{error}");
         assert!(error.related.is_empty());
     }
 }
@@ -632,4 +630,33 @@ fn generic_constant_patterns_keep_type_dependent_values_and_duplicates() {
             .as_bytes(),
     )
     .unwrap();
+}
+
+#[test]
+fn generic_deferred_calls_precede_later_local_errors_and_sibling_calls() {
+    let prefix = "fn bad(n: int) -> int { fix w: i64 = n\nreturn n }\n";
+    // A shared dependency already requested by a later sibling still belongs
+    // to the earlier call path. A recursive edge cannot postpone later checks.
+    for declarations in [
+        "fn f(n: int) -> int { fix w: i64 = n\nreturn n }",
+        "fn f(n: int) -> int { fix w = bad(n)\nreturn n }",
+        "fn f(n: int) -> int { fix w = f(n)\nfix y: i64 = n\nreturn n }",
+    ] {
+        let marked = format!(
+            "{prefix}fn main() -> u8 {{\nfix a: u64 = 1\nfix k = @f(a)\nfix other = bad(a)\nfix b: bool = 1\nreturn 0\n}}\n{declarations}"
+        );
+        let error = marked_error(&marked, "num.fn-body");
+        assert_eq!(error.related.last().unwrap().rule(), "type.expected");
+    }
+    // A shared unconditional body error stays at its declaration, even if the
+    // generic function is declared after its first call.
+    marked_error(
+        "fn main() -> u8 { fix n = f(1)\nreturn 0 }\nfn f(n: int) -> int { return @true }",
+        "type.expected",
+    );
+    // Errors in arguments are checked before the callee's deferred rules.
+    marked_error(
+        "fn f(n: int, b: bool) -> int { fix w: i64 = n\nreturn n }\nfn main() -> u8 { fix a: u64 = 1\nfix k = f(a, @3)\nreturn 0 }",
+        "type.expected",
+    );
 }

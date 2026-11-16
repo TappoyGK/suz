@@ -102,7 +102,7 @@ pub fn run() -> Result<Outcome> {
                     warning.line,
                     warning.column,
                     if warning.allowed_reason.is_some() { "allowed" } else { "warn" },
-                    warning.message,
+                    warning.message(),
                     warning.allowed_reason.as_ref().map(|reason| format!(" {reason}")).unwrap_or_default()
                 )
                 .map_err(|e| Failure::tool(2, "tool.messages", e))?;

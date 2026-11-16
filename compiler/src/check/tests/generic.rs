@@ -62,3 +62,27 @@ fn generic_body_is_checked_once_and_globals_are_shared() {
     let copy = scope.clone();
     assert!(std::rc::Rc::ptr_eq(&scope.constants, &copy.constants));
 }
+
+#[test]
+fn generic_calls_inside_deep_value_blocks_are_checked_once() {
+    // The CLI has a larger stack than Rust's test workers. The budget measures
+    // traversal work independently of stack size and elapsed machine time.
+    std::thread::Builder::new().stack_size(64 * 1024 * 1024).spawn(|| {
+        for generic_body in [false, true] {
+            let mut value = "x +% 300".to_owned();
+            for i in 0..320 {
+                value = format!("f(expr {{ fix t_{i} = {value}\nt_{i} }})");
+            }
+            let source = if generic_body {
+                format!("fn f(y: int) -> int {{ return y }}\nfn g(x: int) -> int {{ fix r = {value}\nreturn x }}\nfn main() -> u8 {{ fix a: i64 = 1\nfix q = g(a)\nreturn 0 }}")
+            } else {
+                format!("fn f(y: int) -> int {{ return y }}\nfn main() -> u8 {{ fix x: i64 = 1\nfix r = {value}\nreturn 0 }}")
+            };
+            super::generic::with_work_budget(20_000, || {
+                let tokens = crate::lexer::lex(&source).unwrap();
+                let parsed = crate::parser::parse(&tokens).unwrap();
+                check(&parsed).unwrap();
+            });
+        }
+    }).unwrap().join().unwrap();
+}

@@ -164,7 +164,7 @@ fn constant_declarations_check_cycles_names_scope_and_unevaluated_expressions() 
             suz::ErrorKind::InvalidSource,
             "{source}: {error:?}"
         );
-        assert!(error.message.contains(rule), "{source}: {error:?}");
+        assert!(error.message().contains(rule), "{source}: {error:?}");
     }
 }
 
@@ -181,5 +181,5 @@ fn constant_arithmetic_diagnostics_are_reported_once_at_the_declaration() {
         .err()
         .unwrap();
     assert_eq!((error.line, error.column), (2, 18));
-    assert!(error.message.contains("diagnostic.arithmetic"));
+    assert!(error.message().contains("diagnostic.arithmetic"));
 }

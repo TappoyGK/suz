@@ -49,7 +49,7 @@ fn template_contents_keep_diagnostics_and_scope_checks() {
         ),
     ] {
         let error = suz::compile(source.as_bytes()).unwrap_err();
-        assert!(error.message.contains(rule), "{source}: {error:?}");
+        assert!(error.message().contains(rule), "{source}: {error:?}");
     }
     let source = "fn main() -> u8 { fix value = `${1 + 2}`\nreturn 0 }";
     let result =

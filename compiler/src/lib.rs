@@ -24,8 +24,8 @@ pub struct Diagnostic {
     pub kind: ErrorKind,
     pub line: usize,
     pub column: usize,
-    pub message: String,
-    pub rule_id: String,
+    message: String,
+    rule_id: String,
 }
 
 impl fmt::Display for Diagnostic {
@@ -55,6 +55,9 @@ impl Diagnostic {
             message: format!("{} [{}]", message.into(), rule_id),
             rule_id,
         }
+    }
+    pub fn message(&self) -> &str {
+        &self.message
     }
     /// The structured rule identifier, independent of the rendered message.
     pub fn rule(&self) -> &str {
@@ -105,6 +108,15 @@ impl TextPoolLimit {
     }
 }
 
+impl Warning {
+    pub fn rule(&self) -> &str {
+        &self.rule_id
+    }
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CompilationOptions {
     pub log_allow: bool,
@@ -114,10 +126,11 @@ pub struct CompilationOptions {
 
 #[derive(Debug)]
 pub struct Warning {
+    rule_id: String,
     pub allowed_reason: Option<String>,
     pub line: usize,
     pub column: usize,
-    pub message: String,
+    message: String,
 }
 
 pub struct Compilation {

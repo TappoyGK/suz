@@ -13,7 +13,7 @@ pub(crate) fn validate(program: &Program) -> Result<(), Diagnostic> {
         if declaration.annotation.is_some_and(Type::generic) {
             return Err(place_error(
                 declaration.location,
-                "constant annotations require a concrete type; use a concrete type or omit the annotation",
+                "constant annotations cannot use int or float; use a concrete type or omit the annotation",
             ));
         }
         Places {
@@ -77,11 +77,11 @@ impl Places {
             Err(place_error(
                 location,
                 if self.constant {
-                    "constant expressions require a concrete cast target; use a concrete type"
+                    "constant cast targets cannot use int or float; use a concrete type"
                 } else if annotation {
-                    "a non-generic function requires a concrete type; use a concrete type or omit the annotation"
+                    "local annotations cannot use int or float without declaring them in the function signature; use a concrete type or omit the annotation"
                 } else {
-                    "a non-generic function requires a concrete cast target; use a concrete type"
+                    "cast targets cannot use int or float without declaring them in the function signature; use a concrete type"
                 },
             ))
         }

@@ -270,7 +270,7 @@ fn compound_assignments_check_mutability_types_and_statement_position() {
         let source = format!("fn main() -> u8 {{\n{body}\n}}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
-        assert!(error.message.contains(rule), "{error:?}");
+        assert!(error.message().contains(rule), "{error:?}");
     }
     // Wrapping and bitwise compound operators are not arithmetic diagnostic targets.
     let source = r#"fn main() -> u8 {

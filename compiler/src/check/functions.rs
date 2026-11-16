@@ -43,50 +43,22 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     let mut functions = Vec::new();
     for (id, function) in program.functions.iter().enumerate() {
         if globals.functions[&function.name].is_generic() {
-            warnings.extend(super::generic::analyze(function, &globals)?);
+            analyze_once(function, id, &globals, &mut warnings)?;
             continue;
         }
-        let (checked, found) = check_function(
-            function,
-            globals.clone(),
-            id,
-            super::generic::GenericTypes::default(),
-        )?;
-        functions.push(checked);
-        warnings.extend(found);
-    }
-    loop {
-        let Some(instance) = globals.instances.borrow_mut().queue.pop_front() else {
-            break;
-        };
-        let function = &program.functions[instance.function];
-        let mut context = globals.clone();
-        context.generic_calls = Some(instance.calls.clone());
-        let (checked, found) = check_function(function, context, instance.id, instance.types)
-            .map_err(|error| {
-                let calls = instance.calls.locations();
-                let mut diagnostic = calls[0].error(
-                    error.kind,
-                    crate::diagnostic!(
-                        "num.fn-body",
-                        "generic call to '{}' is invalid for these concrete types",
-                        function.name
-                    ),
-                );
-                diagnostic.related.extend(calls.iter().skip(1).map(|site| {
-                    site.error(
-                        ErrorKind::InvalidSource,
-                        crate::diagnostic!("num.fn-body", "instantiated through this call"),
-                    )
-                }));
-                diagnostic.related.push(error);
-                diagnostic
-            })?;
+        let result = check_function(function, globals.clone(), id);
+        // Calls encountered before a local error must be validated first. The
+        // explicit work stack preserves call order without a Rust call stack
+        // proportional to a chain of generic functions.
+        check_instances(program, &globals, &mut functions, &mut warnings)?;
+        let (checked, found) = result?;
         functions.push(checked);
         warnings.extend(found);
     }
     warnings.sort_by_key(|l| (l.line, l.column));
-    // [num.fn-warning] One source operation is reported once across instances.
+    // Integer arithmetic sites are collected in generic checks and concrete
+    // instances; report each source operation once. Comparisons/divisions
+    // already come only from the generic check.
     warnings.dedup_by_key(|l| (l.line, l.column));
     Ok(CheckedProgram {
         division_warnings: globals
@@ -113,20 +85,106 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     })
 }
 
+fn analyze_once(
+    function: &crate::ast::Function,
+    id: usize,
+    scope: &Scope,
+    warnings: &mut Vec<crate::ast::Location>,
+) -> Result<(), Diagnostic> {
+    if scope.instances.borrow_mut().analyzed.insert(id) {
+        warnings.extend(super::generic::analyze(function, scope)?);
+    }
+    Ok(())
+}
+
+fn check_instances(
+    program: &Program,
+    globals: &Scope,
+    functions: &mut Vec<CheckedFunction>,
+    warnings: &mut Vec<crate::ast::Location>,
+) -> Result<(), Diagnostic> {
+    enum Task {
+        Check(super::generic::Instance),
+        Finish(
+            super::generic::Instance,
+            Result<(CheckedFunction, Vec<crate::ast::Location>), Diagnostic>,
+        ),
+    }
+    let mut tasks: Vec<_> = globals
+        .instances
+        .borrow_mut()
+        .queue
+        .drain(..)
+        .rev()
+        .map(Task::Check)
+        .collect();
+    while let Some(task) = tasks.pop() {
+        match task {
+            Task::Check(instance) => {
+                // Re-entrant recursion uses its existing signature; a completed
+                // instance is shared. Every body is constructed at most once.
+                if !globals.instances.borrow_mut().visited.insert(instance.id) {
+                    continue;
+                }
+                let function = &program.functions[instance.function];
+                analyze_once(function, instance.function, globals, warnings)?;
+                let mut context = globals.clone();
+                context.generic_calls = Some(instance.calls.clone());
+                context.mode = super::scope::Mode::Instance(instance.types);
+                // Rebuild concrete IR with the shared checker. Once generic
+                // checking succeeds, only deferred rules can fail here.
+                let result = check_function(function, context, instance.id);
+                tasks.push(Task::Finish(instance, result));
+                tasks.extend(
+                    globals
+                        .instances
+                        .borrow_mut()
+                        .queue
+                        .drain(..)
+                        .rev()
+                        .map(Task::Check),
+                );
+            }
+            Task::Finish(instance, result) => {
+                let (checked, found) = result.map_err(|error| {
+                    let calls = instance.calls.locations();
+                    let mut diagnostic = calls[0].error(
+                        error.kind,
+                        crate::diagnostic!(
+                            "num.fn-body",
+                            "generic call to '{}' is invalid for these concrete types",
+                            program.functions[instance.function].name
+                        ),
+                    );
+                    diagnostic.related.extend(calls.iter().skip(1).map(|site| {
+                        site.error(
+                            ErrorKind::InvalidSource,
+                            crate::diagnostic!("num.fn-body", "instantiated through this call"),
+                        )
+                    }));
+                    diagnostic.related.push(error);
+                    diagnostic
+                })?;
+                functions.push(checked);
+                warnings.extend(found);
+            }
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn check_function(
     function: &crate::ast::Function,
     mut scope: Scope,
     id: usize,
-    types: super::generic::GenericTypes,
 ) -> Result<(CheckedFunction, Vec<crate::ast::Location>), Diagnostic> {
     control::validate_return_positions(&function.statements)?;
     let mut warnings = Vec::new();
     // [num.fn-same], [num.fn-body-type], [num.fn-recursion]: a single
     // substitution applies to all annotations in this function instance.
-    scope.generic_types = types;
     // Generic diagnostics were collected once with symbolic types. Instances
     // retain constant registrations, but cannot add type-specific warnings.
-    if scope.in_generic() && !scope.analyzing_generic {
+    if scope.instance() {
         scope.outputs.comparisons = Default::default();
         scope.outputs.divisions = Default::default();
     }
@@ -214,16 +272,6 @@ pub(super) fn call(
     let generic = signature.is_generic();
     let types = super::generic::resolve(signature, arguments, expected, scope, expr.location)?;
     let concrete = |ty| types.resolve(ty);
-    let id = if generic && !scope.analyzing_generic {
-        scope.instances.borrow_mut().request(
-            signature.id,
-            types.concrete(),
-            &scope.generic_calls,
-            expr.location,
-        )
-    } else {
-        signature.id
-    };
     let arguments = arguments
         .iter()
         .zip(&signature.parameters)
@@ -235,6 +283,16 @@ pub(super) fn call(
             }
         })
         .collect::<Result<_, _>>()?;
+    let id = if generic && !scope.generic_check() {
+        scope.instances.borrow_mut().request(
+            signature.id,
+            types.concrete(),
+            &scope.generic_calls,
+            expr.location,
+        )
+    } else {
+        signature.id
+    };
     Ok(CheckedExpression {
         ty: concrete(signature.result),
         value: Value::Call { id, arguments },

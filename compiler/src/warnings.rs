@@ -111,6 +111,7 @@ pub(crate) fn collect(
                 return None;
             }
             Some(Warning {
+                rule_id: rule.to_owned(),
                 line: location.line,
                 column: location.column,
                 message: format!("{message} [{rule}]"),

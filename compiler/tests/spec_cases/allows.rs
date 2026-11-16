@@ -43,7 +43,7 @@ fn main() -> u8 {
     assert_eq!(all.iter().filter(|w| w.allowed_reason.is_some()).count(), 4);
     let denied = suz::check_source(source.as_bytes(), ArithmeticMode::Deny).unwrap_err();
     assert_eq!((denied.line, denied.column), (2, 24));
-    assert!(denied.message.contains("[diagnostic.arithmetic]"));
+    assert!(denied.message().contains("[diagnostic.arithmetic]"));
     let output = compile_and_run_c23(source, "allows.suz");
     assert_eq!(output.status.code(), Some(5));
     assert!(output.stdout.is_empty() && output.stderr.is_empty());
@@ -117,7 +117,7 @@ fn invalid_allows_are_rejected_independently_of_warning_options() {
         ] {
             let error = suz::check_source(source.as_bytes(), mode).unwrap_err();
             assert!(
-                error.message.contains(&format!("[{rule}]")),
+                error.message().contains(&format!("[{rule}]")),
                 "{statement}: {error}"
             );
         }
@@ -140,7 +140,7 @@ fn trailing_allows_reject_blocks_at_any_expression_depth() {
         );
         let error = suz::check_source(source.as_bytes(), ArithmeticMode::Default).unwrap_err();
         assert!(
-            error.message.contains("[allow.contains-block]"),
+            error.message().contains("[allow.contains-block]"),
             "{expression}: {error}"
         );
     }

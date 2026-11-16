@@ -85,7 +85,7 @@ fn safe_casts_keep_source_types_and_diagnostics() {
         let source = format!("fn main() -> u8 {{\n{body}\n}}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
-        assert!(error.message.contains(rule), "{error:?}");
+        assert!(error.message().contains(rule), "{error:?}");
     }
     let source = b"fn main() -> u8 { fix x = -1 as f32\nreturn 0 }";
     let warned = suz::compile_with_mode(source, suz::ArithmeticMode::Warn).unwrap();
@@ -94,7 +94,7 @@ fn safe_casts_keep_source_types_and_diagnostics() {
         suz::compile_with_mode(source, suz::ArithmeticMode::Deny)
             .err()
             .unwrap()
-            .message
+            .message()
             .contains("diagnostic.arithmetic")
     );
     let source = b"fn main() -> u8 { fix x = -1.0 as f64\nreturn 0 }";
@@ -174,7 +174,7 @@ fn checked_casts_require_handlers_and_check_unselected_expressions() {
         let source = format!("fn main() -> u8 {{\n{body}\n}}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
-        assert!(error.message.contains(rule), "{body}: {error:?}");
+        assert!(error.message().contains(rule), "{body}: {error:?}");
     }
     suz::compile(b"fn main() -> u8 { fix x = true || ((300 as u8 or 0) == 0)\nreturn 0 }").unwrap();
 }
@@ -308,7 +308,7 @@ fn narrowing_float_casts_check_constant_success_and_handler_types() {
         let source = format!("fn main() -> u8 {{\n{body}\nreturn 0\n}}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
-        assert!(error.message.contains(rule), "{body}: {error:?}");
+        assert!(error.message().contains(rule), "{body}: {error:?}");
     }
 }
 
@@ -499,6 +499,6 @@ fn float_to_integer_casts_require_handlers_and_check_fallback_types() {
         let source = format!("fn main() -> u8 {{\n{body}\n}}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
-        assert!(error.message.contains(rule), "{body}: {error:?}");
+        assert!(error.message().contains(rule), "{body}: {error:?}");
     }
 }

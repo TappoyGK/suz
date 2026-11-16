@@ -92,7 +92,7 @@ fn exact_width_and_storage_rules_reject_invalid_programs() {
         let source = format!("const SMALL: u8 = 1\nfn main() -> u8 {{\n{body}\nreturn 0\n}}");
         let err = suz::compile(source.as_bytes()).unwrap_err();
         assert!(
-            err.message.contains(&format!("[{rule}]")),
+            err.message().contains(&format!("[{rule}]")),
             "{source}: {err}"
         );
     }
@@ -114,13 +114,13 @@ fn comparison_warnings_and_allow_items_are_independent_of_arithmetic_modes() {
         );
         assert!(warnings.iter().all(|w| w.allowed_reason.is_some()));
         assert!(warnings.iter().any(|w| {
-            w.message
+            w.message()
                 .contains("always true [diagnostic.constant-comparison]")
                 && w.column == 20
         }));
     }
     let err = suz::check_source(source, ArithmeticMode::Deny).unwrap_err();
-    assert!(err.message.contains("[diagnostic.arithmetic]"));
+    assert!(err.message().contains("[diagnostic.arithmetic]"));
 }
 
 #[test]
@@ -182,7 +182,7 @@ fn main() -> u8 {
     assert_eq!(warnings.len(), 1);
     assert!(
         warnings[0]
-            .message
+            .message()
             .ends_with("[diagnostic.integer-division-to-float]")
     );
     assert_eq!((warnings[0].line, warnings[0].column), (6, 27));
@@ -200,7 +200,7 @@ fn main() -> u8 {
         let err = suz::compile(format!("fn main() -> u8 {{\n{body}\nreturn 0\n}}").as_bytes())
             .unwrap_err();
         assert!(
-            err.message.contains("[arith.mix]") || err.message.contains("[arith.store-float]"),
+            err.message().contains("[arith.mix]") || err.message().contains("[arith.store-float]"),
             "{err}"
         );
     }
@@ -280,7 +280,10 @@ fn widening_is_not_applied_to_bounds_or_match_patterns() {
     ] {
         let source = format!("const SMALL: u8 = 1\nfn main() -> u8 {{\n{body}\nreturn 0\n}}");
         let err = suz::compile(source.as_bytes()).unwrap_err();
-        assert!(err.message.contains("[type.expected]"), "{source}: {err:?}");
+        assert!(
+            err.message().contains("[type.expected]"),
+            "{source}: {err:?}"
+        );
     }
     for pattern in ["'a'", "Color.Red", "true", "1.0", "`a`"] {
         for value_match in [false, true] {
@@ -293,7 +296,7 @@ fn widening_is_not_applied_to_bounds_or_match_patterns() {
                 "enum Color: u8 {{ Red }}\nfn main() -> u8 {{\nfix x: u32 = 96\n{arms}\nreturn 0\n}}"
             );
             let err = suz::compile(source.as_bytes()).unwrap_err();
-            assert!(err.message.contains("[arith.match]"), "{source}: {err:?}");
+            assert!(err.message().contains("[arith.match]"), "{source}: {err:?}");
         }
     }
 }

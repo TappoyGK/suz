@@ -60,6 +60,6 @@ fn symbol_float_casts_require_handlers_and_check_unselected_values() {
         ),
     ] {
         let error = suz::compile(source.as_bytes()).unwrap_err();
-        assert!(error.message.contains(rule), "{source}: {error:?}");
+        assert!(error.message().contains(rule), "{source}: {error:?}");
     }
 }

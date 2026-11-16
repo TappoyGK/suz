@@ -1,6 +1,7 @@
 use super::super::constants::{constant_float, constant_integer, float_to_integer};
 use super::super::ir::{CheckedExpression, Value};
 use crate::ast::{FailureHandler, FloatType};
+use crate::check::generic::domain;
 use crate::check::scope::Scope;
 use crate::{
     Diagnostic, ErrorKind,
@@ -124,7 +125,7 @@ pub(in crate::check) fn check(
                     value: Value::Truncate(Box::new(operand)),
                 });
             }
-            let validity = super::super::generic::domain::judge(operand.ty, target, |from, to| {
+            let validity = domain::judge(operand.ty, target, |from, to| {
                 conversion_safety(from, to).is_some()
             });
             if !validity.possible() {
@@ -135,11 +136,7 @@ pub(in crate::check) fn check(
             }
             if fallback.is_none() && !operand.ty.is_text() {
                 let safe = conversion_safety(operand.ty, target).unwrap_or(false);
-                let risk = cast_risk(&operand, target, safe, bindings)?;
-                risk.require_handler_for(
-                    expr.location,
-                    bindings.analyzing_generic && (operand.ty.symbolic() || target.symbolic()),
-                )?;
+                require_handler(&operand, target, safe, expr.location, bindings)?;
             }
             if let Some(FailureHandler::Return { value, .. }) = fallback {
                 let return_value = crate::check::functions::return_value(value, bindings)?;
@@ -273,6 +270,18 @@ impl CastRisk {
         }
     }
 }
+pub(in crate::check) fn require_handler(
+    operand: &CheckedExpression,
+    target: Type,
+    type_safe: bool,
+    location: crate::ast::Location,
+    scope: &Scope,
+) -> Result<(), Diagnostic> {
+    let dependent = super::super::exact::dependent(operand) || target.symbolic();
+    cast_risk(operand, target, type_safe, scope)?
+        .require_handler_for(location, scope.generic_check() && dependent)
+}
+
 pub(in crate::check) fn cast_risk(
     operand: &CheckedExpression,
     target: Type,
@@ -281,18 +290,15 @@ pub(in crate::check) fn cast_risk(
 ) -> Result<CastRisk, Diagnostic> {
     if super::super::exact::dependent(operand) || target.symbolic() {
         // [num.fn-cast] Safety is universal, unlike ordinary deferred judgments.
-        for i in 0..16 {
-            if let (Some(from), Some(to)) = (
-                super::super::generic::domain::at(operand.ty, i),
-                super::super::generic::domain::at(target, i),
-            ) {
+        let safe = domain::try_all(|i| {
+            if let (Some(from), Some(to)) = (domain::at(operand.ty, i), domain::at(target, i)) {
                 let mut scalar = match super::super::constants::generic::at(operand, i, bindings) {
                     Ok(Some(value)) => value,
                     Ok(None) => CheckedExpression {
                         ty: from,
                         value: operand.value.clone(),
                     },
-                    Err(_) => return Ok(CastRisk::Dynamic),
+                    Err(_) => return Ok(false),
                 };
                 if let Value::Exact(e) = &mut scalar.value {
                     e.range = e.range_at(i).ok().flatten();
@@ -305,11 +311,16 @@ pub(in crate::check) fn cast_risk(
                     conversion_safety(from, to).unwrap_or(false)
                 };
                 if !matches!(cast_risk(&scalar, to, safe, bindings)?, CastRisk::Safe) {
-                    return Ok(CastRisk::Dynamic);
+                    return Ok(false);
                 }
             }
-        }
-        return Ok(CastRisk::Safe);
+            Ok::<_, Diagnostic>(true)
+        })?;
+        return Ok(if safe {
+            CastRisk::Safe
+        } else {
+            CastRisk::Dynamic
+        });
     }
     if type_safe {
         return Ok(CastRisk::Safe);

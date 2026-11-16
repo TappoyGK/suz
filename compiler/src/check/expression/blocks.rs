@@ -34,9 +34,38 @@ pub(super) fn operand_type(
     value: &Expression,
     bindings: &Scope,
 ) -> Option<Type> {
-    // Type discovery must not count speculative assignments or diagnostics.
-    let mut local = bindings.speculative();
-    prefix(input, &mut local).ok()?;
+    // Discover only local types here. Running the statement checker would
+    // repeatedly construct the entire nested argument before checking it again.
+    // Names and values are validated once by check(); hints never report errors.
+    let mut local = bindings.clone();
+    for statement in input {
+        if let Statement::Binding {
+            name,
+            annotation,
+            initializer,
+            location,
+            ..
+        } = statement
+        {
+            let ty = annotation
+                .map(|ty| bindings.resolve_type(ty))
+                .or_else(|| super::operand_type(initializer, &local))
+                .unwrap_or_else(|| super::default_type(initializer, &local));
+            local.locals.insert(
+                name.clone(),
+                statements::Binding {
+                    constant: None,
+                    id: 0,
+                    ty,
+                    mutable: false,
+                    parameter: false,
+                    loop_variable: false,
+                    assigned: Default::default(),
+                    location: *location,
+                },
+            );
+        }
+    }
     super::operand_type(value, &local)
 }
 

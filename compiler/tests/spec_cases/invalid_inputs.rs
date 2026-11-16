@@ -18,7 +18,7 @@ fn check(input: &[u8], case: &str, edit: &str, offset: usize, rules: &BTreeSet<&
         );
         assert!(error.line > 0 && error.column > 0, "{}: {error}", context());
         let rule = error
-            .message
+            .message()
             .rsplit_once(" [")
             .and_then(|(_, rule)| rule.strip_suffix(']'));
         assert!(

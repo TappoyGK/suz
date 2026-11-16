@@ -3,6 +3,7 @@ use super::{
     expression::expression,
     ir::{CheckedExpression, Value},
 };
+use crate::check::generic::domain;
 use crate::check::scope::Scope;
 use crate::{
     Diagnostic, ErrorKind,
@@ -35,7 +36,14 @@ pub(super) fn patterns<T>(
             ),
         ));
     }
-    let mut seen = vec![BTreeSet::new(); if bindings.analyzing_generic { 16 } else { 1 }];
+    let mut seen = vec![
+        BTreeSet::new();
+        if bindings.generic_check() {
+            domain::COUNT
+        } else {
+            1
+        }
+    ];
     let mut wildcard = false;
     let mut values = Vec::new();
     let mut warnings = Vec::new();
@@ -86,10 +94,7 @@ pub(super) fn patterns<T>(
                 crate::diagnostic!("arith.match", "exact match requires integer patterns"),
             ));
         }
-        if ty.symbolic()
-            && checked.ty != Type::Exact
-            && !super::generic::domain::same(ty, checked.ty)
-        {
+        if ty.symbolic() && checked.ty != Type::Exact && !domain::same(ty, checked.ty) {
             return Err(pattern.location.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(
@@ -103,9 +108,7 @@ pub(super) fn patterns<T>(
         if ty.symbolic()
             && let Some(n) = super::exact::constant(&checked)
         {
-            let fits = super::generic::domain::judge(ty, ty, |t, _| {
-                crate::numeric::Range::point(n).fits_type(t)
-            });
+            let fits = domain::judge_one(ty, |t| crate::numeric::Range::point(n).fits_type(t));
             if !fits.possible() {
                 return Err(pattern.location.error(
                     ErrorKind::InvalidSource,
@@ -120,7 +123,7 @@ pub(super) fn patterns<T>(
         let mut first_error = None;
         let mut all_duplicate = true;
         for (i, seen) in seen.iter_mut().enumerate() {
-            let evaluated = if bindings.analyzing_generic {
+            let evaluated = if bindings.generic_check() {
                 constants::generic::at(&checked, i, bindings)
             } else {
                 constants::evaluate(&checked)

@@ -201,7 +201,7 @@ fn match_patterns_check_constant_forms_types_and_arithmetic_diagnostics() {
         let source = format!("fn main() -> u8 {{\n{body}\n}}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
-        assert!(error.message.contains(rule), "{source}: {error:?}");
+        assert!(error.message().contains(rule), "{source}: {error:?}");
     }
     let source = br#"const SELECTED: i64 = 1 + 1
 fn main() -> u8 {
@@ -243,7 +243,7 @@ fn main() -> u8 {
     assert!(
         suz::compile(source)
             .unwrap_err()
-            .message
+            .message()
             .contains("const.expression")
     );
 }

@@ -16,7 +16,7 @@ fn assert_diagnostic(source: &str, line: usize, column: usize, message: &str) {
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource, "{source}");
         assert_eq!((error.line, error.column), (line, column), "{source}");
-        assert_eq!(error.message, message, "{source}");
+        assert_eq!(error.message(), message, "{source}");
     }
 }
 
@@ -270,7 +270,7 @@ fn range_bounds_check_nested_references_scope_and_control_transfers() {
         for source in [source.clone(), source.replace("for ", "rev ")] {
             let error = suz::compile(source.as_bytes()).unwrap_err();
             assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
-            assert!(error.message.contains(rule), "{source}: {error:?}");
+            assert!(error.message().contains(rule), "{source}: {error:?}");
         }
     }
     let source = b"fn main() -> u8 {\nfix n: u8 = 2\nfor i in (n - 1)..<(n + 1) { fix x = i * 2 }\nreturn 0\n}";

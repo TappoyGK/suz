@@ -3,6 +3,7 @@ use super::super::ir::{CheckedHandler, IntegerOperation};
 use super::expression;
 use super::{default_type, has_float_source, operand_type};
 use crate::ast::{BinaryOperator, FailureHandler, FloatType, IntegerType};
+use crate::check::generic::domain;
 use crate::check::scope::Scope;
 use crate::{
     Diagnostic, ErrorKind,
@@ -137,8 +138,7 @@ pub(super) fn check(
                     }
                 }
                 ExpressionKind::BitNot(inner) => {
-                    if operand_type(inner, bindings)
-                        .is_some_and(|known| !super::super::generic::domain::same(known, ty))
+                    if operand_type(inner, bindings).is_some_and(|known| !domain::same(known, ty))
                         && !super::super::exact::is_operator(inner)
                     {
                         return Err(inner.location.error(
@@ -163,7 +163,7 @@ pub(super) fn check(
                             if operator.is_shift() && std::ptr::eq(operand, right) {
                                 continue;
                             }
-                            if known.is_some_and(|t| !super::super::generic::domain::same(t, ty))
+                            if known.is_some_and(|t| !domain::same(t, ty))
                                 && !super::super::exact::is_operator(operand)
                             {
                                 return Err(operand.location.error(

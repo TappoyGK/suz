@@ -124,7 +124,7 @@ fn symbol_cast_handlers_obey_type_and_control_constraints() {
         ),
     ] {
         let error = suz::compile(source.as_bytes()).unwrap_err();
-        assert!(error.message.contains(rule), "{source}: {error:?}");
+        assert!(error.message().contains(rule), "{source}: {error:?}");
     }
     check_program(
         r#"fn parse(value: symbol) -> bool {

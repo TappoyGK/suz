@@ -151,7 +151,7 @@ pub fn compile(
             }
             let expected = run.diagnostic.as_ref().unwrap();
             if error.kind != suz::ErrorKind::InvalidSource
-                || !expected.matches_parts(error.line, error.column, &error.message)
+                || !expected.matches_parts(error.line, error.column, error.message())
             {
                 return Err(format!("expected {expected:?}, got {error:?}"));
             }
@@ -170,7 +170,7 @@ pub fn compile(
     let mut remaining: Vec<_> = compilation.warnings.iter().collect();
     for expected in &run.warnings {
         let Some(index) = remaining.iter().position(|warning| {
-            expected.matches_parts(warning.line, warning.column, &warning.message)
+            expected.matches_parts(warning.line, warning.column, warning.message())
         }) else {
             return Err(format!(
                 "expected warnings {:?}, got {:?}",
