@@ -213,8 +213,7 @@ fn main() -> u8 {
             "{}",
             String::from_utf8_lossy(&built.stderr)
         );
-        // Limit only the child; suppress core dumps and prevent tail-call elimination
-        // with the observable log after each recursive call.
+        // 制限は子プロセスだけに適用する。コアダンプを抑え、各再帰呼び出しの後にログを出して末尾呼び出しの除去を防ぐ。
         let mut child = Command::new("/bin/sh")
             .args([
                 "-c",

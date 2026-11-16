@@ -1,3 +1,8 @@
+//! 文字列テンプレートを文字列部分と補間式へ分け、エスケープと行の形式を検査する。
+//!
+//! 利用元: [`crate::lexer`]。
+//! 主な対象規則: `[symbol.escape]`、`[symbol.interpolation]`、`[symbol.template]`、`[symbol.template-line]`。
+
 use super::{Diagnostic, ErrorKind, error};
 
 pub(crate) enum Segment<'a> {

@@ -1,3 +1,8 @@
+//! matchの対象型、定数パターン、重複と網羅性を検査する。汎用型に依存する判定は具体化まで保留する。
+//!
+//! 利用元: [`crate::check::expression`]、[`crate::check::statements`]。
+//! 主な対象規則: `[arith.match]`、`[const.expression]`、`[lit.range]`、`[match.exhaustive]`、`[match.pattern]`、`[match.target]`。
+
 use super::{
     constants, declarations, diagnostics,
     expression::expression,
@@ -133,8 +138,8 @@ pub(super) fn patterns<T>(
             }
         }
         diagnostics::collect(&checked, &mut warnings);
-        // Constant evaluation is a local rule: type-dependent values and
-        // duplicate patterns are deferred, without rechecking any source body.
+        // 定数評価はその箇所の規則として扱う。型に依存する値とパターンの重複は保留し、
+        // ソースの本体を再検査しない。
         let mut representative = None;
         let mut first_error = None;
         let mut all_duplicate = true;
@@ -232,8 +237,8 @@ fn pattern_key(value: &CheckedExpression) -> String {
     }
 }
 
-// Literal spelling (notably -0) has its own typed rule. Other exact constants
-// are evaluated with the target's storage range, just like concrete patterns.
+// リテラルの綴り（特に-0）には型別の規則がある。他の正確な定数は、
+// 具体型のパターンと同じく、対象の格納範囲で評価する。
 fn evaluate_generic_pattern(
     checked: &CheckedExpression,
     pattern: &crate::ast::Expression,

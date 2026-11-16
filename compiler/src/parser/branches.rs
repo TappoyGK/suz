@@ -1,3 +1,8 @@
+//! if・match・値ブロックの構文を解析し、分岐と末尾の値をASTへまとめる。
+//!
+//! 利用元: [`crate::parser::expressions`]、[`crate::parser::statements`]。
+//! 主な対象規則: `[block.value]`、`[expr.else-line]`、`[expr.if-value]`、`[expr.jump-prohibited]`、`[if.elif]`、`[match.separator]`。
+
 use super::{FixedToken, Parser};
 use crate::{
     Diagnostic, ErrorKind,

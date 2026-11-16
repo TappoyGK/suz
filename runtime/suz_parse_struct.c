@@ -57,8 +57,7 @@ static bool structure(reader *r, const suz_parse_type *type, suz_parsed_value *o
         while (field < type->count && !equal(r, start, length, type->fields[field].name)) ++field;
         if (field == type->count) return false;
         const suz_parse_field *entry = &type->fields[field];
-        /* Structures are nonempty, so their first leaf also marks whether
-           that entire field has already been supplied. */
+        /* 構造体は空でないので、最初の葉を使って、そのフィールド全体が既に指定されたかも記録できる。 */
         if (output[entry->slot].seen || !symbol(r, ':') ||
             !value(r, entry->type, output + entry->slot)) return false;
         ++count;

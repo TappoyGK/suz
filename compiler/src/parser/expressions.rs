@@ -1,3 +1,8 @@
+//! 演算子の優先順位に従って式を解析し、呼び出し・構造体・比較の連鎖などのASTを作る。
+//!
+//! 利用元: [`crate::parser::statements`]、[`crate::parser::functions`]。
+//! 主な対象規則: `[assign.statement]`、`[const.expression]`、`[enum.access]`、`[expr.block]`、`[expr.comparison-chain]`、`[expr.if-value]`。
+
 use super::{FixedToken, Parser};
 use crate::{
     Diagnostic, ErrorKind,

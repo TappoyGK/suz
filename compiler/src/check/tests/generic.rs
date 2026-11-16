@@ -8,7 +8,7 @@ fn function_count(source: &str) -> usize {
 
 #[test]
 fn emits_each_used_substitution_once_and_omits_unused_templates() {
-    // [num.monomorphize]: count checked instances, independently of C formatting.
+    // [num.monomorphize]: Cの書式に依存せず、検査済みの具体化の数を数える。
     let prefix = "fn id(n: int) -> int { return n }\nfn unused(n: int) -> int { return n }\n";
     assert_eq!(
         function_count(&format!("{prefix}fn main() -> u8 {{ return 0 }}")),
@@ -30,8 +30,8 @@ fn emits_each_used_substitution_once_and_omits_unused_templates() {
 
 #[test]
 fn nested_value_blocks_and_elif_branches_obey_a_traversal_budget() {
-    // Count checker visits instead of depending on machine speed. An exponential
-    // regression fails before it can hang the test runner.
+    // マシンの速度ではなく検査器の訪問回数を数える。
+    // 指数的に処理が増える退行は、テストが停止しなくなる前に失敗させる。
     super::generic::with_work_budget(4000, || {
         let mut value = "1".to_owned();
         for i in 0..30 {
@@ -53,7 +53,7 @@ fn nested_value_blocks_and_elif_branches_obey_a_traversal_budget() {
 
 #[test]
 fn generic_body_is_checked_once_and_globals_are_shared() {
-    // [num.fn-check]: one body traversal, not 8 or 16 concrete replays.
+    // [num.fn-check]: 本体の走査は一度だけであり、8回や16回の具体型による再検査ではない。
     super::generic::with_work_budget(3, || {
         crate::compile(b"fn f(x: int, y: float) -> int { return x }\nfn main() -> u8 { return 0 }")
             .unwrap();
@@ -65,8 +65,8 @@ fn generic_body_is_checked_once_and_globals_are_shared() {
 
 #[test]
 fn generic_calls_inside_deep_value_blocks_are_checked_once() {
-    // The CLI has a larger stack than Rust's test workers. The budget measures
-    // traversal work independently of stack size and elapsed machine time.
+    // CLIのスタックはRustのテストワーカーより大きい。
+    // 予算はスタックサイズやマシンの処理時間に依存せず、走査の作業量を測る。
     std::thread::Builder::new().stack_size(64 * 1024 * 1024).spawn(|| {
         for generic_body in [false, true] {
             let mut value = "x +% 300".to_owned();

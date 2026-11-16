@@ -34,7 +34,7 @@ fn case_workers_bound_concurrency_and_keep_results_after_failures() {
             seen[index].fetch_add(1, Ordering::SeqCst);
             let concurrent = active.fetch_add(1, Ordering::SeqCst) + 1;
             peak.fetch_max(concurrent, Ordering::SeqCst);
-            // Different durations exercise result ordering independently of completion order.
+            // 実行時間を変え、完了順に依存せず結果が入力順に並ぶことを試す。
             std::thread::sleep(std::time::Duration::from_millis((index % 3) as u64));
             active.fetch_sub(1, Ordering::SeqCst);
             if index == 3 {

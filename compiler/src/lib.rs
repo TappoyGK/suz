@@ -1,3 +1,19 @@
+//! Suzのソースを検査し、C23のソースへ変換するコンパイラ。
+//!
+//! [`compile_with_options`] と [`check_source_with_options`] が公開APIの入口となる。
+//! 入力のUTF-8・改行（src.encoding、src.newline）を検査した後、次の順に処理する。
+//!
+//! 1. [`lexer`] がソースを位置付きの [`lexer::Token`] に分解する。
+//! 2. [`parser`] がトークンから [`ast::Program`] を構築する。
+//! 3. [`check`] が名前・型・値を検査し、[`check::ir::CheckedProgram`] を作る。
+//! 4. [`warnings`] が診断候補へ警告設定とallowを適用する。
+//! 5. [`codegen`] が検査済みIRからCを生成する。検査だけのAPIはこの処理を省く。
+//!
+//! モジュールと型の内部リンクをたどるには、非公開項目も含めてrustdocを生成する。
+
+// 内部実装の案内も公開入口に載せるため、非公開項目を含むrustdoc生成を前提とする。
+#![allow(rustdoc::private_intra_doc_links)]
+
 #[cfg(test)]
 #[path = "../tests/support/integer_bounds.rs"]
 mod integer_bounds;
@@ -59,7 +75,7 @@ impl Diagnostic {
     pub fn message(&self) -> &str {
         &self.message
     }
-    /// The structured rule identifier, independent of the rendered message.
+    /// 表示用の文面から独立した規則識別子を返す。
     pub fn rule(&self) -> &str {
         &self.rule_id
     }
@@ -87,8 +103,8 @@ pub enum ArithmeticMode {
     Deny,
 }
 
-/// Limit embedded in generated programs. Zero is reserved by the C runtime
-/// for unlimited storage and cannot be supplied as a finite limit.
+/// 生成プログラムに埋め込む上限。Cランタイムでは0を無制限の指定に予約しているため、
+/// 有限の上限として0は指定できない。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TextPoolLimit {
     Bytes(NonZeroU64),
@@ -138,7 +154,7 @@ pub struct Compilation {
     pub warnings: Vec<Warning>,
 }
 
-/// Compile Suz source to C23.
+/// SuzのソースをC23へコンパイルする。
 pub fn compile(bytes: &[u8]) -> Result<String, Diagnostic> {
     compile_with_mode(bytes, ArithmeticMode::Default).map(|result| result.c)
 }
@@ -147,7 +163,7 @@ pub fn compile_with_mode(bytes: &[u8], mode: ArithmeticMode) -> Result<Compilati
     compile_with_source_name(bytes, mode, "<input>")
 }
 
-/// Compile with a source name used in generated runtime diagnostics.
+/// 実行時の診断に使うソース名を指定してコンパイルする。
 pub fn compile_with_source_name(
     bytes: &[u8],
     mode: ArithmeticMode,
@@ -163,7 +179,7 @@ pub fn compile_with_source_name(
     )
 }
 
-/// Compile with runtime settings embedded in the generated C.
+/// ランタイム設定を生成Cへ埋め込んでコンパイルする。
 pub fn compile_with_options(
     bytes: &[u8],
     source_name: &str,
@@ -176,7 +192,7 @@ pub fn compile_with_options(
     })
 }
 
-/// Validate source and return warnings without generating C.
+/// ソースを検査し、Cを生成せず警告を返す。
 pub fn check_source(bytes: &[u8], mode: ArithmeticMode) -> Result<Vec<Warning>, Diagnostic> {
     check_source_with_options(
         bytes,

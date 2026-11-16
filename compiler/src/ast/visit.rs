@@ -1,3 +1,7 @@
+//! ASTの式と文の子を列挙し、構文に共通する走査を提供する。
+//!
+//! 利用元: [`crate::check`] の制御・汎用型検査。
+
 use super::{Expression, ExpressionKind, FailureHandler, Statement, TemplatePart};
 use crate::Diagnostic;
 

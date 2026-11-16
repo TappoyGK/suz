@@ -76,7 +76,7 @@ fn generated_bindings_handle_c_names_and_large_integer_literals() {
 fn unary_literal_diagnostics_follow_the_selected_mode() {
     let directory = TemporaryDirectory::new();
     let source = directory.0.join("negative.suz");
-    // Both negations are diagnosed even though the second follows a return.
+    // 二つ目がreturnの後にあっても、両方の符号反転を診断する。
     fs::write(
         &source,
         "fn main() -> u8 {\nfix small: i8 = -128\nreturn 0\nfix other = -1\n}",
@@ -272,7 +272,7 @@ fn compound_assignments_check_mutability_types_and_statement_position() {
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
         assert!(error.message().contains(rule), "{error:?}");
     }
-    // Wrapping and bitwise compound operators are not arithmetic diagnostic targets.
+    // ラップ演算とビット演算の複合代入は、整数演算の診断対象ではない。
     let source = r#"fn main() -> u8 {
     var count: u8 = 255
     count +%= 1

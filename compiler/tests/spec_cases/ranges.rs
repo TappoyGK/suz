@@ -288,7 +288,7 @@ fn range_bounds_check_nested_references_scope_and_control_transfers() {
         .err()
         .unwrap();
     assert_eq!((error.line, error.column), (3, 13));
-    // The compiler-generated range increment itself needs no arithmetic handler.
+    // コンパイラが生成する範囲の更新処理自体には、整数演算のハンドラーは不要。
     for keyword in ["for", "rev"] {
         let source = format!("fn main() -> u8 {{ {keyword} i in 0..=255 {{}}\nreturn 0 }}");
         suz::compile_with_mode(source.as_bytes(), suz::ArithmeticMode::Deny).unwrap();

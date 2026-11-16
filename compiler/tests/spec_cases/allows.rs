@@ -35,7 +35,7 @@ fn main() -> u8 {
     assert!(!plain.c.contains("local bound"));
     let warnings = suz::check_source(source.as_bytes(), ArithmeticMode::Warn).unwrap();
     assert_eq!(warnings.len(), 1);
-    assert_eq!(warnings[0].line, 3); // A call does not suppress the callee's body.
+    assert_eq!(warnings[0].line, 3); // 呼び出し側の指定では、呼び出される関数の本体の警告は抑制しない。
     let all =
         suz::check_source_with_options(source.as_bytes(), &options(ArithmeticMode::Warn, true))
             .unwrap();

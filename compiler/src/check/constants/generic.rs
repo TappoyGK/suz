@@ -1,5 +1,7 @@
-//! Substitute only an already checked constant value, without revisiting source
-//! expressions or declarations. Constant rules can then use the ordinary evaluator.
+//! 検査済みの定数値に数値型の代入を適用し、通常の定数評価で扱える形へ具体化する。ソースの式や宣言を再検査しない。
+//!
+//! 利用元: [`crate::check::constants`]。
+
 use super::*;
 use crate::check::{generic::domain, scope::Scope};
 
@@ -18,8 +20,8 @@ pub(in crate::check) fn at(
     evaluate(&value)
 }
 
-// Exact ranges and template renderings are derived metadata. Update these
-// around the common child walk; the list of Value children lives only in IR.
+// 正確な値域とテンプレートの描画結果は派生情報なので、共通の子の走査に合わせて更新する。
+// Valueの子の一覧はIRだけに定義する。
 fn substitute(value: &mut CheckedExpression, index: usize, scope: &Scope) -> Option<()> {
     value.ty = domain::at(value.ty, index)?;
     let complete = std::cell::Cell::new(true);

@@ -1,3 +1,8 @@
+//! 改行を正規化したソースを、位置付きのトークンへ分解する。数値・文字・テンプレートの字句形式を検査する。
+//!
+//! 利用元: [`crate::analyze`]、[`crate::parser`]。
+//! 主な対象規則: `[char.literal]`、`[for.range-spacing]`、`[lit.float]`、`[lit.integer]`、`[syntax.grammar]`。
+
 use crate::{Diagnostic, ErrorKind};
 pub(crate) mod allows;
 pub(crate) mod templates;
@@ -66,7 +71,7 @@ pub(crate) struct Token<'a> {
     pub kind: Kind<'a>,
     pub line: usize,
     pub column: usize,
-    /// Byte range in the source after CRLF normalization.
+    /// CRLFを正規化した後のソース内のバイト範囲。
     pub span: Range<usize>,
 }
 
@@ -151,7 +156,7 @@ fn number(rest: &str) -> Result<(Kind<'_>, usize), crate::DiagnosticMessage> {
             "a floating-point exponent requires a decimal point"
         ));
     }
-    // Keep range operators and named field access separate from numbers.
+    // 範囲演算子と名前によるフィールド参照を、数値から分離する。
     if bytes.get(end) == Some(&b'.')
         && !bytes
             .get(end + 1)
@@ -223,7 +228,7 @@ fn continues_line(kind: Kind<'_>, previous: Option<Kind<'_>>) -> bool {
     }
 }
 
-/// Input must already have normalized newlines.
+/// 入力の改行は正規化済みでなければならない。
 pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
     let mut tokens: Vec<Token<'_>> = Vec::new();
     let mut delimiters = Vec::new();
@@ -375,7 +380,7 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
             span: offset..offset + length,
         });
         offset += length;
-        column += length; // All supported non-comment tokens are ASCII.
+        column += length; // コメント以外の対応トークンはすべてASCII。
     }
     tokens.push(Token {
         kind: Kind::End,
@@ -385,8 +390,8 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
     });
     for (index, token) in tokens.iter().enumerate() {
         if matches!(token.kind, Kind::Symbol("..<" | "..=")) {
-            // Input boundaries are not whitespace. Missing bounds are syntax
-            // errors for the parser, including in isolated interpolations.
+            // 入力の端は空白ではない。単独で解析する補間式でも、
+            // 境界値の欠落は構文解析側で構文エラーにする。
             let touches_left = if index == 0 {
                 token.span.start == 0
             } else {
@@ -412,7 +417,7 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
     Ok(tokens)
 }
 
-// Share literal parsing with text-to-structure conversion at runtime.
+// リテラルの解析を、実行時の文字列から構造体への変換と共有する。
 pub(crate) fn char_literal(input: &str) -> Result<(u32, usize), crate::DiagnosticMessage> {
     unsafe extern "C" {
         fn suz_parse_char_literal_status(
@@ -423,8 +428,8 @@ pub(crate) fn char_literal(input: &str) -> Result<(u32, usize), crate::Diagnosti
         ) -> u32;
     }
     let (mut value, mut consumed) = (0, 0);
-    // Status codes follow suz_char_literal_status. Input and outputs remain live
-    // for this bounded, allocation-free call.
+    // 状態コードはsuz_char_literal_statusに従う。長さを限定したメモリ確保なしの呼び出し中、
+    // 入力と出力は生存し続ける。
     let status = unsafe {
         suz_parse_char_literal_status(
             input.as_ptr(),

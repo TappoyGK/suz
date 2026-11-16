@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify the supplied release executable, without building or replacing it."""
+"""指定されたリリース実行ファイルを、ビルドや置き換えをせずに検証する。"""
 
 import argparse
 import hashlib
@@ -145,8 +145,7 @@ struct Entry {
         if expected == 101:
             require(b"[rt.symbol-allocation]" in result.stderr, "missing exported text pool diagnostic")
 
-    # A custom compiler path exercises actual missing SDK/linker failures without
-    # modifying the developer's Xcode installation or system search paths.
+    # 開発者のXcodeやシステムの検索パスを変更せず、独自のコンパイラパスを使ってSDK・リンカーの不在を実際に試す。
     unavailable = [("compiler", None, without_tools)]
     for name, flags in (
         ("sdk", ["-isysroot", str(empty)]),

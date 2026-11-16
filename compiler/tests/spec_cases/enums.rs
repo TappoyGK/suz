@@ -111,7 +111,7 @@ fn enum_numbering_and_narrowing_cover_signed_and_unsigned_limits() {
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
         assert!(error.message().contains("[enum.variant]"));
     }
-    // A signed storage type must not introduce mixed-sign C comparisons.
+    // 符号付きの格納型を使っても、Cの比較に符号の混在を持ち込んではならない。
     let variants = (0..=128)
         .map(|i| format!("V{i}"))
         .collect::<Vec<_>>()

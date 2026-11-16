@@ -1,3 +1,8 @@
+//! 代入の右辺が代入先と重なる場所へ書き込まないか、式の内部を走査して検査する。
+//!
+//! 利用元: [`crate::check::statements`]。
+//! 主な対象規則: `[assign.rhs-write]`。
+
 use crate::{
     Diagnostic, ErrorKind,
     ast::{

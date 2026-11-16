@@ -1,3 +1,8 @@
+//! 関数の宣言・引数・戻り値と本体を検査する。汎用関数の記号的な検査と、呼び出しに必要な具体化をまとめる。
+//!
+//! 利用元: [`crate::check`]。
+//! 主な対象規則: `[decl.duplicate]`、`[decl.shadowing]`、`[fn.call]`、`[fn.parameter-scope]`、`[fn.return]`、`[num.fn-body]`。
+
 use super::{
     control, declarations, diagnostics,
     expression::coerced as expression,
@@ -50,18 +55,16 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
             continue;
         }
         let result = check_function(function, globals.clone(), id);
-        // Calls encountered before a local error must be validated first. The
-        // explicit work stack preserves call order without a Rust call stack
-        // proportional to a chain of generic functions.
+        // 本体内のエラーより前に現れた呼び出しを先に検査する。明示的な作業スタックで呼び出し順を保ち、
+        // 汎用関数の連鎖に比例してRustの呼び出しスタックが増えるのを防ぐ。
         check_instances(program, &globals, &mut functions, &mut warnings)?;
         let (checked, found) = result?;
         functions.push(checked);
         warnings.extend(found);
     }
     warnings.sort_by_key(|l| (l.line, l.column));
-    // Integer arithmetic sites are collected in generic checks and concrete
-    // instances; report each source operation once. Comparisons/divisions
-    // already come only from the generic check.
+    // 整数演算の箇所は汎用検査と具体化の両方で集まるため、ソースの演算ごとに一度だけ報告する。
+    // 比較・除算の候補は汎用検査からだけ集まる。
     warnings.dedup_by_key(|l| (l.line, l.column));
     Ok(CheckedProgram {
         division_warnings: globals
@@ -134,8 +137,8 @@ fn check_instances(
     while let Some(task) = tasks.pop() {
         match task {
             Task::Check(instance) => {
-                // Re-entrant recursion uses its existing signature; a completed
-                // instance is shared. Every body is constructed at most once.
+                // 再入する再帰呼び出しは既存のシグネチャを使い、完成した具体化は共有する。
+                // 各本体は多くても一度だけ構築する。
                 if !globals
                     .instances
                     .borrow_mut()
@@ -145,8 +148,7 @@ fn check_instances(
                     continue;
                 }
                 let function = &program.functions[instance.function];
-                // Forward calls need the generic result, but an unconditional
-                // error belongs to the declaration's turn, not to this call.
+                // 前方参照には汎用検査の結果が必要だが、型によらないエラーは呼び出しではなく宣言の順番で報告する。
                 let analysis = analyze_once(function, instance.function, globals);
                 if analysis.result.is_err() {
                     for index in (0..analysis.deferred.len()).rev() {
@@ -157,7 +159,7 @@ fn check_instances(
                 let mut context = globals.clone();
                 context.generic_calls = Some(instance.calls.clone());
                 context.mode = super::scope::Mode::Instance(instance.types);
-                // Only a valid generic body is rebuilt with concrete types.
+                // 汎用検査を通過した本体だけを、具体型で構築し直す。
                 let result = check_function(function, context, instance.id);
                 tasks.push(Task::Finish(instance, result));
                 tasks.extend(
@@ -246,10 +248,8 @@ pub(super) fn check_function(
 ) -> Result<(CheckedFunction, Vec<crate::ast::Location>), Diagnostic> {
     control::validate_return_positions(&function.statements)?;
     let mut warnings = Vec::new();
-    // [num.fn-same], [num.fn-body-type], [num.fn-recursion]: a single
-    // substitution applies to all annotations in this function instance.
-    // Generic diagnostics were collected once with symbolic types. Instances
-    // retain constant registrations, but cannot add type-specific warnings.
+    // [num.fn-same]、[num.fn-body-type]、[num.fn-recursion]: 関数の具体化内の全型注釈に同じ代入を適用する。
+    // 汎用の診断は記号的な型で一度収集済み。具体化では定数登録を残すが、型ごとの警告は追加しない。
     if scope.instance() {
         scope.outputs.comparisons = Default::default();
         scope.outputs.divisions = Default::default();

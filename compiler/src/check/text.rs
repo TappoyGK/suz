@@ -1,3 +1,8 @@
+//! テンプレートの補間値を検査し、定数文字列を評価・登録する。浮動小数点の表記はランタイムと共通の変換を使う。
+//!
+//! 利用元: [`crate::check::expression`]、[`crate::check::statements`]。
+//! 主な対象規則: `[symbol.interpolation]`。
+
 use super::{
     constants,
     ir::{CheckedExpression, Value},
@@ -79,8 +84,8 @@ pub(super) fn constant_parts(
         .collect::<Option<String>>()
 }
 
-// Use the same bundled Ryu formatter as generated programs. Rust's default
-// formatter makes a different choice for some equally short decimal strings.
+// 生成プログラムと同じ同梱Ryuフォーマッターを使う。
+// Rustの標準フォーマッターは、同じ短さの十進表記から別のものを選ぶ場合がある。
 unsafe extern "C" {
     fn suz_format_f32(value: f32, output: *mut u8) -> usize;
     fn suz_format_f64(value: f64, output: *mut u8) -> usize;
@@ -88,8 +93,8 @@ unsafe extern "C" {
 
 fn float_format(bits: u64, ty: Type) -> String {
     let mut output = [0_u8; 32];
-    // The C interface writes at most 32 bytes and returns their count. It
-    // owns no Rust memory and retains no pointers after this call.
+    // Cのインターフェースは最大32バイトを書き、その長さを返す。
+    // Rustのメモリを所有せず、呼び出し後にポインターを保持しない。
     let length = unsafe {
         match ty {
             Type::Float(FloatType::F32) => {
@@ -104,8 +109,7 @@ fn float_format(bits: u64, ty: Type) -> String {
     String::from_utf8(output[..length].to_vec()).expect("numeric formatting produces ASCII")
 }
 
-// Collect during checking, before constant substitution or code generation can
-// discard unused declarations and unselected operands.
+// 定数置換やC生成で未使用の宣言・非選択のオペランドが消える前に、検査中に収集する。
 pub(super) fn register_constants(value: &CheckedExpression, scope: &Scope) {
     match &value.value {
         Value::TextView(inner) => register_constants(inner, scope),

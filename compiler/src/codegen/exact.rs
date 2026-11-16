@@ -1,3 +1,7 @@
+//! 正確な整数式の木をCへ変換する。値域に応じた表現、格納時の検査、整数と浮動小数点の比較を扱う。
+//!
+//! 利用元: [`crate::codegen::expressions`]、[`crate::codegen::arithmetic`]。
+
 mod native;
 use super::{
     ExpressionContext,

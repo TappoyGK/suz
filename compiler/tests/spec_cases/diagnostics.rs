@@ -95,7 +95,7 @@ fn main() -> u8 {
         ]
     );
 
-    // Mutate one field at a time to exercise invalid Markdown contracts.
+    // Markdownの検証契約に違反するケースを、一項目ずつ変えて試す。
     for invalid in [
         input.replace(
             "**ソース：**",

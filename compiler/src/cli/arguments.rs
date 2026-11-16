@@ -1,3 +1,8 @@
+//! CLIのコマンドとオプションを解析し、パスや文字列プール上限などの入力を検証する。
+//!
+//! 利用元: [`crate::cli`]。
+//! 主な対象規則: `[tool.arguments]`、`[tool.text-pool-size]`。
+
 use super::{Failure, Result};
 use std::{ffi::OsString, path::PathBuf};
 

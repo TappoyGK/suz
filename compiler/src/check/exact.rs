@@ -1,3 +1,8 @@
+//! 数学的な整数式と値域を保持し、格納時の幅・変換・比較を検査する。C生成でもこの式の木を使う。
+//!
+//! 利用元: [`crate::check::expression`]、[`crate::codegen`] の整数演算生成。
+//! 主な対象規則: `[arith.div-zero-always]`、`[arith.exact]`、`[arith.store-float]`、`[arith.width]`、`[conv.join]`、`[expr.as]`。
+
 use super::{
     ir::{CheckedExpression, IntegerOperation, Value},
     scope::Scope,
@@ -9,7 +14,7 @@ use crate::{
     numeric::{Int, Range},
 };
 
-// Per substitution: Err is an unrepresentable range; Ok(None) always divides by zero.
+// 型の代入ごとに、Errは表現できない値域、Ok(None)は必ずゼロ除算になることを表す。
 type SubstitutionRanges = [Result<Option<Range>, ()>; domain::NUMERIC_COMBINATIONS];
 
 #[derive(Clone)]
@@ -27,8 +32,8 @@ pub(crate) enum ExactKind {
     Negate(Box<Exact>),
     Binary(BinaryOperator, Box<Exact>, Box<Exact>),
 }
-// The same definition visits read-only/mutable nodes and leaves in one pass.
-// rustfmt does not format this macro body; keep its layout consistent manually.
+// 同じ定義で参照用・変更用のノードと葉を一度に走査する。
+// rustfmtはこのマクロ本体を整形しないため、同じ書式を手動で保つ。
 macro_rules! exact_visitor {
     ($name:ident, ($($mutable:tt)?)) => {
         pub fn $name(
@@ -312,7 +317,7 @@ pub(super) fn check(
                 )),
             }
         };
-        // Missing type/range entries belong to an earlier deferred failure.
+        // 型・値域の項目が欠けているのは、それ以前の保留した判定が失敗しているため。
         if !domain::any(|i| {
             domain::at(ty, i).is_some() && exact.range_at(i).is_ok() && storage_error(i).is_none()
         }) && let Some(error) = domain::indices().find_map(storage_error)

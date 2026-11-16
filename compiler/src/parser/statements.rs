@@ -1,3 +1,8 @@
+//! 束縛・代入・反復・returnなどの文を解析し、改行と制御構文の位置を検査する。
+//!
+//! 利用元: [`crate::parser::functions`]、[`crate::parser::branches`]。
+//! 主な対象規則: `[decl.location]`、`[expr.jump-prohibited]`、`[for.range]`、`[if.elif]`、`[loop.break]`、`[loop.continue]`。
+
 use super::{FixedToken, Parser};
 use crate::{
     Diagnostic, ErrorKind,
@@ -255,7 +260,7 @@ impl Parser<'_, '_> {
                 let operator_location = self.location();
                 self.cursor += 1;
                 let right = self.expression()?;
-                // Binary lowering reads the current target before evaluating the RHS.
+                // 二項演算への変換では、右辺を評価する前に現在の代入先の値を読む。
                 let value = if let Some(operator) = operator {
                     Expression {
                         kind: ExpressionKind::Binary {

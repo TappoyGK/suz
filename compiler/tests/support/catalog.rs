@@ -34,7 +34,7 @@ pub fn load(docs: &Path) -> Result<BTreeMap<String, Source>> {
     Ok(sources)
 }
 
-// Both inventories use the same table contract; only headers and row keys vary.
+// 二つの目録は同じ表の形式を使い、見出しと行のキーだけが異なる。
 pub fn validate_inventory(markdown: &str, sources: &BTreeMap<String, Source>) -> Result<()> {
     let mut groups = BTreeMap::<&str, usize>::new();
     for id in sources.keys() {

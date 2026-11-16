@@ -1,3 +1,8 @@
+//! 検査済みの式と文から、整数除算・比較・未処理の整数演算の診断候補を集める。
+//!
+//! 利用元: [`crate::check::functions`]。
+//! 主な対象規則: `[diagnostic.integer-division-to-float]`、`[diagnostic.constant-comparison]`、`[diagnostic.arithmetic]`。
+
 use super::ir::{CheckedExpression, CheckedHandler, CheckedStatement, Value};
 use crate::ast::Location;
 

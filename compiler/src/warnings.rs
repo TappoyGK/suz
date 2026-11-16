@@ -1,3 +1,8 @@
+//! 意味検査の診断候補へ警告設定とallowを適用する。allowの入れ子・未使用も確認し、警告またはエラーを返す。
+//!
+//! 利用元: [`crate::analyze`]。
+//! 主な対象規則: `[allow.nested]`、`[allow.unused]`、`[diagnostic.arithmetic]`、`[diagnostic.constant-comparison]`、`[diagnostic.integer-division-to-float]`。
+
 use crate::{ArithmeticMode, Diagnostic, ErrorKind, Warning, ast::Location};
 
 pub(crate) struct AllowItem {

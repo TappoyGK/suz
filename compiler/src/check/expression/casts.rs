@@ -1,3 +1,8 @@
+//! 型変換の可否と失敗の可能性を調べ、必要なハンドラーを検査する。文字列と構造体の変換も扱う。
+//!
+//! 利用元: [`crate::check::expression`]。
+//! 主な対象規則: `[const.cast-check]`、`[expr.as]`、`[expr.as-trunc]`、`[expr.cast-handler]`、`[expr.cast-wrap-handler-syntax]`、`[num.fn-cast]`。
+
 use super::super::constants::{constant_float, constant_integer, float_to_integer};
 use super::super::ir::{CheckedExpression, Value};
 use crate::ast::{FailureHandler, FloatType};
@@ -177,7 +182,7 @@ pub(in crate::check) fn check(
                 let constant_struct = if let Type::Struct(id) = target
                     && super::super::constants::is_constant(fallback.as_ref().unwrap())
                 {
-                    // Defer errors in unselected constant operands to constant evaluation.
+                    // 選択されない定数オペランド内のエラーは、定数評価で扱う。
                     super::super::constants::evaluate(&operand)
                         .ok()
                         .flatten()
@@ -225,9 +230,8 @@ pub(in crate::check) fn check(
     })
 }
 
-// [expr.cast-risk], [arith.cast], [const.cast-check]. The ordinary checker
-// and template analysis use this pure classification; no Scope is mutated.
-// Scalar conversion rules are shared by ordinary and symbolic checking.
+// [expr.cast-risk]、[arith.cast]、[const.cast-check]。通常検査と汎用検査で同じ分類を使い、Scopeは変更しない。
+// スカラー変換の規則は通常の検査と記号的な検査で共有する。
 fn conversion_safety(from: Type, to: Type) -> Option<bool> {
     Some(match (from, to) {
         (Type::Symbol | Type::Text, _) => false,
@@ -313,7 +317,7 @@ fn cast_risk(
     dependent: bool,
 ) -> Result<CastRisk, Diagnostic> {
     if dependent {
-        // [num.fn-cast] Safety is universal, unlike ordinary deferred judgments.
+        // [num.fn-cast] 安全性はすべての型の代入で必要であり、通常の保留する判定とは異なる。
         let safe = domain::try_all(|i| {
             if let (Some(from), Some(to)) = (domain::at(operand.ty, i), domain::at(target, i)) {
                 let mut scalar = match super::super::constants::generic::at(operand, i, bindings) {

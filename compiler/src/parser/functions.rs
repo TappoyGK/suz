@@ -1,3 +1,8 @@
+//! 関数の引数・戻り値型・本体を解析し、mainの形と型名を検査する。
+//!
+//! 利用元: [`crate::parser`]。
+//! 主な対象規則: `[fn.parameter]`、`[fn.return-type]`、`[prog.main]`、`[src.ident]`、`[src.list-comma]`、`[src.trailing-comma]`。
+
 use super::{FixedToken, Parser};
 use crate::{
     Diagnostic, ErrorKind,

@@ -1,5 +1,8 @@
-//! Rules accepted symbolically retain their concrete failures, in checking order.
-//! Invalid bodies replay this log, never their source or their universal error.
+//! 記号的な検査で受理した規則の具体型ごとの失敗を、判定順に記録する。不正な本体はソースを再検査せず、この記録を使う。
+//!
+//! 利用元: [`crate::check::functions`]、[`crate::check::generic::analysis`]。
+//! 主な対象規則: `[num.fn-check]`。
+
 use super::{GenericTypes, domain};
 use crate::check::scope::Scope;
 use crate::{
@@ -34,8 +37,7 @@ impl GenericTypes {
 }
 
 impl Scope {
-    // Call only after the rule has passed its symbolic judgment. An error in
-    // any remaining substitution is consequently a deferred judgment.
+    // 規則が記号的な判定を通過した後にだけ呼ぶ。そのため、残る型の代入での失敗は保留した判定になる。
     pub(in crate::check) fn defer_rule(&self, mut error: impl FnMut(usize) -> Option<Diagnostic>) {
         let Some(log) = &self.deferred else {
             return;
@@ -63,8 +65,8 @@ impl Scope {
         }
     }
 
-    // Pure predicates use a bit set. Allocate a record only for a failing
-    // substitution, and format its diagnostic only if that failure is replayed.
+    // 純粋な成否はビット集合で保持する。失敗する代入にだけ記録を確保し、
+    // その失敗を再生するときだけ診断文を組み立てる。
     pub(in crate::check) fn defer_check(
         &self,
         failures: u16,

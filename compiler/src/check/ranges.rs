@@ -1,3 +1,8 @@
+//! for範囲の境界式について、反復変数への参照と値域を検査する。
+//!
+//! 利用元: [`crate::check::statements`]。
+//! 主な対象規則: `[for.bound-reference]`、`[for.bounds]`。
+
 use super::{
     expression::{expression, operand_type},
     ir::CheckedExpression,

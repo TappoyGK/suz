@@ -1,7 +1,12 @@
+//! 構文解析で作るASTと、ソース位置・型・演算子の共通表現を定義する。名前や式の型が未確定の木を保持し、意味検査へ渡す。
+//!
+//! 利用元: [`crate::parser`]、[`crate::check`]。
+
 pub(crate) mod visit;
 
 use crate::{Diagnostic, ErrorKind};
 
+/// ソース内の1始まりの行・列。構文解析後も診断の位置として保持する。
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Location {
     pub line: usize,
@@ -14,6 +19,7 @@ impl Location {
     }
 }
 
+/// Suzの具体的な整数型。ビット幅・符号・格納範囲と対応するC型を定める。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum IntegerType {
     I8,
@@ -83,6 +89,7 @@ impl IntegerType {
     }
 }
 
+/// Suzの具体的な浮動小数点型（f32またはf64）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum FloatType {
     F32,
@@ -103,6 +110,7 @@ impl FloatType {
     }
 }
 
+/// 列挙型の識別番号、整数の基底型、列挙子数。番号はプログラム内の宣言を参照する。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct EnumType {
     pub id: usize,
@@ -110,6 +118,7 @@ pub(crate) struct EnumType {
     pub count: usize,
 }
 
+/// 列挙型の宣言。列挙子の名前と、宣言を読み飛ばすためのトークン範囲を保持する。
 #[derive(Clone)]
 pub(crate) struct EnumDeclaration {
     pub name: String,
@@ -120,21 +129,25 @@ pub(crate) struct EnumDeclaration {
     pub end: usize,
 }
 
+/// 汎用数値型を具体化した一つの整数型または浮動小数点型。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ScalarType {
     Integer(IntegerType),
     Float(FloatType),
 }
 
-// Number of independent int/float substitutions in an internal type function.
+// 内部の型関数で扱う、独立したintとfloatの型代入の組み合わせ数。
 pub(crate) const NUMERIC_COMBINATIONS: usize = 16;
 
+/// ASTと意味検査で共有する型表現。
+/// 具体的な型に加え、汎用のint・float、型の組み合わせごとの結果、内部の正確な整数を表す。
+/// Structの番号は構造体宣言を参照する。汎用の型はC生成までに具体化する。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Type {
     GenericInt,
     GenericFloat,
-    Numeric([Option<ScalarType>; NUMERIC_COMBINATIONS]), // Internal type function of int and float.
-    Exact, // Internal mathematical integer; never a source-level storage type.
+    Numeric([Option<ScalarType>; NUMERIC_COMBINATIONS]), // intとfloatの内部の型関数。
+    Exact, // 内部の数学的な整数。ソースで指定する格納型ではない。
     Struct(usize),
     Enum(EnumType),
     Void,
@@ -153,7 +166,7 @@ impl Type {
     pub fn symbolic(self) -> bool {
         self.generic() || matches!(self, Self::Numeric(_))
     }
-    /// Includes symbolic types whose possible results are all integers.
+    /// 取りうる結果がすべて整数である記号的な型も含む。
     pub fn is_integer(self) -> bool {
         match self {
             Self::Integer(_) | Self::GenericInt => true,
@@ -164,7 +177,7 @@ impl Type {
             _ => false,
         }
     }
-    /// Includes symbolic types whose possible results are all floating-point types.
+    /// 取りうる結果がすべて浮動小数点型である記号的な型も含む。
     pub fn is_float(self) -> bool {
         match self {
             Self::Float(_) | Self::GenericFloat => true,
@@ -175,7 +188,7 @@ impl Type {
             _ => false,
         }
     }
-    /// Includes concrete and symbolic integer/floating-point types.
+    /// 具体型と記号的な整数・浮動小数点型を含む。
     pub fn is_numeric(self) -> bool {
         matches!(self, Self::Numeric(_)) || self.is_integer() || self.is_float()
     }
@@ -263,6 +276,7 @@ impl Type {
     }
 }
 
+/// 構造体のフィールド宣言。名前・型と、その宣言のソース位置。
 #[derive(Clone)]
 pub(crate) struct StructField {
     pub name: String,
@@ -270,6 +284,7 @@ pub(crate) struct StructField {
     pub location: Location,
 }
 
+/// 構造体の宣言。宣言順のフィールドとトークン範囲を持つ。
 #[derive(Clone)]
 pub(crate) struct StructDeclaration {
     pub name: String,
@@ -279,6 +294,7 @@ pub(crate) struct StructDeclaration {
     pub end: usize,
 }
 
+/// 構造体リテラルに書いたフィールド名・初期化式・位置。意味検査でフィールド番号へ解決する。
 #[derive(Clone)]
 pub(crate) struct FieldInitializer {
     pub name: String,
@@ -286,6 +302,7 @@ pub(crate) struct FieldInitializer {
     pub location: Location,
 }
 
+/// トップレベル定数の宣言。省略可能な型注釈と、まだ評価していない初期化式。
 pub(crate) struct ConstDeclaration {
     pub name: String,
     pub location: Location,
@@ -293,6 +310,8 @@ pub(crate) struct ConstDeclaration {
     pub initializer: Expression,
 }
 
+/// 構文解析の結果全体。allowの範囲と型・定数・関数の宣言を保持する。
+/// [`crate::check`] が検査して [`crate::check::ir::CheckedProgram`] へ変換する。
 pub(crate) struct Program {
     pub allows: Vec<crate::warnings::AllowScope>,
     pub structs: Vec<StructDeclaration>,
@@ -301,12 +320,14 @@ pub(crate) struct Program {
     pub functions: Vec<Function>,
 }
 
+/// 関数の仮引数。ソース上の名前・型注釈・位置を保持する。
 pub(crate) struct Parameter {
     pub name: String,
     pub ty: Type,
     pub location: Location,
 }
 
+/// 関数の構文。仮引数・戻り値型・本体の文と、宣言の開始・終了位置を保持する。
 pub(crate) struct Function {
     pub keyword_location: Location,
     pub name: String,
@@ -323,6 +344,8 @@ impl Function {
     }
 }
 
+/// matchの一つの分岐。patternがNoneならそれ以外の分岐。
+/// 本体は文の列または値の式であり、Tで区別する。
 #[derive(Clone)]
 pub(crate) struct MatchArm<T = Vec<Statement>> {
     pub pattern: Option<Expression>,
@@ -330,12 +353,14 @@ pub(crate) struct MatchArm<T = Vec<Statement>> {
     pub body: T,
 }
 
+/// ログ文で指定されたレベル。生成Cの環境呼び出しへ渡す。
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum LogLevel {
     Info,
     Warn,
 }
 
+/// 構文解析済みの文。束縛やフィールドの参照はまだソース上の名前で保持する。
 #[derive(Clone)]
 pub(crate) enum Statement {
     Log {
@@ -386,18 +411,22 @@ pub(crate) enum Statement {
     Return(Expression),
 }
 
+/// 構文解析済みの式とソース位置。型は意味検査で決定する。
 #[derive(Clone)]
 pub(crate) struct Expression {
     pub kind: ExpressionKind,
     pub location: Location,
 }
 
+/// 文字列テンプレートの文字列部分、または補間する値。
+/// TはASTでは [`Expression`]、IRでは [`crate::check::ir::CheckedExpression`]。
 #[derive(Clone)]
 pub(crate) enum TemplatePart<T> {
     Text(String),
     Value(T),
 }
 
+/// 短絡評価する論理演算子（&&または||）。
 #[derive(Clone, Copy)]
 pub(crate) enum LogicalOperator {
     And,
@@ -413,6 +442,7 @@ impl LogicalOperator {
     }
 }
 
+/// 等値・順序比較の演算子。比較の連鎖では各境界の演算子として保持する。
 #[derive(Clone, Copy)]
 pub(crate) enum ComparisonOperator {
     Equal,
@@ -457,6 +487,7 @@ impl ComparisonOperator {
     }
 }
 
+/// 算術・ラップ・シフト・ビット演算の二項演算子。構文の優先順位もここで定める。
 #[derive(Clone, Copy)]
 pub(crate) enum BinaryOperator {
     Add,
@@ -507,7 +538,7 @@ impl BinaryOperator {
             _ => None,
         }
     }
-    // Larger levels bind more tightly; addition and subtraction share a level.
+    // 値が大きいほど強く結合する。加算と減算は同じ優先順位。
     pub fn precedence(self) -> u8 {
         match self {
             Self::Or => 0,
@@ -534,6 +565,7 @@ impl BinaryOperator {
     }
 }
 
+/// 失敗時に値を返す処理、または関数からreturnする処理の構文。
 #[derive(Clone)]
 pub(crate) enum FailureHandler {
     Value(Box<Expression>),
@@ -543,6 +575,7 @@ pub(crate) enum FailureHandler {
     },
 }
 
+/// 式の構文ごとの内容。名前・リテラルの綴り・子の式を保持し、意味検査で [`crate::check::ir::Value`] へ変換する。
 #[derive(Clone)]
 pub(crate) enum ExpressionKind {
     Slice {

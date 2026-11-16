@@ -4,15 +4,11 @@
 #include <assert.h>
 #include <string.h>
 
-/* Every binary64 rounding boundary is m * 2^e with m < 2^54 and
-   e >= -1075. Its terminating decimal has fewer than 770 significant
-   digits (m * 5^1075 has fewer than 770 digits). Keeping 800 digits
-   therefore distinguishes all boundaries; discarded nonzero digits only
-   affect a tie. The same bound covers binary32.
-
-   After the decimal-order checks, a denominator needs at most 10^1123,
-   and a scaled numerator at most 800 decimal digits times 2^1074.
-   Both fit in 4096 bits, including the rounding comparison. */
+/* binary64の丸め境界は、m < 2^54、e >= -1075を満たすm * 2^eである。
+   その有限十進表記の有効桁数は770未満（m * 5^1075も770桁未満）。
+   したがって800桁保持すれば全境界を区別でき、捨てた非ゼロ桁が影響するのは中点の場合だけ。同じ上限でbinary32も扱える。
+   十進の桁数を検査した後、分母は最大10^1123、調整した分子は最大で800桁の十進整数に2^1074を掛けた値になる。
+   丸めの比較も含めて、どちらも4096ビットに収まる。 */
 enum { DECIMAL_DIGITS = 800, WORDS = 128 };
 
 typedef struct {
@@ -55,10 +51,8 @@ static bool digits(const char *bytes, uint64_t length, uint64_t *index, decimal 
     return true;
 }
 
-/* One extra word permits cancellation with a mantissa's full uint64_t
-   digit count, even when the written exponent exceeds UINT64_MAX.
-   Values >= 2^65 can safely saturate: cancellation cannot bring them
-   into the finite floating-point range. */
+/* 1ワード余分に確保し、記述した指数がUINT64_MAXを超えても、仮数のuint64_t全範囲の桁数と相殺できるようにする。
+   2^65以上は安全に飽和させられる。相殺しても有限の浮動小数点範囲には戻らない。 */
 typedef struct { uint64_t low; unsigned high; } exponent;
 
 static void exponent_digit(exponent *value, unsigned next) {

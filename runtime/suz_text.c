@@ -57,8 +57,8 @@ static void *allocate(uint64_t size, bool retained, suz_text_location location) 
     size_t request = allocation_size(size, location);
     uint64_t total = retained ? add(pool.used, size, location) : pool.used;
     if (retained && pool.limit != 0 && total > pool.limit) {
-        /* Fixed storage suffices for three u64 values and these literals.
-           Reporting exhaustion must not ask the allocator for more memory. */
+        /* 固定領域で、三つのu64値とこれらの文字列に足りる。
+           メモリ不足の報告で、アロケーターへ追加のメモリを要求してはならない。 */
         char reason[192];
         char *out = literal(reason, "text pool limit exceeded: limit=");
         out = decimal(out, pool.limit);
@@ -116,7 +116,7 @@ static void grow(suz_text_location location) {
     if (capacity > UINT64_MAX / sizeof(suz_text)) length_failure(location);
     uint64_t size = capacity * sizeof(suz_text);
     suz_text *slots = allocate(size, true, location);
-    /* Assign NULL rather than assuming its representation is all zero bits. */
+    /* NULLの表現を全ビット0と仮定せず、NULLを代入する。 */
     for (uint64_t i = 0; i < capacity; ++i) slots[i] = NULL;
     for (uint64_t i = 0; i < pool.capacity; ++i) {
         suz_text entry = pool.slots[i];
@@ -220,7 +220,7 @@ suz_text suz_text_from_parsed(const char *bytes, uint64_t length, suz_text_locat
     suz_text_buffer buffer = {0};
     suz_text_buffer_append(&buffer, bytes, length, location);
     uint64_t consumed, decoded;
-    /* The validation pass has checked this exact immutable span. */
+    /* 検証の段階で、この不変の範囲そのものを確認済み。 */
     bool valid = suz_parse_string(bytes, length, &consumed, buffer.bytes, &decoded);
     if (!valid || consumed != length) abort();
     suz_text result = suz_text_intern(buffer.bytes, decoded, false, location);

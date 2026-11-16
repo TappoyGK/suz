@@ -25,8 +25,8 @@ pub fn worker_count(value: Option<&str>) -> Result<usize> {
         .ok_or_else(|| "SUZ_JOBS must be a positive integer".into())
 }
 
-// Each worker claims the next available job. Results retain input order even
-// when jobs finish out of order; ordinary failures do not cancel later jobs.
+// 各ワーカーが次の未処理ジョブを取得する。完了順が変わっても結果は入力順に保ち、
+// 通常の失敗で後続のジョブを取り消さない。
 pub fn parallel_map<T: Sync, R: Send>(
     jobs: &[T],
     workers: usize,

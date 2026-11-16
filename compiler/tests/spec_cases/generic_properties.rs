@@ -7,12 +7,11 @@ fn check(source: &str) -> Result<Vec<suz::Warning>, Diagnostic> {
 
 #[test]
 fn generic_instantiations_agree_with_explicit_scalar_functions() {
-    // [num.fn-check-judge], [num.fn-body]: an accepted generic body must have
-    // the same acceptance as a scalar copy for each actual substitution.
-    // A body that passes generic checking can fail after substitution only
-    // at a judgment deferred by that generic check.
-    // Casts here either have handlers or are always safe, so the universal
-    // generic cast policy does not intentionally differ from the scalar policy.
+    // [num.fn-check-judge]、[num.fn-body]: 受理した汎用本体は、実際の各型の代入で、
+    // 同じ内容をスカラー型で書いた本体と同じ成否になる必要がある。
+    // 汎用検査を通過した本体が具体化後に失敗できるのは、汎用検査で保留した判定だけ。
+    // ここでの変換はハンドラー付きか常に安全なので、汎用変換の全型に対する規則と
+    // スカラー変換の規則との意図的な違いは生じない。
     for expression in [
         "n + x",
         "n * x",
@@ -120,7 +119,7 @@ fn mixed_branch_hints_preserve_scalar_literal_and_operator_rules() {
 
 #[test]
 fn generic_argument_type_hints_preserve_value_block_bindings() {
-    // Moving the binding into an expr block preserves its inferred type.
+    // 束縛をexprブロックへ移しても、推論した型は変わらない。
     for (integer, _, _) in INTEGER_BOUNDS {
         for expression in [
             "n",
@@ -149,8 +148,8 @@ fn generic_argument_type_hints_preserve_value_block_bindings() {
             }
         }
     }
-    // Acceptance alone cannot detect an unintended wider specialization. The
-    // wrapping square and f32 rounding make a changed width observable.
+    // 成否だけでは、意図しない広い型への具体化を検出できない。
+    // ラップする二乗とf32の丸めを使い、幅の変更を観測可能にする。
     let mut source = String::from(
         "fn square(n: int) -> int { return n *% n }\nfn increment(x: float) -> float { return x + 1.0 }\nfn main() -> u8 {\n",
     );
@@ -171,8 +170,8 @@ fn generic_argument_type_hints_preserve_value_block_bindings() {
 
 #[test]
 fn generic_constant_casts_keep_dependencies_inside_concrete_results() {
-    // [num.fn-cast]: intermediate concrete types do not erase a constant's
-    // dependence on an inner int/float cast. Judge every resulting value.
+    // [num.fn-cast]: 途中の具体型への変換では、内側のint/float変換に対する定数の依存は消えない。
+    // 得られる値をすべて判定する。
     for (expression, safe) in [
         ("((1 as% int) as u16 or 0) as u8", true),
         ("(((1 as% int) << 1) as u16 or 0) as u8", true),
@@ -223,9 +222,8 @@ fn main() -> u8 {
 
 #[test]
 fn invalid_generic_bodies_preserve_all_earlier_deferred_judgments() {
-    // Appending a universal error must not erase an earlier deferred rule.
-    // Compare with the same prefix in a valid generic body, whose concrete
-    // instance is checked by the ordinary checker.
+    // 全型でのエラーを末尾に足しても、それより前の保留した判定を消してはならない。
+    // 同じ先頭部分を持つ有効な汎用本体と比較し、その具体化は通常検査で確かめる。
     for prefix in [
         "fix value = helper(n)",
         "fix value = helper(helper(n))",

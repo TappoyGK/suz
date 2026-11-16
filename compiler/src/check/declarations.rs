@@ -1,3 +1,8 @@
+//! トップレベル定数の依存を解決し、初期化式の型と定数性を検査する。評価済みの値を関数のスコープへ渡す。
+//!
+//! 利用元: [`crate::check::functions`]。
+//! 主な対象規則: `[const.expression]`、`[const.initializer]`、`[decl.duplicate]`。
+
 use super::{constants, diagnostics, expression::coerced as expression, statements::Binding};
 use crate::check::scope::Scope;
 use crate::{
@@ -122,8 +127,8 @@ impl Resolver<'_> {
                 crate::diagnostic!("const.initializer", "cyclic constant dependency"),
             ));
         }
-        // Resolve every dependency, even in an unselected branch. Constant
-        // expression grammar, types and cycles are independent of short-circuiting.
+        // 選択されない分岐も含めて、すべての依存を解決する。
+        // 定数式の文法・型・循環の判定は短絡評価に左右されない。
         let mut names = Vec::new();
         dependencies(&declaration.initializer, &mut names)?;
         for (dependency, location) in names {
@@ -149,7 +154,7 @@ impl Resolver<'_> {
             name.to_owned(),
             Binding {
                 loop_variable: false,
-                // Constants are substituted as evaluated values, not local slots.
+                // 定数はローカル変数の格納先ではなく、評価済みの値として置き換える。
                 id: 0,
                 ty: value.ty,
                 mutable: false,
@@ -201,7 +206,7 @@ pub(super) fn resolve(
     for declaration in declarations {
         resolver.resolve(&declaration.name, declaration.location)?;
     }
-    // Constants are immutable and shared by all function scopes and substitutions.
+    // 定数は不変であり、すべての関数スコープと型の代入で共有する。
     resolver.bindings.constants = std::rc::Rc::new(std::mem::take(&mut resolver.bindings.locals));
     Ok((resolver.bindings, resolver.warnings))
 }

@@ -1,3 +1,7 @@
+//! 文字列から構造体へ変換するためのスキーマとCの補助関数を生成する。
+//!
+//! 利用元: [`crate::codegen`]、[`crate::codegen::casts`]。
+
 use super::{ExpressionContext, expressions::c_string};
 use crate::ast::{FloatType, Type};
 use std::{collections::BTreeMap, fmt::Write};
@@ -191,7 +195,7 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
         let ty = Type::Struct(*id);
         let slots = schema(c, ty, context, &mut emitted);
         writeln!(c, "static inline _Bool suz_parse_struct_{id}(suz_text_view input, suz_struct_{id} *output, suz_text_location location) {{\n    const char *bytes = suz_view_bytes(input);\n    suz_parsed_value values[{slots}];\n    if (!suz_parse_struct(bytes, suz_view_length(input), &suz_schema_struct_{id}, values)) return 0;\n    suz_struct_{id} result;").unwrap();
-        // Structures without text fields still use the same cast helper signature.
+        // 文字列フィールドを持たない構造体でも、同じ変換補助関数のシグネチャを使う。
         c.push_str("    (void)location;\n");
         assign(c, ty, "result", &mut 0, context);
         c.push_str("    *output = result;\n    return 1;\n}\n\n");

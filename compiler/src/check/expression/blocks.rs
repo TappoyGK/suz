@@ -1,3 +1,8 @@
+//! 値ブロックの文と末尾の値を検査し、外側の束縛の参照を捕捉する。型のヒント取得と実際の検査を分ける。
+//!
+//! 利用元: [`crate::check::expression`]。
+//! 主な対象規則: `[block.value]`。
+
 use super::{
     super::ir::{CheckedExpression, Value},
     super::statements,
@@ -12,8 +17,7 @@ use crate::{
 };
 use std::collections::BTreeSet;
 
-// Block-local IDs need only be distinct from captured IDs: each value block
-// becomes its own C function, with a separate local namespace.
+// 各値ブロックは独立したC関数になるため、ローカル番号は捕捉した番号とだけ区別できればよい。
 fn prefix(
     input: &[Statement],
     bindings: &mut Scope,
@@ -42,9 +46,8 @@ pub(super) fn has_float_source(input: &[Statement], value: &Expression, bindings
 }
 
 fn local_hints(input: &[Statement], bindings: &Scope) -> Scope {
-    // Discover only local types here. Running the statement checker would
-    // repeatedly construct the entire nested argument before checking it again.
-    // Names and values are validated once by check(); hints never report errors.
+    // ここではローカルの型だけを調べる。文の検査を呼ぶと、入れ子の引数全体を何度も構築・再検査してしまう。
+    // 名前と値はcheck()で一度だけ検査し、型のヒント取得ではエラーを報告しない。
     let mut local = bindings.clone();
     for statement in input {
         if let Statement::Binding {
@@ -110,8 +113,7 @@ pub(super) fn check(
     })
 }
 
-// Shadowing is forbidden, so references to an outer name always identify the
-// same binding, including references inside nested value blocks.
+// シャドーイングを禁止しているため、外側の名前への参照は、入れ子の値ブロック内でも同じ束縛を指す。
 struct References(BTreeSet<String>);
 impl Visitor for References {
     fn expression(&mut self, expr: &Expression) -> Result<(), Diagnostic> {

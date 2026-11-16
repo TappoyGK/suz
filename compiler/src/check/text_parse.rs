@@ -1,7 +1,11 @@
+//! 文字列からスカラー値への定数変換を、ランタイムと共通のCパーサーで評価する。
+//!
+//! 利用元: [`crate::check::constants`]。
+
 use super::ir::{CheckedExpression, Value};
 use crate::ast::{FloatType, IntegerType, Type};
 
-// The compiler and generated programs use the same allocation-free parser.
+// コンパイラと生成プログラムで、メモリ確保をしない同じパーサーを使う。
 pub(super) fn parse(text: &str, target: Type, wrap: bool) -> Option<CheckedExpression> {
     unsafe extern "C" {
         fn suz_parse_integer(
@@ -32,7 +36,7 @@ pub(super) fn parse(text: &str, target: Type, wrap: bool) -> Option<CheckedExpre
         Type::Integer(ty) => {
             let mut bits = 0_u64;
             let signed = ty.bounds().0 < 0;
-            // The byte slice and output remain live for the complete call.
+            // 呼び出しが終わるまで、バイト列と出力先は生存する。
             if !unsafe {
                 suz_parse_integer(
                     text.as_ptr(),
@@ -53,7 +57,7 @@ pub(super) fn parse(text: &str, target: Type, wrap: bool) -> Option<CheckedExpre
                 FloatType::F64 => 64,
             };
             let mut bits = 0_u64;
-            // The parser reads the live byte slice and writes one u64.
+            // パーサーは生存中のバイト列を読み、一つのu64を書き込む。
             if !unsafe { suz_parse_float_bits(text.as_ptr(), text.len() as u64, width, &mut bits) }
             {
                 return None;
@@ -62,7 +66,7 @@ pub(super) fn parse(text: &str, target: Type, wrap: bool) -> Option<CheckedExpre
         }
         Type::Bool => {
             let mut value = false;
-            // The parser reads exactly text.len() bytes and writes one bool.
+            // パーサーはtext.len()バイトだけを読み、一つのboolを書き込む。
             if !unsafe { suz_parse_bool(text.as_ptr(), text.len() as u64, &mut value) } {
                 return None;
             }

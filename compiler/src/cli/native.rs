@@ -1,3 +1,8 @@
+//! Clangと実行環境を確認し、生成Cのビルドと実行ファイルの公開を行う。
+//!
+//! 利用元: [`crate::cli`]。
+//! 主な対象規則: `[tool.build-settings]`、`[tool.c-compiler]`、`[tool.environment]`、`[tool.messages]`、`[tool.output]`、`[tool.prerequisites]`。
+
 use super::{
     Failure, Result,
     arguments::Options,

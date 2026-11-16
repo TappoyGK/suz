@@ -1,3 +1,7 @@
+//! 構造体のスキーマをCへ渡し、文字列から構造体への定数変換をランタイムと同じパーサーで評価する。
+//!
+//! 利用元: [`crate::check::constants`]。
+
 use super::{
     ir::{CheckedExpression, Value},
     scope::Scope,
@@ -35,7 +39,7 @@ struct RawValue {
 
 #[derive(Default)]
 struct Schema {
-    // Boxes and CStrings retain their addresses while these vectors grow.
+    // ベクターが伸びても、BoxとCStringの指す領域のアドレスは変わらない。
     types: Vec<(Type, Box<RawType>)>,
     fields: Vec<Box<[RawField]>>,
     names: Vec<CString>,
@@ -141,7 +145,7 @@ pub(super) fn parse(text: &str, id: usize, scope: &Scope) -> Option<CheckedExpre
     let mut schema = Schema::default();
     let (root, slots) = schema.build(Type::Struct(id), scope);
     let mut values = vec![RawValue::default(); slots];
-    // Every schema pointer and the complete output array remain live for the call.
+    // 呼び出し中は、すべてのスキーマの参照先と出力配列全体が生存する。
     if !unsafe { suz_parse_struct(text.as_ptr(), text.len() as u64, root, values.as_mut_ptr()) } {
         return None;
     }
@@ -178,7 +182,7 @@ pub(super) fn parse(text: &str, id: usize, scope: &Scope) -> Option<CheckedExpre
                     .get(raw.start as usize..(raw.start + raw.length) as usize)?;
                 let mut decoded = vec![0_u8; input.len()];
                 let (mut consumed, mut length) = (0, 0);
-                // Validation established this quoted span; output has input.len() bytes.
+                // この引用付き範囲は検証済みで、出力先にはinput.len()バイトある。
                 let valid = unsafe {
                     suz_parse_string(
                         input.as_ptr(),

@@ -1,3 +1,7 @@
+//! 検査済み関数の宣言・定義・呼び出しを生成する。関数番号と引数型をCの名前と型へ写す。
+//!
+//! 利用元: [`crate::codegen`]。
+
 use super::{ExpressionContext, expressions::expression, statements};
 use crate::{
     ast::Type,
@@ -36,7 +40,7 @@ pub(super) fn emit(function: &CheckedFunction, context: &mut ExpressionContext) 
     statements::emit_block(&mut body, &function.statements, 1, &mut 0, context);
     let mut c = format!("{} {{\n", declaration(function));
     for id in 0..function.parameters.len() {
-        // Unused parameters are permitted in Suz; silence the C compiler.
+        // Suzでは未使用の引数を認めるため、Cコンパイラの警告を抑える。
         writeln!(c, "    (void)suz_local_{id};").unwrap();
     }
     for (index, ty) in context.temporaries.iter().enumerate() {

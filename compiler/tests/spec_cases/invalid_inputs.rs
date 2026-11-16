@@ -36,7 +36,7 @@ fn damaged_catalog_inputs_do_not_panic_or_lose_diagnostic_rules() {
     let mut checked = 0;
     for (id, case) in crate::catalog() {
         for offset in 0..case.bytes.len() {
-            // Byte deletion also exercises broken UTF-8 inside comments/templates.
+            // バイト削除により、コメントやテンプレート内の壊れたUTF-8も試す。
             let mut input = case.bytes.clone();
             input.remove(offset);
             check(&input, &id, "delete", offset, &rules);

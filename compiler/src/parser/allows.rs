@@ -1,3 +1,8 @@
+//! allowの規則名と理由を読み、抑制範囲にブロックが含まれるかを調べる。
+//!
+//! 利用元: [`crate::parser`]。
+//! 主な対象規則: `[allow.contains-block]`、`[allow.item]`、`[allow.reason]`、`[allow.rule-check]`、`[diagnostic.arithmetic]`、`[diagnostic.constant-comparison]`。
+
 use super::{FixedToken, Parser};
 use crate::{
     Diagnostic, ErrorKind,

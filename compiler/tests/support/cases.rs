@@ -220,7 +220,7 @@ pub fn extract(markdown: &str) -> Result<BTreeMap<String, Source>> {
      -> Result<()> {
         let mut parts = title.splitn(2, char::is_whitespace);
         let id = parts.next().unwrap_or_default();
-        // A primary-rule label also identifies a case with a malformed ID.
+        // 主根拠のラベルがあれば、IDが不正でも例として識別する。
         if !valid_id(id) && !has_rule {
             return Ok(());
         }
