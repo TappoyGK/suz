@@ -289,9 +289,6 @@ impl Widening {
                 Self::FloatDestination => to.is_float(),
             } && super::exact::widening(from, to))
     }
-    fn possible(self, from: Type, to: Type) -> bool {
-        domain::judge(from, to, |from, to| self.accepts(from, to)).possible()
-    }
 }
 
 pub(super) fn floating_operand(
@@ -435,21 +432,31 @@ fn expression_inner(
 
     let generic_result = matches!(&expr.kind, ExpressionKind::Call { name, .. }
         if bindings.functions.get(name).is_some_and(|f| f.result.generic()));
-    if let Some(to) = required
-        && (to.symbolic() || checked.ty.symbolic())
-        && widen.possible(checked.ty, to)
-    {
-        bindings.defer_rule(|i| {
-            let (from, to) = (domain::at(checked.ty, i)?, domain::at(to, i)?);
-            (!widen.accepts(from, to)).then(|| {
-                conversion_error(expr.location, from, to, argument, generic_result, bindings)
-            })
+    let conversion = required.map(|to| {
+        if checked.ty == to {
+            (domain::Judgment::Valid, 0)
+        } else {
+            domain::judge_with_failures(checked.ty, to, |from, to| widen.accepts(from, to))
+        }
+    });
+    if let Some((domain::Judgment::Deferred, failures)) = conversion {
+        let (from, to, location) = (checked.ty, required.unwrap(), expr.location);
+        bindings.defer_check(failures, move |i| {
+            let (from, to) = (domain::at(from, i).unwrap(), domain::at(to, i).unwrap());
+            conversion_error(
+                location,
+                from,
+                to,
+                argument,
+                generic_result,
+                from.name(),
+                to.name(),
+            )
         });
     }
-
     if let Some(ty) = required
         && ty != checked.ty
-        && widen.possible(checked.ty, ty)
+        && conversion.is_some_and(|(judgment, _)| judgment.possible())
     {
         return Ok(CheckedExpression {
             ty,
@@ -469,7 +476,8 @@ fn expression_inner(
             required.unwrap(),
             argument,
             generic_result,
-            bindings,
+            bindings.type_name(checked.ty),
+            bindings.type_name(required.unwrap()),
         ));
     }
     Ok(checked)
@@ -481,7 +489,8 @@ fn conversion_error(
     to: Type,
     argument: Option<super::generic::Family>,
     generic_result: bool,
-    bindings: &Scope,
+    from_name: &str,
+    to_name: &str,
 ) -> Diagnostic {
     if Type::is_numeric(from) && Type::is_numeric(to) && (argument.is_some() || generic_result) {
         let message = if argument == Some(super::generic::Family::Int) && from.is_float() {
@@ -499,25 +508,20 @@ fn conversion_error(
                 } else {
                     "generic result"
                 },
-                bindings.type_name(from),
+                from_name,
                 if argument.is_some() {
                     "passed"
                 } else {
                     "received"
                 },
-                bindings.type_name(to)
+                to_name
             )
         };
         return location.error(ErrorKind::InvalidSource, message);
     }
     location.error(
         ErrorKind::InvalidSource,
-        crate::diagnostic!(
-            "type.expected",
-            "expected {}, found {}",
-            bindings.type_name(to),
-            bindings.type_name(from)
-        ),
+        crate::diagnostic!("type.expected", "expected {}, found {}", to_name, from_name),
     )
 }
 

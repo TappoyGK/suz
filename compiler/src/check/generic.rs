@@ -238,7 +238,7 @@ pub(super) fn resolve(
                 })?,
             });
         }
-        if let Some(ty) = joined {
+        if let Some(ty @ Type::Numeric(_)) = joined {
             scope.defer_rule(|i| {
                 domain::at(ty, i).is_none().then(|| {
                     location.error(

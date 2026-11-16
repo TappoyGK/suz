@@ -697,6 +697,25 @@ fn forward_generic_errors_respect_declaration_and_call_order() {
     assert_eq!(error.related.len(), 2);
     assert_eq!(error.related[0].rule(), "num.fn-body");
     assert_eq!(error.related[1].rule(), "type.expected");
+    // Only judgments encountered before the first universal error are retained.
+    let error = marked_error(
+        "fn main() -> u8 { fix n: u8 = 1\nfix k = @f(n)\nreturn 0 }\nfn f(n: int) -> int { fix y = n +% 300\nfix z: bool = 1\nreturn n }",
+        "num.fn-body",
+    );
+    assert_eq!(error.related.len(), 1);
+    assert_eq!(
+        (
+            error.related[0].rule(),
+            error.related[0].line,
+            error.related[0].column
+        ),
+        ("lit.range", 4, 36)
+    );
+    let error = marked_error(
+        "fn main() -> u8 { fix n: u8 = 1\nfix k = f(n)\nreturn 0 }\nfn f(n: int) -> int { fix z: bool = @1\nfix y = n +% 300\nreturn n }",
+        "type.expected",
+    );
+    assert!(error.related.is_empty());
     // Without an earlier caller error, the cached declaration error is reported.
     marked_error(
         "fn main() -> u8 { fix n = f(1)\nreturn 0 }\nfn f(n: int) -> int { fix small = n @as u8\nreturn true }",

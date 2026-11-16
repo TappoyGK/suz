@@ -93,33 +93,45 @@ impl Judgment {
 }
 
 // [num.fn-check-judge]: all valid, all invalid, or deferred until instantiation.
-pub(crate) fn judge(a: Type, b: Type, mut predicate: impl FnMut(Type, Type) -> bool) -> Judgment {
+pub(crate) fn judge(a: Type, b: Type, predicate: impl FnMut(Type, Type) -> bool) -> Judgment {
+    judge_with_failures(a, b, predicate).0
+}
+
+pub(crate) fn judge_with_failures(
+    a: Type,
+    b: Type,
+    mut predicate: impl FnMut(Type, Type) -> bool,
+) -> (Judgment, u16) {
     if !a.symbolic() && !b.symbolic() {
         return if predicate(a, b) {
-            Judgment::Valid
+            (Judgment::Valid, 0)
         } else {
-            Judgment::Invalid
+            (Judgment::Invalid, u16::MAX)
         };
     }
-    let (mut yes, mut no) = (false, false);
+    let mut yes = false;
+    let mut failures = 0;
     for i in indices() {
         if let (Some(a), Some(b)) = (at(a, i), at(b, i)) {
             if predicate(a, b) {
                 yes = true;
             } else {
-                no = true;
+                failures |= 1 << i;
             }
         }
     }
-    match (yes, no) {
-        (true, false) => Judgment::Valid,
-        (true, true) => Judgment::Deferred,
-        _ => Judgment::Invalid,
-    }
+    (
+        match (yes, failures != 0) {
+            (true, false) => Judgment::Valid,
+            (true, true) => Judgment::Deferred,
+            _ => Judgment::Invalid,
+        },
+        failures,
+    )
 }
 
 pub(crate) fn same(a: Type, b: Type) -> bool {
-    judge(a, b, |a, b| a == b).possible()
+    a == b || judge(a, b, |a, b| a == b).possible()
 }
 
 pub(crate) fn bounds(ty: Type) -> Option<(i128, i128)> {

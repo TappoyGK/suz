@@ -124,12 +124,15 @@ pub(super) fn check(
                     )
                 })
             };
-            if !domain::judge_one(ty, |ty| type_error(ty).is_none()).possible() {
+            let judgment = domain::judge_one(ty, |ty| type_error(ty).is_none());
+            if !judgment.possible() {
                 return Err(domain::indices()
                     .find_map(|i| type_error(domain::at(ty, i)?))
                     .expect("invalid operator type has a diagnostic"));
             }
-            bindings.defer_rule(|i| type_error(domain::at(ty, i)?));
+            if judgment == domain::Judgment::Deferred {
+                bindings.defer_rule(|i| type_error(domain::at(ty, i)?));
+            }
             let value = match &expr.kind {
                 ExpressionKind::Negate(inner) => {
                     let operand = Box::new(numeric_operand(inner, ty, bindings)?);
@@ -339,7 +342,7 @@ fn same_width(
     location: crate::ast::Location,
     bindings: &Scope,
 ) -> Result<(), Diagnostic> {
-    let Some(from) = known else {
+    let Some(from) = known.filter(|from| *from != ty) else {
         return Ok(());
     };
     let error = || {
@@ -351,10 +354,11 @@ fn same_width(
             ),
         )
     };
-    if !domain::judge(from, ty, |from, to| !to.is_integer() || from == to).possible() {
+    let judgment = domain::judge(from, ty, |from, to| !to.is_integer() || from == to);
+    if !judgment.possible() {
         return Err(error());
     }
-    if from.symbolic() || ty.symbolic() {
+    if judgment == domain::Judgment::Deferred {
         bindings.defer_rule(|i| {
             let (from, to) = (domain::at(from, i)?, domain::at(ty, i)?);
             (to.is_integer() && from != to).then(error)
@@ -370,7 +374,7 @@ fn numeric_operand(
     bindings: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
     if !super::super::exact::is_operator(expr)
-        && let Some(from) = operand_type(expr, bindings)
+        && let Some(from) = operand_type(expr, bindings).filter(|from| *from != ty)
     {
         let compatible = |from: Type, to: Type| {
             !(from.is_integer() && to.is_float()) || super::super::exact::widening(from, to)
@@ -384,11 +388,15 @@ fn numeric_operand(
                 ),
             )
         };
-        if !domain::judge(from, ty, compatible).possible() {
+        let judgment = domain::judge(from, ty, compatible);
+        if !judgment.possible() {
             return Err(error());
         }
-        bindings
-            .defer_rule(|i| (!compatible(domain::at(from, i)?, domain::at(ty, i)?)).then(error));
+        if judgment == domain::Judgment::Deferred {
+            bindings.defer_rule(|i| {
+                (!compatible(domain::at(from, i)?, domain::at(ty, i)?)).then(error)
+            });
+        }
     }
     let checked = super::floating_operand(expr, ty, bindings)?;
     if ty.is_float()

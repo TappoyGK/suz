@@ -171,9 +171,13 @@ fn check_instances(
                 );
             }
             Task::Deferred(instance, analysis, index) => match &analysis.deferred[index] {
-                super::generic::Deferred::Rule(errors) => {
-                    if let Some(error) = &errors[instance.types.index()] {
-                        return Err(instance_error(program, &instance, error.clone()));
+                super::generic::Deferred::Rule {
+                    failures,
+                    diagnostic,
+                } => {
+                    let index = instance.types.index();
+                    if failures & (1 << index) != 0 {
+                        return Err(instance_error(program, &instance, diagnostic(index)));
                     }
                 }
                 super::generic::Deferred::Call {

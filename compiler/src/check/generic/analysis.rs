@@ -11,6 +11,10 @@ pub(crate) fn analyze(function: &Function, globals: &Scope) -> super::Analysis {
     let deferred = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     scope.deferred = Some(deferred.clone());
     let result = functions::check_function(function, scope, 0).map(|(_, warnings)| warnings);
-    let deferred = deferred.take();
+    let deferred = if result.is_err() {
+        deferred.take()
+    } else {
+        Vec::new()
+    };
     super::Analysis { result, deferred }
 }

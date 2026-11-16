@@ -134,7 +134,7 @@ pub(in crate::check) fn check(
                     crate::diagnostic!("expr.as", "invalid source and target types for as"),
                 ));
             }
-            if operand.ty.symbolic() || target.symbolic() {
+            if validity == domain::Judgment::Deferred {
                 bindings.defer_rule(|i| {
                     conversion_safety(domain::at(operand.ty, i)?, domain::at(target, i)?)
                         .is_none()

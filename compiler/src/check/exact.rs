@@ -286,39 +286,41 @@ pub(super) fn check(
             value: Value::Exact(Box::new(exact)),
         });
     }
-    let storage_error = |i| {
-        let ty = domain::at(ty, i)?;
-        let range = exact.range_at(i).ok()?;
-        match ty {
-            Type::Integer(_) => None,
-            Type::Float(float) => range
-                .is_some_and(|r| !r.exact_float(float == FloatType::F32))
-                .then(|| {
-                    exact.location.error(
-                        ErrorKind::InvalidSource,
-                        crate::diagnostic!(
-                            "arith.store-float",
-                            "integer range is not exactly representable; use as"
-                        ),
-                    )
-                }),
-            _ => Some(expr.location.error(
-                ErrorKind::InvalidSource,
-                crate::diagnostic!(
-                    "type.expected",
-                    "integer arithmetic requires a numeric destination"
-                ),
-            )),
+    if !ty.is_integer() {
+        let storage_error = |i| {
+            let ty = domain::at(ty, i)?;
+            let range = exact.range_at(i).ok()?;
+            match ty {
+                Type::Integer(_) => None,
+                Type::Float(float) => range
+                    .is_some_and(|r| !r.exact_float(float == FloatType::F32))
+                    .then(|| {
+                        exact.location.error(
+                            ErrorKind::InvalidSource,
+                            crate::diagnostic!(
+                                "arith.store-float",
+                                "integer range is not exactly representable; use as"
+                            ),
+                        )
+                    }),
+                _ => Some(expr.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "type.expected",
+                        "integer arithmetic requires a numeric destination"
+                    ),
+                )),
+            }
+        };
+        // Missing type/range entries belong to an earlier deferred failure.
+        if !domain::any(|i| {
+            domain::at(ty, i).is_some() && exact.range_at(i).is_ok() && storage_error(i).is_none()
+        }) && let Some(error) = domain::indices().find_map(storage_error)
+        {
+            return Err(error);
         }
-    };
-    // Missing type/range entries belong to an earlier deferred failure.
-    if !domain::any(|i| {
-        domain::at(ty, i).is_some() && exact.range_at(i).is_ok() && storage_error(i).is_none()
-    }) && let Some(error) = domain::indices().find_map(storage_error)
-    {
-        return Err(error);
+        bindings.defer_rule(storage_error);
     }
-    bindings.defer_rule(storage_error);
     let location = exact.location;
     Ok(CheckedExpression {
         ty,
