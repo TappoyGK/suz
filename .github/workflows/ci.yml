@@ -77,6 +77,11 @@ jobs:
           clang --version
           xcrun --show-sdk-version
 
+      - name: Check implementation rules
+        run: |
+          python3 scripts/test-implementation.py
+          python3 scripts/check-implementation.py
+
       - name: Check formatting and lint
         if: github.event_name == 'pull_request'
         run: |

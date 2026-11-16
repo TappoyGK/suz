@@ -2,6 +2,21 @@
 
 リリース全体の操作は[リリース手順](../../docs/releasing.md)に従う。
 
+## 実装規則の検査
+
+[実装規則](../../docs/implementation.md)の `[impl.file-length]` と `[impl.exceptions]` は、次のコマンドで検査する。Python 3.11以上とGitを使う。
+
+```sh
+python3 scripts/test-implementation.py
+python3 scripts/check-implementation.py
+```
+
+最初のコマンドは検査処理の回帰テスト、次のコマンドはリポジトリの検査を行う。CIの `work checks` とリリース検査でも両方を実行する。
+
+対象は `compiler/` のRustファイルと、第三者のコードを除く `runtime/` のCソース・ヘッダーである。Gitの管理対象に加え、無視されていない未追跡ファイルも検査する。文字列内のコメント記号をコードとして扱い、空行とコメントだけの行を除いて数える。
+
+例外は [implementation-exceptions.toml](implementation-exceptions.toml) に記す。上限を超えたファイル、記録の誤記や重複、削除済みのファイルに対する例外、500コード行以下になったファイルに対する例外は、検査を失敗させる。例外の追加・変更・削除は `[impl.exceptions]` の手続きに従う。
+
 ## 実行方法
 
 リポジトリのルートで実行する。
