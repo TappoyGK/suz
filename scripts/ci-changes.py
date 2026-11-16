@@ -27,6 +27,20 @@ def changed_paths(event_name, event):
         pr = event['pull_request']
         revision = f"{pr['base']['sha']}...{pr['head']['sha']}"
     elif event_name == 'push' and event.get('before', '').strip('0'):
+        base = subprocess.run(
+            ['git', 'rev-parse', '--verify', '--quiet', f"{event['before']}^{{commit}}"],
+            capture_output=True,
+        )
+        if base.returncode == 1:
+            # 履歴を戻したpushでは、比較元が取得した履歴に含まれないことがある。
+            # 現在のコミットが有効な場合だけ、変更の絞り込みをやめて全検査する。
+            subprocess.run(
+                ['git', 'rev-parse', '--verify', f"{event['after']}^{{commit}}"],
+                check=True, capture_output=True,
+            )
+            print('Push base commit is unavailable; running full checks.')
+            return None
+        base.check_returncode()
         revision = f"{event['before']}..{event['after']}"
     else:
         # Manual runs and newly created branches always receive full checks.

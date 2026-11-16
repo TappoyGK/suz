@@ -2,6 +2,7 @@
 """Regression checks for CI filtering and Git change detection."""
 
 import importlib.util
+import json
 from pathlib import Path
 import subprocess
 import tempfile
@@ -58,8 +59,25 @@ class ChangeTests(unittest.TestCase):
                         paths = ci.changed_paths(name, event)
                         self.assertEqual(set(paths), {'source.c', 'README.md'})
                         self.assertTrue(ci.requires_checks(paths))
+                self.assertIsNone(ci.changed_paths('push', {'before': 'f' * 40, 'after': head}))
+                event_file = Path(directory, 'event.json')
+                output_file = Path(directory, 'output.txt')
+                event_file.write_text(json.dumps({'before': 'f' * 40, 'after': head}))
+                with patch.dict('os.environ', {'GITHUB_EVENT_NAME': 'push',
+                                               'GITHUB_EVENT_PATH': str(event_file),
+                                               'GITHUB_OUTPUT': str(output_file)}):
+                    ci.main()
+                self.assertEqual(output_file.read_text(), 'required=true\n')
+                for event in [
+                    {'before': base, 'after': 'f' * 40},
+                    {'before': 'e' * 40, 'after': 'f' * 40},
+                ]:
+                    with self.subTest(event=event), self.assertRaises(subprocess.CalledProcessError):
+                        ci.changed_paths('push', event)
                 with self.assertRaises(subprocess.CalledProcessError):
-                    ci.changed_paths('push', {'before': 'f' * 40, 'after': head})
+                    ci.changed_paths('pull_request', {
+                        'pull_request': {'base': {'sha': 'f' * 40}, 'head': {'sha': head}},
+                    })
 
 
 if __name__ == '__main__':
