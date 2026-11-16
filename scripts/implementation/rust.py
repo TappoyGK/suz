@@ -1,4 +1,4 @@
-"""Rust構文に基づく実装規則の検査と、診断箇所の対応表の生成。"""
+"""Rust構文に基づく実装規則の検査。"""
 
 from collections import defaultdict
 import json
@@ -8,9 +8,8 @@ import subprocess
 
 from .check import EXCEPTIONS, read_exceptions, repository_files
 
-INDEX = 'compiler/tests/implementation-rule-index.json'
 MANIFEST = 'scripts/rust-implementation/Cargo.toml'
-RULES = {'impl.layers', 'impl.format', 'impl.module-doc', 'impl.rule-index', 'impl.diagnostic', 'impl.no-silent'}
+RULES = {'impl.layers', 'impl.format', 'impl.module-doc', 'impl.rule-site', 'impl.diagnostic', 'impl.no-silent'}
 LINTS = ('let_underscore_must_use', 'unused_result_ok', 'map_err_ignore')
 RULE_ID = re.compile(r'\[([a-z][a-z0-9-]*(?:\.[a-z0-9-]+)+)\]')
 
@@ -159,9 +158,9 @@ def condition(site):
 
 
 def structural_checks(sources, reports):
-    """違反の識別子と、例外適用前の診断対応表を生成する。"""
+    """ソースから違反を検出し、検査した診断箇所の数とともに返す。"""
     production = module_files(reports)
-    violations, index = {}, []
+    violations, diagnostic_count = {}, 0
 
     def add(rule, name, item, line, message):
         violations[(rule, name, item)] = f'{name}:{line}: {message} [{rule}]'
@@ -181,15 +180,12 @@ def structural_checks(sources, reports):
             add('impl.module-doc', name, None, 1, 'Missing leading //! module documentation')
         for site in report['diagnostics']:
             explanation = condition(site)
-            row = {key: site[key] for key in ('item', 'kind', 'rule', 'rule_expression', 'line', 'column')}
-            row.update(path=name, stage=category(production[name] + tuple(site['module']))[2], condition=explanation)
-            index.append(row)
+            diagnostic_count += 1
             if not site['rule'] or not RULE_ID.fullmatch(f'[{site["rule"]}]') or not explanation:
-                add('impl.rule-index', name, site['item'], site['line'], 'Missing literal rule ID or condition comment')
+                add('impl.rule-site', name, site['item'], site['line'], 'Missing literal rule ID or condition comment')
             if any(RULE_ID.search(s) for s in site['strings']):
                 add('impl.diagnostic', name, site['item'], site['line'], 'Rule ID embedded in diagnostic message')
-    index.sort(key=lambda row: (row['path'], row['line'], row['column'], row['item']))
-    return violations, index
+    return violations, diagnostic_count
 
 
 def clippy_diagnostics(output, reports=None):
@@ -236,18 +232,6 @@ def clippy_checks(root, reports):
     if result.returncode:
         errors.append(f'Clippy failed ({result.returncode}):\n{result.stderr}')
     return violations, errors
-
-
-def check_index(root, index, *, write=False):
-    """抽出した全診断箇所と保存済みの対応表を照合する。更新は明示した場合だけ行う。"""
-    rendered = json.dumps(index, ensure_ascii=False, indent=2) + '\n'
-    target = root / INDEX
-    if write:
-        target.write_text(rendered, encoding='utf-8')
-        return []
-    if not target.is_file() or target.read_text(encoding='utf-8') != rendered:
-        return [f'{INDEX}: diagnostic index is stale; run with --write-index [impl.rule-index]']
-    return []
 
 
 def apply_exceptions(violations, entries):
@@ -299,10 +283,10 @@ def inspect(root):
     sources = {name: (root / name).read_text(encoding='utf-8')
                for name in sorted(files) if name.startswith('compiler/') and name.endswith('.rs')}
     reports = syntax(root, sources)
-    violations, index = structural_checks(sources, reports)
+    violations, diagnostic_count = structural_checks(sources, reports)
     lint_violations, errors = clippy_checks(root, reports)
     violations.update(lint_violations)
     rules = set(re.findall(r'\*\*\[(impl\.[a-z-]+)\]\*\*', (root / 'docs/implementation.md').read_text()))
     entries = []
     read_exceptions((root / EXCEPTIONS).read_text(), rules, files=files, entries=entries)
-    return violations, index, entries, errors
+    return violations, diagnostic_count, entries, errors

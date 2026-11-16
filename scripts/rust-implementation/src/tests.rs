@@ -47,7 +47,7 @@ fn g() { Diagnostic::new(k, 1, 2, rule, format!("\u{5b}bad.rule]")); }
             .any(|s| s.as_str().unwrap().contains("条件を確認する"))
     );
     assert!(rows[1]["rule"].is_null());
-    assert_eq!(rows[1]["rule_expression"], "rule");
+    assert_eq!(rows[1]["item"], "g:Diagnostic::new:rule#1");
     assert!(
         rows[1]["strings"]
             .as_array()

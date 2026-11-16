@@ -269,9 +269,8 @@ impl Scanner<'_> {
         let ordinal = self.ordinals.entry(key.clone()).or_default();
         *ordinal += 1;
         self.diagnostics
-            .push(json!({"item": format!("{key}#{ordinal}"), "kind": kind,
-            "rule": rule, "rule_expression": expression, "line": span.start().line,
-            "column": span.start().column + 1, "scope": self.scope, "module": self.module,
+            .push(json!({"item": format!("{key}#{ordinal}"),
+            "rule": rule, "line": span.start().line,
             "comment": preceding_comment(self.source, span, true), "function_doc": self.function_doc,
             "context_comments": self.comments.iter().rev().cloned().collect::<Vec<_>>(),
             "strings": strings.0}));

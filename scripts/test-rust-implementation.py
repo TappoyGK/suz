@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
-"""[impl.*] Rust構文からの規則判定、診断対応表、例外の有効範囲を検証する。"""
+"""[impl.*] Rust構文からの規則判定と例外の有効範囲を検証する。"""
 
 from pathlib import Path
 import json
 import sys
-import tempfile
 import unittest
 
 sys.dont_write_bytecode = True
 
-from implementation.rust import INDEX, LINTS, apply_exceptions, check_index, clippy_diagnostics, condition, structural_checks, syntax
+from implementation.rust import LINTS, apply_exceptions, clippy_diagnostics, condition, structural_checks, syntax
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -75,8 +74,8 @@ class RustRuleTests(unittest.TestCase):
         violations, _ = self.check({'compiler/src/lib.rs': '// ordinary\n//! Late。\n'})
         self.assertIn(('impl.module-doc', 'compiler/src/lib.rs', None), violations)
 
-    def test_diagnostic_index_contains_each_site_and_condition(self):
-        violations, index = self.check({'compiler/src/lib.rs': '''//! Root。
+    def test_diagnostic_sites_require_literal_rules_and_conditions(self):
+        violations, count = self.check({'compiler/src/lib.rs': '''//! Root。
 fn f() {
     // [a.b] 条件を判定する。
     return Err(crate::diagnostic!("a.b", "message"));
@@ -85,18 +84,15 @@ fn f() {
 fn g() { Diagnostic::new(k, 1, 2, "c.d", "message"); }
 '''})
         self.assertEqual(violations, {})
-        self.assertEqual([r['rule'] for r in index], ['a.b', 'c.d'])
-        self.assertTrue(all(row['condition'] and row['path'] and row['stage'] for row in index))
-        self.assertEqual(len({row['item'] for row in index}), 2)
+        self.assertEqual(count, 2)
 
     def test_dynamic_rules_and_missing_conditions_are_recorded_as_violations(self):
-        violations, index = self.check({'compiler/src/lib.rs': '''//! Root。
+        violations, count = self.check({'compiler/src/lib.rs': '''//! Root。
 fn f() { diagnostic!(rule, "message"); diagnostic!("a.b", "message"); }
 '''})
-        self.assertEqual(len(index), 2)
+        self.assertEqual(count, 2)
         self.assertEqual(len(violations), 2)
-        self.assertIsNone(index[0]['rule'])
-        self.assertEqual(index[0]['rule_expression'], 'rule')
+        self.assertTrue(all(rule == 'impl.rule-site' for rule, _, _ in violations))
 
     def test_embedded_rule_ids_in_diagnostic_messages_only(self):
         violations, _ = self.check({'compiler/src/lib.rs': r'''//! Root。
@@ -119,7 +115,7 @@ fn h() { let text = "#[rustfmt::skip]"; }
         self.assertEqual(sum(rule == 'impl.format' for rule, _, _ in violations), 1)
 
     def test_rule_ids_embedded_through_format_arguments_are_rejected(self):
-        violations, index = self.check({'compiler/src/lib.rs': r'''//! Root。
+        violations, count = self.check({'compiler/src/lib.rs': r'''//! Root。
 fn f() {
     // [a.b] 条件を確認する。
     diagnostic!("a.b", "message {}", "[a.b]");
@@ -127,36 +123,44 @@ fn f() {
     diagnostic!("a.c", "message {detail}", detail = concat!("[a", ".c]"));
 }
 '''})
-        self.assertEqual(len(index), 2)
+        self.assertEqual(count, 2)
         self.assertEqual(len(violations), 2)
         self.assertTrue(all(rule == 'impl.diagnostic' for rule, _, _ in violations))
 
     def test_exceptions_match_one_violation_and_fail_after_resolution(self):
-        key = ('impl.rule-index', 'compiler/src/lib.rs', 'f:diagnostic!:a.b#1')
+        key = ('impl.rule-site', 'compiler/src/lib.rs', 'f:diagnostic!:a.b#1')
         entry = dict(rule=key[0], path=key[1], item=key[2], reason='段階5で対応する。')
         self.assertEqual(apply_exceptions({key: 'missing'}, [entry]), [])
         self.assertEqual(apply_exceptions({key: 'missing'}, []), ['missing'])
         self.assertIn('obsolete or unmatched', apply_exceptions({}, [entry])[0])
-        other = ('impl.rule-index', key[1], 'g:diagnostic!:a.b#1')
+        other = ('impl.rule-site', key[1], 'g:diagnostic!:a.b#1')
         self.assertEqual(apply_exceptions({key: 'missing', other: 'new'}, [entry]), ['new'])
 
     def test_wrong_rule_comment_does_not_fill_condition(self):
         self.assertIsNone(condition(dict(rule='a.b', comment='[a.c] 別の規則。', function_doc='')))
 
-    def test_saved_index_rejects_missing_changed_and_extra_rows(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / INDEX).parent.mkdir(parents=True)
-            rows = [{'rule': 'a.b', 'condition': '条件。', 'path': 'compiler/src/lib.rs', 'line': 3}]
-            self.assertTrue(check_index(root, rows))
-            self.assertEqual(check_index(root, rows, write=True), [])
-            self.assertEqual(check_index(root, rows), [])
-            self.assertTrue(check_index(root, []))
-            self.assertTrue(check_index(root, rows + rows))
-            self.assertTrue(check_index(root, [dict(rows[0], condition='別の条件。')]))
+    def test_diagnostic_line_moves_preserve_exceptions_and_new_missing_comments_fail(self):
+        name = 'compiler/src/lib.rs'
+        source = '//! Root.\nfn existing() { diagnostic!("a.b", "message"); }\n'
+        violations, count = self.check({name: source})
+        self.assertEqual(count, 1)
+        entries = [dict(rule=r, path=p, item=i) for r, p, i in violations]
+        self.assertEqual(entries[0]['rule'], 'impl.rule-site')
+        for extra in ('\n', '// 無関係なコメント。\n', 'fn unrelated() {}\n'):
+            moved = source.replace('fn existing', extra + 'fn existing')
+            shifted, count = self.check({name: moved})
+            self.assertEqual(count, 1)
+            self.assertEqual(set(shifted), set(violations))
+            self.assertEqual(apply_exceptions(shifted, entries), [])
+            added, count = self.check({name: moved + 'fn added() { diagnostic!("c.d", "message"); }'})
+            self.assertEqual(count, 2)
+            errors = apply_exceptions(added, entries)
+            self.assertEqual(len(errors), 1)
+            self.assertIn('Missing literal rule ID or condition comment', errors[0])
+            self.assertIn('[impl.rule-site]', errors[0])
 
-    def test_self_constructor_is_indexed_and_message_is_checked(self):
-        violations, index = self.check({'compiler/src/lib.rs': """//! Root.
+    def test_self_constructor_rule_and_message_are_checked(self):
+        violations, count = self.check({'compiler/src/lib.rs': """//! Root.
 impl Diagnostic {
     fn mk() -> Self {
         // [lex.x] cond
@@ -165,8 +169,7 @@ impl Diagnostic {
 }
 impl Other { fn mk() { Self::new(a, b, c, "lex.x", "bad [lex.x]"); } }
 """})
-        self.assertEqual(len(index), 1)
-        self.assertEqual(index[0]['condition'], 'cond')
+        self.assertEqual(count, 1)
         self.assertEqual([r for r, _, _ in violations], ['impl.diagnostic'])
 
     def test_reasonless_lint_suppression_is_rejected(self):
