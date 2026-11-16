@@ -31,7 +31,6 @@ fn main() {
             .args([
                 "-std=c23",
                 "-O2",
-                "-ffp-model=strict",
                 "-ffp-contract=off",
                 "-fdenormal-fp-math=ieee",
             ])

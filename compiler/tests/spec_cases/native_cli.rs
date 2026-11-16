@@ -10,7 +10,7 @@ fn command(directory: &Path) -> Command {
     command
         .current_dir(directory)
         .env("TMPDIR", directory.join("temporary"));
-    for name in ["CFLAGS", "CPPFLAGS", "LDFLAGS"] {
+    for name in ["CFLAGS", "CPPFLAGS", "LDFLAGS", "SUZ_CFLAGS"] {
         command.env_remove(name);
     }
     command
@@ -110,7 +110,7 @@ fn native_settings_and_input_aliases_are_rejected_before_compilation() {
             .unwrap(),
         2,
     );
-    for variable in ["CFLAGS", "CPPFLAGS", "LDFLAGS"] {
+    for variable in ["CFLAGS", "CPPFLAGS", "LDFLAGS", "SUZ_CFLAGS"] {
         let result = code(
             command(&directory.0)
                 .env(variable, "-ffast-math")
@@ -119,7 +119,13 @@ fn native_settings_and_input_aliases_are_rejected_before_compilation() {
                 .unwrap(),
             2,
         );
-        assert!(String::from_utf8_lossy(&result.stderr).contains("[tool.build-settings]"));
+        assert!(
+            String::from_utf8_lossy(&result.stderr).contains(if variable == "SUZ_CFLAGS" {
+                "[tool.extra-flags]"
+            } else {
+                "[tool.build-settings]"
+            })
+        );
     }
     let result = code(
         command(&directory.0)

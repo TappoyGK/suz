@@ -106,7 +106,22 @@ cd generated
 
 **[tool.environment]** `--env` のCソースは、ランタイム仕様の環境関数を実装する。`build` と `run` はそのファイルを標準環境層の代わりにリンクする。`emit-c` はその内容を出力先の `runtime/suz_env.c` に収録する。環境層のコンパイルには同梱の `suz_env.h` を使う。
 
-**[tool.build-settings]** C23と厳密な浮動小数点演算を使い、積和の縮約を停止し、非正規化数をIEEEの規則で扱う。Clangへの数値関連オプションはSuzが固定する。具体的には `-ffp-model=strict`、`-ffp-contract=off`、`-fdenormal-fp-math=ieee` を指定する。`CFLAGS`、`CPPFLAGS`、`LDFLAGS` に空でない値がある場合、`build` と `run` は使用方法のエラーにする。
+**[tool.build-settings]** C23と厳密な浮動小数点演算を使い、積和の縮約を停止し、非正規化数をIEEEの規則で扱う。Clangへの数値関連オプションはSuzが固定する。具体的には `-ffp-contract=off`、`-fdenormal-fp-math=ieee` を指定する。`CFLAGS`、`CPPFLAGS`、`LDFLAGS` に空でない値がある場合、`build` と `run` は使用方法のエラーにする。追加のフラグは [tool.extra-flags] で渡す。
+
+**[tool.extra-flags]** `build`、`run` と、`emit-c` が出力する `scripts/build-c.sh` は、環境変数 `SUZ_CFLAGS` から次のフラグを受け付ける。
+
+| フラグ | 用途 |
+|---|---|
+| `-march=値`、`-mcpu=値`、`-mtune=値` | 対象CPUの指定 |
+| `-g` | デバッグ情報 |
+| `-fno-omit-frame-pointer` | プロファイラ |
+| `-flto`、`-flto=thin`、`-flto=full` | リンク時の最適化 |
+| `-fprofile-instr-generate`、`-fprofile-instr-generate=パス`、`-fprofile-instr-use=パス` | 実行の記録を使う最適化 |
+| `-fsanitize=値` | `address` と `undefined` のカンマ区切り |
+
+値はASCIIの空白（スペース・タブ・改行・復帰・垂直タブ・改ページ）で区切る。空の項目は無視する。引用符・バックスラッシュ・変数・コマンド・ワイルドカードの展開は行わないため、空白を含むパスは渡せない。`=` の後の値は空にできない。許可リストにないフラグは、その項目を示して使用方法のエラーにする。CPU名やPGOファイルの有効性など、受け付けた値の検証はClangが行う。
+
+CLIと出力用スクリプトは同じ許可リストを使う。受け付けた引数は、Suzが固定するフラグの前に置く。生成Cとランタイムのコンパイル・リンクは1回のClang呼び出しで行い、リンクにも同じフラグを適用する。
 
 ### 3.1 テキストプールの上限
 

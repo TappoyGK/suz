@@ -232,7 +232,7 @@ _Noreturn void suz_env_panic(void) { exit(101); }
             command
                 .current_dir(&moved)
                 .args(["program.c", "-o", &output_name, optimization]);
-            for variable in ["CFLAGS", "CPPFLAGS", "LDFLAGS"] {
+            for variable in ["CFLAGS", "CPPFLAGS", "LDFLAGS", "SUZ_CFLAGS"] {
                 command.env_remove(variable);
             }
             let built = command.output().unwrap();
@@ -326,7 +326,7 @@ fn emitted_c_preserves_text_pool_limits() {
         build
             .current_dir(&generated)
             .args(["program.c", "-o", "program"]);
-        for name in ["CFLAGS", "CPPFLAGS", "LDFLAGS"] {
+        for name in ["CFLAGS", "CPPFLAGS", "LDFLAGS", "SUZ_CFLAGS"] {
             build.env_remove(name);
         }
         let built = build.output().unwrap();

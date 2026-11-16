@@ -18,6 +18,8 @@ cargo run -- build sample.suz -o sample -O2
 cargo run -- run sample.suz
 ```
 
+`SUZ_CFLAGS="-march=native -g" cargo run -- build sample.suz -o sample -O2` のように、[許可された追加フラグ](../docs/tool.md)を指定できる。出力した `scripts/build-c.sh` でも同じ環境変数を使える。
+
 `build` と `run` は外部のClang・リンカー・SDKを使う。`--cc PATH` でClangを、`--env FILE` で環境層を指定できる。最適化は `-O0`（既定）または `-O2` を選ぶ。
 
 `build`・`run`・`emit-c` は `--text-pool-limit SIZE` でテキストプールの上限を指定できる。既定値は `1G`。バイト数、`K`・`M`・`G` 付きの値、`unlimited` を受け付ける。設定は生成プログラムに組み込む。

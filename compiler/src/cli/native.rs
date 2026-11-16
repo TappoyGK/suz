@@ -1,7 +1,7 @@
 //! Clangと実行環境を確認し、生成Cのビルドと実行ファイルの公開を行う。
 //!
 //! 利用元: [`crate::cli`]。
-//! 主な対象規則: `[tool.build-settings]`、`[tool.c-compiler]`、`[tool.environment]`、`[tool.messages]`、`[tool.output]`、`[tool.prerequisites]`。
+//! 主な対象規則: `[tool.build-settings]`、`[tool.extra-flags]`、`[tool.c-compiler]`、`[tool.environment]`、`[tool.messages]`、`[tool.output]`、`[tool.prerequisites]`。
 
 use super::{
     Failure, Result,
@@ -19,6 +19,7 @@ use std::{
 pub struct Build {
     directory: StagedDirectory,
     cc: PathBuf,
+    extra_flags: Vec<String>,
 }
 
 fn error(rule: &str, error: impl std::fmt::Display) -> Failure {
@@ -47,10 +48,11 @@ impl Build {
             if std::env::var_os(name).is_some_and(|v| !v.is_empty()) {
                 return Err(error(
                     "tool.build-settings",
-                    format!("{name} must be empty; use -O0 or -O2"),
+                    format!("{name} must be empty; use SUZ_CFLAGS and -O0 or -O2"),
                 ));
             }
         }
+        let extra_flags = extra_flags()?;
         if let Some(output) = &options.output {
             validate_output(options, output)?;
         }
@@ -67,6 +69,7 @@ impl Build {
         let directory = StagedDirectory::new(&parent).map_err(|e| error("tool.temporary", e))?;
         let build = Self {
             directory,
+            extra_flags,
             cc: options.cc.clone().unwrap_or_else(|| "clang".into()),
         };
         build.probe()?;
@@ -76,12 +79,12 @@ impl Build {
     fn command(&self) -> Command {
         let mut command = Command::new(&self.cc);
         command.env("TMPDIR", self.directory.path());
+        command.args(&self.extra_flags);
         command.args([
             "-std=c23",
             "-Wall",
             "-Wextra",
             "-Werror",
-            "-ffp-model=strict",
             "-ffp-contract=off",
             "-fdenormal-fp-math=ieee",
         ]);
@@ -244,4 +247,44 @@ fn validate_output(options: &Options, output: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+// 出力用スクリプトと同じ許可リストを使う。シェルの引用・展開は行わず、
+// 空白で分けた各項目をそのままClangの引数として渡す。
+fn extra_flags() -> Result<Vec<String>> {
+    let value = match std::env::var("SUZ_CFLAGS") {
+        Ok(value) => value,
+        Err(std::env::VarError::NotPresent) => return Ok(Vec::new()),
+        Err(_) => return Err(error("tool.extra-flags", "SUZ_CFLAGS must be valid UTF-8")),
+    };
+    value
+        .split([' ', '\t', '\n', '\r', '\x0b', '\x0c'])
+        .filter(|flag| !flag.is_empty())
+        .map(|flag| {
+            let allowed = include_str!("../../../scripts/cflags.txt")
+                .lines()
+                .filter(|line| !line.is_empty() && !line.starts_with('#'))
+                .any(|entry| {
+                    if entry.ends_with('=') {
+                        flag.strip_prefix(entry).is_some_and(|value| {
+                            !value.is_empty()
+                                && (entry != "-fsanitize="
+                                    || value
+                                        .split(',')
+                                        .all(|v| matches!(v, "address" | "undefined")))
+                        })
+                    } else {
+                        flag == entry
+                    }
+                });
+            if allowed {
+                Ok(flag.to_owned())
+            } else {
+                Err(error(
+                    "tool.extra-flags",
+                    format!("unsupported SUZ_CFLAGS flag: {flag}"),
+                ))
+            }
+        })
+        .collect()
 }

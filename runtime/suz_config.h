@@ -24,8 +24,9 @@
 #error "unsafe floating-point optimization [runtime.float-environment]"
 #endif
 
-/* 入口で初期化した環境に従い、各演算を分離したまま実行する。 */
-#pragma STDC FENV_ACCESS ON
+/* 入口で初期化した環境に従い、各演算を分離したまま実行する。
+   contract=fastはpragmaだけでは抑止できないため、ビルド時の-ffp-contract=offも必須。 */
+#pragma float_control(precise, on)
 #pragma STDC FP_CONTRACT OFF
 
 _Static_assert(CHAR_BIT == 8, "8-bit bytes required [runtime.c-target]");

@@ -39,15 +39,39 @@ done
 [[ -n "$output_file" ]] || fail "$usage"
 [[ ! -e "$output_file" && ! -L "$output_file" ]] || fail 'Output path already exists.'
 for variable in CFLAGS CPPFLAGS LDFLAGS; do
-    [[ -z "${!variable:-}" ]] || fail "$variable is not accepted; use -O0 or -O2 [runtime.float-environment]"
+    [[ -z "${!variable:-}" ]] || fail "$variable is not accepted; use SUZ_CFLAGS and -O0 or -O2 [runtime.float-environment]"
 done
+# シェルの展開は行わない。改行も区切りとし、各項目を独立した引数として保持する。
+extra_flags=()
+while IFS= read -r line; do
+    IFS=$' \t\r\v\f' read -r -a words <<< "$line"
+    for flag in "${words[@]+"${words[@]}"}"; do
+        [[ -n "$flag" ]] || continue
+        allowed=false
+        while IFS= read -r entry; do
+            [[ -n "$entry" && "$entry" != \#* ]] || continue
+            if [[ "$entry" == *= ]]; then
+                [[ "$flag" == "$entry"* && "$flag" != "$entry" ]] || continue
+                if [[ "$entry" == '-fsanitize=' ]]; then
+                    value="${flag#*=}"
+                    [[ "$value" =~ ^(address|undefined)(,(address|undefined))*$ ]] || continue
+                fi
+                allowed=true
+            elif [[ "$flag" == "$entry" ]]; then
+                allowed=true
+            fi
+        done < "$repo_dir/scripts/cflags.txt"
+        [[ "$allowed" == true ]] || fail "Unsupported SUZ_CFLAGS flag: $flag [tool.extra-flags]"
+        extra_flags+=("$flag")
+    done
+done <<< "${SUZ_CFLAGS:-}"
 # 相対ファイル名が「@」で始まっても、パスとして渡す。
 [[ "$source_file" == /* ]] || source_file="./$source_file"
 [[ "$environment_file" == /* ]] || environment_file="./$environment_file"
 [[ "$output_file" == /* ]] || output_file="./$output_file"
 runtime="$repo_dir/runtime"
-exec "${CC:-clang}" -std=c23 -Wall -Wextra -Werror "$optimization" \
-    -ffp-model=strict -ffp-contract=off \
+exec "${CC:-clang}" "${extra_flags[@]+"${extra_flags[@]}"}" -std=c23 -Wall -Wextra -Werror "$optimization" \
+    -ffp-contract=off \
     -fdenormal-fp-math=ieee \
     -I "$runtime" -I "$runtime/third_party/ryu" \
     "$source_file" "$runtime/suz_runtime.c" "$runtime/suz_text.c" "$runtime/suz_parse.c" "$runtime/suz_parse_float.c" "$runtime/suz_parse_struct.c" "$environment_file" "$runtime/suz_float.c" "$runtime/suz_format_float.c" \
