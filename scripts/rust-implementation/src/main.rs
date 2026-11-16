@@ -75,19 +75,32 @@ fn doc(attrs: &[syn::Attribute]) -> String {
         .join("\n")
 }
 
-fn preceding_comment(source: &str, span: Span) -> String {
+fn preceding_comment(source: &str, span: Span, allow_doc: bool) -> String {
     let prefix = &source[..span.byte_range().start.min(source.len())];
     let trimmed = prefix.trim_end();
     if let Some(body) = trimmed.strip_suffix("*/")
         && let Some(start) = body.rfind("/*")
     {
-        return body[start + 2..].to_string();
+        let comment = &body[start + 2..];
+        if !allow_doc
+            && (comment.starts_with('!')
+                || (comment.starts_with('*') && !comment.starts_with("**")))
+        {
+            return String::new();
+        }
+        return comment.to_string();
     }
     let mut lines = Vec::new();
     for line in trimmed.lines().rev() {
         let Some(comment) = line.trim_start().strip_prefix("//") else {
             break;
         };
+        if !allow_doc
+            && (comment.starts_with('!')
+                || (comment.starts_with('/') && !comment.starts_with("//")))
+        {
+            break;
+        }
         lines.push(
             comment
                 .trim_start_matches('/')
@@ -179,6 +192,8 @@ struct Scanner<'a> {
     functions: Vec<Value>,
     ordinals: BTreeMap<String, usize>,
     in_test: bool,
+    self_type: Vec<String>,
+    lint_allows: Vec<Value>,
 }
 
 impl Scanner<'_> {
@@ -257,21 +272,46 @@ impl Scanner<'_> {
             .push(json!({"item": format!("{key}#{ordinal}"), "kind": kind,
             "rule": rule, "rule_expression": expression, "line": span.start().line,
             "column": span.start().column + 1, "scope": self.scope, "module": self.module,
-            "comment": preceding_comment(self.source, span), "function_doc": self.function_doc,
+            "comment": preceding_comment(self.source, span, true), "function_doc": self.function_doc,
             "context_comments": self.comments.iter().rev().cloned().collect::<Vec<_>>(),
             "strings": strings.0}));
     }
 
-    fn skip_meta(&mut self, meta: &syn::Meta, attr: &syn::Attribute) {
+    fn check_attribute_meta(&mut self, meta: &syn::Meta, attr: &syn::Attribute) {
         if path(meta.path()) == ["rustfmt", "skip"] {
             self.skips.push(json!({"line": attr.span().start().line,
-                "comment": preceding_comment(self.source, attr.span())}));
+                "comment": preceding_comment(self.source, attr.span(), false)}));
+        }
+        if let syn::Meta::List(list) = meta
+            && (list.path.is_ident("allow") || list.path.is_ident("expect"))
+        {
+            let children = metas(list.tokens.clone());
+            let reason = children.iter().any(|m| {
+                matches!(m, syn::Meta::NameValue(n) if n.path.is_ident("reason")
+                    && literal(&n.value).is_some_and(|s| !s.trim().is_empty()))
+            });
+            for child in &children {
+                let lint = path(child.path()).join("::");
+                if !reason
+                    && matches!(
+                        lint.as_str(),
+                        "clippy::let_underscore_must_use"
+                            | "clippy::unused_result_ok"
+                            | "clippy::map_err_ignore"
+                    )
+                {
+                    let key = format!("{}:allow:{lint}", self.scope.join("::"));
+                    let ordinal = self.ordinals.entry(key.clone()).or_default();
+                    *ordinal += 1;
+                    self.lint_allows.push(json!({"item": format!("{key}#{ordinal}"), "line": attr.span().start().line}));
+                }
+            }
         }
         if let syn::Meta::List(list) = meta
             && list.path.is_ident("cfg_attr")
         {
             for child in metas(list.tokens.clone()).iter().skip(1) {
-                self.skip_meta(child, attr);
+                self.check_attribute_meta(child, attr);
             }
         }
     }
@@ -323,12 +363,12 @@ impl<'ast> Visit<'ast> for Scanner<'_> {
     }
     fn visit_stmt(&mut self, node: &'ast syn::Stmt) {
         self.comments
-            .push(preceding_comment(self.source, node.span()));
+            .push(preceding_comment(self.source, node.span(), true));
         syn::visit::visit_stmt(self, node);
         self.comments.pop();
     }
     fn visit_attribute(&mut self, node: &'ast syn::Attribute) {
-        self.skip_meta(&node.meta, node);
+        self.check_attribute_meta(&node.meta, node);
     }
     fn visit_path(&mut self, node: &'ast syn::Path) {
         // 単独の識別子はローカル変数や型の場合がある。import元の依存はuse側で記録する。
@@ -389,9 +429,16 @@ impl<'ast> Visit<'ast> for Scanner<'_> {
         });
     }
     fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
+        let resolved = match node.self_ty.as_ref() {
+            syn::Type::Path(p) => self.expand_alias(path(&p.path)),
+            _ => vec![],
+        };
+        let old_type = std::mem::replace(&mut self.self_type, resolved);
         self.scope.push(node.self_ty.to_token_stream().to_string());
+        self.functions.push(json!({"scope": self.scope, "start": node.span().start().line, "end": node.span().end().line}));
         syn::visit::visit_item_impl(self, node);
         self.scope.pop();
+        self.self_type = old_type;
     }
     fn visit_expr_call(&mut self, node: &'ast syn::ExprCall) {
         if let syn::Expr::Path(p) = node.func.as_ref() {
@@ -427,6 +474,14 @@ impl<'ast> Visit<'ast> for Scanner<'_> {
 
 impl Scanner<'_> {
     fn expand_alias(&self, mut names: Vec<String>) -> Vec<String> {
+        if names.first().is_some_and(|n| n == "Self") && !self.self_type.is_empty() {
+            names = self
+                .self_type
+                .iter()
+                .cloned()
+                .chain(names.into_iter().skip(1))
+                .collect();
+        }
         for _ in 0..20 {
             let Some(first) = names.first() else { break };
             let import = self
@@ -530,6 +585,8 @@ fn scan(source: &str) -> syn::Result<Value> {
         functions: vec![],
         ordinals: BTreeMap::new(),
         in_test: false,
+        self_type: vec![],
+        lint_allows: vec![],
     };
     scanner.visit_file(&file);
     // useは宣言より前でも有効なので、先に収集した別名を使って診断箇所を抽出し直す。
@@ -539,10 +596,11 @@ fn scan(source: &str) -> syn::Result<Value> {
     scanner.skips.clear();
     scanner.functions.clear();
     scanner.ordinals.clear();
+    scanner.lint_allows.clear();
     scanner.visit_file(&file);
     Ok(
         json!({"references": scanner.refs, "imports": scanner.imports, "modules": scanner.modules,
-        "diagnostics": scanner.diagnostics, "skips": scanner.skips, "functions": scanner.functions}),
+        "diagnostics": scanner.diagnostics, "skips": scanner.skips, "functions": scanner.functions, "lint_allows": scanner.lint_allows}),
     )
 }
 

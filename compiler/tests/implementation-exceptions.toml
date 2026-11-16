@@ -414,67 +414,67 @@ reason = "#48 の段階2で既存の文書不足を記録する。段階7（ド�
 [[exceptions]]
 rule = "impl.no-silent"
 path = "compiler/src/check/exact.rs"
-item = "clippy::map_err_ignore:100:68"
+item = "build:clippy::map_err_ignore#1"
 reason = "#48 の段階2で既存のエラー破棄を記録する。段階8（そのほかの規則）で失敗の扱いを見直し、この例外を削除する。"
 
 [[exceptions]]
 rule = "impl.no-silent"
 path = "compiler/src/check/exact.rs"
-item = "clippy::map_err_ignore:122:74"
+item = "build:clippy::map_err_ignore#2"
 reason = "#48 の段階2で既存のエラー破棄を記録する。段階8（そのほかの規則）で失敗の扱いを見直し、この例外を削除する。"
 
 [[exceptions]]
 rule = "impl.no-silent"
 path = "compiler/src/cli/output.rs"
-item = "clippy::let_underscore_must_use:52:13"
+item = "StagedDirectory::drop:clippy::let_underscore_must_use#1"
 reason = "#48 の段階2で既存のエラー破棄を記録する。段階8（そのほかの規則）で失敗の扱いを見直し、この例外を削除する。"
 
 [[exceptions]]
 rule = "impl.no-silent"
 path = "compiler/src/cli/signals.rs"
-item = "clippy::let_underscore_must_use:68:9"
+item = "execute:clippy::let_underscore_must_use#1"
 reason = "#48 の段階2で既存のエラー破棄を記録する。段階8（そのほかの規則）で失敗の扱いを見直し、この例外を削除する。"
 
 [[exceptions]]
 rule = "impl.no-silent"
 path = "compiler/src/cli/signals.rs"
-item = "clippy::let_underscore_must_use:69:9"
+item = "execute:clippy::let_underscore_must_use#2"
 reason = "#48 の段階2で既存のエラー破棄を記録する。段階8（そのほかの規則）で失敗の扱いを見直し、この例外を削除する。"
 
 [[exceptions]]
 rule = "impl.no-silent"
 path = "compiler/src/codegen/tests.rs"
-item = "clippy::let_underscore_must_use:115:13"
+item = "logical_codegen_evaluates_operands_once_and_short_circuits::Cleanup::drop:clippy::let_underscore_must_use#1"
 reason = "#48 の段階2で既存のエラー破棄を記録する。段階8（そのほかの規則）で失敗の扱いを見直し、この例外を削除する。"
 
 [[exceptions]]
 rule = "impl.no-silent"
 path = "compiler/src/codegen/tests.rs"
-item = "clippy::let_underscore_must_use:178:13"
+item = "comparison_codegen_sequences_and_reuses_operands::Cleanup::drop:clippy::let_underscore_must_use#1"
 reason = "#48 の段階2で既存のエラー破棄を記録する。段階8（そのほかの規則）で失敗の扱いを見直し、この例外を削除する。"
 
 [[exceptions]]
 rule = "impl.no-silent"
 path = "compiler/src/codegen/tests.rs"
-item = "clippy::let_underscore_must_use:28:13"
+item = "generated_bool_values_preserve_negation_and_copies::Cleanup::drop:clippy::let_underscore_must_use#1"
 reason = "#48 の段階2で既存のエラー破棄を記録する。段階8（そのほかの規則）で失敗の扱いを見直し、この例外を削除する。"
 
 [[exceptions]]
 rule = "impl.no-silent"
 path = "compiler/src/main.rs"
-item = "clippy::let_underscore_must_use:21:13"
+item = "main:clippy::let_underscore_must_use#1"
 reason = "#48 の段階2で既存のエラー破棄を記録する。段階8（そのほかの規則）で失敗の扱いを見直し、この例外を削除する。"
 
 [[exceptions]]
 rule = "impl.no-silent"
 path = "compiler/tests/support/markdown.rs"
-item = "clippy::map_err_ignore:61:26"
+item = "number:clippy::map_err_ignore#1"
 reason = "#48 の段階2で既存のエラー破棄を記録する。段階8（そのほかの規則）で失敗の扱いを見直し、この例外を削除する。"
 
 [[exceptions]]
 rule = "impl.no-silent"
 path = "compiler/tests/support/test_util.rs"
-item = "clippy::let_underscore_must_use:27:9"
+item = "TemporaryDirectory::drop:clippy::let_underscore_must_use#1"
 reason = "#48 の段階2で既存のエラー破棄を記録する。段階8（そのほかの規則）で失敗の扱いを見直し、この例外を削除する。"
 
 [[exceptions]]

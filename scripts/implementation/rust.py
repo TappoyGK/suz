@@ -169,6 +169,8 @@ def structural_checks(sources, reports):
     for (name, item), line in dependencies(reports, production).items():
         add('impl.layers', name, item, line, f'Forbidden module dependency: {item}')
     for name, report in reports.items():
+        for allowance in report['lint_allows']:
+            add('impl.no-silent', name, allowance['item'], allowance['line'], 'Missing lint suppression reason')
         for skip in report['skips']:
             if not skip['comment'].strip():
                 add('impl.format', name, f'rustfmt::skip:{skip["line"]}', skip['line'], 'Missing rustfmt skip reason')
@@ -190,9 +192,9 @@ def structural_checks(sources, reports):
     return violations, index
 
 
-def clippy_diagnostics(output):
+def clippy_diagnostics(output, reports=None):
     """対象リントだけを例外と照合できる形に変換し、それ以外の警告・エラーは失敗にする。"""
-    violations, errors = {}, []
+    violations, errors, locations = {}, [], {}
     for line in output.splitlines():
         if not line.startswith('{'):
             continue
@@ -211,18 +213,26 @@ def clippy_diagnostics(output):
             errors.append(f'Clippy diagnostic without source location: {code}')
             continue
         name = primary['file_name']
-        item = f'{code}:{primary["line_start"]}:{primary["column_start"]}'
-        violations[('impl.no-silent', name, item)] = f'{name}:{primary["line_start"]}: {message["message"]} [impl.no-silent]'
+        locations[(name, code, primary['line_start'], primary['column_start'])] = message['message']
+    ordinals = {}
+    for (name, code, line, column), message in sorted(locations.items()):
+        scopes = [f for f in (reports or {}).get(name, {}).get('functions', [])
+                  if f['start'] <= line <= f['end']]
+        scope = '::'.join(max(scopes, key=lambda f: len(f['scope']))['scope']) if scopes else '<module>'
+        key = (name, code, scope)
+        ordinals[key] = ordinals.get(key, 0) + 1
+        item = f'{scope}:{code}#{ordinals[key]}'
+        violations[('impl.no-silent', name, item)] = f'{name}:{line}: {message} [impl.no-silent]'
     return violations, errors
 
 
-def clippy_checks(root):
+def clippy_checks(root, reports):
     """Clippyは警告として全件を出し、検査側で例外以外を失敗にする。通常の-D warningsもCIに残す。"""
     command = ['cargo', 'clippy', '--locked', '--all-targets', '--message-format=json', '--']
     for lint in LINTS:
         command += ['-W', 'clippy::' + lint]
     result = subprocess.run(command, cwd=root, capture_output=True, text=True)
-    violations, errors = clippy_diagnostics(result.stdout)
+    violations, errors = clippy_diagnostics(result.stdout, reports)
     if result.returncode:
         errors.append(f'Clippy failed ({result.returncode}):\n{result.stderr}')
     return violations, errors
@@ -262,7 +272,7 @@ def inspect(root):
                for name in sorted(files) if name.startswith('compiler/') and name.endswith('.rs')}
     reports = syntax(root, sources)
     violations, index = structural_checks(sources, reports)
-    lint_violations, errors = clippy_checks(root)
+    lint_violations, errors = clippy_checks(root, reports)
     violations.update(lint_violations)
     rules = set(re.findall(r'\*\*\[(impl\.[a-z-]+)\]\*\*', (root / 'docs/implementation.md').read_text()))
     entries = []

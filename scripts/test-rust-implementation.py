@@ -155,6 +155,49 @@ fn f() {
             self.assertTrue(check_index(root, rows + rows))
             self.assertTrue(check_index(root, [dict(rows[0], condition='別の条件。')]))
 
+    def test_self_constructor_is_indexed_and_message_is_checked(self):
+        violations, index = self.check({'compiler/src/lib.rs': """//! Root.
+impl Diagnostic {
+    fn mk() -> Self {
+        // [lex.x] cond
+        Self::new(a, b, c, "lex.x", "bad [lex.x]")
+    }
+}
+impl Other { fn mk() { Self::new(a, b, c, "lex.x", "bad [lex.x]"); } }
+"""})
+        self.assertEqual(len(index), 1)
+        self.assertEqual(index[0]['condition'], 'cond')
+        self.assertEqual([r for r, _, _ in violations], ['impl.diagnostic'])
+
+    def test_reasonless_lint_suppression_is_rejected(self):
+        violations, _ = self.check({'compiler/src/lib.rs': """//! Root.
+#[allow(dead_code, clippy::let_underscore_must_use)]
+fn missing() { let _ = "1".parse::<u8>(); }
+#[allow(clippy::let_underscore_must_use, reason = "Caller handles failure.")]
+fn valid() { let _ = "1".parse::<u8>(); }
+"""})
+        self.assertEqual(len(violations), 1)
+        self.assertEqual(next(iter(violations))[0], 'impl.no-silent')
+
+    def test_clippy_items_survive_unrelated_line_insertions(self):
+        name = 'compiler/src/lib.rs'
+        source = "//! Root.\nimpl T {\nfn f() {\na();\nb();\n}\n}\nfn g() { c(); }\n"
+        def check(prefix):
+            reports = syntax(ROOT, {name: prefix + source})
+            events = []
+            for line in (4, 5, 8):
+                events.append(json.dumps({'reason': 'compiler-message', 'message': {
+                    'code': {'code': 'clippy::map_err_ignore'}, 'level': 'warning', 'message': 'discarded',
+                    'spans': [{'is_primary': True, 'file_name': name,
+                               'line_start': line + prefix.count('\n'), 'column_start': 1}]}}))
+            result, errors = clippy_diagnostics('\n'.join(events + events), reports)
+            self.assertEqual(errors, [])
+            return set(result)
+        expected = {('impl.no-silent', name, item) for item in (
+            'T::f:clippy::map_err_ignore#1', 'T::f:clippy::map_err_ignore#2', 'g:clippy::map_err_ignore#1')}
+        self.assertEqual(check(''), expected)
+        self.assertEqual(check('// unrelated\n\n'), expected)
+
     def test_clippy_target_lints_and_other_warnings(self):
         def message(code, level='warning', spans=True):
             return json.dumps({'reason': 'compiler-message', 'message': {

@@ -157,3 +157,62 @@ fn skip_attributes_need_adjacent_nonempty_comments() {
 fn parse_errors_are_not_silently_ignored() {
     assert!(scan("fn f( {").is_err());
 }
+
+#[test]
+fn doc_comments_do_not_explain_format_skips() {
+    for comment in ["//! module", "/// item", "/*! module */", "/** item */"] {
+        let report = scan(&format!("{comment}\n#[rustfmt::skip] fn f() {{}}")).unwrap();
+        assert_eq!(report["skips"][0]["comment"], "", "{comment}");
+    }
+    let report = scan("//! module\n#![rustfmt::skip]\nfn f() {}").unwrap();
+    assert_eq!(report["skips"][0]["comment"], "");
+    let report = scan("//! module\n// Keep table layout.\n#[rustfmt::skip] fn f() {}").unwrap();
+    assert_eq!(report["skips"][0]["comment"], "Keep table layout.");
+}
+
+#[test]
+fn self_constructor_resolves_only_in_diagnostic_impls() {
+    let report = scan(
+        r#"
+impl Diagnostic {
+    fn mk() -> Self {
+        // [lex.x] cond
+        Self::new(a, b, c, "lex.x", "bad [lex.x]")
+    }
+    fn wrapped() { outer!(Self::new(a, b, c, "lex.y", "bad")); }
+}
+impl Other { fn mk() { Self::new(a, b, c, "not.diag", "bad"); } }
+use crate::Diagnostic as D;
+impl D { fn mk() { Self::new(a, b, c, "lex.z", "bad"); } }
+"#,
+    )
+    .unwrap();
+    let rows = report["diagnostics"].as_array().unwrap();
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0]["rule"], "lex.x");
+    assert_eq!(rows[0]["comment"], "[lex.x] cond");
+    assert!(
+        rows[0]["strings"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("bad [lex.x]"))
+    );
+    assert_eq!(rows[2]["rule"], "lex.z");
+}
+
+#[test]
+fn targeted_suppressions_require_nonempty_reasons() {
+    let report = scan(
+        r#"
+#![allow(clippy::map_err_ignore)]
+#[allow(dead_code, clippy::let_underscore_must_use)] fn missing() {}
+#[allow(clippy::unused_result_ok, reason = "  ")] fn empty() {}
+#[cfg_attr(unix, allow(clippy::unused_result_ok))] fn conditional() {}
+#[expect(clippy::unused_result_ok)] fn expected() {}
+#[allow(clippy::unused_result_ok, reason = "Handled by caller.")] fn valid() {}
+#[allow(dead_code)] fn unrelated() {}
+"#,
+    )
+    .unwrap();
+    assert_eq!(report["lint_allows"].as_array().unwrap().len(), 5);
+}
