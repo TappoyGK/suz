@@ -45,9 +45,9 @@
 
 **[runtime.float-environment]** ランタイム本体はSuzの処理を始める前に、浮動小数点の丸めを最近接・偶数丸めとし、浮動小数点例外を値の結果として扱う実行環境を整える。生成したCとランタイムは、最近接・偶数丸めと、浮動小数点例外をトラップしない環境を前提にコンパイルする。環境を初期化する `suz_runtime_init` の本体だけを `#pragma STDC FENV_ACCESS ON` の範囲に置き、それ以外の生成Cとランタイムには適用しない。環境関数は、この設定を変更してはならない。
 
-**[runtime.unsafe-math]** 共通の設定ヘッダーで `#pragma float_control(precise, on)` と `#pragma STDC FP_CONTRACT OFF` を指定する。生成Cとランタイムのコンパイルでは、[tool.build-settings](tool.md) に従い `-ffp-contract=off` と `-fdenormal-fp-math=ieee` を指定する。これらの固定フラグは追加フラグより後に置く。
+**[runtime.unsafe-math]** 共通の設定ヘッダーで `#pragma float_control(precise, on)` と `#pragma STDC FP_CONTRACT OFF` を指定する。生成Cとランタイムのコンパイルでは、[tool.build-settings](tool.md) に従い `-fhonor-nans`、`-fhonor-infinities`、`-ffp-contract=off`、`-fdenormal-fp-math=ieee` を指定する。これらの固定フラグは追加フラグより後に置く。
 
-この設定では、`-fno-signed-zeros`、`-freciprocal-math`、`-funsafe-math-optimizations` が指定されても、符号付きゼロを無視した最適化、逆数乗算への置換、演算の再結合・積和への縮約でSuzの結果を変えてはならない。`-ffast-math` と `-ffinite-math-only` はマクロの検査でコンパイルエラーにする。Clangの `contract=fast` はpragmaだけでは縮約を防げないため、固定フラグの `-ffp-contract=off` は必須である。
+この設定では、`-fno-signed-zeros`、`-freciprocal-math`、`-funsafe-math-optimizations`、`-fno-honor-nans`、`-fno-honor-infinities`、`-ffp-model=fast` が追加フラグとして指定されても、NaN・無限大・符号付きゼロを無視した最適化、逆数乗算への置換、演算の再結合・積和への縮約でSuzの結果を変えてはならない。`-ffast-math` と `-ffinite-math-only` はマクロの検査でコンパイルエラーにする。Clangの `contract=fast` はpragmaだけでは縮約を防げないため、固定フラグの `-ffp-contract=off` は必須である。また、NaN・無限大を無視する個別のフラグはマクロで検出できず、`float_control(precise, on)` だけでも打ち消せない。生成Cを手でコンパイルする場合も、これら4つの固定フラグを他の数値関連フラグより後に指定しなければならない。ヘッダーを読み込むだけで、任意のコンパイル設定に対して結果を保証するものではない。
 
 生成したCのコンパイルでは、演算の再結合、積和への縮約、非正規化数のゼロへの置換などによってSuzの結果が変わる最適化を行わない。Cの式の途中だけ余分な精度が保持されることによって結果が変わる場合も、Suzの型の精度へ丸める処理を入れる。
 

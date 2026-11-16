@@ -137,8 +137,16 @@ done
                     .collect::<Vec<_>>();
                 for invocation in recorded.split("BEGIN\n").skip(1) {
                     let args = invocation.lines().collect::<Vec<_>>();
-                    assert_eq!(&args[..expected.len()], &expected, "{route} {flags}");
+                    // CLIの能力確認では追加フラグを使わず、本ビルドでだけ渡す。
+                    let expected =
+                        if route != "script" && !args.iter().any(|a| a.ends_with("/program.c")) {
+                            &[][..]
+                        } else {
+                            &expected[..]
+                        };
+                    assert_eq!(&args[..expected.len()], expected, "{route} {flags}");
                     assert!(args[expected.len()..].contains(&"-ffp-contract=off"));
+                    assert!(args.contains(&"-fhonor-nans") && args.contains(&"-fhonor-infinities"));
                     assert!(!args.contains(&"-ffp-model=strict"));
                 }
             } else {
@@ -197,6 +205,63 @@ fn extra_flags_build_real_programs_through_both_routes() {
         );
         if route == "script" {
             assert_eq!(Command::new(&executable).status().unwrap().code(), Some(7));
+        }
+    }
+}
+
+#[test]
+fn extra_flags_rejected_by_clang_keep_the_original_diagnostic() {
+    let directory = TemporaryDirectory::new();
+    fs::write(
+        directory.0.join("input.suz"),
+        "fn main() -> u8 { return 0 }",
+    )
+    .unwrap();
+    let emitted = cli(&directory.0)
+        .args(["emit-c", "input.suz", "-o", "generated"])
+        .output()
+        .unwrap();
+    assert!(emitted.status.success(), "{emitted:?}");
+    for (flag, diagnostic) in [
+        ("-march=suz-invalid-cpu", "suz-invalid-cpu"),
+        (
+            "-fprofile-instr-use=suz-missing.profdata",
+            "suz-missing.profdata",
+        ),
+    ] {
+        for route in ["build", "run", "script"] {
+            let output = directory.0.join("program");
+            let mut command = if route == "script" {
+                let mut command = Command::new(directory.0.join("generated/scripts/build-c.sh"));
+                command
+                    .current_dir(&directory.0)
+                    .arg(directory.0.join("generated/program.c"))
+                    .arg("-o")
+                    .arg(&output);
+                for name in ["CFLAGS", "CPPFLAGS", "LDFLAGS"] {
+                    command.env_remove(name);
+                }
+                command
+            } else {
+                let mut command = cli(&directory.0);
+                command.args([route, "input.suz"]);
+                if route == "build" {
+                    command.arg("-o").arg(&output);
+                }
+                command
+            };
+            let result = command.env("SUZ_CFLAGS", flag).output().unwrap();
+            assert!(!result.status.success(), "{route} {flag}: {result:?}");
+            let stderr = String::from_utf8_lossy(&result.stderr);
+            assert!(stderr.contains(diagnostic), "{route}: {stderr}");
+            assert!(
+                !stderr.contains("C23-capable") && !stderr.contains("[tool.prerequisites]"),
+                "{stderr}"
+            );
+            if route != "script" {
+                assert_eq!(result.status.code(), Some(4));
+            }
+            assert!(!output.exists());
         }
     }
 }

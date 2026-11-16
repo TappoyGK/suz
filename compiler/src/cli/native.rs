@@ -76,21 +76,25 @@ impl Build {
         Ok(build)
     }
 
-    fn command(&self) -> Command {
+    fn command(&self, extra_flags: &[String]) -> Command {
         let mut command = Command::new(&self.cc);
         command.env("TMPDIR", self.directory.path());
-        command.args(&self.extra_flags);
+        command.args(extra_flags);
         command.args([
             "-std=c23",
             "-Wall",
             "-Wextra",
             "-Werror",
+            "-fhonor-nans",
+            "-fhonor-infinities",
             "-ffp-contract=off",
             "-fdenormal-fp-math=ieee",
         ]);
         command
     }
 
+    // コンパイラとSDKの存在確認には利用者のフラグを混ぜない。
+    // 追加フラグの値の拒否は本ビルドでClangの診断とともに報告する。
     fn probe(&self) -> Result<()> {
         let root = self.directory.path();
         let source = root.join("probe.c");
@@ -108,7 +112,7 @@ _BitInt(128) suz_compiler_probe;
         )
         .map_err(|e| error("tool.temporary", e))?;
         let result = self
-            .command()
+            .command(&[])
             .args(["-Wno-unused-command-line-argument", "-fsyntax-only"])
             .arg(&source)
             .output()
@@ -116,6 +120,7 @@ _BitInt(128) suz_compiler_probe;
                 prerequisite(format!("cannot start Clang '{}': {e}", self.cc.display()))
             })?;
         if !result.status.success() {
+            compiler_output(&result)?;
             return Err(error(
                 "tool.c-compiler",
                 "C23-capable Clang with 128-bit _BitInt support is required",
@@ -124,7 +129,7 @@ _BitInt(128) suz_compiler_probe;
         fs::write(&source, "#include <stdio.h>\n#include <stdlib.h>\n#include <fenv.h>\nint main(void) { return fesetenv(FE_DFL_ENV); }\n")
             .map_err(|e| error("tool.temporary", e))?;
         for link in [false, true] {
-            let mut command = self.command();
+            let mut command = self.command(&[]);
             if link {
                 command
                     .arg(&object)
@@ -167,7 +172,7 @@ _BitInt(128) suz_compiler_probe;
         let root = self.directory.path();
         emit::unpack(c, root, environment.as_deref()).map_err(|e| error("tool.temporary", e))?;
         let executable = root.join("program");
-        let mut command = self.command();
+        let mut command = self.command(&self.extra_flags);
         command
             .arg(&options.optimization)
             .arg("-I")

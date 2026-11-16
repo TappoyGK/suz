@@ -31,6 +31,8 @@ fn main() {
             .args([
                 "-std=c23",
                 "-O2",
+                "-fhonor-nans",
+                "-fhonor-infinities",
                 "-ffp-contract=off",
                 "-fdenormal-fp-math=ieee",
             ])

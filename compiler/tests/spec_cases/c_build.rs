@@ -253,12 +253,16 @@ fn precise_math_preserves_results_under_unsafe_options() {
             "{generated}\n{}",
             r#"
 #include <math.h>
+__attribute__((noinline)) int unordered(double x) { return x != x; }
+__attribute__((noinline)) int infinite(double x) { return x == INFINITY || x == -INFINITY; }
 __attribute__((noinline)) float add_zero(float x) { return x + 0.0f; }
 __attribute__((noinline)) float divide(float x) { return x / 3.0f; }
 __attribute__((noinline)) float separated(float a, float b, float c) { return a * b + c; }
 __attribute__((noinline)) float ordered(float a, float b, float c) { return (a + b) + c; }
 int main(void) {
     if (suz_entry() != 0) return 1;
+    volatile double invalid = NAN, positive = INFINITY, negative = -INFINITY;
+    if (!unordered(invalid) || !infinite(positive) || !infinite(negative)) return 7;
     volatile float negative_zero = -0.0f, five = 5.0f;
     if (signbit(add_zero(negative_zero))) return 2;
     if (divide(five) != 0x1.aaaaaap0f) return 3;
@@ -279,6 +283,9 @@ int main(void) {
         "-freciprocal-math",
         "-funsafe-math-optimizations",
         "-ffp-contract=fast",
+        "-fno-honor-nans",
+        "-fno-honor-infinities",
+        "-ffp-model=fast",
     ] {
         let executable = directory.0.join("precise");
         // 意図的に競合するフラグを渡すため、上書き通知だけはエラーにしない。
@@ -286,6 +293,8 @@ int main(void) {
         let built = crate::support::runtime_link::compiler()
             .args(["-std=c23", "-O2", "-Wall", "-Wextra", "-Werror", flag])
             .args([
+                "-fhonor-nans",
+                "-fhonor-infinities",
                 "-ffp-contract=off",
                 "-fdenormal-fp-math=ieee",
                 "-Wno-error=overriding-option",
@@ -314,6 +323,8 @@ fn precise_math_allows_vectorizing_independent_elements() {
         .args([
             "-std=c23",
             "-O2",
+            "-fhonor-nans",
+            "-fhonor-infinities",
             "-ffp-contract=off",
             "-fdenormal-fp-math=ieee",
             "-Rpass=loop-vectorize",

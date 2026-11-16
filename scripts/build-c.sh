@@ -71,7 +71,7 @@ done <<< "${SUZ_CFLAGS:-}"
 [[ "$output_file" == /* ]] || output_file="./$output_file"
 runtime="$repo_dir/runtime"
 exec "${CC:-clang}" "${extra_flags[@]+"${extra_flags[@]}"}" -std=c23 -Wall -Wextra -Werror "$optimization" \
-    -ffp-contract=off \
+    -fhonor-nans -fhonor-infinities -ffp-contract=off \
     -fdenormal-fp-math=ieee \
     -I "$runtime" -I "$runtime/third_party/ryu" \
     "$source_file" "$runtime/suz_runtime.c" "$runtime/suz_text.c" "$runtime/suz_parse.c" "$runtime/suz_parse_float.c" "$runtime/suz_parse_struct.c" "$environment_file" "$runtime/suz_float.c" "$runtime/suz_format_float.c" \

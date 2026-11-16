@@ -25,7 +25,8 @@
 #endif
 
 /* 入口で初期化した環境に従い、各演算を分離したまま実行する。
-   contract=fastはpragmaだけでは抑止できないため、ビルド時の-ffp-contract=offも必須。 */
+   pragmaだけではNaN・無限大を無視する設定やcontract=fastを抑止できない。
+   ビルド時に-fhonor-nans、-fhonor-infinities、-ffp-contract=offも指定する。 */
 #pragma float_control(precise, on)
 #pragma STDC FP_CONTRACT OFF
 
