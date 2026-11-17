@@ -27,6 +27,14 @@ fn generic(x: int) -> int { COUNT += 1
 return x }
 fn unused(x: float) -> float { FLAG = true
 return x }
+fn check_arguments(count: i32, label: symbol, state: State) -> bool {
+    COUNT = 10
+    STATE.inner.label = `replaced`
+    STATE.inner.view = `replaced view`
+    STATE.count = 20
+    return count == 9 && label == TITLE && state.inner.label == TITLE && state.inner.view == `😀x` && state.count == 2
+}
+fn current_state() -> State { return STATE }
 fn main() -> u8 {
     fix old = STATE
     STATE.inner.label = `changed`
@@ -53,6 +61,29 @@ fn main() -> u8 {
     fix end = STATE.count
     for i in 0..<end { COUNT += 1 }
     if COUNT != 9 { return 9 }
+    // 呼び出し先が大域変数を書き換えても、渡した値は変わらない。
+    STATE = old
+    if not check_arguments(COUNT, STATE.inner.label, STATE) { return 10 }
+    if COUNT != 10 || STATE.inner.label != `replaced` || STATE.inner.view != `replaced view` || STATE.count != 20 { return 11 }
+    // 戻り値を受け取った変数のフィールド代入は、大域変数に波及しない。
+    var returned = current_state()
+    returned.inner.label = `local`
+    returned.inner.view = `local view`
+    returned.count = 30
+    if STATE.inner.label != `replaced` || STATE.inner.view != `replaced view` || STATE.count != 20 { return 12 }
+    if returned.inner.label != `local` || returned.inner.view != `local view` || returned.count != 30 { return 13 }
+    // 条件・対象・選ばれた分岐から大域変数を読み、選ばれた分岐だけが書き換える。
+    fix chosen = ifexpr COUNT == 10 { COUNT += 1
+        COUNT } else { COUNT = 100
+        COUNT }
+    if chosen != 11 || COUNT != 11 { return 14 }
+    fix matched = matchexpr COUNT {
+        11 => { COUNT += 1
+            COUNT }
+        _ => { COUNT = 200
+            COUNT }
+    }
+    if matched != 12 || COUNT != 12 { return 15 }
     return 0
 }
 "#;

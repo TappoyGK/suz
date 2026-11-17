@@ -1400,7 +1400,7 @@ count = (count + 1) or return 1
 | [diagnostic.arithmetic] | `or` による失敗処理がない整数演算 | `--warn-unhandled-arithmetic` を指定した場合 |
 | [diagnostic.constant-comparison] | 範囲だけで結果が決まる比較 | 常に |
 | [diagnostic.integer-division-to-float] | 浮動小数点演算へ渡る整数除算 | 常に |
-| [diagnostic.global-var] | トップレベルの `var` 宣言 | 常に |
+| [diagnostic.global-var] | 大域変数の宣言 | 常に（`allow` で抑制可能） |
 
 **[warn.output]** 警告は [tool.messages] の形式で標準エラーへ書く。メッセージの前には `warn:` を付ける。メッセージの末尾の規則名が、`allow` に指定する規則名である。
 
@@ -1578,6 +1578,8 @@ AllowStatement   ::= "allow" AllowItem ( "," AllowItem )* Block
 AllowClause      ::= "allow" AllowItem ( "," AllowItem )*
 AllowItem        ::= ALLOW_ITEM
 ```
+
+`VariableDeclaration` はブロック内の宣言を表す。トップレベルの宣言は A.3 の `TopLevelBinding` で表す。`AssignmentTarget` の先頭の `IDENT` は、[assign.target] に従い、ブロック内またはトップレベルの `var` の名前として解決する。
 
 `ALLOW_ITEM` は [allow.item] に従って読む1つのトークンである。`AllowClause` には [allow.clause] と [allow.contains-block]、`AllowStatement` には [allow.block]、`AllowItem` には [allow.item]・[allow.reason]・[allow.rule-check] を適用する。`LogLevel` の `"info"` と `"warn"` は、そのつづりの `IDENT` に一致する。
 
