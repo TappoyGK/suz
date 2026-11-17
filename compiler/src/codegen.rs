@@ -27,6 +27,7 @@ struct ExpressionContext {
     text_literals: std::collections::BTreeMap<String, usize>,
     uses_text: bool,
     structs: Vec<crate::ast::StructDeclaration>,
+    function_types: Vec<crate::ast::FunctionType>,
     struct_equals: BTreeSet<usize>,
     struct_parsers: BTreeSet<usize>,
     enums: Vec<crate::ast::EnumDeclaration>,
@@ -76,6 +77,7 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
         source_name: source_name.into(),
         enums: program.enums.clone(),
         structs: program.structs.clone(),
+        function_types: program.function_types.clone(),
         ..ExpressionContext::default()
     };
     for value in &program.constant_texts {

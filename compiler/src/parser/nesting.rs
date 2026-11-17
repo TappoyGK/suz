@@ -174,6 +174,10 @@ fn kind_height(kind: &ExpressionKind) -> usize {
             .height
             .max(fields.iter().map(|f| f.value.height).max().unwrap_or(0)),
         Field { target, .. } => target.height,
+        Invoke { target, arguments } => target
+            .height
+            .max(arguments.iter().map(|v| v.height).max().unwrap_or(0)),
+        FunctionValue(_) => 0,
         Call { arguments, .. } => arguments.iter().map(|v| v.height).max().unwrap_or(0),
         Block { statements, value } => block_height(statements).max(1 + value.height),
         Match { target, arms } => target.height.max(

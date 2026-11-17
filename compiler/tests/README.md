@@ -81,6 +81,7 @@ SUZ_TIMINGS=1 ./scripts/test-spec-cases.sh
 - `compiler/tests/spec_cases/enums.rs`：列挙型の同一性、採番の上限、整数との変換、定数・関数・match・ログとの組み合わせのテスト。
 - `compiler/tests/spec_cases/generic_numeric.rs`：汎用数値関数の型推論、具体型ごとの関数生成、未使用関数、キャストと警告、診断の関連位置のテスト。
 - `compiler/tests/spec_cases/generic_properties.rs`：汎用関数と具体型で書いた関数の一致、値ブロックの型推論、入れ子の定数変換、本体の誤りより前にある保留判定の診断順序のテスト。
+- `compiler/tests/spec_cases/function_values.rs`：関数値の型・受け渡し・評価順序、汎用関数の具体化と診断の検査。
 - `compiler/tests/spec_cases/functions.rs`：関数の引数・戻り値、評価順序、再帰、仮引数の制約、voidのテスト。
 - `compiler/tests/spec_cases/value_blocks.rs`：値ブロックのスコープ、外側の変数の更新、評価順序、制御移動と代入先の制約のテスト。
 - `compiler/tests/spec_cases/arithmetic.rs`：整数の算術、境界値、パニック、定数評価のテスト。

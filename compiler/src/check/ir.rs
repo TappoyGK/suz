@@ -8,6 +8,7 @@ use crate::ast::{BinaryOperator, ComparisonOperator, Location, LogicalOperator, 
 /// 型・名前を解決した関数、入口の関数番号、文字列定数と診断候補を保持する。
 /// 型宣言はASTの表現を共有し、関数は必要な汎用型の具体化も含めてC生成へ渡す。
 pub(crate) struct CheckedProgram {
+    pub function_types: Vec<crate::ast::FunctionType>,
     /// 整数除算を含む浮動小数点演算の警告候補。
     pub division_warnings: Vec<Location>,
     /// 定数として決まる比較の位置と結果。
@@ -156,6 +157,11 @@ impl IntegerOperation {
 /// 値ブロックには捕捉した変数を、汎用リテラルには具体化まで必要な綴りを残す。
 #[derive(Clone)]
 pub(crate) enum Value {
+    Function(usize),
+    Invoke {
+        target: Box<CheckedExpression>,
+        arguments: Vec<CheckedExpression>,
+    },
     // スカラー型によって表現が決まるまで、元の綴りを保持する。
     GenericNumericLiteral {
         text: String,
@@ -336,8 +342,8 @@ macro_rules! constant_children_visitor {
                     return handler(h, visit);
                 }
                 Self::GenericNumericLiteral { .. } | Self::Integer { .. } | Self::Float(_)
-                | Self::Bool(_) | Self::Text { .. } => {}
-                Self::Local(_) | Self::Global(_) | Self::Void | Self::Call { .. } | Self::Block { .. }
+                | Self::Function(_) | Self::Bool(_) | Self::Text { .. } => {}
+                Self::Local(_) | Self::Global(_) | Self::Void | Self::Invoke { .. } | Self::Call { .. } | Self::Block { .. }
                 | Self::Match { .. } | Self::If { .. } | Self::CastReturn { .. } => return false,
             }
             true

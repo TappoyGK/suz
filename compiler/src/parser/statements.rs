@@ -11,6 +11,42 @@ use crate::{
 };
 
 impl Parser<'_, '_> {
+    // 文頭のfnは、宣言なら従来の位置のエラー、値なら式の規則で診断する。
+    // fn pick(1)を宣言と取り違えないよう、仮引数の型・戻り値・本体を確認する。
+    fn starts_function_declaration(&self) -> bool {
+        let tail = &self.tokens[self.cursor + 1..];
+        if !matches!(tail.first().map(|t| t.kind), Some(Kind::Ident(_))) {
+            return true;
+        }
+        if tail.get(1).map(|t| t.kind) != Some(Kind::Symbol("(")) {
+            // 仮引数の括弧を欠く宣言も、関数値の式とは区別する。
+            return matches!(tail.get(1).map(|t| t.kind), Some(Kind::Symbol("->" | "{")));
+        }
+        if matches!(tail.get(2).map(|t| t.kind), Some(Kind::Ident(_)))
+            && tail.get(3).map(|t| t.kind) == Some(Kind::Symbol(":"))
+        {
+            return true;
+        }
+        let mut depth = 0usize;
+        for (i, token) in tail.iter().enumerate().skip(1) {
+            match token.kind {
+                Kind::Symbol("(") => depth += 1,
+                Kind::Symbol(")") => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return matches!(
+                            tail.get(i + 1).map(|t| t.kind),
+                            Some(Kind::Symbol("->" | "{"))
+                        );
+                    }
+                }
+                Kind::End => break,
+                _ => {}
+            }
+        }
+        false
+    }
+
     fn assignment_operator(&self) -> Option<Option<BinaryOperator>> {
         let mut cursor = self.cursor + 1;
         while self
@@ -132,7 +168,14 @@ impl Parser<'_, '_> {
                     body,
                 })
             }
-            Kind::Keyword("fn" | "enum" | "struct") => Err(self.error(
+            Kind::Keyword("fn") if self.starts_function_declaration() => Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "decl.location",
+                    "functions and types must be declared at top level"
+                ),
+            )),
+            Kind::Keyword("enum" | "struct" | "fntype") => Err(self.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(
                     "decl.location",

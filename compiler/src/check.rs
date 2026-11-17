@@ -8,6 +8,7 @@ mod declarations;
 mod diagnostics;
 pub(crate) mod exact;
 mod expression;
+mod function_values;
 mod functions;
 mod generic;
 pub(crate) mod ir;

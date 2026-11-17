@@ -38,6 +38,22 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
     #[cfg(test)]
     super::generic::work();
     match &expr.kind {
+        ExpressionKind::FunctionValue(name) => {
+            let signature = bindings.functions.get(name)?;
+            if signature.is_generic() || name == "main" {
+                return None;
+            }
+            Some(bindings.intern_function(crate::ast::FunctionType {
+                parameters: signature.parameters.clone(),
+                result: signature.result,
+            }))
+        }
+        ExpressionKind::Invoke { target, .. } => {
+            let Type::Function(id) = operand_type(target, bindings)? else {
+                return None;
+            };
+            Some(bindings.function_types.borrow()[id].result)
+        }
         ExpressionKind::Slice { index, .. } => Some(if *index { Type::Char } else { Type::Text }),
         ExpressionKind::Len(_) => Some(Type::Integer(IntegerType::Len)),
         ExpressionKind::Template(_) => Some(Type::Symbol),
@@ -135,13 +151,20 @@ pub(super) fn has_float_source(expr: &Expression, bindings: &Scope) -> bool {
 
 fn has_float_source_inner(expr: &Expression, bindings: &Scope) -> bool {
     match &expr.kind {
-        ExpressionKind::Name(_) | ExpressionKind::Field { .. } | ExpressionKind::Cast { .. } => {
-            operand_type(expr, bindings).is_some_and(Type::is_float)
+        ExpressionKind::Invoke { .. }
+        | ExpressionKind::Name(_)
+        | ExpressionKind::Field { .. }
+        | ExpressionKind::Cast { .. } => operand_type(expr, bindings).is_some_and(Type::is_float),
+        ExpressionKind::Call { name, .. } => {
+            if bindings.contains_key(name) {
+                operand_type(expr, bindings).is_some_and(Type::is_float)
+            } else {
+                bindings
+                    .functions
+                    .get(name)
+                    .is_some_and(|f| f.result.is_float())
+            }
         }
-        ExpressionKind::Call { name, .. } => bindings
-            .functions
-            .get(name)
-            .is_some_and(|f| f.result.is_float()),
         ExpressionKind::Match { arms, .. } => {
             arms.iter().any(|arm| has_float_source(&arm.body, bindings))
         }
@@ -329,6 +352,12 @@ fn expression_inner(
         super::exact::check(expr, inference_hint, bindings, false)?
     } else {
         match &expr.kind {
+            ExpressionKind::FunctionValue(name) => {
+                super::function_values::value(expr, name, required, bindings)?
+            }
+            ExpressionKind::Invoke { target, arguments } => {
+                super::function_values::invoke(expr, target, arguments, bindings)?
+            }
             ExpressionKind::Slice { .. } => slices::check(expr, bindings)?,
             ExpressionKind::Template(parts) => {
                 super::text::template(parts, expr.location, bindings)?
@@ -430,6 +459,15 @@ fn expression_inner(
                 value: Value::Bool(*value),
             },
             ExpressionKind::Name(name) => {
+                if bindings.functions.contains_key(name) {
+                    return Err(expr.location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "fn.value-mark",
+                            "use fn {name} to create a function value"
+                        ),
+                    ));
+                }
                 let binding = bindings.get(name).ok_or_else(|| {
                     expr.location.error(
                         ErrorKind::InvalidSource,
@@ -498,8 +536,8 @@ fn expression_inner(
             required.unwrap(),
             argument,
             generic_result,
-            bindings.type_name(checked.ty),
-            bindings.type_name(required.unwrap()),
+            &bindings.type_name(checked.ty),
+            &bindings.type_name(required.unwrap()),
         ));
     }
     Ok(checked)

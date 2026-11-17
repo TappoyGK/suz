@@ -36,6 +36,8 @@ mod float_logs;
 mod floats;
 #[path = "spec_cases/format.rs"]
 mod format;
+#[path = "spec_cases/function_values.rs"]
+mod function_values;
 #[path = "spec_cases/functions.rs"]
 mod functions;
 #[path = "spec_cases/generic_numeric.rs"]

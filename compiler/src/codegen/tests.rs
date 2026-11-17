@@ -43,6 +43,7 @@ fn generated_bool_values_preserve_negation_and_copies() {
     .enumerate()
     {
         let program = CheckedProgram {
+            function_types: Vec::new(),
             globals: Vec::new(),
             global_warnings: Vec::new(),
             constant_texts: Default::default(),
@@ -218,6 +219,7 @@ fn comparison_codegen_sequences_and_reuses_operands() {
             });
         }
         let program = CheckedProgram {
+            function_types: Vec::new(),
             globals: Vec::new(),
             global_warnings: Vec::new(),
             constant_texts: Default::default(),

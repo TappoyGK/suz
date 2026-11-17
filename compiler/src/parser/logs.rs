@@ -74,6 +74,7 @@ impl Parser<'_, '_> {
                         tokens: &tokens,
                         enums: self.enums,
                         structs: self.structs,
+                        fntypes: self.fntypes,
                         restricted_condition: self.restricted_condition,
                         cursor: 0,
                         constant_expression: self.constant_expression,

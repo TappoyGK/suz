@@ -43,6 +43,8 @@ pub(super) enum Mode {
 
 #[derive(Clone)]
 pub(super) struct Scope {
+    pub fntypes: Rc<Vec<crate::ast::FnTypeDeclaration>>,
+    pub function_types: Rc<std::cell::RefCell<Vec<crate::ast::FunctionType>>>,
     pub mode: Mode,
     pub deferred: Option<Rc<std::cell::RefCell<Vec<super::generic::Deferred>>>>,
     // 起点の呼び出しから、この具体化までの共有可能な経路。
@@ -64,6 +66,27 @@ pub(super) struct Scope {
     pub result: Type,
 }
 impl Scope {
+    pub fn contains_function(&self, ty: Type) -> bool {
+        match ty {
+            Type::Function(_) => true,
+            Type::Struct(id) => self.structs[id]
+                .fields
+                .iter()
+                .any(|f| self.contains_function(f.ty)),
+            _ => false,
+        }
+    }
+    pub fn intern_function(&self, signature: crate::ast::FunctionType) -> Type {
+        let mut types = self.function_types.borrow_mut();
+        let id = types
+            .iter()
+            .position(|t| t == &signature)
+            .unwrap_or_else(|| {
+                types.push(signature);
+                types.len() - 1
+            });
+        Type::Function(id)
+    }
     pub fn get(&self, name: &str) -> Option<&Binding> {
         self.locals
             .get(name)
@@ -86,21 +109,39 @@ impl Scope {
         matches!(self.mode, Mode::Instance(_))
     }
 
-    pub fn type_name(&self, ty: Type) -> &str {
+    pub fn type_name(&self, ty: Type) -> String {
         match ty {
-            Type::Enum(ty) => &self.enums[ty.id].name,
-            Type::Struct(id) => &self.structs[id].name,
-            _ => ty.name(),
+            Type::Enum(ty) => self.enums[ty.id].name.clone(),
+            Type::Struct(id) => self.structs[id].name.clone(),
+            Type::Function(id) => {
+                if let Some(declaration) = self.fntypes.iter().find(|d| d.type_id == id) {
+                    return format!("fn {}", declaration.name);
+                }
+                // 名前のない推論型では、違いが分かるよう仮引数と戻り値を表示する。
+                let types = self.function_types.borrow();
+                let signature = &types[id];
+                let parameters = signature
+                    .parameters
+                    .iter()
+                    .map(|&ty| self.type_name(ty))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("fn({parameters}) -> {}", self.type_name(signature.result))
+            }
+            _ => ty.name().into(),
         }
     }
     pub fn is_type_name(&self, name: &str) -> bool {
-        self.enums.iter().any(|decl| decl.name == name)
+        self.fntypes.iter().any(|d| d.name == name)
+            || self.enums.iter().any(|decl| decl.name == name)
             || self.structs.iter().any(|decl| decl.name == name)
     }
 }
 impl Default for Scope {
     fn default() -> Self {
         Self {
+            fntypes: Rc::default(),
+            function_types: Rc::default(),
             mode: Default::default(),
             deferred: None,
             generic_calls: None,

@@ -7,6 +7,7 @@ mod allows;
 mod branches;
 mod enums;
 mod expressions;
+mod function_types;
 mod functions;
 mod logs;
 mod names;
@@ -30,6 +31,7 @@ struct Parser<'a, 's> {
     tokens: &'a [Token<'s>],
     enums: &'a [crate::ast::EnumDeclaration],
     structs: &'a [crate::ast::StructDeclaration],
+    fntypes: &'a [crate::ast::FnTypeDeclaration],
     restricted_condition: bool,
     cursor: usize,
     constant_expression: bool,
@@ -142,11 +144,14 @@ impl<'a, 's> Parser<'a, 's> {
 
 pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
     let enums = enums::collect(tokens)?;
-    let structs = structs::collect(tokens, &enums)?;
+    let mut fntypes = function_types::headers(tokens)?;
+    let mut structs = structs::collect(tokens, &enums, &fntypes)?;
+    let function_types = function_types::resolve(tokens, &enums, &mut structs, &mut fntypes)?;
     let mut p = Parser {
         allows: Vec::new(),
         enums: &enums,
         structs: &structs,
+        fntypes: &fntypes,
         restricted_condition: false,
         tokens,
         cursor: 0,
@@ -162,6 +167,9 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
     while p.token().kind != Kind::End {
         match p.token().kind {
             Kind::Keyword("fix" | "var") => bindings.push(p.top_level_binding()?),
+            Kind::Keyword("fntype") => {
+                p.cursor = fntypes.iter().find(|d| d.start == p.cursor).unwrap().end;
+            }
             Kind::Keyword("struct") => {
                 p.cursor = structs
                     .iter()
@@ -216,6 +224,8 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
     }
     Ok(Program {
         allows: p.allows,
+        fntypes,
+        function_types,
         structs,
         enums,
         bindings,

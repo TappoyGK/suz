@@ -80,6 +80,12 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
                 }
             }
             ExpressionKind::Field { target, .. } => visit(target, false, in_value)?,
+            ExpressionKind::Invoke { target, arguments } => {
+                visit(target, false, in_value)?;
+                for argument in arguments {
+                    visit(argument, false, in_value)?;
+                }
+            }
             ExpressionKind::Call { arguments, .. } => {
                 for argument in arguments {
                     visit(argument, false, in_value)?;

@@ -239,6 +239,20 @@ impl Parser<'_, '_> {
         }
         let location = self.location();
         let kind = match self.token().kind {
+            Kind::Keyword("fn") => {
+                self.cursor += 1;
+                let Kind::Ident(name) = self.token().kind else {
+                    return Err(self.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!("fn.value-mark", "fn requires a function name"),
+                    ));
+                };
+                self.cursor += 1;
+                if matches!(self.token().kind, Kind::Symbol("(" | "." | "[")) {
+                    return Err(self.error(ErrorKind::InvalidSource, crate::diagnostic!("fn.value-mark", "fn applies to a function name only; parenthesize the function value before calling it")));
+                }
+                return self.primary_node(ExpressionKind::FunctionValue(name.into()), location);
+            }
             Kind::Keyword("if") => {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
@@ -394,8 +408,30 @@ impl Parser<'_, '_> {
         let mut result = self.primary_node(kind, location)?;
         while matches!(
             self.token().kind,
-            Kind::Symbol("." | "[") | Kind::Keyword("with")
+            Kind::Symbol("." | "[" | "(") | Kind::Keyword("with")
         ) {
+            if self.token().kind == Kind::Symbol("(") {
+                let location = self.location();
+                if self.constant_expression {
+                    return Err(location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "const.expression",
+                            "function calls are not constant expressions"
+                        ),
+                    ));
+                }
+                self.check_height(result.height, location)?;
+                let arguments = self.list(Self::parenthesized_expression)?;
+                result = self.primary_node(
+                    ExpressionKind::Invoke {
+                        target: Box::new(result),
+                        arguments,
+                    },
+                    location,
+                )?;
+                continue;
+            }
             if self.token().kind == Kind::Keyword("with") {
                 result = self.with_expression(result)?;
                 continue;

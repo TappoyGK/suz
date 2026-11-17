@@ -107,6 +107,31 @@ impl Parser<'_, '_> {
     }
 
     pub(super) fn parse_type(&mut self) -> Result<Type, Diagnostic> {
+        let marked = self.token().kind == Kind::Keyword("fn");
+        if marked {
+            self.cursor += 1;
+        }
+        if let Kind::Ident(name) = self.token().kind
+            && let Some(decl) = self.fntypes.iter().find(|d| d.name == name)
+        {
+            if !marked {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "fn.type-mark",
+                        "function value types require fn before the type name"
+                    ),
+                ));
+            }
+            self.cursor += 1;
+            return Ok(Type::Function(decl.type_id));
+        }
+        if marked {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("fn.type-mark", "fn requires a declared fntype name"),
+            ));
+        }
         let ty = match self.token().kind {
             Kind::TypeName(name) => Type::from_name(name).unwrap(),
             Kind::Ident(name) => self

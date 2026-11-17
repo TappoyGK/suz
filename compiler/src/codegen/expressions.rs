@@ -30,6 +30,11 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
         return super::exact::stored(expr, context);
     }
     match expr.value {
+        Value::Function(id) => format!("suz_fn_{id}"),
+        Value::Invoke {
+            ref target,
+            ref arguments,
+        } => super::functions::invoke(target, arguments, context),
         Value::GenericNumericLiteral { .. } => {
             unreachable!("generic values are substituted before code generation")
         }

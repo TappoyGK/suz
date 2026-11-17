@@ -318,6 +318,15 @@ pub(super) fn check(
                     ),
                 ));
             }
+            if bindings.contains_function(ty) {
+                return Err(expr.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "fn.value-compare",
+                        "function values and structs containing them cannot be compared"
+                    ),
+                ));
+            }
             if ty == Type::Void
                 || (matches!(ty, Type::Bool | Type::Enum(_) | Type::Struct(_))
                     && operators.iter().any(|operator| !operator.is_equality()))
