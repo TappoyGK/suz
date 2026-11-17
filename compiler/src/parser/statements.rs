@@ -19,7 +19,8 @@ impl Parser<'_, '_> {
             return true;
         }
         if tail.get(1).map(|t| t.kind) != Some(Kind::Symbol("(")) {
-            return false;
+            // 仮引数の括弧を欠く宣言も、関数値の式とは区別する。
+            return matches!(tail.get(1).map(|t| t.kind), Some(Kind::Symbol("->" | "{")));
         }
         if matches!(tail.get(2).map(|t| t.kind), Some(Kind::Ident(_)))
             && tail.get(3).map(|t| t.kind) == Some(Kind::Symbol(":"))

@@ -359,7 +359,13 @@ fn function_values_limit_call_targets_and_resolve_long_type_chains_without_recur
 
 #[test]
 fn function_values_distinguish_declarations_from_misplaced_fn_marks() {
-    for statement in ["fn inner() -> void {}", "fn inner(x: i32) -> void {}", "fn"] {
+    for statement in [
+        "fn inner() -> void {}",
+        "fn inner(x: i32) -> void {}",
+        "fn inner {}",
+        "fn inner -> void {}",
+        "fn",
+    ] {
         let source = format!("fn main() -> u8 {{\n    {statement}\n    return 0\n}}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(
