@@ -414,7 +414,8 @@ pub(crate) enum Statement {
         name: String,
         location: Location,
         start: Expression,
-        end: Option<Expression>,
+        // メモリ効率を高めるため、終了式をBoxに置き、Forを含まない文の格納サイズも抑える。
+        end: Option<Box<Expression>>,
         inclusive: bool,
         reverse: bool,
         body: Vec<Statement>,

@@ -241,6 +241,8 @@ fn analyze(
     let source = source.replace("\r\n", "\n");
     let tokens = lexer::lex(&source)?;
     let program = parser::parse(&tokens)?;
+    // ASTは必要な名前や値を所有している。検査中にトークン列を保持しない。
+    drop(tokens);
     let checked = check::check(&program)?;
     let warnings = warnings::collect(&checked, &program.allows, options)?;
     Ok((checked, warnings))
@@ -249,6 +251,14 @@ fn analyze(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn statement_storage_stays_within_budget() {
+        // メモリ効率を維持するため、全ての文の格納サイズが再び肥大化する変更を検出する。
+        assert!(std::mem::size_of::<ast::Statement>() <= 200);
+        assert!(std::mem::size_of::<check::ir::CheckedStatement>() <= 208);
+    }
 
     #[test]
     fn accepts_comments_crlf_and_decimal_separators() {

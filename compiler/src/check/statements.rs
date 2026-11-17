@@ -289,7 +289,7 @@ fn check_for(statement: &Statement, context: &mut StatementContext<'_>) -> Resul
     context.output.push(CheckedStatement::For {
         id,
         start,
-        end,
+        end: end.map(Box::new),
         inclusive: *inclusive,
         reverse: *reverse,
         body,
