@@ -247,3 +247,50 @@ fn symbol_length_optimizes_to_a_load_without_lto() {
         "{probe}"
     );
 }
+
+#[test]
+fn narrow_length_comparisons_do_not_extend_to_64_bits() {
+    let types = ["u8", "u16", "u32"];
+    let mut source = String::new();
+    for (i, ty) in types.iter().enumerate() {
+        source.push_str(&format!(
+            "fn less{i}(n: len_t, value: {ty}) -> bool {{ return n < value }}\n"
+        ));
+    }
+    source.push_str("fn main() -> u8 { return 0 }");
+    let mut c = suz::compile(source.as_bytes()).unwrap();
+    // 任意の引数を渡して、定数畳み込みされない比較を最適化する。
+    for (i, ty) in ["uint8_t", "uint16_t", "uint32_t"].iter().enumerate() {
+        c.push_str(&format!(
+            "\n_Bool probe{i}(int32_t n, {ty} value) {{ return suz_fn_{i}(n, value); }}\n"
+        ));
+    }
+    let directory = TemporaryDirectory::new();
+    let path = directory.0.join("compare.c");
+    fs::write(&path, c).unwrap();
+    let output =
+        std::process::Command::new(std::env::var_os("CC").unwrap_or_else(|| "clang".into()))
+            .args([
+                "-std=c23",
+                "-O2",
+                "-Wall",
+                "-Wextra",
+                "-Werror",
+                "-S",
+                "-emit-llvm",
+                "-I",
+            ])
+            .arg(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime"))
+            .arg(path)
+            .args(["-o", "-"])
+            .output()
+            .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let ir = String::from_utf8(output.stdout).unwrap();
+    for i in 0..types.len() {
+        let name = format!("@probe{i}(");
+        let body = ir.split(&name).nth(1).unwrap().split('}').next().unwrap();
+        assert!(body.contains("icmp ult i32"), "{body}");
+        assert!(!body.contains("to i64"), "{body}");
+    }
+}

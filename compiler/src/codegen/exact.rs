@@ -235,9 +235,15 @@ pub(super) fn compare(
     if let (Type::Integer(a), Type::Integer(b)) = (a, b) {
         let signed_a = a.c_signed();
         let signed_b = b.c_signed();
-        // 非負の値同士はu64にそろえれば、Cの符号も一致し、上位ビットも失わない。
+        // 非負の値同士は符号なしにそろえる。32ビットに収まる比較を
+        // 64ビットへ広げず、len_tのint32_tからの不要な符号拡張を避ける。
         if a.bounds().0 == 0 && b.bounds().0 == 0 && signed_a != signed_b {
-            return format!("(uint64_t){left} {} (uint64_t){right}", op.symbol());
+            let c_type = if a.bounds().1 <= u32::MAX as i128 && b.bounds().1 <= u32::MAX as i128 {
+                "uint32_t"
+            } else {
+                "uint64_t"
+            };
+            return format!("({c_type}){left} {} ({c_type}){right}", op.symbol());
         }
         if signed_a == signed_b {
             return format!("{left} {} {right}", op.symbol());
