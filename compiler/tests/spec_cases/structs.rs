@@ -4,6 +4,7 @@ use crate::test_util::compile_and_run_c23;
 fn struct_with_preserves_saved_values_order_and_constant_results() {
     let source = r#"struct Point { x: i32, y: i32 }
 struct Player { pos: Point, name: symbol, view: text }
+struct Wide { x: i64 }
 fix RIGHT = ORIGIN with { x: 1 }
 fix ORIGIN = Point { x: 0, y: 2 }
 fix PLAYER = Player { pos: RIGHT, name: `old`, view: `abc`[:] }
@@ -45,6 +46,17 @@ fn main() -> u8 {
             10 },
     }
     if saved.x != 10 || saved.y != 2 || local.y != 20 { return 10 }
+    // withで作った定数と、その場で書いた定数式の両方をパターンに使える。
+    match 1 as i32 { RIGHT.x => {}
+        _ => { return 11 } }
+    match 2 as i32 { (ORIGIN with { x: 2 }).x => {}
+        _ => { return 12 } }
+    fix narrow: i8 = -7
+    fix wide = (Wide { x: 0 }) with { x: narrow }
+    if wide.x != -7 { return 13 }
+    fix casted = ORIGIN with { x: 3 }.x as u8 or 9
+    fix sum = base() with { x: 3 }.x + ORIGIN with { y: 1 }.y * 2
+    if casted != 3 || sum != 5 { return 14 }
     return 0
 }
 "#;
@@ -60,10 +72,15 @@ fn struct_with_rejects_invalid_targets_fields_and_hidden_writes() {
         ("fix q = p with { z: 1 }", "struct.with-fields"),
         ("fix q = p with { x, x: 2 }", "struct.with-fields"),
         ("fix q = p with { x: true }", "type.expected"),
+        (
+            "fix large: i64 = 1\nfix q = p with { x: large }",
+            "type.expected",
+        ),
         ("fix q = p with { y }", "decl.local-scope"),
         ("fix q = p with { x: 1, }", "src.trailing-comma"),
         ("fix q = p with {\nx: 1\n}", "src.trailing-comma"),
         ("fix q = p\nwith { x: 1 }", "syntax.grammar"),
+        ("fix q = p with\n{ x: 1 }", "syntax.grammar"),
         ("fix q = (p\nwith { x: 1 })", "struct.with-line"),
         ("fix q = p with { x.y: 1 }", "struct.with-nested"),
         ("fix with = 1", "src.ident"),
@@ -85,6 +102,17 @@ fn struct_with_rejects_invalid_targets_fields_and_hidden_writes() {
         suz::compile(source).unwrap_err().rule(),
         "arith.div-zero-always"
     );
+    // 関数呼び出しと大域varは、withのコピー元でも定数式にはならない。
+    for target in ["id(ORIGIN)", "STATE"] {
+        let source = format!(
+            "struct Point {{ x: i32 }}\nfix ORIGIN = Point {{ x: 0 }}\nvar STATE = ORIGIN\nfix BAD = {target} with {{ x: 1 }}\nfn id(p: Point) -> Point {{ return p }}\nfn main() -> u8 {{ STATE.x = 2\nreturn 0 }}"
+        );
+        assert_eq!(
+            suz::compile(source.as_bytes()).unwrap_err().rule(),
+            "const.expression",
+            "{source}"
+        );
+    }
 }
 
 #[test]
