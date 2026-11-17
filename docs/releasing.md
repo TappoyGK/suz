@@ -10,6 +10,7 @@
 4. 公開対象が揃ったら、スタックの最後のリリース準備PRでバージョンと変更履歴を確定する。取り込む全作業PRと変更履歴を照合し、利用者向けの変更が欠けていないことを確認する。
 5. 準備PRを取り込んだら、リリースPRのタイトル・説明・関連イシューを確定し、ドラフトを解除する。人間がレビューとCIの結果確認を行い、merge commitでmainへ取り込む。
 6. マージ後のmainのコミットに対応する検証済み成果物からタグとGitHub Releaseを公開する。
+7. HomebrewのFormulaを更新し、インストールと検査の成功を確認してtapへpushする。GitHub ReleaseとHomebrewの両方が更新されたことを確認して完了とする。
 
 ## 1. リリースブランチの作成
 
@@ -146,6 +147,21 @@ cat COMMIT
 検査に成功した `main` 上の公開対象コミットに `vVERSION` のタグを付け、pushする。タグの参照先と成果物の `COMMIT` が一致することを確認する。
 
 そのタグからGitHub Releaseを作成し、対象OS・CPUを明示する。検証済みの `suz`、そのSHA-256、変更内容と検証環境を記したリリースノートを公開する。
+
+## 6. Homebrewの更新
+
+[Homebrew tap](https://github.com/TappoyGK/homebrew-tap) の `Formula/suz.rb` を更新する。URLを公開したバージョンの `suz-macos-arm64.tar.gz` に変更し、そのアーカイブのSHA-256を設定する。実行ファイルのハッシュを記載した `SHA256SUMS` の値とは区別する。
+
+ローカルのtapで変更を適用し、次を実行する。
+
+```sh
+brew audit --strict tappoygk/tap/suz
+brew reinstall tappoygk/tap/suz
+brew test tappoygk/tap/suz
+suz --version
+```
+
+公開した版のインストールと検査の成功を確認し、Formulaの変更をコミットしてtapへpushする。GitHub上のFormulaのURLとSHA-256が公開したアーカイブと一致していることを確認する。
 
 ## ローカルでの検査
 
