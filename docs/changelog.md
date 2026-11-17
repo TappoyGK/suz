@@ -17,14 +17,14 @@
 
 ## v0.3.2
 
-- `rev` を追加し、整数範囲を逆順に反復できるようにした。
-- Unicodeスカラー値を表す `char` 型と文字リテラルを追加した。比較、整数・文字列からの変換、ログ出力、構造体のフィールドで扱えるようにした。
-- 文字範囲と文字列を `for`・`rev` で反復できるようにした。
-- 従来の `text` 型を `symbol` に改名し、テンプレートの値を `symbol` とした。同じ内容の実体を共有し、等値比較では同一性を使う性質を維持した。
-- 文字列の範囲を参照する新しい `text` 型を追加した。`symbol` からの暗黙変換と `text as symbol` によるインターン化を提供した。`text` の等値比較は内容で行うようにした。
-- `symbol`・`text` に `[開始:終了]` による切り出しと `[位置]` による文字の読み取りを追加した。位置はUnicodeスカラー値で数え、失敗処理には `or` を必須とした。全体を参照する `[:]` は失敗しない形式とした。
-- `text` の切り出し・読み取り・比較・反復・ログ出力で、範囲のコピーと動的メモリ確保を不要とした。ASCIIの切り出しと読み取りを定数時間で行うようにした。
-- 範囲記法を値として使った場合の診断を `[for.range]` に統一した。括弧内、関数の引数、定数やフィールドの初期値、条件式、テンプレートの埋め込みなどでも、範囲記号の位置に原因を示すようにした。
+- `rev` を追加し、整数範囲を逆順に反復できるようにした。（[Issue #6](https://github.com/TappoyGK/suz/issues/6)・[PR #13](https://github.com/TappoyGK/suz/pull/13)）
+- Unicodeスカラー値を表す `char` 型と文字リテラルを追加した。（[Issue #17](https://github.com/TappoyGK/suz/issues/17)・[PR #18](https://github.com/TappoyGK/suz/pull/18)）
+- 文字範囲と文字列を `for`・`rev` で反復できるようにした。（[Issue #17](https://github.com/TappoyGK/suz/issues/17)・[PR #18](https://github.com/TappoyGK/suz/pull/18)）
+- 従来の `text` 型を `symbol` に改名し、文字列テンプレートの値の型も `symbol` に変更した。（[Issue #20](https://github.com/TappoyGK/suz/issues/20)・[PR #21](https://github.com/TappoyGK/suz/pull/21)）
+- 文字列の範囲を参照する新しい `text` 型と、`symbol` との相互変換を追加した。（[Issue #20](https://github.com/TappoyGK/suz/issues/20)・[PR #21](https://github.com/TappoyGK/suz/pull/21)）
+- `symbol`・`text` に、文字列の切り出し `[開始:終了]` と文字の読み取り `[位置]` を追加した。（[Issue #20](https://github.com/TappoyGK/suz/issues/20)・[PR #21](https://github.com/TappoyGK/suz/pull/21)）
+- `text` の切り出し・読み取り・比較・反復・ログ出力で、文字列のコピーと動的メモリ確保を不要にした。（[Issue #20](https://github.com/TappoyGK/suz/issues/20)・[PR #21](https://github.com/TappoyGK/suz/pull/21)）
+- 範囲記法を値として使った場合に、誤った位置や原因を示す診断を修正した。（[Issue #5](https://github.com/TappoyGK/suz/issues/5)・[PR #7](https://github.com/TappoyGK/suz/pull/7)）
 
 ## v0.3.1
 
