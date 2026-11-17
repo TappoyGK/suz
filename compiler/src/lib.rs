@@ -241,6 +241,8 @@ fn analyze(
     let source = source.replace("\r\n", "\n");
     let tokens = lexer::lex(&source)?;
     let program = parser::parse(&tokens)?;
+    // ASTは必要な名前や値を所有している。検査中にトークン列を保持しない。
+    drop(tokens);
     let checked = check::check(&program)?;
     let warnings = warnings::collect(&checked, &program.allows, options)?;
     Ok((checked, warnings))
