@@ -306,7 +306,36 @@ enum Wave: u8 {
 
 **[struct.nonempty]** 構造体には、フィールドが 1 つ以上必要である。フィールドがない構造体の宣言はコンパイルエラーである。
 
-**[struct.literal]** 構造体リテラルは `Vec2 { x: 0.0, y: 0.0 }` のように書く。すべてのフィールドの名前と初期値を1回ずつ指定する。記述順は自由である。各初期値にはフィールドの型を要求する。フィールドの不足・重複、存在しないフィールドの指定、型の要求を満たさない初期値はコンパイルエラーである。
+**[struct.literal]** 構造体リテラルは `Vec2 { x: 0.0, y: 0.0 }` のように書く。すべてのフィールドを1回ずつ指定する。各フィールドには `フィールド名: 式` で初期値を指定するか、[struct.shorthand] の省略形を使う。記述順は自由である。各初期値にはフィールドの型を要求する。フィールドの不足・重複、存在しないフィールドの指定、型の要求を満たさない初期値はコンパイルエラーである。
+
+**[struct.shorthand]** 構造体リテラルの初期値は、`フィールド名: 式` のほかに、`フィールド名` だけでも書ける。`フィールド名` だけの初期値は、`フィールド名: フィールド名` と同じ意味である。
+
+```suz
+struct Pair { key: u8, value: u8 }
+
+fn make_pair(key: u8, value: u8) -> Pair {
+    return Pair { key, value }   // Pair { key: key, value: value } と同じ
+}
+```
+
+**[struct.shorthand-name]** 省略形の名前は、その位置で参照できる値の名前（ブロック内の `fix`・`var`、仮引数、`for`・`rev` のループ変数）として解決する。該当する名前がない場合はコンパイルエラーである。診断は、省略形の名前の位置を示し、同じ名前の値が見つからないことを示す。
+
+フィールド名は [name.value] により小文字で始まり、トップレベルの `fix`・`var` の名前は [name.top-level-binding] により大文字で始まるため、省略形の名前がトップレベルの定数や大域変数を指すことはない。関数名は小文字で始まるが、関数は値ではないため、省略形の名前が関数だけを指す場合はコンパイルエラーである。
+
+**[struct.shorthand-rules]** 省略形にも、[struct.literal] のフィールドの不足・重複・存在しないフィールド・初期値に求める型の規則と、[struct.eval-order] の評価順序を適用する。初期値には、ほかの形と同じく [conv.widen-places] の広げる変換を適用する。省略形が指す値は、その初期値を評価する時点で読み取る。通常の `フィールド名: 式` と同じ値コピーの規則に従い、構造体・列挙型には [type.value-copy] を適用する。省略形と通常の形で同じフィールドを指定した場合は、重複としてコンパイルエラーである。
+
+```suz
+struct Range {
+    lo: u16,
+    hi: u16,
+}
+
+fn make_range(lo: u8, hi: u16) -> Range {
+    return Range { lo, hi }   // lo は u8 から u16 へ広げる
+}
+```
+
+**[struct.shorthand-cast]** `symbol`・`text` から構造体への `as` の入力（[symbol.cast-struct]）では、省略形を使えない。入力のフィールドの値は、変数の参照ではなく値の表記として読むためである。省略形を含む入力は、変換失敗とする。
 
 **[struct.eval-order]** 構造体リテラルの各フィールドの初期値は、リテラルに書いた順に、それぞれ 1 回評価する。
 
@@ -1618,8 +1647,10 @@ FunctionCall     ::= IDENT "(" Arguments? ")"
 Arguments        ::= Expression ( "," Expression )* ","?
 StructLiteral    ::= IDENT "{" NL* Initializers? "}"
 Initializers     ::= Initializer ( "," NL* Initializer )* ","? NL*
-Initializer      ::= IDENT ":" Expression
+Initializer      ::= IDENT ":" Expression | IDENT
 ```
+
+`IDENT` だけの `Initializer` には [struct.shorthand]・[struct.shorthand-name]・[struct.shorthand-rules] を適用する。
 
 `Index` と `IndexHandler` には [text.slice]、[text.index]、[text.slice-handler] を適用する。
 

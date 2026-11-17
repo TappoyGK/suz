@@ -6,7 +6,10 @@
 use super::{FixedToken, Parser};
 use crate::{
     Diagnostic, ErrorKind,
-    ast::{EnumDeclaration, Expression, FieldInitializer, StructDeclaration, StructField, Type},
+    ast::{
+        EnumDeclaration, Expression, ExpressionKind, FieldInitializer, StructDeclaration,
+        StructField, Type,
+    },
     lexer::{Kind, Token},
 };
 use std::collections::BTreeSet;
@@ -64,17 +67,20 @@ impl Parser<'_, '_> {
         };
         let name = name.to_owned();
         self.cursor += 1;
-        if self.token().kind != Kind::Symbol(":") {
-            return Err(self.error(
-                ErrorKind::InvalidSource,
-                crate::diagnostic!("struct.literal", "field initializer requires ':'"),
-            ));
-        }
-        self.cursor += 1;
+        let value = if self.token().kind == Kind::Symbol(":") {
+            self.cursor += 1;
+            self.expression()?
+        } else {
+            // 省略形も通常の名前参照にして、名前解決・型変換・評価順序を共通にする。
+            Expression {
+                kind: ExpressionKind::Name(name.clone()),
+                location,
+            }
+        };
         Ok(FieldInitializer {
             name,
             location,
-            value: self.expression()?,
+            value,
         })
     }
 }

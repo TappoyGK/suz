@@ -1,6 +1,80 @@
 use crate::test_util::compile_and_run_c23;
 
 #[test]
+fn struct_shorthand_preserves_values_conversions_and_evaluation_order() {
+    let source = r#"struct Pair { x: u16, y: u16 }
+struct Box { pair: Pair, label: symbol }
+struct Index { i: len_t }
+fn make(x: u8, y: u16) -> Pair { return Pair { y, x } }
+fn main() -> u8 {
+    var x: u8 = 1
+    fix y: u16 = 300
+    // 後の初期値が変数を書き換えても、省略形で既に読んだ値は変わらない。
+    fix first = Pair { x, y: expr { x = 2
+        y }, }
+    fix second = Pair { y: expr { x = 3
+        y }, x, }
+    if first != make(1, y) || second != make(3, y) { return 1 }
+    var pair = Pair {
+        x,
+        y,
+    }
+    fix label = `original`
+    fix boxed = Box { pair, label }
+    pair.x = 4
+    if boxed.pair.x != 3 || boxed.label != label { return 2 }
+    for i in 0..<(2 as len_t) {
+        fix index = Index { i }
+        if index.i != i { return 3 }
+    }
+    rev i in 0..<(2 as len_t) {
+        fix index = Index { i }
+        if index.i != i { return 4 }
+    }
+    // 文字列の中の省略形は名前参照にならず、従来どおり変換に失敗する。
+    fix input = `Pair { x, y }`
+    fix fallback = make(9, 9)
+    if (input as Pair or fallback) != fallback { return 5 }
+    fix view = input[:]
+    if (view as Pair or fallback) != fallback { return 6 }
+    return 0
+}
+"#;
+    let output = compile_and_run_c23(source, "shorthand.suz");
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+}
+
+#[test]
+fn struct_shorthand_uses_existing_name_field_and_type_checks() {
+    let declarations = "struct Pair { x: u8, y: u8 }\nfn x() -> u8 { return 1 }\n";
+    for (setup, literal) in [
+        ("fix y: u8 = 2", "Pair { x, y }"), // 関数名だけでは値にならない。
+        ("fix x: u8 = 1", "Pair { x, y }"), // 未定義の値。
+        ("fix x: u8 = 1\nfix y: u8 = 2", "Pair { x, x: 2, y }"),
+        ("fix x: u8 = 1", "Pair { x }"),
+        ("fix z: u8 = 1\nfix y: u8 = 2", "Pair { z, y }"),
+        ("fix x = true\nfix y: u8 = 2", "Pair { x, y }"),
+    ] {
+        let source =
+            format!("{declarations}fn main() -> u8 {{\n{setup}\nfix p = {literal}\nreturn 0\n}}");
+        let explicit = source
+            .replace("{ x,", "{ x: x,")
+            .replace("{ x }", "{ x: x }")
+            .replace("{ z,", "{ z: z,")
+            .replace(", y }", ", y: y }");
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        let expected = suz::compile(explicit.as_bytes()).unwrap_err();
+        assert_eq!(error.rule(), expected.rule(), "{source}: {error}");
+    }
+    let error = suz::compile(
+        b"struct Item { missing: u8 }\nfn main() -> u8 {\nfix p = Item { missing }\nreturn 0\n}",
+    )
+    .unwrap_err();
+    assert_eq!((error.line, error.column), (3, 16));
+    assert!(error.message().contains("missing"));
+}
+
+#[test]
 #[ignore = "release check: run scripts/test-release.sh"]
 fn nested_struct_constants_and_equality_preserve_scalar_semantics() {
     let source = r#"struct Outer { inner: Inner, mode: Mode }
