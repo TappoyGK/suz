@@ -31,6 +31,7 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
     }
     match expr.value {
         Value::Function(id) => format!("suz_fn_{id}"),
+        Value::FunctionBorrow(ref value) => super::functions::borrow(value, context),
         Value::Invoke {
             ref target,
             ref arguments,

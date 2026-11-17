@@ -43,7 +43,7 @@ pub(super) fn value(
         .ok_or_else(error)?;
     let mut types = GenericTypes::default();
     if signature.is_generic() {
-        let Some(Type::Function(id)) = expected else {
+        let Some(Type::StaticFunction(id)) = expected else {
             return Err(expr.location.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(
@@ -140,8 +140,8 @@ pub(super) fn invoke(
     arguments: &[Expression],
     scope: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
-    let target = expression::coerced(target, None, scope)?;
-    let Type::Function(id) = target.ty else {
+    let target = call_target(target, scope)?;
+    let (Type::StaticFunction(id) | Type::Function(id)) = target.ty else {
         return Err(expr.location.error(
             ErrorKind::InvalidSource,
             crate::diagnostic!("fn.value-call", "call target must be a function value"),
@@ -160,7 +160,7 @@ pub(super) fn invoke(
     let arguments = arguments
         .iter()
         .zip(signature.parameters)
-        .map(|(a, ty)| expression::coerced(a, Some(ty), scope))
+        .map(|(a, ty)| argument(a, ty, scope))
         .collect::<Result<_, _>>()?;
     Ok(CheckedExpression {
         ty: signature.result,
@@ -200,4 +200,49 @@ pub(super) fn require_context(expr: &Expression, scope: &Scope) -> Result<(), Di
         _ => {}
     }
     Ok(())
+}
+
+/// 呼び出し専用の仮引数は、名前をそのまま渡したときだけ転送を認める。
+/// 保存可能な関数値は評価時の値を環境へ写し、後続の引数の副作用から切り離す。
+pub(super) fn argument(
+    expr: &Expression,
+    required: Type,
+    scope: &Scope,
+) -> Result<CheckedExpression, Diagnostic> {
+    let Type::Function(id) = required else {
+        return expression::coerced(expr, Some(required), scope);
+    };
+    if let ExpressionKind::Name(name) = &expr.kind
+        && let Some(binding) = scope.get(name)
+        && binding.ty == required
+    {
+        return Ok(CheckedExpression {
+            ty: required,
+            value: Value::Local(binding.id),
+        });
+    }
+    let value = expression::coerced(expr, Some(Type::StaticFunction(id)), scope)?;
+    Ok(CheckedExpression {
+        ty: required,
+        value: Value::FunctionBorrow(Box::new(value)),
+    })
+}
+
+/// 呼び出す位置だけで呼び出し専用の名前を読み、一般の式としては取り出さない。
+fn call_target(expr: &Expression, scope: &Scope) -> Result<CheckedExpression, Diagnostic> {
+    match &expr.kind {
+        ExpressionKind::Name(name)
+            if scope
+                .get(name)
+                .is_some_and(|b| matches!(b.ty, Type::Function(_))) =>
+        {
+            let binding = scope.get(name).unwrap();
+            Ok(CheckedExpression {
+                ty: binding.ty,
+                value: Value::Local(binding.id),
+            })
+        }
+        ExpressionKind::Group(inner) => call_target(inner, scope),
+        _ => expression::coerced(expr, None, scope),
+    }
 }

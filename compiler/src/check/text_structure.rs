@@ -113,7 +113,8 @@ impl Schema {
                 entry.count = fields.len();
                 self.fields.push(fields);
             }
-            Type::Function(_)
+            Type::StaticFunction(_)
+            | Type::Function(_)
             | Type::GenericInt
             | Type::GenericFloat
             | Type::Numeric(_)

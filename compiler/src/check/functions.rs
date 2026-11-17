@@ -409,7 +409,7 @@ pub(super) fn call(
             if let Some(family) = super::generic::Family::of(*ty) {
                 super::expression::generic_argument(argument, concrete(*ty), family, scope)
             } else {
-                expression(argument, Some(concrete(*ty)), scope)
+                super::function_values::argument(argument, concrete(*ty), scope)
             }
         })
         .collect::<Result<_, _>>()?;

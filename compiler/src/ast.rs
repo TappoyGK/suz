@@ -162,7 +162,8 @@ pub(crate) enum Type {
     Numeric([Option<ScalarType>; NUMERIC_COMBINATIONS]), // intとfloatの内部の型関数。
     Exact, // 内部の数学的な整数。ソースで指定する格納型ではない。
     Struct(usize),
-    Function(usize),
+    StaticFunction(usize), // 保存・返却できるトップレベルの関数値。
+    Function(usize),       // 呼び出しと転送だけができる仮引数。
     Enum(EnumType),
     Void,
     Float(FloatType),
@@ -269,7 +270,7 @@ impl Type {
             Self::Void => "void",
             Self::Enum(_) => "enum",
             Self::Struct(_) => "struct",
-            Self::Function(_) => "function",
+            Self::StaticFunction(_) | Self::Function(_) => "function",
         }
     }
     pub fn c_name(self) -> String {
@@ -279,7 +280,8 @@ impl Type {
                 unreachable!("generic types are resolved before code generation")
             }
             Self::Struct(id) => format!("suz_struct_{id}"),
-            Self::Function(id) => format!("suz_fntype_{id}"),
+            Self::StaticFunction(id) => format!("suz_fntype_{id}"),
+            Self::Function(id) => format!("suz_callback_{id}"),
             Self::Integer(ty) => ty.c_name().into(),
             Self::Float(ty) => ty.c_name().into(),
             Self::Char => "uint32_t".into(),

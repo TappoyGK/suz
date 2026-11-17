@@ -96,7 +96,7 @@ impl Parser<'_, '_> {
             ));
         }
         self.cursor += 1;
-        let ty = self.parse_type()?;
+        let ty = self.function_parameter_type()?;
         if ty == Type::Void {
             return Err(location.error(
                 ErrorKind::InvalidSource,
@@ -107,6 +107,34 @@ impl Parser<'_, '_> {
     }
 
     pub(super) fn parse_type(&mut self) -> Result<Type, Diagnostic> {
+        let location = self.location();
+        let ty = self.function_parameter_type()?;
+        if matches!(ty, Type::Function(_)) {
+            return Err(location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "fn.type-call",
+                    "fn types are only allowed on function parameters; use static fn here"
+                ),
+            ));
+        }
+        Ok(ty)
+    }
+
+    fn function_parameter_type(&mut self) -> Result<Type, Diagnostic> {
+        let persistent = self.token().kind == Kind::Keyword("static");
+        if persistent {
+            self.cursor += 1;
+            if self.token().kind != Kind::Keyword("fn") {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "fn.type-mark",
+                        "static must be followed by fn and a declared fntype name"
+                    ),
+                ));
+            }
+        }
         let marked = self.token().kind == Kind::Keyword("fn");
         if marked {
             self.cursor += 1;
@@ -124,7 +152,11 @@ impl Parser<'_, '_> {
                 ));
             }
             self.cursor += 1;
-            return Ok(Type::Function(decl.type_id));
+            return Ok(if persistent {
+                Type::StaticFunction(decl.type_id)
+            } else {
+                Type::Function(decl.type_id)
+            });
         }
         if marked {
             return Err(self.error(

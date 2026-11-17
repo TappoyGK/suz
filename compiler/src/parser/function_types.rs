@@ -109,7 +109,7 @@ pub(super) fn resolve(
     let mut parents = vec![Vec::new(); raw.len()];
     for (id, signature) in raw.iter().enumerate() {
         for ty in signature.parameters.iter().chain([&signature.result]) {
-            if let Type::Function(child) = ty {
+            if let Type::StaticFunction(child) = ty {
                 pending[id] += 1;
                 parents[*child].push(id);
             }
@@ -121,8 +121,8 @@ pub(super) fn resolve(
     let mut types = Vec::new();
     while let Some(id) = ready.pop_front() {
         let remap = |ty| {
-            if let Type::Function(child) = ty {
-                Type::Function(ids[child].unwrap())
+            if let Type::StaticFunction(child) = ty {
+                Type::StaticFunction(ids[child].unwrap())
             } else {
                 ty
             }
@@ -160,8 +160,8 @@ pub(super) fn resolve(
         d.end = ends[id];
     }
     for field in structs.iter_mut().flat_map(|s| &mut s.fields) {
-        if let Type::Function(id) = field.ty {
-            field.ty = Type::Function(ids[id].unwrap());
+        if let Type::StaticFunction(id) = field.ty {
+            field.ty = Type::StaticFunction(ids[id].unwrap());
         }
     }
     Ok(types)

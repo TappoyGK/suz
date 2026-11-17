@@ -32,6 +32,9 @@ pub(super) fn declaration(function: &CheckedFunction) -> String {
 pub(super) fn emit(function: &CheckedFunction, context: &mut ExpressionContext) -> String {
     context.temporaries.clear();
     for ty in function.parameters.iter().chain([&function.result]) {
+        if let Type::Function(id) = ty {
+            context.call_only_types.insert(*id);
+        }
         if let Type::Float(ty) = ty {
             context.float_types.insert(*ty);
         }
@@ -93,14 +96,19 @@ pub(super) fn invoke(
         ));
         names.push(format!("suz_cmp_{index}"));
     }
-    setup.push(format!("suz_cmp_{id}({})", names.join(", ")));
+    if matches!(target.ty, Type::Function(_)) {
+        names.insert(0, format!("suz_cmp_{id}.environment"));
+        setup.push(format!("suz_cmp_{id}.call({})", names.join(", ")));
+    } else {
+        setup.push(format!("suz_cmp_{id}({})", names.join(", ")));
+    }
     format!("({})", setup.join(", "))
 }
 
 /// 構造体の前方宣言の後、本体の前に関数ポインタ型を宣言する。
 /// 関数値の型の番号は依存先から付くため、ここでは番号順に出力できる。
-pub(super) fn type_declarations(c: &mut String, types: &[crate::ast::FunctionType]) {
-    for (id, ty) in types.iter().enumerate() {
+pub(super) fn type_declarations(c: &mut String, context: &ExpressionContext) {
+    for (id, ty) in context.function_types.iter().enumerate() {
         let args = if ty.parameters.is_empty() {
             "void".into()
         } else {
@@ -116,5 +124,60 @@ pub(super) fn type_declarations(c: &mut String, types: &[crate::ast::FunctionTyp
             ty.result.c_name()
         )
         .unwrap();
+        if context.call_only_types.contains(&id) {
+            let mut arguments = vec!["void *".to_owned()];
+            arguments.extend(ty.parameters.iter().map(|ty| ty.c_name()));
+            writeln!(
+                c,
+                "typedef struct {{ {} (*call)({}); void *environment; }} suz_callback_{id};",
+                ty.result.c_name(),
+                arguments.join(", ")
+            )
+            .unwrap();
+        }
+    }
+}
+
+/// 評価済みの関数ポインタをスタックの一時変数に保持する。
+/// 仮引数は保存・返却できないため、その呼び出しと転送先の実行中はこの環境が生きている。
+pub(super) fn borrow(value: &CheckedExpression, context: &mut ExpressionContext) -> String {
+    let Type::StaticFunction(id) = value.ty else {
+        unreachable!()
+    };
+    context.call_only_types.insert(id);
+    context.function_adapters.insert(id);
+    let temporary = context.temporaries.len();
+    context.temporaries.push(value.ty);
+    let value = expression(value, context);
+    format!(
+        "(suz_cmp_{temporary} = {value}, (suz_callback_{id}){{ suz_adapt_{id}, &suz_cmp_{temporary} }})"
+    )
+}
+
+/// 関数ポインタ型と構造体の定義後に、必要な包み関数を出力する。
+/// この型を使わないプログラムには宣言を追加しない。
+pub(super) fn call_only_declarations(c: &mut String, context: &ExpressionContext) {
+    for &id in &context.function_adapters {
+        let ty = &context.function_types[id];
+        let result = ty.result.c_name();
+        let parameters: Vec<_> = ty
+            .parameters
+            .iter()
+            .enumerate()
+            .map(|(i, ty)| format!("{} argument_{i}", ty.c_name()))
+            .collect();
+        let mut with_environment = vec!["void *environment".to_owned()];
+        with_environment.extend(parameters);
+        let parameters = with_environment.join(", ");
+        let arguments = (0..ty.parameters.len())
+            .map(|i| format!("argument_{i}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let return_value = if ty.result == Type::Void {
+            ""
+        } else {
+            "return "
+        };
+        writeln!(c, "static inline {result} suz_adapt_{id}({parameters}) {{\n    {return_value}(*(suz_fntype_{id} *)environment)({arguments});\n}}").unwrap();
     }
 }

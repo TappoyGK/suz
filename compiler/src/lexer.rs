@@ -14,6 +14,7 @@ const KEYWORDS: &[&str] = &[
     "var",
     "fn",
     "fntype",
+    "static",
     "struct",
     "enum",
     "if",

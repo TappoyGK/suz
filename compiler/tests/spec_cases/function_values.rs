@@ -5,22 +5,22 @@ fn function_values_pass_through_bindings_fields_and_calls() {
     let source = r#"
 fntype Transform(i32) -> i32
 fntype Alias(i32) -> i32
-fntype Choose(bool) -> fn Transform
+fntype Choose(bool) -> static fn Transform
 fntype Visit(Node) -> i32
-struct Node { value: i32, visit: fn Visit }
-struct Holder { action: fn Alias }
-fix ID: fn Transform = fn identity
-var CURRENT: fn Transform = fn identity
+struct Node { value: i32, visit: static fn Visit }
+struct Holder { action: static fn Alias }
+fix ID: static fn Transform = fn identity
+var CURRENT: static fn Transform = fn identity
 fn identity(x: int) -> int { return x }
 fn twice(x: i32) -> i32 { return x * 2 }
 fn truth(x: bool) -> bool { return x }
 fn opposite(x: bool) -> bool { return not x }
 fn visit_node(node: Node) -> i32 { return node.value }
-fn choose(first: bool) -> fn Transform {
+fn choose(first: bool) -> static fn Transform {
     return ifexpr first { fn identity } else { fn twice }
 }
-fn apply(action: fn Alias, x: i32) -> i32 { return action(x) }
-fn returned() -> fn Transform {
+fn apply(action: static fn Alias, x: i32) -> i32 { return action(x) }
+fn returned() -> static fn Transform {
     fix n = 300 as u8 or return fn identity
     return fn twice
 }
@@ -33,12 +33,12 @@ fn main() -> u8 {
     var local = inferred
     local = fn identity
     CURRENT = fn twice
-    fix chooser: fn Choose = fn choose
+    fix chooser: static fn Choose = fn choose
     fix holder = Holder { action: fn identity }
     fix changed = holder with { action: fn twice }
     fix node = Node { value: 7, visit: fn visit_node }
-    fix selected: fn Transform = matchexpr 0 { _ => fn identity }
-    fix blocked: fn Transform = expr { (fn identity) }
+    fix selected: static fn Transform = matchexpr 0 { _ => fn identity }
+    fix blocked: static fn Transform = expr { (fn identity) }
     if ID(3) != 3 || CURRENT(3) != 6 || copy(3) != 6 || local(3) != 3 { return 1 }
     if chooser(true)(3) != 3 || choose(false)(3) != 6 { return 2 }
     if holder.action(3) != 3 || changed.action(3) != 6 || node.visit(node) != 7 { return 3 }
@@ -57,14 +57,14 @@ fn main() -> u8 {
 fn function_values_capture_the_target_before_evaluating_arguments() {
     let source = r#"
 fntype Pair(i32, i32) -> i32
-struct Holder { action: fn Pair }
-var CURRENT: fn Pair = fn first
+struct Holder { action: static fn Pair }
+var CURRENT: static fn Pair = fn first
 var HOLDER = Holder { action: fn first }
 var TRACE: i32 = 0
 fn first(a: i32, b: i32) -> i32 { TRACE = TRACE * 10 + 4
 return a * 10 + b }
 fn second(a: i32, b: i32) -> i32 { return 99 }
-fn pick() -> fn Pair { TRACE = TRACE * 10 + 1
+fn pick() -> static fn Pair { TRACE = TRACE * 10 + 1
 return CURRENT }
 fn change() -> i32 { TRACE = TRACE * 10 + 2
 CURRENT = fn second
@@ -77,7 +77,7 @@ fn main() -> u8 {
     TRACE = 0
     HOLDER.action = fn first
     if HOLDER.action(change(), next()) != 23 || TRACE != 234 { return 2 }
-    var local: fn Pair = fn first
+    var local: static fn Pair = fn first
     fix result = local(expr { local = fn second
         2 }, 3)
     if result != 23 || local(2, 3) != 99 { return 3 }
@@ -101,11 +101,11 @@ fn function_values_reject_invalid_types_and_missing_context() {
             "fn.value-generic",
         ),
         (
-            "fntype Bad(i32) -> i64\nfn main() -> u8 { fix f: fn Bad = fn identity\nreturn 0 }",
+            "fntype Bad(i32) -> i64\nfn main() -> u8 { fix f: static fn Bad = fn identity\nreturn 0 }",
             "fn.value-generic",
         ),
         (
-            "fntype Bad(f32) -> f32\nfn main() -> u8 { fix f: fn Bad = fn identity\nreturn 0 }",
+            "fntype Bad(f32) -> f32\nfn main() -> u8 { fix f: static fn Bad = fn identity\nreturn 0 }",
             "fn.value-generic",
         ),
         (
@@ -158,19 +158,19 @@ fn function_values_reject_invalid_types_and_missing_context() {
             "type.void",
         ),
         (
-            "fntype Bad(fn Bad) -> void\nfn main() -> u8 { return 0 }",
+            "fntype Bad(static fn Bad) -> void\nfn main() -> u8 { return 0 }",
             "fntype.recursion",
         ),
         (
-            "fntype Ping(fn Pong) -> void\nfntype Pong(fn Ping) -> void\nfn main() -> u8 { return 0 }",
+            "fntype Ping(static fn Pong) -> void\nfntype Pong(static fn Ping) -> void\nfn main() -> u8 { return 0 }",
             "fntype.recursion",
         ),
         (
-            "struct Holder { action: fn Transform }\nfn main() -> u8 { fix h = Holder { action: fn fixed }\nfix same = h == h\nreturn 0 }",
+            "struct Holder { action: static fn Transform }\nfn main() -> u8 { fix h = Holder { action: fn fixed }\nfix same = h == h\nreturn 0 }",
             "fn.value-compare",
         ),
         (
-            "struct Holder { action: fn Transform }\nfn main() -> u8 { fix h = `` as Holder or Holder { action: fn fixed }\nreturn 0 }",
+            "struct Holder { action: static fn Transform }\nfn main() -> u8 { fix h = `` as Holder or Holder { action: fn fixed }\nreturn 0 }",
             "symbol.cast",
         ),
         (
@@ -178,7 +178,7 @@ fn function_values_reject_invalid_types_and_missing_context() {
             "expr.operator-types",
         ),
         (
-            "fn main() -> u8 { var f: fn Transform = fn fixed\nfor i in f(0)..<1 {}\nf = fn identity\nreturn 0 }",
+            "fn main() -> u8 { var f: static fn Transform = fn fixed\nfor i in f(0)..<1 {}\nf = fn identity\nreturn 0 }",
             "for.bound-reference",
         ),
         (
@@ -214,14 +214,14 @@ fn zero() -> int { return 0 }
 fn identity(n: int) -> int { return n }
 fn action() -> void { return }
 fn inside(n: int) -> int {
-    fix f: fn Transform = fn identity
+    fix f: static fn Transform = fn identity
     return n
 }
 fn main() -> u8 {
-    fix mix: fn Mixed = fn mixed
-    fix make: fn Zero = fn zero
-    fix act: fn Action = fn action
-    fix f: fn Transform = fn identity
+    fix mix: static fn Mixed = fn mixed
+    fix make: static fn Zero = fn zero
+    fix act: static fn Action = fn action
+    fix f: static fn Transform = fn identity
     act()
     if mix(1, 2.5) + 0.5 != 3.0 || make() != 0 { return 1 }
     fix n: i32 = 4
@@ -246,8 +246,8 @@ fn main() -> u8 {
 #[test]
 fn function_values_check_unused_specializations_and_report_the_value_site() {
     for declaration in [
-        "fix BAD: fn Narrow = @fn limited",
-        "fn unused() -> void { fix bad: fn Narrow = @fn limited }",
+        "fix BAD: static fn Narrow = @fn limited",
+        "fn unused() -> void { fix bad: static fn Narrow = @fn limited }",
     ] {
         let marked = format!(
             "fntype Narrow(u8) -> u8\nfn limited(n: int) -> int {{ return n +% 300 }}\n{declaration}\nfn main() -> u8 {{ return 0 }}"
@@ -271,14 +271,14 @@ fn function_values_stop_at_a_panicking_target_or_argument() {
 fntype Action(u8, u8) -> u8
 fn target(a: u8, b: u8) -> u8 { log info `body`
 return a }
-fn pick() -> fn Action { log info `target`
+fn pick() -> static fn Action { log info `target`
 return fn target }
 fn fail() -> u8 { log info `fail`
 fix n: u8 = 255
 return n + 1 }
 fn later() -> u8 { log info `later`
 return 1 }
-fn bad_pick() -> fn Action { fix n = fail()
+fn bad_pick() -> static fn Action { fix n = fail()
 return fn target }
 "#;
     for (call, expected) in [
@@ -333,7 +333,10 @@ fn function_values_limit_call_targets_and_resolve_long_type_chains_without_recur
     // 型の依存は式の深さと異なる。宣言を長く連ねても、型解決に再帰スタックを使わない。
     let mut source = String::new();
     for i in 0..2_000 {
-        source.push_str(&format!("fntype Chain{i}(fn Chain{}) -> void\n", i + 1));
+        source.push_str(&format!(
+            "fntype Chain{i}(static fn Chain{}) -> void\n",
+            i + 1
+        ));
     }
     source.push_str("fntype Chain2000() -> void\nfn main() -> u8 { return 0 }");
     fs::write(directory.0.join("chain.suz"), &source).unwrap();
@@ -343,7 +346,7 @@ fn function_values_limit_call_targets_and_resolve_long_type_chains_without_recur
         .output()
         .unwrap();
     assert!(output.status.success(), "{output:?}");
-    let source = source.replace("fntype Chain2000()", "fntype Chain2000(fn Chain0)");
+    let source = source.replace("fntype Chain2000()", "fntype Chain2000(static fn Chain0)");
     fs::write(directory.0.join("chain.suz"), source).unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_suz"))
         .current_dir(&directory.0)
@@ -395,17 +398,21 @@ fn function_values_distinguish_declarations_from_misplaced_fn_marks() {
 #[test]
 fn function_values_show_the_required_and_actual_types() {
     for (declarations, annotation, actual) in [
-        ("fntype Narrow(i32) -> i32\n", ": fn Narrow", "fn Narrow"),
-        ("", "", "fn(i32) -> i32"),
+        (
+            "fntype Narrow(i32) -> i32\n",
+            ": static fn Narrow",
+            "static fn Narrow",
+        ),
+        ("", "", "static fn(i32) -> i32"),
     ] {
         let source = format!(
-            "{declarations}fntype Wide(i64) -> i32\nfn identity(n: i32) -> i32 {{ return n }}\nfn take(f: fn Wide) -> void {{}}\nfn main() -> u8 {{\nfix f{annotation} = fn identity\ntake(f)\nreturn 0\n}}"
+            "{declarations}fntype Wide(i64) -> i32\nfn identity(n: i32) -> i32 {{ return n }}\nfn take(f: static fn Wide) -> void {{}}\nfn main() -> u8 {{\nfix f{annotation} = fn identity\ntake(f)\nreturn 0\n}}"
         );
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert!(
-            error
-                .to_string()
-                .contains(&format!("expected fn Wide, found {actual} [type.expected]")),
+            error.to_string().contains(&format!(
+                "expected static fn Wide, found {actual} [type.expected]"
+            )),
             "{error}"
         );
     }
@@ -428,6 +435,136 @@ fn function_values_report_duplicate_type_names_at_the_existing_collector_site() 
         assert_eq!(
             error.to_string(),
             format!("{line}:8: duplicate type name [decl.duplicate]")
+        );
+    }
+}
+
+#[test]
+fn call_only_functions_preserve_selected_values_and_forward_environments() {
+    let source = r#"
+fntype Transform(i32) -> i32
+fntype Alias(i32) -> i32
+fntype Action() -> void
+fntype Make() -> Item
+struct Item { value: i32 }
+struct Holder { action: static fn Transform }
+var CURRENT: static fn Transform = fn identity
+var HOLDER = Holder { action: fn identity }
+var TRACE: i32 = 0
+fn identity(n: int) -> int { return n }
+fn twice(n: i32) -> i32 { return n * 2 }
+fn pick() -> static fn Transform { TRACE += 1
+return CURRENT }
+fn change() -> i32 { CURRENT = fn twice
+HOLDER.action = fn twice
+return 3 }
+fn apply(action: fn Transform, n: i32) -> i32 { return action(n) }
+fn forward(action: fn Alias, n: i32) -> i32 { return apply(action, n) }
+fn generic_forward(action: fn Transform, n: int) -> int { action(1)
+return n }
+fn pair(a: fn Transform, b: fn Transform, n: i32) -> i32 { return a(n) + b(n) }
+fn again(action: fn Transform, n: i32) -> i32 {
+    if n == 0 { return action(3) }
+    return again(action, n - 1)
+}
+fn run(action: fn Action) -> void { action() }
+fn tick() -> void { TRACE += 10 }
+fn make() -> Item { return Item { value: 7 } }
+fn create(action: fn Make) -> Item { return action() }
+fn main() -> u8 {
+    if generic_forward(fn identity, 3) != 3 { return 8 }
+    if forward(pick(), change()) != 3 || TRACE != 1 { return 1 }
+    HOLDER.action = fn identity
+    if apply(HOLDER.action, change()) != 3 { return 2 }
+    if pair(fn identity, CURRENT, 3) != 9 { return 3 }
+    if again(fn identity, 3) != 3 { return 4 }
+    // 関数名から推論した型でも、呼び出し専用の仮引数へ変換できる。
+    fix indirect = fn apply
+    if indirect(fn identity, 4) != 4 { return 5 }
+    run(fn tick)
+    if TRACE != 11 || create(fn make).value != 7 { return 6 }
+    for i in 0..<10 {
+        if forward(ifexpr i == 0 { fn identity } else { fn twice }, 3) != ifexpr i == 0 { 3 } else { 6 } { return 7 }
+    }
+    return 0
+}
+"#;
+    let output = compile_and_run_c23(source, "call-only.suz");
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    // この入力は環境の受け渡しだけを使う。環境のための動的確保が紛れ込むのを検出する。
+    let c = suz::compile(source.as_bytes()).unwrap();
+    for allocation in ["malloc(", "calloc(", "realloc(", "alloca("] {
+        assert!(
+            !c.contains(allocation),
+            "unexpected allocation: {allocation}"
+        );
+    }
+}
+
+#[test]
+fn call_only_functions_reject_storage_and_non_parameter_annotations() {
+    let prelude = "fntype Transform(i32) -> i32\nfn fixed(n: i32) -> i32 { return n }\nfn apply(f: fn Transform) -> void { f(1) }\nfn save(f: static fn Transform) -> void {}\n";
+    for source in [
+        "fix BAD: fn Transform = fn fixed",
+        "var BAD: fn Transform = fn fixed",
+        "struct Bad { f: fn Transform }",
+        "fntype Bad(fn Transform) -> void",
+        "fntype Bad() -> fn Transform",
+        "fn bad() -> fn Transform { return fn fixed }",
+        "fn bad() -> void { fix f: fn Transform = fn fixed }",
+        "fn bad() -> void { var f: fn Transform = fn fixed }",
+    ] {
+        let source = format!("{prelude}{source}\nfn main() -> u8 {{ return 0 }}");
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert!(
+            error.to_string().contains("[fn.type-call]"),
+            "{source}: {error}"
+        );
+    }
+    for body in [
+        "fix copy = f",
+        "var copy = f",
+        "fix copy = ifexpr true { f } else { fn fixed }",
+        "fix copy = matchexpr 0 { _ => f }",
+        "fix copy = expr { f }",
+        "var copy = fn fixed\ncopy = f",
+        "fix copy = Holder { f: f }",
+        "save(f)",
+        "apply((f))",
+        "apply(ifexpr true { f } else { f })",
+        "fix result = f == f",
+        "fix result = `${f}`",
+        "return f",
+    ] {
+        let source = format!(
+            "{prelude}struct Holder {{ f: static fn Transform }}\nfn bad(f: fn Transform) -> static fn Transform {{ {body}\nreturn fn fixed }}\nfn main() -> u8 {{ return 0 }}"
+        );
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert!(
+            error.to_string().contains("[fn.call-only]"),
+            "{source}: {error}"
+        );
+    }
+}
+
+#[test]
+fn static_is_reserved_and_only_modifies_function_types() {
+    for source in [
+        "fn main() -> u8 { fix static = 1\nreturn 0 }",
+        "fn static() -> void {}\nfn main() -> u8 { return 0 }",
+        "fn bad(static: i32) -> void {}\nfn main() -> u8 { return 0 }",
+        "struct Item { static: i32 }\nfn main() -> u8 { return 0 }",
+    ] {
+        assert!(suz::compile(source.as_bytes()).is_err(), "{source}");
+    }
+    for ty in ["static i32", "static Item", "static fn i32"] {
+        let source = format!(
+            "struct Item {{ value: i32 }}\nfn bad(n: {ty}) -> void {{}}\nfn main() -> u8 {{ return 0 }}"
+        );
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert!(
+            error.to_string().contains("[fn.type-mark]"),
+            "{source}: {error}"
         );
     }
 }

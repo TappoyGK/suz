@@ -160,6 +160,7 @@ impl IntegerOperation {
 #[derive(Clone)]
 pub(crate) enum Value {
     Function(usize),
+    FunctionBorrow(Box<CheckedExpression>),
     Invoke {
         target: Box<CheckedExpression>,
         arguments: Vec<CheckedExpression>,
@@ -300,7 +301,7 @@ macro_rules! constant_children_visitor {
                     }
                     return handler(h, visit);
                 }
-                Self::Len(v) | Self::Cast(v) | Self::Negate(v) | Self::Truncate(v) | Self::BitNot(v)
+                Self::FunctionBorrow(v) | Self::Len(v) | Self::Cast(v) | Self::Negate(v) | Self::Truncate(v) | Self::BitNot(v)
                 | Self::Not(v) | Self::TextView(v) | Self::Intern { operand: v, .. }
                 | Self::Field { target: v, .. } => visit(v),
                 // constant_structはオペランドの解析から得た具体的なキャッシュであり、ソースのオペランドではない。

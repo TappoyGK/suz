@@ -24,7 +24,10 @@ pub(super) fn parts(
                 TemplatePart::Text(text) => TemplatePart::Text(text.clone()),
                 TemplatePart::Value(value) => {
                     let result = super::exact::use_value(value, bindings)?;
-                    if matches!(result.ty, Type::Function(_) | Type::Void | Type::Struct(_)) {
+                    if matches!(
+                        result.ty,
+                        Type::StaticFunction(_) | Type::Function(_) | Type::Void | Type::Struct(_)
+                    ) {
                         return Err(value.location.error(
                             ErrorKind::InvalidSource,
                             crate::diagnostic!(

@@ -69,7 +69,7 @@ Suzは次のものを含む。
 **[src.keywords]** 次の語はキーワードである。
 
 ```text
-fix var fn fntype struct enum
+fix var fn fntype static struct enum
 if ifexpr elif else while loop for rev in break continue return match matchexpr
 as or not len log allow expr with
 true false nan inf
@@ -234,7 +234,7 @@ fn main() -> u8 {
 
 ## 5. 型
 
-**[type.name]** 型として使う名前は、組み込み型名、またはファイル内で宣言された構造体・列挙型の名前でなければならない。関数値の型は [fn.type-mark] に従い `fn` と `fntype` の名前で書く。該当する型がない場合はコンパイルエラーである。
+**[type.name]** 型として使う名前は、組み込み型名、またはファイル内で宣言された構造体・列挙型の名前でなければならない。関数値の型は [fn.type-mark] に従い `static fn` または `fn` と `fntype` の名前で書く。該当する型がない場合はコンパイルエラーである。
 
 ### 5.1 組み込み型
 
@@ -1390,17 +1390,27 @@ fn convert(value: u16) -> int {
 
 **[fntype.decl]** `fntype 名前(T1, T2, ...) -> R` は、仮引数の型の並びと戻り値の型に名前を付ける。仮引数は0個以上で、型だけを書く。この型を関数値の型と呼ぶ。仮引数・戻り値に `int`・`float` は書けず、`void` は戻り値だけに使える。
 
-**[fntype.same]** 仮引数の型の並びと戻り値の型が同じ関数値の型は、名前が違っても同じ型である。関数の宣言から推論した関数値の型にも、同じ規則を適用する。
+**[fntype.same]** 同じ種別（`static fn` か `fn`）で、仮引数の型の並びと戻り値の型が同じ関数値の型は、名前が違っても同じ型である。関数の宣言から推論した関数値の型にも、同じ規則を適用する。
 
-**[fntype.recursion]** 関数値の型は、仮引数と戻り値を直接・間接にたどって自分自身を含むことはできない。循環する宣言はコンパイルエラーである。構造体を通して含む場合は認める。たとえば、`struct Node { visit: fn Visit }` と `fntype Visit(Node) -> void` は宣言できる。
+**[fntype.recursion]** 関数値の型は、仮引数と戻り値を直接・間接にたどって自分自身を含むことはできない。循環する宣言はコンパイルエラーである。構造体を通して含む場合は認める。たとえば、`struct Node { visit: static fn Visit }` と `fntype Visit(Node) -> void` は宣言できる。
 
-**[fn.type-mark]** 関数値の型を明記するときは、すべての場所で `fn Shape` のように `fn` を付ける。関数値の型の名前に `fn` を付けないこと、関数値の型でない型に `fn` を付けることはコンパイルエラーである。`fntype` の宣言で付ける名前には `fn` を付けない。
+**[fn.type-mark]** 関数値の型は `static fn 名前` または `fn 名前` と書く。名前は `fntype` で宣言した名前である。`fn` を付けないこと、`fntype` でない型に `fn` を付けること、`fn` 以外の型に `static` を付けることはコンパイルエラーである。`fntype` の宣言で付ける名前には `fn` を付けない。
 
-**[fn.value-from-name]** `fn saw` は、トップレベルの関数 `saw` を指す値を作る。汎用でない関数では、関数の仮引数と戻り値の型から関数値の型が決まり、同じ形の `fntype` の宣言や型注釈は必要ない。型が要求される場所では、その型と同じでなければコンパイルエラーである。汎用関数には [fn.value-generic] を適用する。`main` は値にできない。
+**[fn.type-static]** `static fn Shape` は、トップレベルの関数を指す値の型である。指している関数は、その値を渡した呼び出しが終わった後も有効である。どの関数を指すかは実行時に選べる。[value.copy-equivalent] に従い、仮引数・戻り値、トップレベルとブロック内の `fix`・`var`、構造体のフィールドに使える。`fntype` の宣言の仮引数と戻り値にも使える。
+
+**[fn.type-call]** `fn Shape` は、受け取った呼び出しの間だけ使える関数値の型である。関数の仮引数の型にだけ書ける。戻り値、`fix`・`var` の型注釈、構造体のフィールド、`fntype` の宣言の仮引数と戻り値に書くとコンパイルエラーである。
+
+**[fn.call-only]** `fn Shape` の仮引数は、呼び出すことと、別の関数の `fn Shape` の仮引数へ名前をそのまま書いて渡すことだけができる。それ以外の使い方はコンパイルエラーである。初期値・代入の右辺・`return`・フィールドの初期値・値ブロックの値には書けない。転送する実引数を丸括弧や値ブロックで包むこともできない。
+
+**[fn.type-convert]** `static fn Shape` の値は、同じ形の `fn Shape` の仮引数へ渡せる。逆の変換はない。
+
+**[fn.value-sharing]** `fn Shape` の値を転送すると、呼び出し先の環境を共有する。`static` のない型の書き方で、この性質を示す（[value.sharing-explicit]）。`static fn Shape` は [value.copy-equivalent] に従う。
+
+**[fn.value-from-name]** `fn saw` は、トップレベルの関数 `saw` を指す値を作る。汎用でない関数では、関数の仮引数と戻り値の型から `static fn` の型が決まり、同じ形の `fntype` の宣言や型注釈は必要ない。型が要求される場所では、その型と同じでなければコンパイルエラーである。汎用関数には [fn.value-generic] を適用する。`main` は値にできない。
 
 **[fn.value-mark]** 関数名を値として使うときは `fn` を付ける。関数値を保持する変数・フィールド・呼び出しなどの式には付けない。これらに反するとコンパイルエラーである。名前で直接呼ぶ `saw(p)` には `fn` を付けない。`fn pick(i)` は認めず、関数値を返す関数の呼び出しは `pick(i)` と書く。関数名から作った値をその場で呼ぶ場合は `(fn saw)(p)` と書く。
 
-**[fn.value-places]** 関数値は [value.copy-equivalent] に従う。コピーした関数値は元の値と同じ関数を指す。仮引数・戻り値、トップレベルとブロック内の `fix`・`var`、構造体のフィールドに使える。`var` には同じ型の別の関数値を代入できる。クロージャは導入しない。
+**[fn.value-places]** `static fn` の値には [fn.type-static]、`fn` の値には [fn.type-call] と [fn.call-only] を適用する。コピーした `static fn` の値は同じ関数を指し、`var` には同じ型の別の関数値を代入できる。
 
 **[fn.value-const]** `fn 関数名` は定数式であり、トップレベルの `fix`・`var` の初期値に書ける。汎用関数を具体化した関数値も同じである。
 
@@ -1410,7 +1420,7 @@ fn convert(value: u16) -> int {
 
 **[fn.value-compare]** 関数値には比較・算術・テンプレートの埋め込みを使えない。関数値をフィールドに含む構造体も、入れ子を含めて比較できない。
 
-**[fn.value-generic]** `fn 関数名` が汎用関数を指す場合は、その式に要求される関数値の型から具体型を決める。
+**[fn.value-generic]** `fn 関数名` が汎用関数を指す場合は、その式に要求される関数値の型から具体型を決める。要求される型は `static fn Shape` と `fn Shape` のどちらでもよい。
 
 - 型の要求は型注釈、実引数、`return`・`or return` の値、代入先、構造体のフィールドから来る。`ifexpr`・`matchexpr`・`expr`・丸括弧は外側からの要求を内側へ伝える。分岐の一方の型をもう一方の要求にはしない。
 - 宣言中のすべての `int` を同じ整数の具体型、すべての `float` を同じ浮動小数点の具体型に置き換える。両者は独立に決める。置き換え後の仮引数の型の並びと戻り値の型は、要求される型と完全に一致しなければならない。戻り値にだけ汎用型がある場合も、その戻り値の要求から具体型を決める。
@@ -1424,13 +1434,17 @@ fn identity(x: int) -> int { return x }
 fn twice(x: i32) -> i32 { return x * 2 }
 fn apply(action: fn Transform, n: i32) -> i32 { return action(n) }
 fn main() -> u8 {
-    fix action: fn Transform = fn identity
+    fix action: static fn Transform = fn identity
     fix other = fn twice
     return ifexpr apply(action, 3) == 3 && other(3) == 6 { 0 } else { 1 }
 }
 ```
 
-**[rt.fn-value]** 関数値は、生成するCでは関数ポインタ1つで表す。呼び出し対象と実引数の評価順序は [fn.value-evaluation] に従い、Cの関数呼び出し式の評価順序には依存しない。
+**[rt.fn-value]** `static fn Shape` の値は、生成するCでは関数ポインタ1つで表す。呼び出し対象と実引数の評価順序は [fn.value-evaluation] に従い、Cの関数呼び出し式の評価順序には依存しない。
+
+**[rt.closure-call]** `fn Shape` の値は、環境へのポインタを先頭の引数に取る関数ポインタと、環境へのポインタの組で表す。`static fn Shape` から変換するときは、評価して得た関数ポインタの値を呼び出し側のスタックに保持する。元の変数やフィールドへのポインタは保持しない。形ごとに生成する包み関数が、その環境から関数ポインタを読み出して呼ぶ。環境は実引数を受け取る呼び出しが終わるまで有効で、転送先でも同じ環境を使う。環境のためのヒープ確保は行わない。名前による直接の呼び出しと `static fn Shape` を通した呼び出しは、従来の表現を使う。
+
+**[rt.closure-order]** `static fn Shape` から `fn Shape` への変換は、その実引数の評価位置で元の関数値を1回評価し、環境に保持する。後続の実引数の評価で元の変数やフィールドが書き換わっても、保持した関数ポインタは変わらない。実引数の評価順は [fn.call] と [fn.value-evaluation] に従う。
 
 ## 9. 実行時の検査
 
@@ -1693,7 +1707,7 @@ EnumDeclaration  ::= "enum" IDENT ":" IntegerType
 Variants         ::= IDENT ( "," NL* IDENT )* ","? NL*
 
 Type             ::= IntegerType | "len_t" | "f32" | "f64" | "bool" | "char" | "symbol" | "text" | "void"
-                   | "int" | "float" | IDENT | "fn" IDENT
+                   | "int" | "float" | IDENT | "static" "fn" IDENT | "fn" IDENT
 IntegerType      ::= "i8" | "i16" | "i32" | "i64"
                    | "u8" | "u16" | "u32" | "u64"
 ```

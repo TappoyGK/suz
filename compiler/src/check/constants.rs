@@ -334,7 +334,7 @@ fn constant_bool_raw(expr: &CheckedExpression) -> Option<bool> {
                     }
                 } else {
                     match left.ty {
-                        Type::Function(_) => return None,
+                        Type::StaticFunction(_) | Type::Function(_) => return None,
                         Type::GenericInt | Type::GenericFloat | Type::Numeric(_) => return None,
                         Type::Symbol | Type::Text => {
                             let (Value::Text { text: a, .. }, Value::Text { text: b, .. }) =
@@ -445,7 +445,7 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
         return slice_value(expr);
     }
     let value = match expr.ty {
-        Type::Function(_) => match expr.value {
+        Type::StaticFunction(_) | Type::Function(_) => match expr.value {
             Value::Function(_) => expr.value.clone(),
             _ => return None,
         },

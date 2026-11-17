@@ -68,7 +68,7 @@ pub(super) struct Scope {
 impl Scope {
     pub fn contains_function(&self, ty: Type) -> bool {
         match ty {
-            Type::Function(_) => true,
+            Type::StaticFunction(_) | Type::Function(_) => true,
             Type::Struct(id) => self.structs[id]
                 .fields
                 .iter()
@@ -85,7 +85,7 @@ impl Scope {
                 types.push(signature);
                 types.len() - 1
             });
-        Type::Function(id)
+        Type::StaticFunction(id)
     }
     pub fn get(&self, name: &str) -> Option<&Binding> {
         self.locals
@@ -113,9 +113,14 @@ impl Scope {
         match ty {
             Type::Enum(ty) => self.enums[ty.id].name.clone(),
             Type::Struct(id) => self.structs[id].name.clone(),
-            Type::Function(id) => {
+            Type::StaticFunction(id) | Type::Function(id) => {
+                let prefix = if matches!(ty, Type::StaticFunction(_)) {
+                    "static fn"
+                } else {
+                    "fn"
+                };
                 if let Some(declaration) = self.fntypes.iter().find(|d| d.type_id == id) {
-                    return format!("fn {}", declaration.name);
+                    return format!("{prefix} {}", declaration.name);
                 }
                 // 名前のない推論型では、違いが分かるよう仮引数と戻り値を表示する。
                 let types = self.function_types.borrow();
@@ -126,7 +131,10 @@ impl Scope {
                     .map(|&ty| self.type_name(ty))
                     .collect::<Vec<_>>()
                     .join(", ");
-                format!("fn({parameters}) -> {}", self.type_name(signature.result))
+                format!(
+                    "{prefix}({parameters}) -> {}",
+                    self.type_name(signature.result)
+                )
             }
             _ => ty.name().into(),
         }

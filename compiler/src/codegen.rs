@@ -28,6 +28,8 @@ struct ExpressionContext {
     uses_text: bool,
     structs: Vec<crate::ast::StructDeclaration>,
     function_types: Vec<crate::ast::FunctionType>,
+    call_only_types: BTreeSet<usize>,
+    function_adapters: BTreeSet<usize>,
     struct_equals: BTreeSet<usize>,
     struct_parsers: BTreeSet<usize>,
     enums: Vec<crate::ast::EnumDeclaration>,
@@ -105,6 +107,7 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
     text_structure::prepare(&mut context);
     helpers::emit(&mut c, &context);
     structs::emit(&mut c, &context);
+    functions::call_only_declarations(&mut c, &context);
     text_structure::emit(&mut c, &context);
     for function in &program.functions {
         writeln!(c, "{};", functions::declaration(function)).unwrap();

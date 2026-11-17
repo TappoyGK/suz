@@ -49,7 +49,8 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
             }))
         }
         ExpressionKind::Invoke { target, .. } => {
-            let Type::Function(id) = operand_type(target, bindings)? else {
+            let (Type::StaticFunction(id) | Type::Function(id)) = operand_type(target, bindings)?
+            else {
                 return None;
             };
             Some(bindings.function_types.borrow()[id].result)
@@ -474,6 +475,15 @@ fn expression_inner(
                         crate::diagnostic!("decl.local-scope", "binding '{name}' is not in scope"),
                     )
                 })?;
+                if matches!(binding.ty, Type::Function(_)) {
+                    return Err(expr.location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "fn.call-only",
+                            "call-only parameters can only be called or forwarded by name"
+                        ),
+                    ));
+                }
                 binding.constant.clone().unwrap_or(CheckedExpression {
                     ty: binding.ty,
                     value: if binding.global {
