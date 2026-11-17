@@ -1404,7 +1404,7 @@ fn convert(value: u16) -> int {
 
 **[fn.type-convert]** `static fn Shape` の値は、同じ形の `fn Shape` の仮引数へ渡せる。逆の変換はない。
 
-**[fn.value-sharing]** `fn Shape` の値を転送すると、呼び出し先の環境を共有する。`static` のない型の書き方で、この性質を示す（[value.sharing-explicit]）。`static fn Shape` は [value.copy-equivalent] に従う。
+**[fn.value-sharing]** `fn Shape` は [value.sharing] の型とする。クロージャが参照でキャプチャーした変数や、書き換え可能な実体を指す値を環境に保持する場合、呼び出しを通して外側から見える書き換えが起きうるためである。`static` のない型の書き方で、この性質を示す（[value.sharing-explicit]）。`static fn Shape` は [value.copy-equivalent] に従う。
 
 **[fn.value-from-name]** `fn saw` は、トップレベルの関数 `saw` を指す値を作る。汎用でない関数では、関数の仮引数と戻り値の型から `static fn` の型が決まり、同じ形の `fntype` の宣言や型注釈は必要ない。型が要求される場所では、その型と同じでなければコンパイルエラーである。汎用関数には [fn.value-generic] を適用する。`main` は値にできない。
 
@@ -1418,7 +1418,7 @@ fn convert(value: u16) -> int {
 
 **[fn.value-evaluation]** 呼び出し対象の式を最初に1回評価し、得られた関数値を保持する。その後、実引数を左から右へそれぞれ1回評価し、保持した関数を呼ぶ。実引数の評価中に元の変数やフィールドが書き換わっても、今回呼び出す関数は変わらない。途中でパニックした場合は、残りの評価と呼び出しを行わない。
 
-**[fn.value-compare]** 関数値には比較・算術・テンプレートの埋め込みを使えない。関数値をフィールドに含む構造体も、入れ子を含めて比較できない。
+**[fn.value-compare]** `static fn Shape` と `fn Shape` のどちらの値にも、比較・算術・テンプレートの埋め込みを使えない。関数値をフィールドに含む構造体も、入れ子を含めて比較できない。
 
 **[fn.value-generic]** `fn 関数名` が汎用関数を指す場合は、その式に要求される関数値の型から具体型を決める。要求される型は `static fn Shape` と `fn Shape` のどちらでもよい。
 

@@ -568,3 +568,13 @@ fn static_is_reserved_and_only_modifies_function_types() {
         );
     }
 }
+
+#[test]
+fn call_only_forwarding_reports_signature_mismatches() {
+    let source = "fntype Tr(i32) -> i32\nfntype Ot(i64) -> i32\nfn take(f: fn Ot) -> void {}\nfn forward(f: fn Tr) -> void { take(f) }\nfn main() -> u8 { return 0 }";
+    let error = suz::compile(source.as_bytes()).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "4:37: expected fn Ot, found fn Tr [type.expected]"
+    );
+}

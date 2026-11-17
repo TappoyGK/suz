@@ -214,8 +214,19 @@ pub(super) fn argument(
     };
     if let ExpressionKind::Name(name) = &expr.kind
         && let Some(binding) = scope.get(name)
-        && binding.ty == required
+        && matches!(binding.ty, Type::Function(_))
     {
+        if binding.ty != required {
+            return Err(expr.location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "type.expected",
+                    "expected {}, found {}",
+                    scope.type_name(required),
+                    scope.type_name(binding.ty)
+                ),
+            ));
+        }
         return Ok(CheckedExpression {
             ty: required,
             value: Value::Local(binding.id),
