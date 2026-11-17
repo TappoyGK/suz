@@ -1,12 +1,12 @@
 //! 宣言の種類に応じて名前の綴りを検査する。
 //!
 //! 利用元: [`crate::parser::functions`]、[`crate::parser::structs`]、[`crate::parser::enums`]。
-//! 主な対象規則: `[name.constant]`、`[name.type]`、`[name.value]`、`[name.variant]`。
+//! 主な対象規則: `[name.top-level-binding]`、`[name.type]`、`[name.value]`、`[name.variant]`。
 
 use crate::{Diagnostic, ErrorKind, ast::Location};
 
 pub(super) enum Shape {
-    Constant,
+    TopLevelBinding,
     Value,
     Type,
     Variant,
@@ -17,14 +17,14 @@ pub(super) fn check(shape: Shape, name: &str, location: Location) -> Result<(), 
     let first = bytes.first().copied().unwrap_or_default();
     let separated = !name.ends_with('_') && !name.contains("__");
     let (valid, rule, description) = match shape {
-        Shape::Constant => (
+        Shape::TopLevelBinding => (
             first.is_ascii_uppercase()
                 && bytes
                     .iter()
                     .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || *c == b'_')
                 && separated,
-            "name.constant",
-            "constant names must start with an uppercase letter and contain only uppercase letters, digits, and single separating underscores",
+            "name.top-level-binding",
+            "top-level binding names must start with an uppercase letter and contain only uppercase letters, digits, and single separating underscores",
         ),
         Shape::Value => (
             first.is_ascii_lowercase()

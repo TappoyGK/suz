@@ -860,7 +860,7 @@ fn main() -> u8 { return 0 }
 **ソース：**
 
 ```suz
-const FIRST: u8 = 9
+fix FIRST: u8 = 9
 enum Left: u8 { FIRST, Second, Third }
 enum Right: u8 { Third, Second, FIRST }
 

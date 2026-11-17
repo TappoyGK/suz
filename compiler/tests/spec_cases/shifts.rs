@@ -59,12 +59,12 @@ fn shifts_check_types_diagnostics_and_constant_evaluation() {
         assert!(error.message().contains("expr.operator-types"), "{error:?}");
     }
     for declaration in [
-        "const VALUE: u8 = 1 << 8",
-        "const VALUE: i64 = 1 << 63",
-        "const VALUE: u64 = 1 >> 64",
-        "const VALUE: i8 = 1 >> -1",
-        "const VALUE: i8 = -2 << 7",
-        "const VALUE: u8 = ((1 << 8) >> 1) or 7",
+        "fix VALUE: u8 = 1 << 8",
+        "fix VALUE: i64 = 1 << 63",
+        "fix VALUE: u64 = 1 >> 64",
+        "fix VALUE: i8 = 1 >> -1",
+        "fix VALUE: i8 = -2 << 7",
+        "fix VALUE: u8 = ((1 << 8) >> 1) or 7",
     ] {
         let source = format!("{declaration}\nfn main() -> u8 {{ return 0 }}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
@@ -88,14 +88,14 @@ fn shifts_check_types_diagnostics_and_constant_evaluation() {
         .err()
         .unwrap();
     assert_eq!((error.line, error.column), (3, 7));
-    let source = br#"const COUNT: u8 = 8
-const INFERRED = 1 << COUNT
-const MINIMUM: i64 = -1 << 63
-const SIGN_FILL: i64 = MINIMUM >> 63
-const LARGEST_BIT: u64 = 1 << 63
-const FALLBACK: u8 = 1 << 256 or 7
-const LAZY: u8 = 1 << 1 or (1 / (0 as u8))
-const SHORT = true || (1 << 64 == 0)
+    let source = br#"fix COUNT: u8 = 8
+fix INFERRED = 1 << COUNT
+fix MINIMUM: i64 = -1 << 63
+fix SIGN_FILL: i64 = MINIMUM >> 63
+fix LARGEST_BIT: u64 = 1 << 63
+fix FALLBACK: u8 = 1 << 256 or 7
+fix LAZY: u8 = 1 << 1 or (1 / (0 as u8))
+fix SHORT = true || (1 << 64 == 0)
 fn main() -> u8 {
     return ifexpr INFERRED == 256 && SIGN_FILL == -1 && LARGEST_BIT == 9223372036854775808 && FALLBACK == 7 && LAZY == 2 && SHORT { 0 } else { 1 }
 }

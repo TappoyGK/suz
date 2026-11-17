@@ -41,6 +41,7 @@ pub struct Options {
     pub optimization: OsString,
     pub force: bool,
     pub log_allow: bool,
+    pub deny_global_var: bool,
     pub mode: suz::ArithmeticMode,
     pub text_pool_limit: suz::TextPoolLimit,
 }
@@ -82,6 +83,7 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
     let mut text_pool_limit = None;
     let mut force = false;
     let mut log_allow = false;
+    let mut deny_global_var = false;
     let mut help = false;
     let mut paths_only = false;
     while let Some(arg) = args.next() {
@@ -90,6 +92,10 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
             match arg.to_str() {
                 Some("--") => {
                     paths_only = true;
+                    continue;
+                }
+                Some("--deny-global-var") if !deny_global_var => {
+                    deny_global_var = true;
                     continue;
                 }
                 Some("--log-allow") if !log_allow => {
@@ -174,6 +180,7 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
         optimization: optimization.unwrap_or_else(|| "-O0".into()),
         force,
         log_allow,
+        deny_global_var,
         mode: mode.unwrap_or_default(),
         text_pool_limit: text_pool_limit.unwrap_or_default(),
     }))

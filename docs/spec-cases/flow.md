@@ -446,7 +446,7 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
-const ALWAYS = true
+fix ALWAYS = true
 
 fn main() -> u8 {
     while ALWAYS {
@@ -636,7 +636,7 @@ info flow-064.suz:8: 2 true
 **ソース：**
 
 ```suz
-const SELECTED: i32 = 2
+fix SELECTED: i32 = 2
 
 fn main() -> u8 {
     fix input: i32 = 2

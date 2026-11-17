@@ -315,21 +315,22 @@ pub(crate) struct FieldInitializer {
     pub location: Location,
 }
 
-/// トップレベル定数の宣言。省略可能な型注釈と、まだ評価していない初期化式。
-pub(crate) struct ConstDeclaration {
+/// トップレベルのfix・varの宣言。省略可能な型注釈と、まだ評価していない初期化式。
+pub(crate) struct TopLevelBinding {
+    pub mutable: bool,
     pub name: String,
     pub location: Location,
     pub annotation: Option<Type>,
     pub initializer: Expression,
 }
 
-/// 構文解析の結果全体。allowの範囲と型・定数・関数の宣言を保持する。
+/// 構文解析の結果全体。allowの範囲と型・トップレベル束縛・関数の宣言を保持する。
 /// [`crate::check`] が検査して [`crate::check::ir::CheckedProgram`] へ変換する。
 pub(crate) struct Program {
     pub allows: Vec<crate::warnings::AllowScope>,
     pub structs: Vec<StructDeclaration>,
     pub enums: Vec<EnumDeclaration>,
-    pub constants: Vec<ConstDeclaration>,
+    pub bindings: Vec<TopLevelBinding>,
     pub functions: Vec<Function>,
 }
 
