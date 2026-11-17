@@ -253,6 +253,14 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn statement_storage_stays_within_budget() {
+        // 大きな列挙子の式を直接格納する変更で、全ての文が再び肥大化するのを検出する。
+        assert!(std::mem::size_of::<ast::Statement>() <= 200);
+        assert!(std::mem::size_of::<check::ir::CheckedStatement>() <= 208);
+    }
+
+    #[test]
     fn accepts_comments_crlf_and_decimal_separators() {
         for source in [
             "// 前置き\nfn main() -> u8 { return 2_5_5 } // 後置き",

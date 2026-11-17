@@ -38,12 +38,14 @@ pub(crate) struct CheckedFunction {
 /// [`crate::ast::Statement`] の検査結果。
 /// 束縛と参照を番号へ解決し、束縛・代入の型を確定する。
 /// 式内の失敗時returnは専用の文へ移し、C生成で制御を組み立てられるようにする。
+/// 大きな列挙子の式をBoxに置き、全ての文がその大きさに引きずられるのを防ぐ。
+/// 失敗時returnの式は、検査中に作ったBoxをそのまま使う。
 #[derive(Clone)]
 pub(crate) enum CheckedStatement {
     SliceReturn {
         id: usize,
         operation: CheckedExpression,
-        return_value: CheckedExpression,
+        return_value: Box<CheckedExpression>,
     },
     Log {
         level: crate::ast::LogLevel,
@@ -60,7 +62,7 @@ pub(crate) enum CheckedStatement {
     For {
         id: usize,
         start: CheckedExpression,
-        end: Option<CheckedExpression>,
+        end: Option<Box<CheckedExpression>>,
         inclusive: bool,
         reverse: bool,
         body: Vec<CheckedStatement>,
@@ -68,15 +70,15 @@ pub(crate) enum CheckedStatement {
     ArithmeticReturn {
         id: usize,
         operation: CheckedExpression,
-        return_value: CheckedExpression,
+        return_value: Box<CheckedExpression>,
     },
     CastReturn {
         location: Location,
         wrap: bool,
         id: usize,
         ty: Type,
-        operand: CheckedExpression,
-        return_value: CheckedExpression,
+        operand: Box<CheckedExpression>,
+        return_value: Box<CheckedExpression>,
     },
     Loop {
         condition: Option<CheckedExpression>,

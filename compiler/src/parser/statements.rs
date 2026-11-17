@@ -162,7 +162,7 @@ impl Parser<'_, '_> {
                     name,
                     location,
                     start,
-                    end,
+                    end: end.map(Box::new),
                     inclusive,
                     reverse,
                     body,

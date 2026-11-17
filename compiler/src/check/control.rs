@@ -255,13 +255,13 @@ pub(super) fn lower_return_handler(
             CheckedStatement::SliceReturn {
                 id,
                 operation,
-                return_value: *return_value,
+                return_value,
             }
         } else {
             CheckedStatement::ArithmeticReturn {
                 id,
                 operation,
-                return_value: *return_value,
+                return_value,
             }
         });
         return true;
@@ -345,8 +345,8 @@ pub(super) fn lower_return_handler(
         wrap,
         id,
         ty: expr.ty,
-        operand: *operand,
-        return_value: *return_value,
+        operand,
+        return_value,
     });
     true
 }
