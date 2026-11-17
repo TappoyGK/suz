@@ -56,10 +56,18 @@ def verify(binary, version, cc, directory):
     if (view[1] or '?') != '😀' { return 9 }
     if (view as symbol) != `あ😀` { return 10 }
     if view != `あ😀` { return 11 }
+    fix length: len_t = len view
+    fix wide: u32 = 2
+    if identity(length) != wide || (length as u8 or 0) != 2 { return 12 }
+    fix exact: u64 = 18446744073709551615
+    if exact + 1 - exact != 1 { return 13 }
+    fix end: i8 = 1
+    if (view[300:end] or `fallback`) != `fallback` { return 14 }
     fix count: u8 = 1 + 2 allow [diagnostic.arithmetic: bounded sum]
     log warn `count: ${count}`
     return 7
 }
+fn identity(value: int) -> int { return value }
 enum Mode: u8 { First, Last }
 struct Entry {
     name: text,
