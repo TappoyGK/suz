@@ -15,8 +15,65 @@ use crate::{
 use std::collections::BTreeSet;
 
 impl Parser<'_, '_> {
+    // with固有の解析を分離し、再帰する式解析のスタック使用量を増やさない。
+    pub(super) fn with_expression(&mut self, target: Expression) -> Result<Expression, Diagnostic> {
+        let location = self.location();
+        // 丸括弧内では字句解析が改行トークンを省くため、物理行も確認する。
+        if self.tokens[self.cursor - 1].line != location.line {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "struct.with-line",
+                    "with must follow its target on the same line"
+                ),
+            ));
+        }
+        if self.restricted_condition {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "expr.struct-in-cond",
+                    "with expressions in conditions require parentheses"
+                ),
+            ));
+        }
+        self.cursor += 1;
+        let fields = self.delimited_list("{", "}", Self::with_field_initializer)?;
+        if fields.is_empty() {
+            return Err(location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("struct.with-fields", "with requires at least one field"),
+            ));
+        }
+        Ok(Expression {
+            kind: ExpressionKind::With {
+                target: Box::new(target),
+                fields,
+            },
+            location,
+        })
+    }
+
     pub(super) fn condition(&mut self) -> Result<Expression, Diagnostic> {
         self.restricted_expression(true)
+    }
+
+    fn with_field_initializer(&mut self) -> Result<FieldInitializer, Diagnostic> {
+        // pos.x: 式は受け付けず、内側のwith式で更新するよう案内する。
+        if self
+            .tokens
+            .get(self.cursor + 1)
+            .is_some_and(|token| token.kind == Kind::Symbol("."))
+        {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "struct.with-nested",
+                    "with accepts direct fields only; use a nested with expression"
+                ),
+            ));
+        }
+        self.field_initializer()
     }
 
     pub(super) fn parenthesized_expression(&mut self) -> Result<Expression, Diagnostic> {

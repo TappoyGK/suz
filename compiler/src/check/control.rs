@@ -68,6 +68,12 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
                     }
                 }
             }
+            ExpressionKind::With { target, fields } => {
+                visit(target, false, in_value)?;
+                for field in fields {
+                    visit(&field.value, false, in_value)?;
+                }
+            }
             ExpressionKind::Struct { fields, .. } => {
                 for field in fields {
                     visit(&field.value, false, in_value)?;

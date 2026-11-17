@@ -381,7 +381,14 @@ impl Parser<'_, '_> {
             }
         };
         let mut result = Expression { kind, location };
-        while matches!(self.token().kind, Kind::Symbol("." | "[")) {
+        while matches!(
+            self.token().kind,
+            Kind::Symbol("." | "[") | Kind::Keyword("with")
+        ) {
+            if self.token().kind == Kind::Keyword("with") {
+                result = self.with_expression(result)?;
+                continue;
+            }
             if self.token().kind == Kind::Symbol("[") {
                 let location = self.location();
                 self.cursor += 1;

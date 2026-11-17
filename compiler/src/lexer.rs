@@ -35,6 +35,7 @@ const KEYWORDS: &[&str] = &[
     "len",
     "log",
     "expr",
+    "with",
     "true",
     "false",
     "nan",

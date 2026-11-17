@@ -37,6 +37,12 @@ pub(super) fn collect(expr: &CheckedExpression, locations: &mut Vec<Location>) {
                 }
             }
         }
+        Value::With { target, fields } => {
+            collect(target, locations);
+            for (_, field) in fields {
+                collect(field, locations);
+            }
+        }
         Value::Struct { fields } => {
             for (_, field) in fields {
                 collect(field, locations);
