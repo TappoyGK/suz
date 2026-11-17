@@ -23,153 +23,166 @@ pub(crate) fn scan(
             message,
         )
     };
+    #[derive(Clone, Copy)]
+    enum Mode {
+        Text { start: usize, opening: usize },
+        Expression { start: usize, braces: usize },
+    }
     let bytes = source.as_bytes();
     let mut parts = Vec::new();
+    // 字句解析は構文の深さが分かる前に行う。補間内のテンプレートも再帰せず走査する。
+    let mut modes = vec![Mode::Text {
+        start: 1,
+        opening: 0,
+    }];
     let mut cursor = 1;
-    let mut text_start = cursor;
     while cursor < bytes.len() {
-        match bytes[cursor] {
-            b'\n' => {
-                return Err(fail(
-                    cursor,
-                    crate::diagnostic!(
-                        "symbol.template-line",
-                        "template must fit on one source line"
-                    ),
-                ));
-            }
-            b'`' => {
-                parts.push(Segment::Text(&source[text_start..cursor]));
-                return Ok((cursor + 1, parts));
-            }
-            b'\\' => match bytes.get(cursor + 1) {
-                Some(b'0' | b'n' | b'r' | b't' | b'\\' | b'`' | b'$') => cursor += 2,
-                Some(b'\n') => {
-                    return Err(fail(
-                        cursor + 1,
-                        crate::diagnostic!(
-                            "symbol.template-line",
-                            "template must fit on one source line"
-                        ),
-                    ));
-                }
-                _ => {
-                    return Err(fail(
-                        cursor,
-                        crate::diagnostic!("symbol.escape", "unknown template escape"),
-                    ));
-                }
-            },
-            b'$' if bytes.get(cursor + 1) == Some(&b'{') => {
-                parts.push(Segment::Text(&source[text_start..cursor]));
-                cursor += 2;
-                let start = cursor;
-                let mut depth = 1;
-                while cursor < bytes.len() {
-                    match bytes[cursor] {
-                        ch if ch.is_ascii_alphabetic() || ch == b'_' => {
-                            let word_start = cursor;
-                            while bytes
-                                .get(cursor)
-                                .is_some_and(|ch| ch.is_ascii_alphanumeric() || *ch == b'_')
-                            {
-                                cursor += 1;
-                            }
-                            if &source[word_start..cursor] == "allow" {
-                                loop {
-                                    while bytes.get(cursor) == Some(&b' ')
-                                        || bytes.get(cursor) == Some(&b'\t')
-                                    {
-                                        cursor += 1;
-                                    }
-                                    if bytes.get(cursor) != Some(&b'[') {
-                                        break;
-                                    }
-                                    let item_column = column + source[..cursor].chars().count();
-                                    cursor +=
-                                        super::allows::scan(&source[cursor..], line, item_column)?;
-                                    while bytes.get(cursor) == Some(&b' ')
-                                        || bytes.get(cursor) == Some(&b'\t')
-                                    {
-                                        cursor += 1;
-                                    }
-                                    if bytes.get(cursor) != Some(&b',') {
-                                        break;
-                                    }
-                                    cursor += 1;
-                                }
-                            }
-                            continue;
-                        }
-                        b'\n' => {
-                            return Err(fail(
-                                cursor,
-                                crate::diagnostic!(
-                                    "symbol.template-line",
-                                    "template must fit on one source line"
-                                ),
-                            ));
-                        }
-                        b'\'' => {
-                            let (_, length) = super::char_literal(&source[cursor..])
-                                .map_err(|message| fail(cursor, message))?;
-                            cursor += length;
-                            continue;
-                        }
-                        b'`' => {
-                            let nested_column = column + source[..cursor].chars().count();
-                            cursor += scan(&source[cursor..], line, nested_column)?.0;
-                            continue;
-                        }
-                        b'/' if bytes.get(cursor + 1) == Some(&b'/') => {
-                            if let Some(end) = source[cursor..].find('\n') {
-                                return Err(fail(
-                                    cursor + end,
-                                    crate::diagnostic!(
-                                        "symbol.template-line",
-                                        "template must fit on one source line"
-                                    ),
-                                ));
-                            }
-                            return Err(fail(
-                                start,
-                                crate::diagnostic!(
-                                    "symbol.interpolation",
-                                    "unclosed interpolation"
-                                ),
-                            ));
-                        }
-                        b'{' => depth += 1,
-                        b'}' => {
-                            depth -= 1;
-                            if depth == 0 {
-                                break;
-                            }
-                        }
-                        _ => {}
+        if bytes[cursor] == b'\n' {
+            return Err(fail(
+                cursor,
+                crate::diagnostic!(
+                    "symbol.template-line",
+                    "template must fit on one source line"
+                ),
+            ));
+        }
+        match *modes.last().unwrap() {
+            Mode::Text { start, .. } => match bytes[cursor] {
+                b'`' => {
+                    if modes.len() == 1 {
+                        parts.push(Segment::Text(&source[start..cursor]));
+                        return Ok((cursor + 1, parts));
                     }
+                    modes.pop();
                     cursor += 1;
                 }
-                if depth != 0 {
+                b'\\' => match bytes.get(cursor + 1) {
+                    Some(b'0' | b'n' | b'r' | b't' | b'\\' | b'`' | b'$') => cursor += 2,
+                    Some(b'\n') => {
+                        return Err(fail(
+                            cursor + 1,
+                            crate::diagnostic!(
+                                "symbol.template-line",
+                                "template must fit on one source line"
+                            ),
+                        ));
+                    }
+                    _ => {
+                        return Err(fail(
+                            cursor,
+                            crate::diagnostic!("symbol.escape", "unknown template escape"),
+                        ));
+                    }
+                },
+                b'$' if bytes.get(cursor + 1) == Some(&b'{') => {
+                    if modes.len() == 1 {
+                        parts.push(Segment::Text(&source[start..cursor]));
+                    }
+                    cursor += 2;
+                    modes.push(Mode::Expression {
+                        start: cursor,
+                        braces: 1,
+                    });
+                }
+                _ => cursor += 1,
+            },
+            Mode::Expression { start, braces } => match bytes[cursor] {
+                ch if ch.is_ascii_alphabetic() || ch == b'_' => {
+                    let word_start = cursor;
+                    while bytes
+                        .get(cursor)
+                        .is_some_and(|ch| ch.is_ascii_alphanumeric() || *ch == b'_')
+                    {
+                        cursor += 1;
+                    }
+                    if &source[word_start..cursor] == "allow" {
+                        loop {
+                            while matches!(bytes.get(cursor), Some(b' ' | b'\t')) {
+                                cursor += 1;
+                            }
+                            if bytes.get(cursor) != Some(&b'[') {
+                                break;
+                            }
+                            let item_column = column + source[..cursor].chars().count();
+                            cursor += super::allows::scan(&source[cursor..], line, item_column)?;
+                            while matches!(bytes.get(cursor), Some(b' ' | b'\t')) {
+                                cursor += 1;
+                            }
+                            if bytes.get(cursor) != Some(&b',') {
+                                break;
+                            }
+                            cursor += 1;
+                        }
+                    }
+                }
+                b'\'' => {
+                    let (_, length) = super::char_literal(&source[cursor..])
+                        .map_err(|message| fail(cursor, message))?;
+                    cursor += length;
+                }
+                b'`' => {
+                    modes.push(Mode::Text {
+                        start: cursor + 1,
+                        opening: cursor,
+                    });
+                    cursor += 1;
+                }
+                b'/' if bytes.get(cursor + 1) == Some(&b'/') => {
+                    if let Some(end) = source[cursor..].find('\n') {
+                        return Err(fail(
+                            cursor + end,
+                            crate::diagnostic!(
+                                "symbol.template-line",
+                                "template must fit on one source line"
+                            ),
+                        ));
+                    }
                     return Err(fail(
                         start,
                         crate::diagnostic!("symbol.interpolation", "unclosed interpolation"),
                     ));
                 }
-                parts.push(Segment::Expression {
-                    source: &source[start..cursor],
-                    column: column + source[..start].chars().count(),
-                });
-                cursor += 1;
-                text_start = cursor;
-            }
-            _ => cursor += 1,
+                b'{' => {
+                    *modes.last_mut().unwrap() = Mode::Expression {
+                        start,
+                        braces: braces + 1,
+                    };
+                    cursor += 1;
+                }
+                b'}' => {
+                    if braces == 1 {
+                        modes.pop();
+                        if modes.len() == 1 {
+                            parts.push(Segment::Expression {
+                                source: &source[start..cursor],
+                                column: column + source[..start].chars().count(),
+                            });
+                        }
+                        if let Mode::Text { start, .. } = modes.last_mut().unwrap() {
+                            *start = cursor + 1;
+                        }
+                    } else {
+                        *modes.last_mut().unwrap() = Mode::Expression {
+                            start,
+                            braces: braces - 1,
+                        };
+                    }
+                    cursor += 1;
+                }
+                _ => cursor += 1,
+            },
         }
     }
-    Err(fail(
-        0,
-        crate::diagnostic!("symbol.template", "unclosed template"),
-    ))
+    match *modes.last().unwrap() {
+        Mode::Text { opening, .. } => Err(fail(
+            opening,
+            crate::diagnostic!("symbol.template", "unclosed template"),
+        )),
+        Mode::Expression { start, .. } => Err(fail(
+            start,
+            crate::diagnostic!("symbol.interpolation", "unclosed interpolation"),
+        )),
+    }
 }
 
 pub(crate) fn decode(text: &str) -> String {

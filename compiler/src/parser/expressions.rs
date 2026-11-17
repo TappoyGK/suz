@@ -21,14 +21,15 @@ impl Parser<'_, '_> {
         }
         let location = self.location();
         self.cursor += 1;
-        let fallback = Some(self.failure_handler()?);
-        Ok(Expression {
-            kind: ExpressionKind::ArithmeticHandler {
+        self.check_height(operand.height + 1, location)?;
+        let fallback = Some(self.operator_child(location, Self::failure_handler)?);
+        self.node(
+            ExpressionKind::ArithmeticHandler {
                 operand: Box::new(operand),
                 fallback,
             },
             location,
-        })
+        )
     }
 
     fn failure_handler(&mut self) -> Result<FailureHandler, Diagnostic> {
@@ -52,6 +53,7 @@ impl Parser<'_, '_> {
                     value: Box::new(Expression {
                         kind: ExpressionKind::Void,
                         location,
+                        height: 0,
                     }),
                     location,
                 });
@@ -74,15 +76,16 @@ impl Parser<'_, '_> {
         while self.token().kind == Kind::Symbol(operator.symbol()) {
             let location = self.location();
             self.cursor += 1;
-            let right = operand(self)?;
-            left = Expression {
-                kind: ExpressionKind::Logical {
+            self.check_height(left.height + 1, location)?;
+            let right = self.operator_child(location, operand)?;
+            left = self.node(
+                ExpressionKind::Logical {
                     operator,
                     left: Box::new(left),
                     right: Box::new(right),
                 },
                 location,
-            };
+            )?;
         }
         Ok(left)
     }
@@ -125,45 +128,45 @@ impl Parser<'_, '_> {
             locations.push(self.location());
             not_equal = matches!(operator, ComparisonOperator::NotEqual);
             self.cursor += 1;
-            operands.push(self.binary(0)?);
+            self.check_height(operands[0].height + 1, location)?;
+            operands.push(self.operator_child(location, |p| p.binary(0))?);
             operators.push(operator);
         }
         if operators.is_empty() {
             return Ok(operands.pop().unwrap());
         }
-        Ok(Expression {
-            kind: ExpressionKind::Comparison {
+        self.node(
+            ExpressionKind::Comparison {
                 locations,
                 operators,
                 operands,
             },
             location,
-        })
+        )
     }
 
     fn binary(&mut self, level: u8) -> Result<Expression, Diagnostic> {
-        if level == 6 {
-            return self.cast();
-        }
-        let mut left = self.binary(level + 1)?;
+        // 演算子のない式で優先順位の段数だけ再帰しない。
+        let mut left = self.cast()?;
         while let Kind::Symbol(symbol) = self.token().kind {
             let Some(operator) = BinaryOperator::from_symbol(symbol) else {
                 break;
             };
-            if operator.precedence() != level {
+            if operator.precedence() < level {
                 break;
             }
             let location = self.location();
             self.cursor += 1;
-            let right = self.binary(level + 1)?;
-            left = Expression {
-                kind: ExpressionKind::Binary {
+            self.check_height(left.height + 1, location)?;
+            let right = self.operator_child(location, |p| p.binary(operator.precedence() + 1))?;
+            left = self.node(
+                ExpressionKind::Binary {
                     operator,
                     left: Box::new(left),
                     right: Box::new(right),
                 },
                 location,
-            };
+            )?;
         }
         Ok(left)
     }
@@ -174,10 +177,13 @@ impl Parser<'_, '_> {
             let truncate = self.token().kind == Kind::Symbol("as%");
             let location = self.location();
             self.cursor += 1;
+            self.check_height(operand.height + 1, location)?;
             let target = self.parse_type()?;
             let fallback = if self.token().kind == Kind::Keyword("or") {
+                let handler_location = self.location();
+                self.check_height(operand.height + 2, handler_location)?;
                 self.cursor += 1;
-                Some(self.failure_handler()?)
+                Some(self.operator_child(handler_location, Self::failure_handler)?)
             } else {
                 None
             };
@@ -187,7 +193,7 @@ impl Parser<'_, '_> {
                 target,
                 fallback,
             };
-            operand = Expression { kind, location };
+            operand = self.node(kind, location)?;
         }
         Ok(operand)
     }
@@ -213,6 +219,10 @@ impl Parser<'_, '_> {
     }
 
     fn unary(&mut self) -> Result<Expression, Diagnostic> {
+        self.nested(self.location(), Self::unary_inner)
+    }
+
+    fn unary_inner(&mut self) -> Result<Expression, Diagnostic> {
         if self.constant_expression
             && matches!(
                 self.token().kind,
@@ -349,6 +359,8 @@ impl Parser<'_, '_> {
             }
             Kind::Symbol("-") => {
                 self.cursor += 1;
+                // 負のリテラルへ畳み込む前に、単項演算子の下のリテラルの段を検査する。
+                self.check_height(1, self.limit_location.unwrap_or(self.location()))?;
                 let kind = match self.token().kind {
                     Kind::Integer(text) => ExpressionKind::Integer {
                         digits: text.replace('_', ""),
@@ -358,10 +370,9 @@ impl Parser<'_, '_> {
                         ExpressionKind::Float(format!("-{text}"))
                     }
                     _ => {
-                        return Ok(Expression {
-                            kind: ExpressionKind::Negate(Box::new(self.unary()?)),
-                            location,
-                        });
+                        let child = self.unary()?;
+                        return self
+                            .primary_node(ExpressionKind::Negate(Box::new(child)), location);
                     }
                 };
                 self.cursor += 1;
@@ -380,7 +391,7 @@ impl Parser<'_, '_> {
                 ));
             }
         };
-        let mut result = Expression { kind, location };
+        let mut result = self.primary_node(kind, location)?;
         while matches!(
             self.token().kind,
             Kind::Symbol("." | "[") | Kind::Keyword("with")
@@ -391,6 +402,8 @@ impl Parser<'_, '_> {
             }
             if self.token().kind == Kind::Symbol("[") {
                 let location = self.location();
+                self.check_height(result.height, location)?;
+                let previous_limit = self.limit_location.replace(location);
                 self.cursor += 1;
                 let start = if self.token().kind == Kind::Symbol(":") {
                     None
@@ -410,23 +423,31 @@ impl Parser<'_, '_> {
                 };
                 self.expect(FixedToken::Symbol("]"))?;
                 let fallback = if self.token().kind == Kind::Keyword("or") {
+                    let height = result
+                        .height
+                        .max(start.as_ref().map_or(0, |v| v.height))
+                        .max(end.as_ref().map_or(0, |v| v.height));
+                    self.check_height(height + 1, self.location())?;
+                    self.limit_location = Some(self.location());
                     self.cursor += 1;
                     Some(self.failure_handler()?)
                 } else {
                     None
                 };
-                result = Expression {
-                    location,
-                    kind: ExpressionKind::Slice {
+                self.limit_location = previous_limit;
+                result = self.primary_node(
+                    ExpressionKind::Slice {
                         target: Box::new(result),
                         start,
                         end,
                         index,
                         fallback,
                     },
-                };
+                    location,
+                )?;
                 continue;
             }
+            self.check_height(result.height, self.location())?;
             self.cursor += 1;
             let location = self.location();
             let Kind::Ident(name) = self.token().kind else {
@@ -436,13 +457,13 @@ impl Parser<'_, '_> {
                 ));
             };
             self.cursor += 1;
-            result = Expression {
-                kind: ExpressionKind::Field {
+            result = self.primary_node(
+                ExpressionKind::Field {
                     target: Box::new(result),
                     name: name.into(),
                 },
                 location,
-            };
+            )?;
         }
         if matches!(
             self.token().kind,

@@ -12,7 +12,19 @@ use std::{
 
 fn main() -> ExitCode {
     std::panic::set_hook(Box::new(|_| {}));
-    let result = std::panic::catch_unwind(cli::run).unwrap_or_else(|_| {
+    // 深さ256の解析・検査・C生成と途中の木の破棄に必要なスタックを確保する。
+    // OSのメインスレッドのスタックサイズに、言語の受理範囲を依存させない。
+    let result = std::panic::catch_unwind(|| {
+        let worker = std::thread::Builder::new()
+            .name("suz-compiler".into())
+            .stack_size(64 * 1024 * 1024)
+            .spawn(cli::run)
+            .expect("cannot create compiler thread");
+        worker
+            .join()
+            .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+    })
+    .unwrap_or_else(|_| {
         Err(cli::Failure::tool(
             3,
             "tool.exit",

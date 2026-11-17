@@ -241,6 +241,7 @@ impl Parser<'_, '_> {
                 let mut target = Expression {
                     kind: ExpressionKind::Name(name.clone()),
                     location,
+                    height: 1,
                 };
                 while self.token().kind == Kind::Symbol(".") {
                     self.cursor += 1;
@@ -248,7 +249,10 @@ impl Parser<'_, '_> {
                         unreachable!()
                     };
                     fields.push(field.to_owned());
+                    let height = target.height + 1;
+                    self.check_height(height, self.location())?;
                     target = Expression {
+                        height,
                         kind: ExpressionKind::Field {
                             target: Box::new(target),
                             name: field.to_owned(),
@@ -263,6 +267,7 @@ impl Parser<'_, '_> {
                 // 二項演算への変換では、右辺を評価する前に現在の代入先の値を読む。
                 let value = if let Some(operator) = operator {
                     Expression {
+                        height: 1 + target.height.max(right.height),
                         kind: ExpressionKind::Binary {
                             operator,
                             left: Box::new(target),
@@ -289,6 +294,7 @@ impl Parser<'_, '_> {
                 ) {
                     return Ok(Statement::Return(Expression {
                         kind: ExpressionKind::Void,
+                        height: 0,
                         location: self.location(),
                     }));
                 }
@@ -299,6 +305,10 @@ impl Parser<'_, '_> {
     }
 
     pub(super) fn block(&mut self) -> Result<(Vec<Statement>, Location), Diagnostic> {
+        self.nested(self.location(), Self::block_inner)
+    }
+
+    fn block_inner(&mut self) -> Result<(Vec<Statement>, Location), Diagnostic> {
         self.expect(FixedToken::Symbol("{"))?;
         self.newlines();
         let mut statements = Vec::new();

@@ -430,6 +430,8 @@ pub(crate) enum Statement {
 pub(crate) struct Expression {
     pub kind: ExpressionKind,
     pub location: Location,
+    /// 構文上の高さ。後置・左結合の演算を追加する前の上限検査に使う。
+    pub height: usize,
 }
 
 /// 文字列テンプレートの文字列部分、または補間する値。

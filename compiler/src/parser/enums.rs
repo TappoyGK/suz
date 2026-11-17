@@ -115,6 +115,8 @@ pub(super) fn collect(tokens: &[Token<'_>]) -> Result<Vec<EnumDeclaration>, Diag
         cursor: 0,
         constant_expression: false,
         in_value: false,
+        depth: 0,
+        limit_location: None,
     };
     let mut enums = Vec::<EnumDeclaration>::new();
     let mut depth = 0usize;
