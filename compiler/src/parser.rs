@@ -15,7 +15,7 @@ mod structs;
 
 use crate::{
     Diagnostic, ErrorKind,
-    ast::{ConstDeclaration, Location, Program, Type},
+    ast::{Location, Program, TopLevelBinding, Type},
     lexer::{Kind, Token},
 };
 
@@ -81,20 +81,24 @@ impl<'a, 's> Parser<'a, 's> {
         }
     }
 
-    fn constant(&mut self) -> Result<ConstDeclaration, Diagnostic> {
+    fn top_level_binding(&mut self) -> Result<TopLevelBinding, Diagnostic> {
         let start = self.location();
-        self.expect(FixedToken::Keyword("const"))?;
+        let mutable = self.token().kind == Kind::Keyword("var");
+        self.cursor += 1;
         let location = self.location();
         let name = match self.token().kind {
             Kind::Ident(name) => name.to_owned(),
             _ => {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
-                    crate::diagnostic!("src.ident", "expected a non-reserved constant name"),
+                    crate::diagnostic!(
+                        "src.ident",
+                        "expected a non-reserved top-level binding name"
+                    ),
                 ));
             }
         };
-        names::check(names::Shape::Constant, &name, location)?;
+        names::check(names::Shape::TopLevelBinding, &name, location)?;
         self.cursor += 1;
         let annotation = if self.token().kind == Kind::Symbol(":") {
             self.cursor += 1;
@@ -112,7 +116,10 @@ impl<'a, 's> Parser<'a, 's> {
         if self.token().kind != Kind::Symbol("=") {
             return Err(self.error(
                 ErrorKind::InvalidSource,
-                crate::diagnostic!("const.decl", "a constant requires an initializer"),
+                crate::diagnostic!(
+                    if mutable { "top.var" } else { "const.decl" },
+                    "a top-level binding requires an initializer"
+                ),
             ));
         }
         self.cursor += 1;
@@ -120,7 +127,8 @@ impl<'a, 's> Parser<'a, 's> {
         let initializer = self.expression()?;
         self.constant_expression = false;
         self.allow_clause(start, allows::expression_contains_block(&initializer))?;
-        Ok(ConstDeclaration {
+        Ok(TopLevelBinding {
+            mutable,
             name,
             location,
             annotation,
@@ -142,13 +150,13 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
         constant_expression: false,
         in_value: false,
     };
-    let mut constants = Vec::new();
+    let mut bindings = Vec::new();
     let mut functions = Vec::new();
     let mut main = false;
     p.newlines();
     while p.token().kind != Kind::End {
         match p.token().kind {
-            Kind::Keyword("const") => constants.push(p.constant()?),
+            Kind::Keyword("fix" | "var") => bindings.push(p.top_level_binding()?),
             Kind::Keyword("struct") => {
                 p.cursor = structs
                     .iter()
@@ -174,21 +182,12 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
                     crate::diagnostic!("fn.return", "return requires an enclosing function"),
                 ));
             }
-            Kind::Keyword("fix" | "var") => {
-                return Err(p.error(
-                    ErrorKind::InvalidSource,
-                    crate::diagnostic!(
-                        "decl.location",
-                        "variables must be declared inside a block"
-                    ),
-                ));
-            }
             _ => {
                 return Err(p.error(
                     ErrorKind::InvalidSource,
                     crate::diagnostic!(
                         "decl.top-level",
-                        "expected a const, fn, struct or enum declaration"
+                        "expected a fix, var, fn, struct or enum declaration"
                     ),
                 ));
             }
@@ -214,7 +213,7 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
         allows: p.allows,
         structs,
         enums,
-        constants,
+        bindings,
         functions,
     })
 }

@@ -132,11 +132,11 @@ impl Parser<'_, '_> {
                     body,
                 })
             }
-            Kind::Keyword("const" | "fn" | "enum" | "struct") => Err(self.error(
+            Kind::Keyword("fn" | "enum" | "struct") => Err(self.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(
                     "decl.location",
-                    "constants and functions must be declared at top level"
+                    "functions and types must be declared at top level"
                 ),
             )),
             Kind::Keyword("while" | "loop") => {

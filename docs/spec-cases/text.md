@@ -173,12 +173,12 @@ fn main() -> u8 {
 struct Label {
     name: symbol,
 }
-const PRODUCT = `Suz`
-const MAJOR: u8 = 1
-const LABEL = `${PRODUCT} ${MAJOR}`
-const COUNT: u8 = `256` as u8 or 10
-const WRAPPED = `257` as% u8 or 10
-const OBJECT = `Label { name: \`Suz\` }` as Label or Label { name: `` }
+fix PRODUCT = `Suz`
+fix MAJOR: u8 = 1
+fix LABEL = `${PRODUCT} ${MAJOR}`
+fix COUNT: u8 = `256` as u8 or 10
+fix WRAPPED = `257` as% u8 or 10
+fix OBJECT = `Label { name: \`Suz\` }` as Label or Label { name: `` }
 fn main() -> u8 {
     if LABEL == `Suz 1` && COUNT == 10 && WRAPPED == 1 && OBJECT.name == PRODUCT { return 0 }
     return 1
@@ -303,7 +303,7 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
-const VALUE: u8 = `1` as u8
+fix VALUE: u8 = `1` as u8
 fn main() -> u8 { return VALUE }
 ```
 
@@ -317,7 +317,7 @@ fn main() -> u8 { return VALUE }
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[symbol.cast-handler]` | 1 | 23 |
+| 通常 | `[symbol.cast-handler]` | 1 | 21 |
 
 ### text-010 成功する定数文字列のas%にもorを要求する
 
@@ -797,11 +797,11 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
-const SOURCE = `xnamey`
-const KEY = SOURCE[1:5] or ``
-const FIRST = KEY[0] or '?'
-const FALLBACK = SOURCE[-1:] or `bad`
-const INTERNED = KEY as symbol
+fix SOURCE = `xnamey`
+fix KEY = SOURCE[1:5] or ``
+fix FIRST = KEY[0] or '?'
+fix FALLBACK = SOURCE[-1:] or `bad`
+fix INTERNED = KEY as symbol
 fn classify(value: symbol) -> u8 {
     return matchexpr value {
         KEY => 1
@@ -834,7 +834,7 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
-const NAME = `ready`
+fix NAME = `ready`
 fn main() -> u8 {
     match `ready` {
         NAME => { return 0 }
@@ -954,8 +954,8 @@ info text-025.suz:4: count: 1
 **ソース：**
 
 ```suz
-const COUNT = len `あ😀x`
-const TAIL = len `あ😀x`[1:] or ``
+fix COUNT = len `あ😀x`
+fix TAIL = len `あ😀x`[1:] or ``
 fn message() -> symbol {
     log info `called`
     return `あ😀x`

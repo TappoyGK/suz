@@ -6,11 +6,11 @@ fn nested_struct_constants_and_equality_preserve_scalar_semantics() {
     let source = r#"struct Outer { inner: Inner, mode: Mode }
 struct Inner { value: f32, flag: bool }
 enum Mode: u8 { A, B }
-const FIRST = Outer { mode: Mode.B, inner: Inner { value: 1.5, flag: true } }
-const EQUAL = FIRST == Outer { inner: Inner { flag: true, value: 1.5 }, mode: Mode.B }
-const BAD = Inner { value: nan, flag: false }
-const UNEQUAL = BAD != BAD
-const FIELD = FIRST.inner.value
+fix FIRST = Outer { mode: Mode.B, inner: Inner { value: 1.5, flag: true } }
+fix EQUAL = FIRST == Outer { inner: Inner { flag: true, value: 1.5 }, mode: Mode.B }
+fix BAD = Inner { value: nan, flag: false }
+fix UNEQUAL = BAD != BAD
+fix FIELD = FIRST.inner.value
 fn copy(value: Outer) -> Outer { return value }
 fn main() -> u8 {
     fix value = copy(FIRST)
@@ -131,12 +131,12 @@ fn struct_fields_reject_invalid_declarations_access_and_overlapping_writes() {
             "assign.rhs-write",
         ),
         (
-            "struct Item { x: u8 }\nconst P = Item { x: 1 / 0 }",
+            "struct Item { x: u8 }\nfix P = Item { x: 1 / 0 }",
             "",
             "arith.div-zero-always",
         ),
         (
-            "struct Item { x: u8 }\nconst P = Item { x: P.x }",
+            "struct Item { x: u8 }\nfix P = Item { x: P.x }",
             "",
             "const.initializer",
         ),

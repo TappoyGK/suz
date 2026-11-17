@@ -437,7 +437,11 @@ fn expression_inner(
                 })?;
                 binding.constant.clone().unwrap_or(CheckedExpression {
                     ty: binding.ty,
-                    value: Value::Local(binding.id),
+                    value: if binding.global {
+                        Value::Global(binding.id)
+                    } else {
+                        Value::Local(binding.id)
+                    },
                 })
             }
             // 括弧は引数の境界を保つ。新しい式の文脈や独立した変換を作らない。

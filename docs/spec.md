@@ -69,7 +69,7 @@ Suzは次のものを含む。
 **[src.keywords]** 次の語はキーワードである。
 
 ```text
-const fix var fn struct enum
+fix var fn struct enum
 if ifexpr elif else while loop for rev in break continue return match matchexpr
 as or not len log allow expr
 true false nan inf
@@ -179,9 +179,9 @@ fn main() -> u8 {
 
 ### 4.1 宣言とスコープ
 
-**[decl.top-level]** トップレベルには、定数、関数、構造体、列挙型の宣言だけを書ける。これらの名前は、ファイル内の宣言順序によらず参照できる。
+**[decl.top-level]** トップレベルには、`fix`・`var`・関数・構造体・列挙型の宣言だけを書ける。これらの名前は、ファイル内の宣言順序によらず参照できる。
 
-**[decl.location]** 定数、関数、構造体、列挙型はトップレベルで宣言する。`fix` と `var` はブロック内で宣言する。それぞれの宣言をこれらの場所以外に書くとコンパイルエラーである。
+**[decl.location]** `fix` と `var` はトップレベルとブロック内で宣言できる。関数、構造体、列挙型はトップレベルで宣言する。それぞれの宣言をこれらの場所以外に書くとコンパイルエラーである。
 
 **[decl.duplicate]** 同じスコープで同じ名前を宣言するとコンパイルエラーである。定数、変数、仮引数、関数、型など、宣言の種類が違っても同じである。
 
@@ -191,9 +191,9 @@ fn main() -> u8 {
 
 ### 4.2 命名規則
 
-**[name.constant]** `const` の名前はASCIIの大文字で始まり、大文字・数字・`_` だけからなる。`_` は末尾に置かず、連続させない。例は `MAX_COUNT`、`N`、`LIMIT_2` である。
+**[name.top-level-binding]** トップレベルの `fix`・`var` の名前はASCIIの大文字で始まり、大文字・数字・`_` だけからなる。`_` は末尾に置かず、連続させない。例は `MAX_COUNT`、`N`、`LIMIT_2` である。
 
-**[name.value]** 関数、`fix`・`var`、仮引数、構造体のフィールド、`for` と `rev` のループ変数の名前はASCIIの小文字で始まり、小文字・数字・`_` だけからなる。`_` は末尾に置かず、連続させない。例は `read_count`、`count`、`x2` である。
+**[name.value]** 関数、ブロック内の `fix`・`var`、仮引数、構造体のフィールド、`for` と `rev` のループ変数の名前はASCIIの小文字で始まり、小文字・数字・`_` だけからなる。`_` は末尾に置かず、連続させない。例は `read_count`、`count`、`x2` である。
 
 **[name.type]** 構造体・列挙型の名前はASCIIの大文字で始まり、英字と数字だけからなる。小文字を1文字以上含み、大文字を連続させない。例は `Vec2`、`IoError` である。`IOError`、`T`、`Load_Error` は認めない。
 
@@ -395,11 +395,11 @@ fix empty = joined == ``
 
 ### 6.1 定数
 
-**[const.decl]** 定数は `const 名前: 型 = 初期値` と書く。型は省略でき、省略したときは初期値から推論する。初期値は必須であり、コンパイル時に評価する。定数やそのフィールドへの代入はコンパイルエラーである。
+**[const.decl]** 定数はトップレベルで `fix 名前: 型 = 初期値` と書く。型は省略でき、省略したときは初期値から推論する。初期値は必須であり、コンパイル時に評価する。定数やそのフィールドへの代入はコンパイルエラーである。
 
 **[const.initializer]** 定数の初期値には、[const.expression] の定数式を使う。定数間の循環参照はコンパイルエラーである。
 
-**[const.expression]** 定数式は、数値・真偽値・文字のリテラル、定数名、列挙子、定数式同士の演算と型変換、定数式から作る構造体リテラル、そのフィールド参照、丸括弧で囲んだ定数式から構成する。型変換と整数演算の `or` による代替値にも定数式を使える。埋め込みのないテンプレート、すべての埋め込みが定数式であるテンプレート、定数式の `symbol` 同士の比較も定数式である。`text` の定数式には [text.const-view] を適用する。
+**[const.expression]** 定数名はトップレベルの `fix` の名前を指し、ブロック内の `fix` とすべての `var` の名前は含めない。定数式は、数値・真偽値・文字のリテラル、定数名、列挙子、定数式同士の演算と型変換、定数式から作る構造体リテラル、そのフィールド参照、丸括弧で囲んだ定数式から構成する。型変換と整数演算の `or` による代替値にも定数式を使える。埋め込みのないテンプレート、すべての埋め込みが定数式であるテンプレート、定数式の `symbol` 同士の比較も定数式である。`text` の定数式には [text.const-view] を適用する。
 
 **[const.evaluation]** 定数式は、通常の式と同じ型、演算、評価順序、短絡評価の規則でコンパイル時に評価する。評価中にパニックの条件を満たし、その演算に対応する `or` による失敗処理がなければコンパイルエラーである。整数演算に対応する `or` がある場合は、演算に失敗したときだけ代替値を評価する。成功した場合は演算結果を使う。評価しない部分にも、定数式の構成と型の規則、および [const.cast-check] と [expr.cast-handler] と [symbol.cast-handler] の `or` を要求する規則を適用する。
 
@@ -410,22 +410,22 @@ fix empty = joined == ``
 短絡評価で評価しない箇所にも、キャストに `or` が必要かどうかの検査を適用する。たとえば、`true || ((300 as u8) == 0)` はコンパイルエラーであり、`true || ((300 as u8 or 0) == 0)` は受理する。式の評価順序と短絡評価には [const.evaluation] を適用する。実行時に値が決まる変換は、9.4 節に従って検査する。
 
 ```suz
-const LARGE: f64 = 1.0e40
+fix LARGE: f64 = 1.0e40
 ```
 
 この定数を使った `LARGE as f32` や、リテラルを使った `1.0e40 as f32` は、`or` がないためコンパイルエラーである。`LARGE as f32 or 0.0` は、代替値の `0.0` を使う。
 
 ```suz
-const SAMPLE_RATE: i32 = 48_000
-const CHANNELS = 2
+fix SAMPLE_RATE: i32 = 48_000
+fix CHANNELS = 2
 ```
 
-**[const.symbol]** 定数テンプレートは、実行時と同じエスケープと値の表示規則で評価する。数値リテラルの型は通常の型決定規則に従う。定数名は参照できるが、`fix` の値の参照は定数式にならない。ユーザー定義関数の呼び出しには [const.expression] の制約を適用する。
+**[const.symbol]** 定数テンプレートは、実行時と同じエスケープと値の表示規則で評価する。数値リテラルの型は通常の型決定規則に従う。定数名は参照できるが、ブロック内の `fix` の値の参照は定数式にならない。ユーザー定義関数の呼び出しには [const.expression] の制約を適用する。
 
 ```suz
-const PRODUCT: symbol = `Suz`
-const MAJOR: u8 = 1
-const LABEL = `${PRODUCT} ${MAJOR}`
+fix PRODUCT: symbol = `Suz`
+fix MAJOR: u8 = 1
+fix LABEL = `${PRODUCT} ${MAJOR}`
 ```
 
 `LABEL` の内容は `Suz 1` となる。
@@ -433,21 +433,21 @@ const LABEL = `${PRODUCT} ${MAJOR}`
 **[const.symbol-cast]** 定数式の `symbol` からの `as` と `as%` は定数式として評価できる。`or` の代替値も定数式とし、実行時と同じ形式・範囲・丸め・ラップの規則で判定する。構造体への変換も対象とし、フィールドを再帰的に検査する。成功した結果の `symbol` フィールドはconstant symbolとして配置する。変換が失敗した場合は代替値を使う。成功する変換であっても [symbol.cast-handler] に従って `or` を必須とする。
 
 ```suz
-const ENABLED = `true` as bool or false
-const COUNT: u8 = `256` as u8 or 10
+fix ENABLED = `true` as bool or false
+fix COUNT: u8 = `256` as u8 or 10
 ```
 
 `ENABLED` は `true`、`COUNT` は10となる。
 
 ### 6.2 変数
 
-**[var.decl]** 変数は `fix` か `var` で宣言する。`fix` で宣言した変数には、代入し直せない。`var` で宣言した変数には、代入し直せる。
+**[var.decl]** ブロック内の変数は `fix` か `var` で宣言する。`fix` で宣言した変数には、代入し直せない。`var` で宣言した変数には、代入し直せる。
 
-**[var.initializer]** `fix` と `var` は、どちらも初期値を必ず指定する。型を指定した場合は、その型の初期値が必要である。型を省略した場合は、初期値から型を推論する。
+**[var.initializer]** ブロック内の `fix` と `var` は、どちらも初期値を必ず指定する。型を指定した場合は、その型の初期値が必要である。型を省略した場合は、初期値から型を推論する。
 
-**[var.fix-assign]** `fix` で宣言した変数や、そのフィールドへの代入はコンパイルエラーである。入れ子の構造体のフィールドも同じである。
+**[var.fix-assign]** ブロック内の `fix` で宣言した変数や、そのフィールドへの代入はコンパイルエラーである。入れ子の構造体のフィールドも同じである。
 
-**[var.never-reassigned]** `var` の宣言のあとには、その変数またはそのフィールドへの代入が、スコープ内に構文上 1 つ以上必要である。複合代入と、条件分岐内の代入も数える。初期化は数えない。実行時にその代入を通るかどうかは問わない。該当する代入がなければコンパイルエラーである。
+**[var.never-reassigned]** ブロック内の `var` は、宣言後の同じスコープ内に、その変数またはそのフィールドへの代入が構文上1つ以上必要である。トップレベルの `var` は、いずれかの関数の本体に同じ対象への代入が構文上1つ以上必要である。複合代入と、条件分岐内の代入も数える。初期化は数えない。実行時にその代入を通るかどうかは問わない。該当する代入がなければコンパイルエラーとし、`fix` で宣言するよう案内する。
 
 ```suz
 fix rate: i32 = 48_000
@@ -455,9 +455,15 @@ var count = 0
 count += 1
 ```
 
+**[top.var]** トップレベルの `var 名前: 型 = 初期値` は、大域変数を宣言する。型注釈は省略でき、省略時は初期値から推論する。初期値は必須で、[const.expression] の定数式に限り、コンパイル時に評価する。変数は `main` の実行前に初期化し、格納領域をプログラム終了まで保持する。
+
+**[top.var-use]** 大域変数は、各関数から名前を使って読み書きできる。式中の参照では、その時点の値を読み取る。引数・戻り値・他の変数の初期値として渡すのは、その値であり、大域変数そのものへの参照ではない。値の受け渡しは [value.copy-equivalent] など、その型の規則に従う。呼び出された関数も、大域変数の名前を使えばその変数を書き換えられる。代入には [assign.target] と [assign.rhs-write] を適用する。大域変数の名前は定数式と `match` のパターンには使えない。
+
+**[top.var-type]** 大域変数にはブロック内の `var` で使える具体型を指定できる。`int`・`float` は [num.places] により指定できない。
+
 ### 6.3 代入
 
-**[assign.target]** 代入は `代入先 = 式` と書く。代入先は、`var` で宣言した変数、またはそのフィールドである。入れ子の構造体のフィールドも代入先にできる。それ以外への代入はコンパイルエラーである。
+**[assign.target]** 代入は `代入先 = 式` と書く。代入先は、ブロック内またはトップレベルの `var` で宣言した変数、またはそのフィールドである。入れ子の構造体のフィールドも代入先にできる。それ以外への代入はコンパイルエラーである。
 
 **[assign.type]** 通常の代入では、右辺に代入先の型を要求し、[conv.widen] と [text.from-symbol] の暗黙変換を認める。算術式の格納には [arith.store] を適用する。要求を満たさない場合はコンパイルエラーである。
 
@@ -1139,7 +1145,7 @@ fix sign = ifexpr x < 0 {
 
 **[for.bounds]** 両端は同じ整数型、またはともに `char` でなければならない。開始値、終了値の順に、ループ開始時にそれぞれ 1 回だけ評価する。開始値が終了値より大きければ反復は 0 回である。両端が等しい場合、`..<` は 0 回、`..=` は 1 回である。終了値が整数型の最大値でも、最後の反復後に増分によるオーバーフローは起きない。
 
-**[for.bound-reference]** 開始値と終了値の式の内部で、`var` で宣言した変数を値として参照するとコンパイルエラーである。その変数のフィールド参照、演算のオペランド、関数呼び出しの実引数に書いた参照も対象になる。変更可能な変数の現在値を範囲に使う場合は、ループの前で `fix` にコピーし、その名前を範囲式で参照する。検査は範囲式に書かれた参照に対して行う。
+**[for.bound-reference]** 開始値と終了値の式の内部で、ブロック内またはトップレベルの `var` で宣言した変数を値として参照するとコンパイルエラーである。その変数のフィールド参照、演算のオペランド、関数呼び出しの実引数に書いた参照も対象になる。変更可能な変数の現在値を範囲に使う場合は、ループの前で `fix` にコピーし、その名前を範囲式で参照する。検査は範囲式に書かれた参照に対して行う。
 
 ```suz
 var end: u8 = 3
@@ -1394,6 +1400,7 @@ count = (count + 1) or return 1
 | [diagnostic.arithmetic] | `or` による失敗処理がない整数演算 | `--warn-unhandled-arithmetic` を指定した場合 |
 | [diagnostic.constant-comparison] | 範囲だけで結果が決まる比較 | 常に |
 | [diagnostic.integer-division-to-float] | 浮動小数点演算へ渡る整数除算 | 常に |
+| [diagnostic.global-var] | トップレベルの `var` 宣言 | 常に |
 
 **[warn.output]** 警告は [tool.messages] の形式で標準エラーへ書く。メッセージの前には `warn:` を付ける。メッセージの末尾の規則名が、`allow` に指定する規則名である。
 
@@ -1401,9 +1408,13 @@ count = (count + 1) or return 1
 
 **[diagnostic.integer-division-to-float]** 浮動小数点演算のオペランドになる整数の算術式に `/` が含まれる場合は、通常設定でも各 `/` の位置に警告する。整数除算による切り捨てが先に行われることを示す。理由付きの `allow` で抑制できる。明示的な型変換や格納済みの値の内部までさかのぼって警告しない。
 
+**[diagnostic.global-var]** トップレベルの `var` 宣言には、通常設定でも警告を出す。診断位置は宣言した名前とする。末尾の `allow [diagnostic.global-var: 理由]` で抑えられる。警告を残したまま使うこともできる。
+
+**[diagnostic.global-var-deny]** `--deny-global-var` を指定すると、トップレベルの `var` 宣言をコンパイルエラーにする。`allow` による例外は認めない。
+
 ### 11.3 警告の抑制
 
-**[allow.clause]** 文の末尾に `allow [規則名: 理由]` を書くと、その文で出る、その規則の警告を抑える。複数行にまたがる文にも文全体に効く。`const` 宣言の末尾にも書ける。複数の規則を指定する場合は、それぞれに理由を付けてカンマで区切る。
+**[allow.clause]** 文の末尾に `allow [規則名: 理由]` を書くと、その文で出る、その規則の警告を抑える。複数行にまたがる文にも文全体に効く。トップレベルの `fix`・`var` 宣言の末尾にも書ける。複数の規則を指定する場合は、それぞれに理由を付けてカンマで区切る。
 
 **[allow.block]** `allow [規則名: 理由] { ... }` は、ブロック内の文で出る、その規則の警告を抑える文である。ブロックは [block.statement] と同じくスコープを作る。
 
@@ -1509,10 +1520,10 @@ CharEscape ::= "\" ( "0" | "n" | "r" | "t" | "\" | "'"
 
 ```ebnf
 Program          ::= NL* ( Declaration NL+ )* Declaration? EOF
-Declaration      ::= ConstDeclaration | FunctionDeclaration
+Declaration      ::= TopLevelBinding | FunctionDeclaration
                    | StructDeclaration | EnumDeclaration
 
-ConstDeclaration ::= "const" IDENT TypeAnnotation? "=" ConstExpression AllowClause?
+TopLevelBinding  ::= ( "fix" | "var" ) IDENT TypeAnnotation? "=" ConstExpression AllowClause?
 TypeAnnotation   ::= ":" Type
 
 FunctionDeclaration ::= "fn" IDENT "(" Parameters? ")" "->" Type Block
@@ -1532,6 +1543,8 @@ Type             ::= IntegerType | "len_t" | "f32" | "f64" | "bool" | "char" | "
 IntegerType      ::= "i8" | "i16" | "i32" | "i64"
                    | "u8" | "u16" | "u32" | "u64"
 ```
+
+`TopLevelBinding` の `fix` には [const.decl]、`var` には [top.var] を適用する。どちらも初期値は定数式に限る。
 
 `Type` の `"int"` と `"float"` には [num.places]、関数内での使用には8.7節の規則を適用する。
 
@@ -1647,4 +1660,4 @@ Pattern          ::= "_" | ConstExpression
 ConstExpression ::= Expression
 ```
 
-`ConstExpression` は、[const.expression] の構成に制限して `Expression` を読む。演算子の優先順位と結合は A.5 と同じである。参照する名前は定数または列挙子として解決し、演算のオペランド、型変換の対象、構造体の各フィールドの初期値、フィールド参照の対象、丸括弧内の式、テンプレートの埋め込みにも再帰的に同じ制限を適用する。
+`ConstExpression` は、[const.expression] の構成に制限して `Expression` を読む。演算子の優先順位と結合は A.5 と同じである。参照する名前はトップレベルの `fix` または列挙子として解決し、演算のオペランド、型変換の対象、構造体の各フィールドの初期値、フィールド参照の対象、丸括弧内の式、テンプレートの埋め込みにも再帰的に同じ制限を適用する。

@@ -73,6 +73,7 @@ impl Parser<'_, '_> {
             if !matches!(
                 rule,
                 "diagnostic.arithmetic"
+                    | "diagnostic.global-var"
                     | "diagnostic.constant-comparison"
                     | "diagnostic.integer-division-to-float"
             ) || items.iter().any(|item| item.rule == rule)

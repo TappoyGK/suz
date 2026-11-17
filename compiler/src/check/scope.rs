@@ -56,6 +56,8 @@ pub(super) struct Scope {
     pub locals: BTreeMap<String, Binding>,
     // 不変の宣言は共有し、ローカル束縛の状態だけを複製する。
     pub constants: Rc<BTreeMap<String, Binding>>,
+    // 大域変数の型・格納先と代入済みフラグを、全関数の検査で共有する。
+    pub globals: Rc<BTreeMap<String, Binding>>,
     pub enums: Rc<Vec<crate::ast::EnumDeclaration>>,
     pub structs: Rc<Vec<crate::ast::StructDeclaration>>,
     pub functions: Rc<BTreeMap<String, Signature>>,
@@ -63,7 +65,10 @@ pub(super) struct Scope {
 }
 impl Scope {
     pub fn get(&self, name: &str) -> Option<&Binding> {
-        self.locals.get(name).or_else(|| self.constants.get(name))
+        self.locals
+            .get(name)
+            .or_else(|| self.constants.get(name))
+            .or_else(|| self.globals.get(name))
     }
     pub fn contains_key(&self, name: &str) -> bool {
         self.get(name).is_some()
@@ -106,6 +111,7 @@ impl Default for Scope {
             outputs: Default::default(),
             locals: BTreeMap::new(),
             constants: Rc::default(),
+            globals: Rc::default(),
             enums: Rc::default(),
             structs: Rc::default(),
             functions: Rc::default(),

@@ -72,7 +72,7 @@ fn ranges_used_as_values_report_the_range_rule_at_the_operator() {
 fn range_misuse_is_diagnosed_in_other_expression_contexts() {
     for operator in ["..<", "..="] {
         for template in [
-            "const VALUE = 0RANGE3\nfn main() -> u8 { return 0 }",
+            "fix VALUE = 0RANGE3\nfn main() -> u8 { return 0 }",
             "struct Item { value: u8 }\nfn main() -> u8 { fix item = Item { value: 0RANGE3 }\nreturn 0 }",
             "fn main() -> u8 { if 0RANGE3 {}\nreturn 0 }",
             "fn main() -> u8 { while 0RANGE3 {}\nreturn 0 }",

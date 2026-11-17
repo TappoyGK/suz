@@ -32,9 +32,9 @@ fn enum_conversions_use_variant_ranges_and_preserve_integer_boundaries() {
 #[test]
 #[ignore = "release check: run scripts/test-release.sh"]
 fn enum_values_work_with_constants_calls_blocks_and_lazy_handlers() {
-    let source = r#"const CHOSEN: Mode = INVALID as Mode or Mode.B
-const INVALID: u16 = 256
-const EQUAL = CHOSEN == Mode.B == (1 as Mode)
+    let source = r#"fix CHOSEN: Mode = INVALID as Mode or Mode.B
+fix INVALID: u16 = 256
+fix EQUAL = CHOSEN == Mode.B == (1 as Mode)
 fn narrow(raw: i64) -> Mode {
     fix mode = raw as Mode or return Mode.B
     return mode
@@ -118,8 +118,8 @@ fn enum_numbering_and_narrowing_cover_signed_and_unsigned_limits() {
         .join(", ");
     let source = format!(
         r#"enum Code: i64 {{ {variants} }}
-const LOW = Code.V127 as i8
-const HIGH = Code.V128 as i8 or -1
+fix LOW = Code.V127 as i8
+fix HIGH = Code.V128 as i8 or -1
 fn convert(value: Code) -> i8 {{
     fix ordinal = value as i8 or return -1
     return ordinal

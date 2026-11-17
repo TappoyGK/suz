@@ -1,13 +1,16 @@
-//! トップレベル定数の依存を解決し、初期化式の型と定数性を検査する。評価済みの値を関数のスコープへ渡す。
+//! トップレベル宣言の初期値を定数式として検査する。fixの依存を解決し、varの格納先と評価済み初期値を作る。
 //!
 //! 利用元: [`crate::check::functions`]。
 //! 主な対象規則: `[const.expression]`、`[const.initializer]`、`[decl.duplicate]`。
 
-use super::{constants, diagnostics, expression::coerced as expression, statements::Binding};
+use super::{
+    constants, diagnostics, expression::coerced as expression, ir::CheckedExpression,
+    statements::Binding,
+};
 use crate::check::scope::Scope;
 use crate::{
     Diagnostic, ErrorKind,
-    ast::{ConstDeclaration, Expression, ExpressionKind, FailureHandler, Location},
+    ast::{Expression, ExpressionKind, FailureHandler, Location, TopLevelBinding},
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -105,7 +108,7 @@ fn handler_dependencies(
 }
 
 struct Resolver<'a> {
-    declarations: BTreeMap<String, &'a ConstDeclaration>,
+    declarations: BTreeMap<String, &'a TopLevelBinding>,
     bindings: Scope,
     visiting: BTreeSet<String>,
     warnings: Vec<Location>,
@@ -122,12 +125,41 @@ impl Resolver<'_> {
                 crate::diagnostic!("const.expression", "'{name}' is not a constant"),
             )
         })?;
+        if declaration.mutable {
+            return Err(location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("const.expression", "'{name}' is not a constant"),
+            ));
+        }
         if !self.visiting.insert(name.to_owned()) {
             return Err(location.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!("const.initializer", "cyclic constant dependency"),
             ));
         }
+        let value = self.initializer(declaration)?;
+        self.bindings.locals.insert(
+            name.to_owned(),
+            Binding {
+                loop_variable: false,
+                // 定数はローカル変数の格納先ではなく、評価済みの値として置き換える。
+                id: 0,
+                global: false,
+                ty: value.ty,
+                mutable: false,
+                parameter: false,
+                assigned: Default::default(),
+                location: declaration.location,
+                constant: Some(value),
+            },
+        );
+        self.visiting.remove(name);
+        Ok(())
+    }
+    fn initializer(
+        &mut self,
+        declaration: &TopLevelBinding,
+    ) -> Result<CheckedExpression, Diagnostic> {
         // 選択されない分岐も含めて、すべての依存を解決する。
         // 定数式の文法・型・循環の判定は短絡評価に左右されない。
         let mut names = Vec::new();
@@ -151,30 +183,15 @@ impl Resolver<'_> {
             )
         })?;
         super::text::register_constants(&value, &self.bindings);
-        self.bindings.locals.insert(
-            name.to_owned(),
-            Binding {
-                loop_variable: false,
-                // 定数はローカル変数の格納先ではなく、評価済みの値として置き換える。
-                id: 0,
-                ty: value.ty,
-                mutable: false,
-                parameter: false,
-                assigned: Default::default(),
-                location: declaration.location,
-                constant: Some(value),
-            },
-        );
-        self.visiting.remove(name);
-        Ok(())
+        Ok(value)
     }
 }
 
 pub(super) fn resolve(
-    declarations: &[ConstDeclaration],
+    declarations: &[TopLevelBinding],
     enums: &[crate::ast::EnumDeclaration],
     structs: &[crate::ast::StructDeclaration],
-) -> Result<(Scope, Vec<Location>), Diagnostic> {
+) -> Result<(Scope, Vec<Location>, Vec<CheckedExpression>), Diagnostic> {
     let mut resolver = Resolver {
         declarations: BTreeMap::new(),
         bindings: Scope {
@@ -204,10 +221,31 @@ pub(super) fn resolve(
             ));
         }
     }
-    for declaration in declarations {
+    for declaration in declarations.iter().filter(|d| !d.mutable) {
         resolver.resolve(&declaration.name, declaration.location)?;
     }
+    let mut initializers = Vec::new();
+    let mut globals = BTreeMap::new();
+    for declaration in declarations.iter().filter(|d| d.mutable) {
+        let value = resolver.initializer(declaration)?;
+        globals.insert(
+            declaration.name.clone(),
+            Binding {
+                id: initializers.len(),
+                global: true,
+                ty: value.ty,
+                mutable: true,
+                parameter: false,
+                loop_variable: false,
+                assigned: Default::default(),
+                location: declaration.location,
+                constant: None,
+            },
+        );
+        initializers.push(value);
+    }
+    resolver.bindings.globals = std::rc::Rc::new(globals);
     // 定数は不変であり、すべての関数スコープと型の代入で共有する。
     resolver.bindings.constants = std::rc::Rc::new(std::mem::take(&mut resolver.bindings.locals));
-    Ok((resolver.bindings, resolver.warnings))
+    Ok((resolver.bindings, resolver.warnings, initializers))
 }

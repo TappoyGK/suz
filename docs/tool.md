@@ -98,6 +98,7 @@ cd generated
 | `--text-pool-limit SIZE` | 可 | 可 | | 可 | テキストプールの上限。既定は `1G` |
 | `--force` | 可 | | | | 既存の通常ファイルを出力先として置き換える |
 | `--log-allow` | 可 | 可 | 可 | 可 | 抑えた警告と理由を表示する |
+| `--deny-global-var` | 可 | 可 | 可 | 可 | 大域変数の宣言を禁止する。`allow` でも除外しない |
 | `--warn-unhandled-arithmetic` | 可 | 可 | 可 | 可 | 整数演算の失敗処理がない箇所を警告する |
 | `--deny-unhandled-arithmetic` | 可 | 可 | 可 | 可 | 同じ箇所をコンパイルエラーにする |
 | `--help` | 可 | 可 | 可 | 可 | そのコマンドの使用方法を表示する |

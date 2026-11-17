@@ -42,6 +42,8 @@ mod functions;
 mod generic_numeric;
 #[path = "spec_cases/generic_properties.rs"]
 mod generic_properties;
+#[path = "spec_cases/globals.rs"]
+mod globals;
 #[path = "support/integer_bounds.rs"]
 mod integer_bounds;
 #[path = "spec_cases/invalid_inputs.rs"]

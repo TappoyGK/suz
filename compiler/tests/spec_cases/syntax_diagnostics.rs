@@ -77,7 +77,7 @@ fn invalid_syntax_reports_source_errors_through_check() {
 fn truncated_programs_are_source_errors_not_unsupported_features() {
     let source = r#"enum Mode: u8 { A, B }
 struct Pair { x: u8, y: u8 }
-const SEED = Pair { x: 1, y: 2 }
+fix SEED = Pair { x: 1, y: 2 }
 fn add(value: Pair) -> u8 { return value.x + value.y }
 fn main() -> u8 {
     // 日本語のコメント

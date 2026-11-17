@@ -196,27 +196,27 @@ fn integer_arithmetic_failures_panic_at_the_suz_operator_even_when_optimized() {
 
 #[test]
 fn constant_arithmetic_checks_only_evaluated_operations() {
-    let source = br#"const MAX: u8 = 255
-const SUM: u8 = BASE + 2
-const BASE: u8 = 3
-const PRODUCT = SUM * 3
-const DIFFERENCE = PRODUCT - 1
-const SHORT = true || (MAX + 1 == 0)
-const CHAIN = 2 < 1 < (MAX + 1)
-const FALLBACK: u8 = 1 as u8 or (MAX + 1)
-const CONVERTED = (1 + 2) as u8
-const HANDLED: u8 = 255 + 1 or 255 * 2 or 7
-const LAZY: u8 = 1 + 2 or (255 + 1)
-const MINIMUM: i8 = -128 or 0
-const NEGATED = -MINIMUM or 7
-const DIRECT: i8 = -(1)
-const CONSTANT_LAZY: i8 = -128 or (1 / (0 as u8))
-const QUOTIENT: i8 = -7 / 3
-const REMAINDER: i8 = -7 % 3
-const DIVISION_FALLBACK: u8 = 7 / 0 or 8
-const REMAINDER_FALLBACK: i8 = -128 % -1 or 9
-const LAZY_DIVISION: u8 = 1 + 2 or (1 / (0 as u8))
-const NARROWED = (9223372036854775807 + 1 or 7) as u8
+    let source = br#"fix MAX: u8 = 255
+fix SUM: u8 = BASE + 2
+fix BASE: u8 = 3
+fix PRODUCT = SUM * 3
+fix DIFFERENCE = PRODUCT - 1
+fix SHORT = true || (MAX + 1 == 0)
+fix CHAIN = 2 < 1 < (MAX + 1)
+fix FALLBACK: u8 = 1 as u8 or (MAX + 1)
+fix CONVERTED = (1 + 2) as u8
+fix HANDLED: u8 = 255 + 1 or 255 * 2 or 7
+fix LAZY: u8 = 1 + 2 or (255 + 1)
+fix MINIMUM: i8 = -128 or 0
+fix NEGATED = -MINIMUM or 7
+fix DIRECT: i8 = -(1)
+fix CONSTANT_LAZY: i8 = -128 or (1 / (0 as u8))
+fix QUOTIENT: i8 = -7 / 3
+fix REMAINDER: i8 = -7 % 3
+fix DIVISION_FALLBACK: u8 = 7 / 0 or 8
+fix REMAINDER_FALLBACK: i8 = -128 % -1 or 9
+fix LAZY_DIVISION: u8 = 1 + 2 or (1 / (0 as u8))
+fix NARROWED = (9223372036854775807 + 1 or 7) as u8
 fn main() -> u8 {
     return ifexpr DIFFERENCE == 14 && SHORT && not CHAIN && FALLBACK == 1 && CONVERTED == 3 && HANDLED == 7 && LAZY == 3 && NARROWED == 7 && QUOTIENT == -2 && REMAINDER == -1 && DIVISION_FALLBACK == 8 && REMAINDER_FALLBACK == 0 && LAZY_DIVISION == 3 && NEGATED == 7 && DIRECT == -1 && CONSTANT_LAZY == MINIMUM { 0 } else { 1 }
 }
@@ -231,15 +231,15 @@ fn main() -> u8 {
         Some(0)
     );
     for source in [
-        "const LO: i8 = -128\nconst BAD = -LO\nfn main() -> u8 { return 0 }",
-        "const BAD: u8 = 1 / 0\nfn main() -> u8 { return 0 }",
-        "const BAD: u8 = 1 % 0\nfn main() -> u8 { return 0 }",
-        "const BAD: i8 = -128 / -1\nfn main() -> u8 { return 0 }",
-        "const BAD: u8 = 255 + 1 or (255 + 1)\nfn main() -> u8 { return 0 }",
-        "const BAD: u8 = 255 + 1\nfn main() -> u8 { return 0 }",
-        "const BAD: u8 = 0 - 1\nfn main() -> u8 { return 0 }",
-        "const BAD: u64 = 18446744073709551615 * 2\nfn main() -> u8 { return 0 }",
-        "const BAD: u8 = 300 as u8 or (255 + 1)\nfn main() -> u8 { return 0 }",
+        "fix LO: i8 = -128\nfix BAD = -LO\nfn main() -> u8 { return 0 }",
+        "fix BAD: u8 = 1 / 0\nfn main() -> u8 { return 0 }",
+        "fix BAD: u8 = 1 % 0\nfn main() -> u8 { return 0 }",
+        "fix BAD: i8 = -128 / -1\nfn main() -> u8 { return 0 }",
+        "fix BAD: u8 = 255 + 1 or (255 + 1)\nfn main() -> u8 { return 0 }",
+        "fix BAD: u8 = 255 + 1\nfn main() -> u8 { return 0 }",
+        "fix BAD: u8 = 0 - 1\nfn main() -> u8 { return 0 }",
+        "fix BAD: u64 = 18446744073709551615 * 2\nfn main() -> u8 { return 0 }",
+        "fix BAD: u8 = 300 as u8 or (255 + 1)\nfn main() -> u8 { return 0 }",
     ] {
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource);

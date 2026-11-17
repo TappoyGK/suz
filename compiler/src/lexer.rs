@@ -10,7 +10,6 @@ use std::ops::Range;
 
 const KEYWORDS: &[&str] = &[
     "allow",
-    "const",
     "fix",
     "var",
     "fn",

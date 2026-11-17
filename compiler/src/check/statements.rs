@@ -18,6 +18,7 @@ use crate::{
 pub(super) struct Binding {
     pub(super) constant: Option<CheckedExpression>,
     pub(super) id: usize,
+    pub(super) global: bool,
     pub(super) ty: Type,
     pub(super) mutable: bool,
     pub(super) parameter: bool,
@@ -34,6 +35,7 @@ impl Binding {
 
     fn local(id: usize, ty: Type, mutable: bool, loop_variable: bool, location: Location) -> Self {
         Self {
+            global: false,
             constant: None,
             id,
             ty,
@@ -406,7 +408,7 @@ fn check_assign(
         ));
     }
     super::writes::check(value, name, fields)?;
-    let (id, mut ty) = (binding.id, binding.ty);
+    let (id, global, mut ty) = (binding.id, binding.global, binding.ty);
     let mut indices = Vec::new();
     for name in fields {
         let (index, field_type) =
@@ -418,6 +420,7 @@ fn check_assign(
     lower_return_handler(&mut value, &mut context.output, context.next_id);
     context.bindings[name].assigned.set(true);
     context.output.push(CheckedStatement::Assign {
+        global,
         id,
         fields: indices,
         ty,
@@ -450,7 +453,7 @@ pub(super) fn finish_scope(bindings: &mut Scope, declared: Vec<String>) -> Resul
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(
                     "var.never-reassigned",
-                    "var binding '{name}' is never reassigned"
+                    "var binding '{name}' is never reassigned; declare it with fix"
                 ),
             );
             return Err(error);

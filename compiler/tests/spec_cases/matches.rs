@@ -203,7 +203,7 @@ fn match_patterns_check_constant_forms_types_and_arithmetic_diagnostics() {
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
         assert!(error.message().contains(rule), "{source}: {error:?}");
     }
-    let source = br#"const SELECTED: i64 = 1 + 1
+    let source = br#"fix SELECTED: i64 = 1 + 1
 fn main() -> u8 {
     match SELECTED {
         SELECTED => 1 + 1
@@ -239,7 +239,7 @@ fn main() -> u8 {
         [2, 3, 3]
     );
     let source =
-        b"const VALUE = matchexpr true { true => 1\nfalse => 2 }\nfn main() -> u8 { return 0 }";
+        b"fix VALUE = matchexpr true { true => 1\nfalse => 2 }\nfn main() -> u8 { return 0 }";
     assert!(
         suz::compile(source)
             .unwrap_err()

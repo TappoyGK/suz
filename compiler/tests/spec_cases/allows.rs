@@ -11,8 +11,8 @@ fn options(mode: ArithmeticMode, log_allow: bool) -> CompilationOptions {
 
 #[test]
 fn allows_track_lexical_sites_in_all_modes_and_keep_runtime_behavior() {
-    let source = r#"const BASE: u8 = 2
-const LIMIT: u8 = BASE + 1 allow [diagnostic.arithmetic: constant bound]
+    let source = r#"fix BASE: u8 = 2
+fix LIMIT: u8 = BASE + 1 allow [diagnostic.arithmetic: constant bound]
 fn next(value: u8) -> u8 { return value + 1 }
 fn main() -> u8 {
     fix value = LIMIT +
@@ -42,7 +42,7 @@ fn main() -> u8 {
     assert_eq!(all.len(), 5);
     assert_eq!(all.iter().filter(|w| w.allowed_reason.is_some()).count(), 4);
     let denied = suz::check_source(source.as_bytes(), ArithmeticMode::Deny).unwrap_err();
-    assert_eq!((denied.line, denied.column), (2, 24));
+    assert_eq!((denied.line, denied.column), (2, 22));
     assert!(denied.message().contains("[diagnostic.arithmetic]"));
     let output = compile_and_run_c23(source, "allows.suz");
     assert_eq!(output.status.code(), Some(5));

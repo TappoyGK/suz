@@ -64,6 +64,7 @@ pub(super) fn check_references(expr: &Expression, bindings: &Scope) -> Result<()
         bindings
             .locals
             .iter()
+            .chain(bindings.globals.iter())
             .filter(|(_, b)| b.mutable)
             .map(|(name, _)| name.clone())
             .collect(),

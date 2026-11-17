@@ -88,6 +88,13 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
             }
         }
     }
+    // 初期値を先に生成し、必要な文字列と補助関数を出力対象へ登録する。
+    let global_initializers: Vec<_> = program
+        .globals
+        .iter()
+        .map(|value| expressions::expression(value, &mut context))
+        .collect();
+    let global_temporaries = std::mem::take(&mut context.temporaries);
     let bodies: Vec<_> = program
         .functions
         .iter()
@@ -99,6 +106,9 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
     text_structure::emit(&mut c, &context);
     for function in &program.functions {
         writeln!(c, "{};", functions::declaration(function)).unwrap();
+    }
+    for (id, value) in program.globals.iter().enumerate() {
+        writeln!(c, "static {} suz_global_{id};", value.ty.c_name()).unwrap();
     }
     c.push_str(&context.functions);
     for body in bodies {
@@ -121,6 +131,14 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
     };
     for (value, id) in &context.text_literals {
         writeln!(text_init, "    suz_text_constant_{id} = suz_text_intern(suz_text_literal_{id}, UINT64_C({}), true, {});", value.len(), text::position(program.main_location, &context)).unwrap();
+    }
+    // symbol/text（構造体のフィールドも含む）の参照先を登録してから初期値を設定する。
+    for (id, ty) in global_temporaries.iter().enumerate() {
+        writeln!(text_init, "    {} suz_cmp_{id};", ty.c_name()).unwrap();
+    }
+    for (id, initializer) in global_initializers.iter().enumerate() {
+        writeln!(text_init, "    suz_global_{id} = {initializer};").unwrap();
+        writeln!(text_init, "    (void)suz_global_{id};").unwrap();
     }
     writeln!(
         c,
