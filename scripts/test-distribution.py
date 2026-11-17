@@ -31,12 +31,18 @@ def require(condition, message):
 
 
 def verify(binary, version, cc, directory):
+    # 配布物自身の動作を調べるため、開発者が設定した追加のCコンパイルフラグを除く。
+    # 検査対象を再ビルドせず、一時ディレクトリへコピーした完成済みバイナリを使う。
     env = os.environ.copy()
     for name in ("CFLAGS", "CPPFLAGS", "LDFLAGS", "SUZ_CFLAGS", "CC"):
         env.pop(name, None)
     copied = directory / "suz"
     shutil.copy2(binary, copied)
     source = directory / "program.suz"
+    # 以下の言語機能は、この場所でしか検証できるものではない。
+    # ここでは内蔵ランタイムの数値・文字列処理とログ出力を使う共通入力にして、
+    # 配布バイナリから直接実行する経路と、書き出したCから実行する経路を照合する。
+    # 個々の言語仕様の網羅的な検査は通常のテストで行う。
     source.write_text(r"""fn main() -> u8 {
     fix zero: f64 = 0.0
     fix invalid = zero / zero
@@ -69,6 +75,7 @@ struct Entry {
 }
 """)
     panic = directory / "panic.suz"
+    # 正常終了だけでなく、配布物に含まれるランタイムの異常終了経路も動かす入力。
     panic.write_text("""fn main() -> u8 {
     var value: u8 = 255
     value += 1
@@ -78,22 +85,32 @@ struct Entry {
     empty = directory / "empty"
     empty.mkdir()
     without_tools = dict(env, PATH=str(empty))
+    # ツールを検索できない環境で、配布された版番号と内蔵のヘルプ・ライセンスを確認する。
+    # ソース上の定数や文書が正しくても、配布バイナリが古い／埋め込み漏れなら検出できる。
     result = run([copied, "--version"], directory, without_tools)
     require(result.stdout == f"suz v{version}\n".encode(), "incorrect version")
     for option in ("--help", "--licenses"):
         result = run([copied, option], directory, without_tools)
         require(bool(result.stdout.strip()), f"empty {option} output")
+    # checkはCコンパイラ不要の機能なので、配布物でも外部ツールを呼ばずに使えることを確認する。
     run([copied, "check", source], directory, without_tools)
+    # 診断の内容自体は通常のテストでも検証できる。ここでは配布バイナリのCLI経由で
+    # オプションを指定し、警告抑制の理由が実際に出力されることを確認している。
     result = run([copied, "check", source, "--warn-unhandled-arithmetic", "--log-allow"], directory, without_tools)
     require(result.stderr.count(b": allowed:") == 1 and b"[diagnostic.arithmetic] bounded sum\n" in result.stderr,
             "incorrect suppressed warning diagnostic")
     warn_line = next(i for i, line in enumerate(source.read_text().splitlines(), 1) if "log warn" in line)
     expected_log = f"info {source.name}:7: nan -0.0\nwarn {source.name}:{warn_line}: count: 3\n".encode()
     exported = directory / "exported"
+    # emit-cも外部ツール不要。配布バイナリにCソース・ランタイム・ビルドスクリプトが
+    # 埋め込まれ、開発用リポジトリからコピーせずに書き出せることを検査する。
     run([copied, "emit-c", source, "-o", exported], directory, without_tools)
     for path in ("program.c", "runtime/suz_env.c", "scripts/build-c.sh"):
         require((exported / path).is_file(), f"missing exported file: {path}")
 
+    # 完成済みバイナリのbuild/runが、内蔵したランタイムを展開してClangと連携できるかを
+    # 確認する。通常のコンパイラ内部テストだけでは、この配布経路の欠落は分からない。
+    # O0/O2は配布物の両設定での動作確認であり、最適化の正しさの網羅検査ではない。
     for optimization in ("-O0", "-O2"):
         for command in ("build", "run"):
             for input_file, expected in ((source, 7), (panic, 101)):
@@ -115,6 +132,8 @@ struct Entry {
                         re.fullmatch(rb"panic [^\n]+ \[rt\.[^\]\n]+\]\n", result.stderr),
                         f"incorrect panic diagnostic: {result.stderr!r}",
                     )
+        # 書き出されたファイルだけでビルドする。リポジトリ内のランタイムで代用すると、
+        # バイナリに埋め込まれた配布用ファイルの不足や不整合を見逃すため。
         run(
             [exported / "scripts/build-c.sh", "program.c", "-o", f"program{optimization}", optimization],
             exported, dict(env, CC=str(cc)),
@@ -125,6 +144,8 @@ struct Entry {
             f"incorrect exported program output: {result.stderr!r}",
         )
 
+    # CLIのプール上限が、直接実行とC書き出しの両経路でランタイムへ伝わるかを確認する。
+    # 上限の計算そのものではなく、配布物で設定が欠落する不具合を対象にする。
     for limit, expected in (("1", 101), ("unlimited", 7)):
         result = run(
             [copied, "run", source, "--cc", cc, "--text-pool-limit", limit],
@@ -145,7 +166,9 @@ struct Entry {
         if expected == 101:
             require(b"[rt.symbol-allocation]" in result.stderr, "missing exported text pool diagnostic")
 
-    # 開発者のXcodeやシステムの検索パスを変更せず、独自のコンパイラパスを使ってSDK・リンカーの不在を実際に試す。
+    # 開発環境ではClang・SDK・リンカーが揃っているため、不足した利用者環境を再現する。
+    # 配布バイナリのbuild/runが不足を検出し、導入案内を出して未完成の出力を残さないか確認する。
+    # 開発者のXcodeやシステムの検索パスは変更せず、この検査専用のパスを使う。
     unavailable = [("compiler", None, without_tools)]
     for name, flags in (
         ("sdk", ["-isysroot", str(empty)]),
@@ -174,6 +197,8 @@ struct Entry {
     require(diagnostics["compiler"] != diagnostics["sdk"], "indistinguishable prerequisite errors")
 
     relocated = directory / "relocated"
+    # 一度動かしたバイナリを移動して再実行し、元の設置場所に依存しないことを確認する。
+    # 同じ場所で動かし続ける通常のテストでは、絶対パスへの依存を見逃し得る。
     relocated.mkdir()
     moved = relocated / "suz"
     copied.rename(moved)
@@ -188,6 +213,8 @@ def main():
     )
     parser.add_argument("--cc", default="clang")
     args = parser.parse_args()
+    # 期待する版番号の取得だけにマニフェストを使う。検査対象のバイナリは作り直さない。
+    # リポジトリ外で実行する場合は--versionで期待値を渡せる。
     if args.version is None:
         manifest = Path(__file__).resolve().parent.parent / "compiler/Cargo.toml"
         with manifest.open("rb") as source:
@@ -202,6 +229,7 @@ def main():
     except (AssertionError, OSError, subprocess.TimeoutExpired) as error:
         parser.exit(1, f"Distribution verification failed: {error}\n")
     print(f"Distribution verification passed: {binary.name}")
+    # 検証した実物を識別するための値。ハッシュの表示自体は正しさの検査ではない。
     print(f"SHA-256: {hashlib.sha256(binary.read_bytes()).hexdigest()}")
 
 
