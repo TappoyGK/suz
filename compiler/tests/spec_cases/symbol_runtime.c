@@ -254,14 +254,13 @@ int main(int argc, char **argv) {
     assert(calls == 0 && suz_text_pool_used() == 0);
     if (strcmp(argv[1], "scalar-limit") == 0) {
         /* プール無制限でも一つのsymbolの個数上限は変わらない。
-           2GiB以上を確保せず、本番のUTF-8計数処理の最後の一文字を検証する。 */
+           巨大な文字列を確保せず、本番の登録処理が使う上限判定を検証する。 */
         assert(limit == 0);
-        uint64_t count = count_scalar(INT32_MAX - 1, 0xf0, location);
-        assert(count == INT32_MAX);
-        for (int i = 0; i < 3; ++i) count = count_scalar(count, 0x80, location);
-        assert(count == INT32_MAX);
+        check_scalar_count(0, location);
+        check_scalar_count(INT32_MAX - 1, location);
+        check_scalar_count(INT32_MAX, location);
         panic_expected = true;
-        count_scalar(count, 'x', location);
+        check_scalar_count((uint64_t)INT32_MAX + 1, location);
         return 2;
     }
     else if (strcmp(argv[1], "identity") == 0) identity();

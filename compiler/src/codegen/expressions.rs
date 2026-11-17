@@ -231,7 +231,7 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             let value = expression(inner, context);
             // 実体またはビューが保持する個数を読む。オペランドは一度だけ評価する。
             if inner.ty == crate::ast::Type::Symbol {
-                format!("((int32_t)suz_text_as_view({value}).scalars)")
+                format!("suz_text_count({value})")
             } else {
                 format!("((int32_t)({value}).scalars)")
             }

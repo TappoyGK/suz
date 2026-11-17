@@ -233,8 +233,12 @@ pub(super) fn compare(
         return format!("{left} {} {right}", op.symbol());
     }
     if let (Type::Integer(a), Type::Integer(b)) = (a, b) {
-        let signed_a = a.bounds().0 < 0;
-        let signed_b = b.bounds().0 < 0;
+        let signed_a = a.c_signed();
+        let signed_b = b.c_signed();
+        // 非負の値同士はu64にそろえれば、Cの符号も一致し、上位ビットも失わない。
+        if a.bounds().0 == 0 && b.bounds().0 == 0 && signed_a != signed_b {
+            return format!("(uint64_t){left} {} (uint64_t){right}", op.symbol());
+        }
         if signed_a == signed_b {
             return format!("{left} {} {right}", op.symbol());
         }

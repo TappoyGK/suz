@@ -74,6 +74,13 @@ impl IntegerType {
             Self::Len => "int32_t",
         }
     }
+    /// 生成Cの格納型の符号。値域が非負でもlen_tのint32_tは符号付き。
+    pub fn c_signed(self) -> bool {
+        matches!(
+            self,
+            Self::I8 | Self::I16 | Self::I32 | Self::I64 | Self::Len
+        )
+    }
     // len_t の31は値域のビット数。言語上のビット幅ではなく、Cではint32_tを使う。
     pub fn bits(self) -> u32 {
         match self {

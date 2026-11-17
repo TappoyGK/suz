@@ -43,7 +43,9 @@ fn main() -> u8 {
     fix max: u64 = 18446744073709551615
     if (text_value[start:max] or `bad`) != `bad` { return 5 }
     fix wide_start: u64 = 0
-    if (text_value[wide_start:18446744073709551615] or `bad`) != `bad` { return 24 }
+    if (text_value[wide_start:max] or `bad`) != `bad` { return 24 }
+    fix tiny_end: i8 = 2
+    if (text_value[300:tiny_end] or `bad`) != `bad` { return 25 }
     if (text_value[-1:end] or `bad`) != `bad` { return 6 }
     if len text_value - 1 != 2 || (len text_value[1:] or ``) != 2 { return 7 }
     if len `` != 0 || len `é` != 2 { return 8 }
@@ -95,29 +97,38 @@ fn main() -> u8 {
 
 #[test]
 fn length_rejects_width_operations_and_invalid_targets() {
-    for body in [
-        "fix x: len_t = 2147483648",
-        "fix x: len_t = -1",
-        "fix x: f32 = n",
-        "fix x = n & n",
-        "fix x = n | n",
-        "fix x = n ^ n",
-        "fix x = ~n",
-        "fix x = n +% n",
-        "fix x = n -% n",
-        "fix x = n *% n",
-        "fix x = n << 1",
-        "fix x = n >> 1",
-        "fix x = 1 as% len_t",
-        "fix x = `1` as% len_t or 0",
-        "fix x = len 1",
-        "fix len = 1",
-        "fix len_t = 1",
+    for (body, rule) in [
+        ("fix x: len_t = 2147483648", "lit.range"),
+        ("fix x: len_t = -1", "lit.range"),
+        ("fix x: f32 = n", "type.expected"),
+        ("fix x = n & n", "expr.operator-types"),
+        ("fix x = n | n", "expr.operator-types"),
+        ("fix x = n ^ n", "expr.operator-types"),
+        ("fix x = ~n", "expr.operator-types"),
+        ("fix x = n +% n", "expr.operator-types"),
+        ("fix x = n -% n", "expr.operator-types"),
+        ("fix x = n *% n", "expr.operator-types"),
+        ("fix x = n << 1", "expr.operator-types"),
+        ("fix x = n >> 1", "expr.operator-types"),
+        ("n &= 1", "expr.operator-types"),
+        ("n +%= 1", "expr.operator-types"),
+        ("n <<= 1", "expr.operator-types"),
+        ("fix x = 1 as% len_t", "expr.as-trunc"),
+        ("fix x = `1` as% len_t or 0", "expr.as-trunc"),
+        ("fix x = len 1", "len.targets"),
+        ("fix len = 1", "src.ident"),
+        ("fix len_t = 1", "src.ident"),
     ] {
-        let source = format!("fn main() -> u8 {{ fix n: len_t = 2\n{body}\nreturn 0 }}");
-        assert!(suz::compile(source.as_bytes()).is_err(), "{source}");
+        let source = format!("fn main() -> u8 {{ var n: len_t = 2\n{body}\nreturn 0 }}");
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert!(
+            error.message().contains(&format!("[{rule}]")),
+            "{source}: {error}"
+        );
     }
-    assert!(suz::compile(b"enum Count: len_t { One }\nfn main() -> u8 { return 0 }").is_err());
+    let error =
+        suz::compile(b"enum Count: len_t { One }\nfn main() -> u8 { return 0 }").unwrap_err();
+    assert!(error.message().contains("[enum.base]"));
 }
 
 #[test]
@@ -144,5 +155,95 @@ fn length_generic_width_failures_are_deferred_to_the_call() {
         );
         let error = suz::compile(bad.as_bytes()).unwrap_err();
         assert!(error.message().contains("[num.fn-body]"), "{expr}: {error}");
+        let rule = if expr.contains("as%") {
+            "expr.as-trunc"
+        } else {
+            "expr.operator-types"
+        };
+        assert!(
+            error
+                .related
+                .iter()
+                .any(|related| related.message().contains(&format!("[{rule}]"))),
+            "{expr}: {error:?}"
+        );
     }
+}
+
+#[test]
+fn length_comparisons_and_narrow_casts_preserve_c_signedness() {
+    use crate::integer_bounds::INTEGER_BOUNDS;
+    use std::fmt::Write;
+    let mut source = String::from("fn main() -> u8 {\n");
+    for n in [0_i128, 3, i32::MAX as i128] {
+        for (ty, lo, hi) in INTEGER_BOUNDS {
+            for v in [lo, 3, hi] {
+                writeln!(source, "{{ fix n: len_t = {n}\nfix v: {ty} = {v}").unwrap();
+                for (op, expected, reverse) in [
+                    ("==", n == v, v == n),
+                    ("!=", n != v, v != n),
+                    ("<", n < v, v < n),
+                    ("<=", n <= v, v <= n),
+                    (">", n > v, v > n),
+                    (">=", n >= v, v >= n),
+                ] {
+                    writeln!(
+                        source,
+                        "if (n {op} v) != {expected} || (v {op} n) != {reverse} {{ return 1 }}"
+                    )
+                    .unwrap();
+                }
+                writeln!(source, "if (0 <= n <= v) != {} {{ return 2 }}\n}}", n <= v).unwrap();
+            }
+            for value in [0, hi.min(i32::MAX as i128), (hi + 1).min(i32::MAX as i128)] {
+                let expected = if value <= hi { value } else { 7 };
+                writeln!(source, "{{ fix n: len_t = {value}\nfix v = n as {ty} or 7\nif v != {expected} {{ return 3 }}\n}}").unwrap();
+            }
+        }
+    }
+    source.push_str("return 0\n}");
+    let output = crate::test_util::compile_and_run_c23(&source, "length-compare.suz");
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+}
+
+#[test]
+fn symbol_length_optimizes_to_a_load_without_lto() {
+    let source = b"fn size(s: symbol) -> len_t { return len s }\nfn main() -> u8 { return 0 }";
+    let mut c = suz::compile(source).unwrap();
+    // 外部から任意のsymbolを渡すので、定数畳み込みで呼び出しが消えた結果にはならない。
+    c.push_str("\nint32_t probe(suz_text value) { return suz_fn_0(value); }\n");
+    let directory = TemporaryDirectory::new();
+    let path = directory.0.join("length.c");
+    fs::write(&path, c).unwrap();
+    let output =
+        std::process::Command::new(std::env::var_os("CC").unwrap_or_else(|| "clang".into()))
+            .args([
+                "-std=c23",
+                "-O2",
+                "-Wall",
+                "-Wextra",
+                "-Werror",
+                "-S",
+                "-emit-llvm",
+                "-I",
+            ])
+            .arg(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime"))
+            .arg(path)
+            .args(["-o", "-"])
+            .output()
+            .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let ir = String::from_utf8(output.stdout).unwrap();
+    let probe = ir
+        .split("@probe(")
+        .nth(1)
+        .unwrap()
+        .split('}')
+        .next()
+        .unwrap();
+    assert!(probe.contains("load "), "{probe}");
+    assert!(
+        !probe.contains("call ") && !probe.contains("invoke "),
+        "{probe}"
+    );
 }

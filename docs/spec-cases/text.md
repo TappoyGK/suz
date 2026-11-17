@@ -1002,6 +1002,9 @@ fn main() -> u8 {
     if (value[negative:end] or `bad`) != `bad` { return 2 }
     if (value[start:huge] or `bad`) != `bad` { return 3 }
     if (value[end] or '?') != '?' { return 4 }
+    fix tiny_end: i8 = 2
+    if (value[300:tiny_end] or `bad`) != `bad` { return 5 }
+    if (value[tiny_end:300] or `bad`) != `bad` { return 6 }
     return 0
 }
 ```

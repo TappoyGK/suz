@@ -6,7 +6,16 @@
 #include <stdint.h>
 
 /* インターン済みのSuzのsymbol。以下のビューは、不変でプロセス終了まで生存するバイト列を共有する。 */
+struct suz_text_entry {
+    const char *bytes;
+    uint64_t length;
+    uint32_t hash;
+    uint64_t scalars;
+};
 typedef struct suz_text_entry const *suz_text;
+
+/* 実体は不変。通常のビルドでもlenを外部関数呼び出しなしで取得する。 */
+static inline int32_t suz_text_count(suz_text value) { return (int32_t)value->scalars; }
 
 typedef struct {
     const char *source;

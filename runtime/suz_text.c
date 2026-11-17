@@ -7,13 +7,6 @@
 #include <string.h>
 #include <stdlib.h>
 
-struct suz_text_entry {
-    const char *bytes;
-    uint64_t length;
-    uint32_t hash;
-    uint64_t scalars;
-};
-
 static struct {
     suz_text *slots;
     uint64_t capacity;
@@ -87,12 +80,10 @@ uint64_t suz_text_pool_used(void) {
     return pool.used;
 }
 
-/* [rt.len-limit] UTF-8の先頭バイトだけを数える。バイト長とプール容量は縮めない。
-   個数の加算を独立させ、巨大な文字列を確保せず境界を検証できるようにする。 */
-static uint64_t count_scalar(uint64_t count, unsigned char byte, suz_text_location location) {
-    if ((byte & 0xc0) == 0x80) return count;
-    if (count >= INT32_MAX) length_failure(location);
-    return count + 1;
+/* [rt.len-limit] 個数はバイト長以下なのでuint64_tであふれない。
+   計数とハッシュのループを終えた後、一度だけ上限を検査する。 */
+static void check_scalar_count(uint64_t scalars, suz_text_location location) {
+    if (scalars > INT32_MAX) length_failure(location);
 }
 
 static uint32_t hash_bytes(const char *bytes, uint64_t length, uint64_t *scalars, suz_text_location location) {
@@ -100,10 +91,11 @@ static uint32_t hash_bytes(const char *bytes, uint64_t length, uint64_t *scalars
     *scalars = 0;
     for (uint64_t i = 0; i < length; ++i) {
         unsigned char byte = (unsigned char)bytes[i];
-        *scalars = count_scalar(*scalars, byte, location);
+        if ((byte & 0xc0) != 0x80) ++*scalars;
         hash ^= byte;
         hash *= UINT32_C(16777619);
     }
+    check_scalar_count(*scalars, location);
     return hash;
 }
 
