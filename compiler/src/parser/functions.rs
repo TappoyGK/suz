@@ -114,7 +114,7 @@ impl Parser<'_, '_> {
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(
                     "fn.type-call",
-                    "fn types are only allowed on function parameters; use static fn here"
+                    "fn types are only allowed on function parameters and fntype parameters; use static fn here"
                 ),
             ));
         }
