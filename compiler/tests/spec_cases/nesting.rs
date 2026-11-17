@@ -130,6 +130,158 @@ fn nesting_limit_reports_the_operator_that_deepens_an_existing_subtree() {
 }
 
 #[test]
+fn nesting_boundaries_cover_expression_and_statement_children() {
+    let directory = TemporaryDirectory::new();
+    // $を深い式に置き換える。@は257段を拒否する位置で、入力からは取り除く。
+    // 演算子が既存の式を深くする場合以外は、257段目の葉を指す。
+    let cases = [
+        (253, "1", "fix value = - $"),
+        (253, "1", "fix value: u8 = ~ $"),
+        (253, "`a`", "fix value = len $"),
+        (253, "1", "fix value: u8 = 1 + 1 @or $"),
+        (253, "1", "fix value = Point { x: $, y: 0 }"),
+        (253, "1", "fix value = matchexpr $ { _ => 0 }"),
+        (252, "1", "fix value = matchexpr 0 { _ => $ }"),
+        (252, "1", "fix value = matchexpr 0 { _ => { $ } }"),
+        (253, "P", "fix value = $@.x"),
+        (253, "`a`", "fix value = $@[:]"),
+        (252, "`a`", "fix value = $[0] @or 'a'"),
+        (252, "0", "fix value = `a`[$] @or 'a'"),
+        (252, "0", "fix value = `a`[$:] @or ``"),
+        (252, "1", "fix value = `a`[:$] @or ``"),
+        (253, "1", "fix value = 0 @< $ < 2"),
+        (253, "1", "while false { fix value = $ }"),
+        (253, "1", "loop { fix value = $\nbreak }"),
+        (253, "1", "for i in 0..<1 { fix value = $ }"),
+        (253, "1", "rev i in 0..<1 { fix value = $ }"),
+        (254, "0", "for i in $..<1 {}"),
+        (254, "1", "for i in 0..<$ {}"),
+        (254, "0", "rev i in $..<1 {}"),
+        (254, "1", "rev i in 0..<$ {}"),
+        (254, "false", "if false {} elif $ {}"),
+        (253, "1", "if false {} elif true { fix value = $ }"),
+        (253, "1", "if false {} else { fix value = $ }"),
+        (254, "1", "match $ { _ => {} }"),
+        (253, "1", "match 0 { _ => { fix value = $ } }"),
+        (253, "1", "match 0 { _ => $ }"),
+        (253, "1", "{ fix value = $ }"),
+        (
+            253,
+            "1",
+            "allow [diagnostic.arithmetic: boundary test] { fix n: u8 = id(1) as u8 or 0\nfix sum: u8 = n + n\nfix value = $ }",
+        ),
+    ];
+    for (parens, leaf, template) in cases {
+        for extra in [0, 1] {
+            let leaf = if template.contains('@') {
+                leaf.to_owned()
+            } else {
+                format!("@{leaf}")
+            };
+            let expression = wrap("(", ")", parens + extra, &leaf);
+            let statement = template.replace('$', &expression);
+            let source = program("0").replace("fix value = 0", &statement);
+            let offset = source.find('@').unwrap();
+            let line_number = source[..offset].bytes().filter(|b| *b == b'\n').count() + 1;
+            let column = source[..offset].rsplit('\n').next().unwrap().len() + 1;
+            fs::write(directory.0.join("boundary.suz"), source.replace('@', "")).unwrap();
+            let output = suz(&directory.0, &["check", "boundary.suz"]);
+            if extra == 0 {
+                assert!(output.status.success(), "{template}: {output:?}");
+                success(output);
+            } else {
+                assert_eq!(output.status.code(), Some(1), "{template}: {output:?}");
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                assert!(
+                    stderr.contains("[src.nesting-limit]")
+                        && stderr.contains(&format!("boundary.suz:{line_number}:{column}:")),
+                    "{template}: {stderr}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn nesting_limit_checks_nested_blocks_and_top_level_initializers() {
+    let directory = TemporaryDirectory::new();
+    for (opening, closing, token) in [
+        ("while false {", "}", "false"),
+        ("loop {", "}", "{"),
+        ("for i in 0..<0 {", "}", "0"),
+        ("rev i in 0..<0 {", "}", "0"),
+        ("match 0 { _ => {", "}}", "0"),
+        ("{", "}", "{"),
+    ] {
+        for count in [255, 256] {
+            // 1行に1つの構文を置き、257段目へ入る条件・範囲・ブロックの位置を検査する。
+            let source = format!(
+                "fn main() -> u8 {{\n{}{}\nreturn 0\n}}",
+                (0..count)
+                    .map(|i| format!("{}\n", opening.replace(" i ", &format!(" i{i:03} "))))
+                    .collect::<String>(),
+                closing.repeat(count)
+            );
+            fs::write(directory.0.join("blocks.suz"), source).unwrap();
+            let output = suz(&directory.0, &["check", "blocks.suz"]);
+            if count == 255 {
+                success(output);
+            } else {
+                assert_eq!(output.status.code(), Some(1), "{opening}: {output:?}");
+                let last_opening = opening.replace(" i ", " i255 ");
+                let column = last_opening.find(token).unwrap() + 1;
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                assert!(
+                    stderr.contains("[src.nesting-limit]")
+                        && stderr.contains(&format!("blocks.suz:257:{column}:")),
+                    "{opening}: {stderr}"
+                );
+            }
+        }
+    }
+    for declaration in ["fix", "var"] {
+        let source = format!(
+            "{declaration} VALUE = {}\nfn main() -> u8 {{ return 0 }}",
+            wrap("(", ")", 256, "1")
+        );
+        fs::write(directory.0.join("global.suz"), source).unwrap();
+        let output = suz(&directory.0, &["check", "global.suz"]);
+        assert_eq!(output.status.code(), Some(1), "{output:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let column = format!("{declaration} VALUE = ").len() + 257;
+        assert!(
+            stderr.contains("[src.nesting-limit]")
+                && stderr.contains(&format!("global.suz:1:{column}:")),
+            "{stderr}"
+        );
+    }
+}
+
+#[test]
+fn deeply_nested_unclosed_inputs_exit_with_a_diagnostic() {
+    let directory = TemporaryDirectory::new();
+    for (opening, rule) in [
+        ("(", "src.nesting-limit"),
+        ("id(", "src.nesting-limit"),
+        ("`${", "symbol.template-line"),
+    ] {
+        // 閉じ記号に到達しない入力でも、再帰でプロセスが異常終了しないことを確認する。
+        // 未完のテンプレートは構文解析より先に字句解析が拒否する。
+        let source = format!(
+            "fn main() -> u8 {{\nfix value = {}1\n",
+            opening.repeat(100_000)
+        );
+        fs::write(directory.0.join("unclosed.suz"), source).unwrap();
+        let output = suz(&directory.0, &["check", "unclosed.suz"]);
+        assert_eq!(output.status.code(), Some(1), "{opening}: {output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains(&format!("[{rule}]")),
+            "{output:?}"
+        );
+    }
+}
+
+#[test]
 fn nesting_boundary_compiles_and_runs_through_all_commands() {
     let directory = TemporaryDirectory::new();
     // 本体のブロックが1段、式の根が2段。高さ255の式の最深部は256段になる。
