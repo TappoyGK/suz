@@ -30,10 +30,6 @@ fn views_reject_missing_handlers_wrong_types_and_hidden_returns() {
             "var v: text = `abc`\nfor ch in v[:] {}",
             "for.bound-reference",
         ),
-        (
-            "fix a: u8 = 0\nfix b: u16 = 1\nfix x = `abc`[a:b] or ``",
-            "type.expected",
-        ),
         ("fix x = `abc`[0..<1] or ``", "text.slice-omit"),
         ("fix x = `abc`[..=1] or ``", "text.slice-omit"),
         ("fix x = `abc`[:1..=2] or ``", "text.slice-omit"),

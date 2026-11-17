@@ -7,13 +7,6 @@
 #include <string.h>
 #include <stdlib.h>
 
-struct suz_text_entry {
-    const char *bytes;
-    uint64_t length;
-    uint32_t hash;
-    uint64_t scalars;
-};
-
 static struct {
     suz_text *slots;
     uint64_t capacity;
@@ -87,7 +80,13 @@ uint64_t suz_text_pool_used(void) {
     return pool.used;
 }
 
-static uint32_t hash_bytes(const char *bytes, uint64_t length, uint64_t *scalars) {
+/* [rt.len-limit] 個数はバイト長以下なのでuint64_tであふれない。
+   計数とハッシュのループを終えた後、一度だけ上限を検査する。 */
+static void check_scalar_count(uint64_t scalars, suz_text_location location) {
+    if (scalars > INT32_MAX) length_failure(location);
+}
+
+static uint32_t hash_bytes(const char *bytes, uint64_t length, uint64_t *scalars, suz_text_location location) {
     uint32_t hash = UINT32_C(2166136261);
     *scalars = 0;
     for (uint64_t i = 0; i < length; ++i) {
@@ -96,6 +95,7 @@ static uint32_t hash_bytes(const char *bytes, uint64_t length, uint64_t *scalars
         hash ^= byte;
         hash *= UINT32_C(16777619);
     }
+    check_scalar_count(*scalars, location);
     return hash;
 }
 
@@ -134,7 +134,7 @@ suz_text suz_text_intern(const char *bytes, uint64_t length, bool constant,
                          suz_text_location location) {
     allocation_size(length, location);
     uint64_t scalars;
-    uint32_t hash = hash_bytes(bytes, length, &scalars);
+    uint32_t hash = hash_bytes(bytes, length, &scalars, location);
     if (pool.capacity != 0) {
         uint64_t index = slot_for(pool.slots, pool.capacity, hash, bytes, length);
         if (pool.slots[index] != NULL) return pool.slots[index];

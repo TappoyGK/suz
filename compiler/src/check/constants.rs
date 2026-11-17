@@ -147,6 +147,12 @@ fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
                 Some(wrap(constant_integer_raw(inner)?))
             }
         }
+        Value::Len(inner) => {
+            let Value::Text { text } = evaluate_raw(inner)?.value else {
+                return None;
+            };
+            Some(text.chars().count() as i128)
+        }
         Value::BitNot(inner) => Some(wrap(!constant_integer_raw(inner)?)),
         Value::Binary {
             operator,
@@ -617,7 +623,7 @@ fn validate_evaluation(expr: &CheckedExpression) -> Result<(), Diagnostic> {
     }
 
     match &expr.value {
-        Value::TextView(inner) | Value::Intern { operand: inner, .. } => {
+        Value::Len(inner) | Value::TextView(inner) | Value::Intern { operand: inner, .. } => {
             validate_evaluation(inner)?
         }
         Value::Slice {

@@ -942,3 +942,106 @@ fn main() -> u8 {
 info text-025.suz:3: Hello
 info text-025.suz:4: count: 1
 ```
+
+### text-034 lenはUnicodeスカラー値を数え定数式にも使える
+
+主根拠：`[len.expr]`。
+
+対象型・定数評価・優先順位は `[len.targets]`、`[len.const]`、`[len.precedence]` も確認する。
+
+バイト数や見た目の文字数ではなく、Unicodeスカラー値を数える。関数呼び出しは一度だけ評価する。
+
+**ソース：**
+
+```suz
+const COUNT = len `あ😀x`
+const TAIL = len `あ😀x`[1:] or ``
+fn message() -> symbol {
+    log info `called`
+    return `あ😀x`
+}
+fn main() -> u8 {
+    fix n = len message()
+    fix width: i32 = 80 - n
+    fix half: f64 = n * 0.5
+    if COUNT != 3 || TAIL != 2 || n != 3 { return 1 }
+    if width != 77 || half != 1.5 { return 2 }
+    if len `` != 0 || len `é` != 2 { return 3 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+**標準エラー：**
+
+```text
+info text-034.suz:4: called
+```
+
+### text-035 切り出しの開始と終了は異なる整数型を使える
+
+主根拠：`[text.slice-bounds]`。
+
+各位置を独立に評価する。負の値や大きな符号なし整数は範囲外として処理する。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix value = `あ😀x`
+    fix start: u8 = 1
+    fix end: len_t = len value
+    fix huge: u64 = 18446744073709551615
+    if (value[start:end] or ``) != `😀x` { return 1 }
+    fix negative: i64 = -1
+    if (value[negative:end] or `bad`) != `bad` { return 2 }
+    if (value[start:huge] or `bad`) != `bad` { return 3 }
+    if (value[end] or '?') != '?' { return 4 }
+    fix tiny_end: i8 = 2
+    if (value[300:tiny_end] or `bad`) != `bad` { return 5 }
+    if (value[tiny_end:300] or `bad`) != `bad` { return 6 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### text-036 len_tの範囲を検査し汎用関数と反復に使える
+
+主根拠：`[len.type-operations]`。
+
+汎用関数と変換は `[len.type-generic]`、`[len.type-cast]` も確認する。
+
+**ソース：**
+
+```suz
+fn identity(value: int) -> int { return value }
+fn parse(value: text) -> len_t { return value as len_t or 7 }
+fn main() -> u8 {
+    fix hi: len_t = 2147483647
+    fix zero: len_t = 0
+    fix over: len_t = hi + 1 or 9
+    fix under: len_t = zero - 1 or 9
+    if over != 9 || under != 9 { return 1 }
+    if parse(`2147483647`) != hi || parse(`2147483648`) != 7 { return 2 }
+    var count: len_t = 0
+    for i in 0..<len `abc` { count += identity(i) }
+    if count != 3 { return 3 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |

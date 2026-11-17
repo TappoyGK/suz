@@ -1,4 +1,6 @@
 #include "suz_text.h"
+/* 本番の個数加算を境界値から検証するため、内部関数も同じ翻訳単位に置く。 */
+#include "suz_text.c"
 #include "suz_parse.h"
 #include "suz_runtime.h"
 #include "suz_env.h"
@@ -250,7 +252,18 @@ int main(int argc, char **argv) {
     uint64_t limit = argc > 2 ? strtoull(argv[2], NULL, 10) : 0;
     suz_text_pool_init(strcmp(argv[1], "oom") == 0 ? 0 : limit);
     assert(calls == 0 && suz_text_pool_used() == 0);
-    if (strcmp(argv[1], "identity") == 0) identity();
+    if (strcmp(argv[1], "scalar-limit") == 0) {
+        /* プール無制限でも一つのsymbolの個数上限は変わらない。
+           巨大な文字列を確保せず、本番の登録処理が使う上限判定を検証する。 */
+        assert(limit == 0);
+        check_scalar_count(0, location);
+        check_scalar_count(INT32_MAX - 1, location);
+        check_scalar_count(INT32_MAX, location);
+        panic_expected = true;
+        check_scalar_count((uint64_t)INT32_MAX + 1, location);
+        return 2;
+    }
+    else if (strcmp(argv[1], "identity") == 0) identity();
     else if (strcmp(argv[1], "collision") == 0) collision();
     else if (strcmp(argv[1], "accounting") == 0) accounting();
     else if (strcmp(argv[1], "growth") == 0) {

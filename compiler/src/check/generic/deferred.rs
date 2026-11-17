@@ -12,7 +12,7 @@ use crate::{
 
 pub(in crate::check) enum Deferred {
     Rule {
-        failures: u16,
+        failures: u32,
         diagnostic: Box<dyn Fn(usize) -> Diagnostic>,
     },
     Call {
@@ -69,7 +69,7 @@ impl Scope {
     // その失敗を再生するときだけ診断文を組み立てる。
     pub(in crate::check) fn defer_check(
         &self,
-        failures: u16,
+        failures: u32,
         diagnostic: impl Fn(usize) -> Diagnostic + 'static,
     ) {
         let Some(log) = &self.deferred else {

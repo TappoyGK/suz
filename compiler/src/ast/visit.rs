@@ -101,6 +101,7 @@ pub(crate) fn walk_expression<V: Visitor + ?Sized>(
         }
         ExpressionKind::Group(inner)
         | ExpressionKind::Negate(inner)
+        | ExpressionKind::Len(inner)
         | ExpressionKind::Not(inner)
         | ExpressionKind::BitNot(inner) => visitor.expression(inner)?,
         ExpressionKind::Binary { left, right, .. }

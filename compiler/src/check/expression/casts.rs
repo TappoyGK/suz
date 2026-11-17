@@ -25,6 +25,22 @@ pub(in crate::check) fn check(
             fallback,
         } => {
             let target = bindings.resolve_type(*annotation);
+            if *wrap {
+                let allowed = |ty| ty != Type::Integer(crate::ast::IntegerType::Len);
+                let error = || {
+                    expr.location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!("expr.as-trunc", "len_t cannot be the target of as%"),
+                    )
+                };
+                match domain::judge_one(target, allowed) {
+                    domain::Judgment::Invalid => return Err(error()),
+                    domain::Judgment::Deferred => {
+                        bindings.defer_rule(|i| (!allowed(domain::at(target, i)?)).then(error))
+                    }
+                    domain::Judgment::Valid => {}
+                }
+            }
             let operand = super::super::exact::use_value(operand, bindings)?;
             if operand.ty == Type::Exact {
                 return super::super::exact::cast(

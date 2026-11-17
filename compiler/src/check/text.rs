@@ -47,6 +47,18 @@ pub(super) fn template(
 ) -> Result<CheckedExpression, Diagnostic> {
     let parts = parts(input, bindings)?;
     let constant = constant_parts(&parts, bindings);
+    if constant
+        .as_ref()
+        .is_some_and(|text| text.chars().count() > i32::MAX as usize)
+    {
+        return Err(location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "rt.len-limit",
+                "symbol exceeds the maximum Unicode scalar count"
+            ),
+        ));
+    }
     Ok(CheckedExpression {
         ty: Type::Symbol,
         value: Value::Template {

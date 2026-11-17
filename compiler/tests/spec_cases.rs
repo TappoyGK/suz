@@ -251,3 +251,6 @@ fn run_spec_cases(optimized: bool) {
     support::runner::print_timings();
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+#[path = "spec_cases/length.rs"]
+mod length;

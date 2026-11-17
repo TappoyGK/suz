@@ -3,7 +3,7 @@
 //! 利用元: [`crate::check::expression`]。
 //! 主な対象規則: `[text.slice-bounds]`、`[text.slice-handler]`。
 
-use super::{expression, operand_type};
+use super::expression;
 use crate::check::{
     ir::{CheckedExpression, CheckedHandler, Value},
     scope::Scope,
@@ -25,15 +25,8 @@ pub(super) fn check(expr: &Expression, bindings: &Scope) -> Result<CheckedExpres
         unreachable!()
     };
     let target = expression(target, Some(Type::Text), bindings)?;
-    let bound_type = start
-        .as_deref()
-        .and_then(|value| operand_type(value, bindings))
-        .or_else(|| {
-            end.as_deref()
-                .and_then(|value| operand_type(value, bindings))
-        });
     let bound = |value: &Expression| -> Result<Box<CheckedExpression>, Diagnostic> {
-        let checked = expression(value, bound_type, bindings)?;
+        let checked = expression(value, None, bindings)?;
         if !checked.ty.is_integer() {
             return Err(value.location.error(
                 ErrorKind::InvalidSource,

@@ -127,7 +127,7 @@ pub(super) fn cast_parts(
                 conditions.push(format!("{local} >= INT64_C({to_min})"));
             }
             if from_max > to_max {
-                let prefix = if from.integer_storage().unwrap().bounds().0 < 0 {
+                let prefix = if from.integer_storage().unwrap().c_signed() {
                     "INT64_C"
                 } else {
                     "UINT64_C"

@@ -283,6 +283,10 @@ impl Parser<'_, '_> {
                 self.cursor += 1;
                 ExpressionKind::BitNot(Box::new(self.unary()?))
             }
+            Kind::Keyword("len") => {
+                self.cursor += 1;
+                ExpressionKind::Len(Box::new(self.unary()?))
+            }
             Kind::Keyword("not") => {
                 self.cursor += 1;
                 ExpressionKind::Not(Box::new(self.unary()?))
