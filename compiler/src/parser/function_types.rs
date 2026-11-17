@@ -81,7 +81,7 @@ pub(super) fn resolve(
     let mut ends = Vec::new();
     for d in declarations.iter() {
         p.cursor = d.start + 2;
-        let parameters = p.list(Parser::parse_type)?;
+        let parameters = p.list(Parser::function_parameter_type)?;
         p.expect(FixedToken::Symbol("->"))?;
         let result = p.parse_type()?;
         for ty in parameters.iter().chain([&result]) {
@@ -109,7 +109,7 @@ pub(super) fn resolve(
     let mut parents = vec![Vec::new(); raw.len()];
     for (id, signature) in raw.iter().enumerate() {
         for ty in signature.parameters.iter().chain([&signature.result]) {
-            if let Type::StaticFunction(child) = ty {
+            if let Type::StaticFunction(child) | Type::Function(child) = ty {
                 pending[id] += 1;
                 parents[*child].push(id);
             }
@@ -120,12 +120,10 @@ pub(super) fn resolve(
     let mut ids = vec![None; raw.len()];
     let mut types = Vec::new();
     while let Some(id) = ready.pop_front() {
-        let remap = |ty| {
-            if let Type::StaticFunction(child) = ty {
-                Type::StaticFunction(ids[child].unwrap())
-            } else {
-                ty
-            }
+        let remap = |ty| match ty {
+            Type::StaticFunction(child) => Type::StaticFunction(ids[child].unwrap()),
+            Type::Function(child) => Type::Function(ids[child].unwrap()),
+            _ => ty,
         };
         let signature = FunctionType {
             parameters: raw[id].parameters.iter().copied().map(remap).collect(),

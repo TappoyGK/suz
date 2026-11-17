@@ -508,7 +508,6 @@ fn call_only_functions_reject_storage_and_non_parameter_annotations() {
         "fix BAD: fn Transform = fn fixed",
         "var BAD: fn Transform = fn fixed",
         "struct Bad { f: fn Transform }",
-        "fntype Bad(fn Transform) -> void",
         "fntype Bad() -> fn Transform",
         "fn bad() -> fn Transform { return fn fixed }",
         "fn bad() -> void { fix f: fn Transform = fn fixed }",
@@ -577,4 +576,48 @@ fn call_only_forwarding_reports_signature_mismatches() {
         error.to_string(),
         "4:37: expected fn Ot, found fn Tr [type.expected]"
     );
+}
+
+#[test]
+fn function_type_parameters_accept_call_only_types() {
+    let source = r#"
+// 前方参照を解決した後も、fnとstatic fnを区別して同じ形をまとめる。
+fntype Runner(fn Tr) -> i32
+fntype Alias(fn TrAlias) -> i32
+fntype Tr(i32) -> i32
+fntype TrAlias(i32) -> i32
+// 関数本体から使われない型も、参照する呼び出し専用のC型を必要とする。
+fntype Unused(fn Never) -> void
+fntype Never() -> void
+struct Job { run: static fn Runner }
+fn inc(n: i32) -> i32 { return n + 1 }
+fn r(f: fn Tr) -> i32 { return f(4) }
+fn other(f: fn Tr) -> i32 { return f(5) }
+fn saved(run: static fn Alias, f: fn Tr) -> i32 { return run(f) }
+fn forwarded(run: fn Runner, f: fn Tr) -> i32 { return run(f) }
+fn main() -> u8 {
+    fix inferred = fn r
+    var named: static fn Alias = inferred
+    fix job = Job { run: named }
+    named = fn other
+    if job.run(fn inc) != 5 || named(fn inc) != 6 { return 1 }
+    if saved(inferred, fn inc) != 5 { return 2 }
+    if forwarded(job.run, fn inc) != 5 { return 3 }
+    return 0
+}
+"#;
+    let output = compile_and_run_c23(source, "function-type-parameters.suz");
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+
+    for declarations in [
+        "fntype Loop(fn Loop) -> void",
+        "fntype Alpha(fn Beta) -> void\nfntype Beta(static fn Alpha) -> void",
+    ] {
+        let source = format!("{declarations}\nfn main() -> u8 {{ return 0 }}");
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert!(
+            error.to_string().contains("[fntype.recursion]"),
+            "{source}: {error}"
+        );
+    }
 }

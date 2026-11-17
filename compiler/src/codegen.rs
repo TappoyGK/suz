@@ -80,6 +80,16 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
         enums: program.enums.clone(),
         structs: program.structs.clone(),
         function_types: program.function_types.clone(),
+        // 未使用のfntypeもCへ宣言するため、その仮引数が参照する組の型も用意する。
+        call_only_types: program
+            .function_types
+            .iter()
+            .flat_map(|ty| &ty.parameters)
+            .filter_map(|ty| match ty {
+                crate::ast::Type::Function(id) => Some(*id),
+                _ => None,
+            })
+            .collect(),
         ..ExpressionContext::default()
     };
     for value in &program.constant_texts {

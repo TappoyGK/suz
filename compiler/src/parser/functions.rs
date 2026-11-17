@@ -121,7 +121,7 @@ impl Parser<'_, '_> {
         Ok(ty)
     }
 
-    fn function_parameter_type(&mut self) -> Result<Type, Diagnostic> {
+    pub(super) fn function_parameter_type(&mut self) -> Result<Type, Diagnostic> {
         let persistent = self.token().kind == Kind::Keyword("static");
         if persistent {
             self.cursor += 1;
