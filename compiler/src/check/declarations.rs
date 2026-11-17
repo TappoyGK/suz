@@ -52,7 +52,8 @@ pub(super) fn dependencies(
         }
         ExpressionKind::Field { target, .. } => dependencies(target, names)?,
         ExpressionKind::Name(name) => names.push((name.clone(), expr.location)),
-        ExpressionKind::Integer { .. }
+        ExpressionKind::FunctionValue(_)
+        | ExpressionKind::Integer { .. }
         | ExpressionKind::Float(_)
         | ExpressionKind::Char(_)
         | ExpressionKind::Bool(_)
@@ -81,6 +82,7 @@ pub(super) fn dependencies(
         }
         ExpressionKind::Void
         | ExpressionKind::Call { .. }
+        | ExpressionKind::Invoke { .. }
         | ExpressionKind::Block { .. }
         | ExpressionKind::If { .. }
         | ExpressionKind::Match { .. } => {
@@ -197,19 +199,25 @@ pub(super) fn resolve(
     declarations: &[TopLevelBinding],
     enums: &[crate::ast::EnumDeclaration],
     structs: &[crate::ast::StructDeclaration],
+    scope: Scope,
 ) -> Result<(Scope, Vec<Location>, Vec<CheckedExpression>), Diagnostic> {
     let mut resolver = Resolver {
         declarations: BTreeMap::new(),
         bindings: Scope {
             enums: std::rc::Rc::new(enums.to_vec()),
             structs: std::rc::Rc::new(structs.to_vec()),
-            ..Scope::default()
+            ..scope
         },
         visiting: BTreeSet::new(),
         warnings: Vec::new(),
     };
     for declaration in declarations {
-        if structs.iter().any(|s| s.name == declaration.name)
+        if resolver
+            .bindings
+            .fntypes
+            .iter()
+            .any(|d| d.name == declaration.name)
+            || structs.iter().any(|s| s.name == declaration.name)
             || enums.iter().any(|e| e.name == declaration.name)
             || declaration.name == "main"
             || resolver

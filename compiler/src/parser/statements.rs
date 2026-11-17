@@ -132,7 +132,18 @@ impl Parser<'_, '_> {
                     body,
                 })
             }
-            Kind::Keyword("fn" | "enum" | "struct") => Err(self.error(
+            Kind::Keyword("fn")
+                if self
+                    .tokens
+                    .get(self.cursor + 2)
+                    .is_some_and(|t| t.kind == Kind::Symbol("(")) =>
+            {
+                Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("decl.location", "functions must be declared at top level"),
+                ))
+            }
+            Kind::Keyword("enum" | "struct" | "fntype") => Err(self.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(
                     "decl.location",

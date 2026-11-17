@@ -117,7 +117,7 @@ pub(super) fn check(
 struct References(BTreeSet<String>);
 impl Visitor for References {
     fn expression(&mut self, expr: &Expression) -> Result<(), Diagnostic> {
-        if let ExpressionKind::Name(name) = &expr.kind {
+        if let ExpressionKind::Name(name) | ExpressionKind::Call { name, .. } = &expr.kind {
             self.0.insert(name.clone());
         }
         visit::walk_expression(self, expr)

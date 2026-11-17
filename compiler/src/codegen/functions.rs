@@ -73,3 +73,48 @@ pub(super) fn call(
         format!("({})", setup.join(", "))
     }
 }
+
+/// 呼び出す関数を実引数より先に保存し、引数による変数の書き換えの影響を避ける。
+pub(super) fn invoke(
+    target: &CheckedExpression,
+    arguments: &[CheckedExpression],
+    context: &mut ExpressionContext,
+) -> String {
+    let id = context.temporaries.len();
+    context.temporaries.push(target.ty);
+    let mut setup = vec![format!("suz_cmp_{id} = {}", expression(target, context))];
+    let mut names = Vec::new();
+    for argument in arguments {
+        let index = context.temporaries.len();
+        context.temporaries.push(argument.ty);
+        setup.push(format!(
+            "suz_cmp_{index} = {}",
+            expression(argument, context)
+        ));
+        names.push(format!("suz_cmp_{index}"));
+    }
+    setup.push(format!("suz_cmp_{id}({})", names.join(", ")));
+    format!("({})", setup.join(", "))
+}
+
+/// 構造体の前方宣言の後、本体の前に関数ポインタ型を宣言する。
+/// 関数値の型の番号は依存先から付くため、ここでは番号順に出力できる。
+pub(super) fn type_declarations(c: &mut String, types: &[crate::ast::FunctionType]) {
+    for (id, ty) in types.iter().enumerate() {
+        let args = if ty.parameters.is_empty() {
+            "void".into()
+        } else {
+            ty.parameters
+                .iter()
+                .map(|t| t.c_name())
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        writeln!(
+            c,
+            "typedef {} (*suz_fntype_{id})({args});",
+            ty.result.c_name()
+        )
+        .unwrap();
+    }
+}

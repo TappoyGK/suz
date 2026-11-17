@@ -17,7 +17,7 @@ struct References(std::collections::BTreeSet<String>);
 
 impl crate::ast::visit::Visitor for References {
     fn expression(&mut self, expr: &Expression) -> Result<(), Diagnostic> {
-        if let ExpressionKind::Name(name) = &expr.kind
+        if let ExpressionKind::Name(name) | ExpressionKind::Call { name, .. } = &expr.kind
             && self.0.contains(name)
         {
             return Err(expr.location.error(

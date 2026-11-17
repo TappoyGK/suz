@@ -149,7 +149,12 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
                     slots,
                 )
             }
-            Type::GenericInt | Type::GenericFloat | Type::Numeric(_) | Type::Exact | Type::Void => {
+            Type::Function(_)
+            | Type::GenericInt
+            | Type::GenericFloat
+            | Type::Numeric(_)
+            | Type::Exact
+            | Type::Void => {
                 unreachable!("text conversions only receive resolved, storable types")
             }
         };

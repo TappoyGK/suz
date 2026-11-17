@@ -146,12 +146,14 @@ impl Parser<'_, '_> {
 pub(super) fn collect(
     tokens: &[Token<'_>],
     enums: &[EnumDeclaration],
+    fntypes: &[crate::ast::FnTypeDeclaration],
 ) -> Result<Vec<StructDeclaration>, Diagnostic> {
     let mut p = Parser {
         allows: Vec::new(),
         tokens,
         enums,
         structs: &[],
+        fntypes,
         restricted_condition: false,
         cursor: 0,
         constant_expression: false,

@@ -69,7 +69,7 @@ Suzは次のものを含む。
 **[src.keywords]** 次の語はキーワードである。
 
 ```text
-fix var fn struct enum
+fix var fn fntype struct enum
 if ifexpr elif else while loop for rev in break continue return match matchexpr
 as or not len log allow expr with
 true false nan inf
@@ -172,6 +172,7 @@ fix lower = -inf      // f64 の負の無限大
 - 文自体は数えない。文に書いた式とブロックは、その文を含むブロックより1段深い。条件、`match`の対象とパターン、`for`・`rev`の反復対象と範囲の両端も同じであり、範囲演算子は別の段として数えない。
 - `if`・`elif`・`else`・`while`・`loop`・`for`・`rev`の本体、`match`の腕、ブロック文、`allow`のブロックは、それぞれ1つのブロックとして数える。腕の本体を式だけで書く場合も、その式を含むブロックを1段として数える。
 - リテラル、名前、丸括弧、単項・二項演算子、`len`、`as`・`as%`、`or`、関数呼び出し、構造体リテラル、テンプレート、フィールド参照、切り出し・添字、`with`を、それぞれ1つの式として数える。各オペランド、実引数、初期値、添字・切り出しの境界、テンプレートの埋め込みの式は、その式より1段深い。`with`のコピー元と初期値も、その`with`より1段深い。
+- `fn 関数名` は1つの式として数える。名前で呼ぶ `f(x)` の名前は別の段として数えない。それ以外の呼び出しでは、呼び出し対象の式も呼び出しより1段深い。
 - 左結合の並びは演算ごとに1段を数える。比較の連鎖は全体で1つの式とし、各オペランドはその1段下とする。
 - `ifexpr`・`matchexpr`・`expr`もそれぞれ1つの式である。条件・対象と値のブロックはその1段下、値のブロック内の式はさらに1段下となる。値のブロックで数え直さない。
 
@@ -209,9 +210,9 @@ fn main() -> u8 {
 
 ### 4.1 宣言とスコープ
 
-**[decl.top-level]** トップレベルには、`fix`・`var`・関数・構造体・列挙型の宣言だけを書ける。これらの名前は、ファイル内の宣言順序によらず参照できる。
+**[decl.top-level]** トップレベルには、`fix`・`var`・関数・構造体・列挙型・`fntype` の宣言だけを書ける。これらの名前は、ファイル内の宣言順序によらず参照できる。
 
-**[decl.location]** `fix` と `var` はトップレベルとブロック内で宣言できる。関数、構造体、列挙型はトップレベルで宣言する。それぞれの宣言をこれらの場所以外に書くとコンパイルエラーである。
+**[decl.location]** `fix` と `var` はトップレベルとブロック内で宣言できる。関数、構造体、列挙型、`fntype` はトップレベルで宣言する。それぞれの宣言をこれらの場所以外に書くとコンパイルエラーである。
 
 **[decl.duplicate]** 同じスコープで同じ名前を宣言するとコンパイルエラーである。定数、変数、仮引数、関数、型など、宣言の種類が違っても同じである。
 
@@ -225,7 +226,7 @@ fn main() -> u8 {
 
 **[name.value]** 関数、ブロック内の `fix`・`var`、仮引数、構造体のフィールド、`for` と `rev` のループ変数の名前はASCIIの小文字で始まり、小文字・数字・`_` だけからなる。`_` は末尾に置かず、連続させない。例は `read_count`、`count`、`x2` である。
 
-**[name.type]** 構造体・列挙型の名前はASCIIの大文字で始まり、英字と数字だけからなる。小文字を1文字以上含み、大文字を連続させない。例は `Vec2`、`IoError` である。`IOError`、`T`、`Load_Error` は認めない。
+**[name.type]** 構造体・列挙型・`fntype` の名前はASCIIの大文字で始まり、英字と数字だけからなる。小文字を1文字以上含み、大文字を連続させない。例は `Vec2`、`IoError` である。`IOError`、`T`、`Load_Error` は認めない。
 
 **[name.variant]** 列挙子の名前はASCIIの大文字で始まり、英字と数字だけからなる。例は `Ready`、`A`、`F1`、`ESC` である。
 
@@ -233,7 +234,7 @@ fn main() -> u8 {
 
 ## 5. 型
 
-**[type.name]** 型として使う名前は、組み込み型名、またはファイル内で宣言された構造体・列挙型の名前でなければならない。該当する型がない場合はコンパイルエラーである。
+**[type.name]** 型として使う名前は、組み込み型名、またはファイル内で宣言された構造体・列挙型の名前でなければならない。関数値の型は [fn.type-mark] に従い `fn` と `fntype` の名前で書く。該当する型がない場合はコンパイルエラーである。
 
 ### 5.1 組み込み型
 
@@ -503,6 +504,8 @@ fix empty = joined == ``
 **[const.initializer]** 定数の初期値には、[const.expression] の定数式を使う。定数間の循環参照はコンパイルエラーである。
 
 **[const.expression]** 定数名はトップレベルの `fix` の名前を指し、ブロック内の `fix` とすべての `var` の名前は含めない。定数式は、数値・真偽値・文字のリテラル、定数名、列挙子、定数式同士の演算と型変換、定数式から作る構造体リテラル、そのフィールド参照、丸括弧で囲んだ定数式から構成する。型変換と整数演算の `or` による代替値にも定数式を使える。埋め込みのないテンプレート、すべての埋め込みが定数式であるテンプレート、定数式の `symbol` 同士の比較も定数式である。`text` の定数式には [text.const-view] を適用する。 左の式と指定したフィールドの初期値がすべて定数式である `with` 式も、定数式である（[struct.with-const]）。
+
+`fn 関数名` も [fn.value-const] の定数式である。
 
 **[const.evaluation]** 定数式は、通常の式と同じ型、演算、評価順序、短絡評価の規則でコンパイル時に評価する。評価中にパニックの条件を満たし、その演算に対応する `or` による失敗処理がなければコンパイルエラーである。整数演算に対応する `or` がある場合は、演算に失敗したときだけ代替値を評価する。成功した場合は演算結果を使う。評価しない部分にも、定数式の構成と型の規則、および [const.cast-check] と [expr.cast-handler] と [symbol.cast-handler] の `or` を要求する規則を適用する。
 
@@ -1353,7 +1356,7 @@ fix result: u16 = clamp(square(input), 0, 50_000)
 
 **[num.fn-check-judge]** 汎用検査では、型に関わる各規則を `int`・`float` が取りうるすべての具体型について判定する。両者の具体型は独立に組み合わせる。すべてで成立する場合は受理し、すべてで違反する場合は本体の位置でコンパイルエラーとする。具体型によって結果が異なる場合は判定を保留する。保留した式も、その規則で決まる型の値として後続の検査に使う。例えば `(n +% 300) + true` では、300が `int` に収まるかは保留するが、右辺の `bool` は加算できないためエラーとする。
 
-**[num.fn-body]** 呼び出しで具体型が決まったら、汎用検査で保留した判定を行う。汎用検査に成功した本体が具体型で違反するのは、保留した判定だけである。違反する場合は、具体型を決めた呼び出しを主診断とし、本体に至る呼び出しの連鎖と本体の違反を関連診断として示す。各診断はそれぞれの位置と規則名を持つ。汎用検査で違反を検出した本体では、検査を打ち切るまでに保留した判定だけを呼び出しで行う。打ち切り後の判定は行わず、汎用検査で検出した違反は [num.fn-check] の宣言順で報告する。
+**[num.fn-body]** 呼び出し、または [fn.value-generic] の関数値で具体型が決まったら、汎用検査で保留した判定を行う。汎用検査に成功した本体が具体型で違反するのは、保留した判定だけである。違反する場合は、具体型を決めた呼び出しを主診断とし、本体に至る呼び出しの連鎖と本体の違反を関連診断として示す。各診断はそれぞれの位置と規則名を持つ。汎用検査で違反を検出した本体では、検査を打ち切るまでに保留した判定だけを呼び出しで行う。打ち切り後の判定は行わず、汎用検査で検出した違反は [num.fn-check] の宣言順で報告する。
 
 **[num.fn-unused]** 呼び出されない汎用関数にも汎用検査を行う。保留した判定は行わない。整数演算の警告対象箇所も呼び出しの有無によらず集計し、診断設定と `allow` を適用する。
 
@@ -1381,7 +1384,53 @@ fn convert(value: u16) -> int {
 
 **[num.fn-main]** `main` の形は [prog.main] に従い、汎用関数にはできない。
 
-**[num.monomorphize]** 汎用関数は、使用される具体型の組み合わせごとに別の関数として生成する。同じ関数・同じ組み合わせは共有し、呼び出されない組み合わせは生成しない。型の選択はコンパイル時に完了し、実行時の型判定や型情報の受け渡しは行わない。
+**[num.monomorphize]** 汎用関数は、使用される具体型の組み合わせごとに別の関数として生成する。同じ関数・同じ組み合わせは、直接呼び出しと関数値で同じ生成済みの関数を使う。呼び出しにも関数値にも使われない組み合わせは生成しない。型の選択はコンパイル時に完了し、実行時の型判定や型情報の受け渡しは行わない。
+
+### 8.8 関数値
+
+**[fntype.decl]** `fntype 名前(T1, T2, ...) -> R` は、仮引数の型の並びと戻り値の型に名前を付ける。仮引数は0個以上で、型だけを書く。この型を関数値の型と呼ぶ。仮引数・戻り値に `int`・`float` は書けず、`void` は戻り値だけに使える。
+
+**[fntype.same]** 仮引数の型の並びと戻り値の型が同じ関数値の型は、名前が違っても同じ型である。関数の宣言から推論した関数値の型にも、同じ規則を適用する。
+
+**[fntype.recursion]** 関数値の型は、仮引数と戻り値を直接・間接にたどって自分自身を含むことはできない。循環する宣言はコンパイルエラーである。構造体を通して含む場合は認める。たとえば、`struct Node { visit: fn Visit }` と `fntype Visit(Node) -> void` は宣言できる。
+
+**[fn.type-mark]** 関数値の型を明記するときは、すべての場所で `fn Shape` のように `fn` を付ける。関数値の型の名前に `fn` を付けないこと、関数値の型でない型に `fn` を付けることはコンパイルエラーである。`fntype` の宣言で付ける名前には `fn` を付けない。
+
+**[fn.value-from-name]** `fn saw` は、トップレベルの関数 `saw` を指す値を作る。汎用でない関数では、関数の仮引数と戻り値の型から関数値の型が決まり、同じ形の `fntype` の宣言や型注釈は必要ない。型が要求される場所では、その型と同じでなければコンパイルエラーである。汎用関数には [fn.value-generic] を適用する。`main` は値にできない。
+
+**[fn.value-mark]** 関数名を値として使うときは `fn` を付ける。関数値を保持する変数・フィールド・呼び出しなどの式には付けない。これらに反するとコンパイルエラーである。名前で直接呼ぶ `saw(p)` には `fn` を付けない。`fn pick(i)` は認めず、関数値を返す関数の呼び出しは `pick(i)` と書く。関数名から作った値をその場で呼ぶ場合は `(fn saw)(p)` と書く。
+
+**[fn.value-places]** 関数値は [value.copy-equivalent] に従う。コピーした関数値は元の値と同じ関数を指す。仮引数・戻り値、トップレベルとブロック内の `fix`・`var`、構造体のフィールドに使える。`var` には同じ型の別の関数値を代入できる。クロージャは導入しない。
+
+**[fn.value-const]** `fn 関数名` は定数式であり、トップレベルの `fix`・`var` の初期値に書ける。汎用関数を具体化した関数値も同じである。
+
+**[fn.value-call]** 関数値は `f(x)` で呼ぶ。関数値の型の式なら、名前に限らず後ろに `(実引数)` を付けられる。フィールドは `node.visit(n)`、関数値を返す呼び出しの結果は `pick(i)(p)` と書く。関数値の型でない式を呼ぶとコンパイルエラーである。実引数の個数・型・暗黙変換・値の受け渡しには [fn.call] を適用する。
+
+**[fn.value-evaluation]** 呼び出し対象の式を最初に1回評価し、得られた関数値を保持する。その後、実引数を左から右へそれぞれ1回評価し、保持した関数を呼ぶ。実引数の評価中に元の変数やフィールドが書き換わっても、今回呼び出す関数は変わらない。途中でパニックした場合は、残りの評価と呼び出しを行わない。
+
+**[fn.value-compare]** 関数値には比較・算術・テンプレートの埋め込みを使えない。関数値をフィールドに含む構造体も、入れ子を含めて比較できない。関数値と、それを含む構造体への文字列からの変換は認めない。
+
+**[fn.value-generic]** `fn 関数名` が汎用関数を指す場合は、その式に要求される関数値の型から具体型を決める。
+
+- 型の要求は型注釈、実引数、`return`・`or return` の値、代入先、構造体のフィールドから来る。`ifexpr`・`matchexpr`・`expr`・丸括弧は外側からの要求を内側へ伝える。分岐の一方の型をもう一方の要求にはしない。
+- 宣言中のすべての `int` を同じ整数の具体型、すべての `float` を同じ浮動小数点の具体型に置き換える。両者は独立に決める。置き換え後の仮引数の型の並びと戻り値の型は、要求される型と完全に一致しなければならない。戻り値にだけ汎用型がある場合も、その戻り値の要求から具体型を決める。
+- 要求される型がない場合、一致する具体型がない場合は、`fn 関数名` の位置でコンパイルエラーとする。型の要求がなければ、関数値の型を明記するよう案内する。後の使い方からさかのぼる推論、既定の具体型の選択、暗黙変換やラッパーによる関数の型の調整はしない。
+
+**[fn.value-generic-check]** 具体型が決まった時点で、汎用検査で保留した判定をその組み合わせについて行う。その関数値を呼ばない場合も検査する。違反する場合は `fn 関数名` を主診断とし、本体に至る呼び出し・関数値の参照の連鎖と、本体の違反を関連診断として示す。
+
+```suz
+fntype Transform(i32) -> i32
+fn identity(x: int) -> int { return x }
+fn twice(x: i32) -> i32 { return x * 2 }
+fn apply(action: fn Transform, n: i32) -> i32 { return action(n) }
+fn main() -> u8 {
+    fix action: fn Transform = fn identity
+    fix other = fn twice
+    return ifexpr apply(action, 3) == 3 && other(3) == 6 { 0 } else { 1 }
+}
+```
+
+**[rt.fn-value]** 関数値は、生成するCでは関数ポインタ1つで表す。呼び出し対象と実引数の評価順序は [fn.value-evaluation] に従い、Cの関数呼び出し式の評価順序には依存しない。
 
 ## 9. 実行時の検査
 
@@ -1624,12 +1673,14 @@ CharEscape ::= "\" ( "0" | "n" | "r" | "t" | "\" | "'"
 ```ebnf
 Program          ::= NL* ( Declaration NL+ )* Declaration? EOF
 Declaration      ::= TopLevelBinding | FunctionDeclaration
-                   | StructDeclaration | EnumDeclaration
+                   | StructDeclaration | EnumDeclaration | FnTypeDeclaration
 
 TopLevelBinding  ::= ( "fix" | "var" ) IDENT TypeAnnotation? "=" ConstExpression AllowClause?
 TypeAnnotation   ::= ":" Type
 
 FunctionDeclaration ::= "fn" IDENT "(" Parameters? ")" "->" Type Block
+FnTypeDeclaration ::= "fntype" IDENT "(" FnTypeParameters? ")" "->" Type
+FnTypeParameters ::= Type ( "," Type )* ","?
 Parameters       ::= Parameter ( "," Parameter )* ","?
 Parameter        ::= IDENT ":" Type
 
@@ -1642,7 +1693,7 @@ EnumDeclaration  ::= "enum" IDENT ":" IntegerType
 Variants         ::= IDENT ( "," NL* IDENT )* ","? NL*
 
 Type             ::= IntegerType | "len_t" | "f32" | "f64" | "bool" | "char" | "symbol" | "text" | "void"
-                   | "int" | "float" | IDENT
+                   | "int" | "float" | IDENT | "fn" IDENT
 IntegerType      ::= "i8" | "i16" | "i32" | "i64"
                    | "u8" | "u16" | "u32" | "u64"
 ```
@@ -1709,8 +1760,9 @@ Sum              ::= Product ( ( "+" | "-" | "+%" | "-%" ) Product )*
 Product          ::= Cast ( ( "*" | "/" | "%" | "*%" ) Cast )*
 Cast             ::= Unary ( "as%" Type CastHandler? | "as" Type CastHandler? )*
 CastHandler      ::= "or" ( Expression | "return" Expression? )
-Unary            ::= ( "-" | "not" | "~" | "len" ) Unary | Postfix
+Unary            ::= ( "-" | "not" | "~" | "len" ) Unary | "fn" IDENT | Postfix
 Postfix          ::= Primary ( "." IDENT | "[" Index "]" IndexHandler?
+                             | "(" Arguments? ")"
                              | "with" "{" NL* Initializers "}" )*
 Index            ::= Expression | Expression? ":" Expression?
 IndexHandler     ::= "or" ( Expression | "return" Expression? )
@@ -1730,6 +1782,8 @@ Initializer      ::= IDENT ":" Expression | IDENT
 `IDENT` だけの `Initializer` には [struct.shorthand]・[struct.shorthand-name]・[struct.shorthand-rules] を適用する。
 
 `Index` と `IndexHandler` には [text.slice]、[text.index]、[text.slice-handler] を適用する。
+
+`"fn" IDENT` には [fn.value-from-name] と [fn.value-mark]、後置の呼び出しには [fn.value-call] を適用する。名前の直後の `(` は `FunctionCall` として読む。
 
 `IDENT` と `FunctionCall`、`StructLiteral` は、後続の `(`、`{` を含めて区別する。列挙子の `Wave.Sine` とフィールド参照の `p.x` は、名前を解決して区別する。
 

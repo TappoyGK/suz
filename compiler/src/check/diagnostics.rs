@@ -49,6 +49,12 @@ pub(super) fn collect(expr: &CheckedExpression, locations: &mut Vec<Location>) {
             }
         }
         Value::Field { target, .. } => collect(target, locations),
+        Value::Invoke { target, arguments } => {
+            collect(target, locations);
+            for argument in arguments {
+                collect(argument, locations);
+            }
+        }
         Value::Call { arguments, .. } => {
             for argument in arguments {
                 collect(argument, locations);

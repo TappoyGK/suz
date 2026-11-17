@@ -24,6 +24,7 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
             || program.bindings.iter().any(|c| c.name == function.name)
             || program.enums.iter().any(|e| e.name == function.name)
             || program.structs.iter().any(|s| s.name == function.name)
+            || program.fntypes.iter().any(|s| s.name == function.name)
         {
             return Err(function.location.error(
                 ErrorKind::InvalidSource,
@@ -41,11 +42,19 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     }
     let main_id = signatures["main"].id;
     let signatures = Rc::new(signatures);
-    let (mut globals, mut warnings, initializers) =
-        declarations::resolve(&program.bindings, &program.enums, &program.structs)?;
-    globals.functions = signatures;
-    *globals.instances.borrow_mut() = super::generic::Instances::new(program.functions.len());
+    let scope = Scope {
+        functions: signatures,
+        fntypes: Rc::new(program.fntypes.clone()),
+        function_types: Rc::new(std::cell::RefCell::new(program.function_types.clone())),
+        instances: Rc::new(std::cell::RefCell::new(super::generic::Instances::new(
+            program.functions.len(),
+        ))),
+        ..Scope::default()
+    };
+    let (globals, mut warnings, initializers) =
+        declarations::resolve(&program.bindings, &program.enums, &program.structs, scope)?;
     let mut functions = Vec::new();
+    check_instances(program, &globals, &mut functions, &mut warnings)?;
     for (id, function) in program.functions.iter().enumerate() {
         if globals.functions[&function.name].is_generic() {
             match &analyze_once(function, id, &globals).result {
@@ -80,6 +89,7 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     // 比較・除算の候補は汎用検査からだけ集まる。
     warnings.dedup_by_key(|l| (l.line, l.column));
     Ok(CheckedProgram {
+        function_types: globals.function_types.borrow().clone(),
         globals: initializers,
         global_warnings: program
             .bindings
@@ -206,6 +216,7 @@ fn check_instances(
                     function,
                     types,
                     location,
+                    function_value,
                 } => {
                     if let Some(types) = types[instance.types.index()] {
                         globals.instances.borrow_mut().request(
@@ -213,6 +224,7 @@ fn check_instances(
                             types,
                             &Some(instance.calls.clone()),
                             *location,
+                            *function_value,
                         );
                         tasks.extend(
                             globals
@@ -243,20 +255,43 @@ fn instance_error(
     error: Diagnostic,
 ) -> Diagnostic {
     let calls = instance.calls.locations();
-    let mut diagnostic = calls[0].error(
+    let mut diagnostic = calls[0].0.error(
         error.kind,
         crate::diagnostic!(
-            "num.fn-body",
-            "generic call to '{}' is invalid for these concrete types",
+            if calls[0].1 {
+                "fn.value-generic-check"
+            } else {
+                "num.fn-body"
+            },
+            "{} '{}' is invalid for these concrete types",
+            if calls[0].1 {
+                "generic function value for"
+            } else {
+                "generic call to"
+            },
             program.functions[instance.function].name
         ),
     );
-    diagnostic.related.extend(calls.iter().skip(1).map(|site| {
-        site.error(
-            ErrorKind::InvalidSource,
-            crate::diagnostic!("num.fn-body", "instantiated through this call"),
-        )
-    }));
+    diagnostic
+        .related
+        .extend(calls.iter().skip(1).map(|(site, function_value)| {
+            site.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    if *function_value {
+                        "fn.value-generic-check"
+                    } else {
+                        "num.fn-body"
+                    },
+                    "{}",
+                    if *function_value {
+                        "instantiated through this function value"
+                    } else {
+                        "instantiated through this call"
+                    }
+                ),
+            )
+        }));
     diagnostic.related.push(error);
     diagnostic
 }
@@ -341,6 +376,14 @@ pub(super) fn call(
     expected: Option<Type>,
     scope: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
+    if scope.contains_key(name) {
+        let target = Expression {
+            kind: ExpressionKind::Name(name.into()),
+            location: expr.location,
+            height: 1,
+        };
+        return super::function_values::invoke(expr, &target, arguments, scope);
+    }
     let signature = scope.functions.get(name).ok_or_else(|| {
         expr.location.error(
             ErrorKind::InvalidSource,
@@ -371,7 +414,7 @@ pub(super) fn call(
         })
         .collect::<Result<_, _>>()?;
     if generic && scope.generic_check() {
-        scope.defer_call(signature.id, types.int, types.float, expr.location);
+        scope.defer_call(signature.id, types.int, types.float, expr.location, false);
     }
     let id = if generic && !scope.generic_check() {
         scope.instances.borrow_mut().request(
@@ -379,6 +422,7 @@ pub(super) fn call(
             types.concrete(),
             &scope.generic_calls,
             expr.location,
+            false,
         )
     } else {
         signature.id

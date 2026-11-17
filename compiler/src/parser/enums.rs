@@ -111,6 +111,7 @@ pub(super) fn collect(tokens: &[Token<'_>]) -> Result<Vec<EnumDeclaration>, Diag
         tokens,
         enums: &[],
         structs: &[],
+        fntypes: &[],
         restricted_condition: false,
         cursor: 0,
         constant_expression: false,
