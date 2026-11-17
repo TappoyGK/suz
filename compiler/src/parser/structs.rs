@@ -38,20 +38,24 @@ impl Parser<'_, '_> {
             ));
         }
         self.cursor += 1;
-        let fields = self.delimited_list("{", "}", Self::with_field_initializer)?;
+        self.check_height(target.height, location)?;
+        let previous_limit = self.limit_location.replace(location);
+        let fields = self.delimited_list("{", "}", Self::with_field_initializer);
+        self.limit_location = previous_limit;
+        let fields = fields?;
         if fields.is_empty() {
             return Err(location.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!("struct.with-fields", "with requires at least one field"),
             ));
         }
-        Ok(Expression {
-            kind: ExpressionKind::With {
+        self.primary_node(
+            ExpressionKind::With {
                 target: Box::new(target),
                 fields,
             },
             location,
-        })
+        )
     }
 
     pub(super) fn condition(&mut self) -> Result<Expression, Diagnostic> {
@@ -129,10 +133,7 @@ impl Parser<'_, '_> {
             self.expression()?
         } else {
             // 省略形も通常の名前参照にして、名前解決・型変換・評価順序を共通にする。
-            Expression {
-                kind: ExpressionKind::Name(name.clone()),
-                location,
-            }
+            self.node(ExpressionKind::Name(name.clone()), location)?
         };
         Ok(FieldInitializer {
             name,
@@ -155,6 +156,8 @@ pub(super) fn collect(
         cursor: 0,
         constant_expression: false,
         in_value: false,
+        depth: 0,
+        limit_location: None,
     };
     let mut headers = Vec::<StructDeclaration>::new();
     let mut depth = 0usize;

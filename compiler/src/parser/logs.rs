@@ -34,7 +34,7 @@ impl Parser<'_, '_> {
                 crate::diagnostic!("log.syntax", "expected a log template"),
             ));
         };
-        let parts = self.template(raw)?;
+        let parts = self.nested(self.location(), |p| p.template(raw))?;
         Ok(Statement::Log {
             parts,
             location,
@@ -52,6 +52,14 @@ impl Parser<'_, '_> {
             match segment {
                 Segment::Text(text) => parts.push(TemplatePart::Text(templates::decode(text))),
                 Segment::Expression { source, column } => {
+                    if self.depth == super::nesting::LIMIT {
+                        return Err(super::nesting::error(self.limit_location.unwrap_or(
+                            crate::ast::Location {
+                                line: token.line,
+                                column: column - 2,
+                            },
+                        )));
+                    }
                     let mut tokens = lexer::lex(source).map_err(|mut error| {
                         error.line = token.line;
                         error.column += column - 1;
@@ -70,6 +78,8 @@ impl Parser<'_, '_> {
                         cursor: 0,
                         constant_expression: self.constant_expression,
                         in_value: self.in_value,
+                        depth: self.depth,
+                        limit_location: self.limit_location,
                     };
                     if parser.token().kind == Kind::End {
                         return Err(parser.error(

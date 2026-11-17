@@ -10,6 +10,7 @@ mod expressions;
 mod functions;
 mod logs;
 mod names;
+pub(crate) mod nesting;
 mod statements;
 mod structs;
 
@@ -33,6 +34,8 @@ struct Parser<'a, 's> {
     cursor: usize,
     constant_expression: bool,
     in_value: bool,
+    depth: usize,
+    limit_location: Option<Location>,
 }
 
 impl<'a, 's> Parser<'a, 's> {
@@ -149,6 +152,8 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
         cursor: 0,
         constant_expression: false,
         in_value: false,
+        depth: 0,
+        limit_location: None,
     };
     let mut bindings = Vec::new();
     let mut functions = Vec::new();

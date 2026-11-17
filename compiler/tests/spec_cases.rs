@@ -56,6 +56,8 @@ mod matches;
 mod names;
 #[path = "spec_cases/native_cli.rs"]
 mod native_cli;
+#[path = "spec_cases/nesting.rs"]
+mod nesting;
 #[path = "spec_cases/numeric.rs"]
 mod numeric;
 #[path = "spec_cases/panics.rs"]
