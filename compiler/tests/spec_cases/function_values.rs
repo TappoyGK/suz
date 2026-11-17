@@ -126,7 +126,7 @@ fn function_values_reject_invalid_types_and_missing_context() {
         ),
         (
             "fn main() -> u8 { fix f = fn fixed\nfix g = fn f\nreturn 0 }",
-            "fn.value-from-name",
+            "fn.value-mark",
         ),
         (
             "fn main() -> u8 { fix f = fn fixed(1)\nreturn 0 }",
@@ -355,4 +355,73 @@ fn function_values_limit_call_targets_and_resolve_long_type_chains_without_recur
         String::from_utf8_lossy(&output.stderr).contains("[fntype.recursion]"),
         "{output:?}"
     );
+}
+
+#[test]
+fn function_values_distinguish_declarations_from_misplaced_fn_marks() {
+    for statement in ["fn inner() -> void {}", "fn inner(x: i32) -> void {}", "fn"] {
+        let source = format!("fn main() -> u8 {{\n    {statement}\n    return 0\n}}");
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "2:5: functions and types must be declared at top level [decl.location]"
+        );
+    }
+    for statement in ["fn pick(1)", "fix f = fn pick(1)"] {
+        let source = format!(
+            "fn pick(n: i32) -> i32 {{ return n }}\nfn main() -> u8 {{\n{statement}\nreturn 0\n}}"
+        );
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert!(error.to_string().contains("[fn.value-mark]"), "{error}");
+    }
+    for binding in ["fix f = fn pick", "fix f = 1", "var f = fn pick"] {
+        let source = format!(
+            "fn pick(n: i32) -> i32 {{ return n }}\nfn main() -> u8 {{\n{binding}\nfix g = fn f\nreturn 0\n}}"
+        );
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "4:9: do not prefix a binding with fn; use f directly [fn.value-mark]"
+        );
+    }
+}
+
+#[test]
+fn function_values_show_the_required_and_actual_types() {
+    for (declarations, annotation, actual) in [
+        ("fntype Narrow(i32) -> i32\n", ": fn Narrow", "fn Narrow"),
+        ("", "", "fn(i32) -> i32"),
+    ] {
+        let source = format!(
+            "{declarations}fntype Wide(i64) -> i32\nfn identity(n: i32) -> i32 {{ return n }}\nfn take(f: fn Wide) -> void {{}}\nfn main() -> u8 {{\nfix f{annotation} = fn identity\ntake(f)\nreturn 0\n}}"
+        );
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains(&format!("expected fn Wide, found {actual} [type.expected]")),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn function_values_report_duplicate_type_names_at_the_existing_collector_site() {
+    // 異種の型名の重複は、既存の列挙型→構造体の収集順と同じ位置で報告する。
+    for (first, second, line) in [
+        ("struct Same { value: i32 }", "enum Same: u8 { One }", 1),
+        ("enum Same: u8 { One }", "struct Same { value: i32 }", 2),
+        ("struct Same { value: i32 }", "fntype Same() -> void", 1),
+        ("fntype Same() -> void", "struct Same { value: i32 }", 2),
+        ("enum Same: u8 { One }", "fntype Same() -> void", 2),
+        ("fntype Same() -> void", "enum Same: u8 { One }", 1),
+        ("fntype Same() -> void", "fntype Same(i32) -> void", 2),
+    ] {
+        let source = format!("{first}\n{second}\nfn main() -> u8 {{ return 0 }}");
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            format!("{line}:8: duplicate type name [decl.duplicate]")
+        );
+    }
 }

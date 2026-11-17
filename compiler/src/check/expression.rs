@@ -536,8 +536,8 @@ fn expression_inner(
             required.unwrap(),
             argument,
             generic_result,
-            bindings.type_name(checked.ty),
-            bindings.type_name(required.unwrap()),
+            &bindings.type_name(checked.ty),
+            &bindings.type_name(required.unwrap()),
         ));
     }
     Ok(checked)

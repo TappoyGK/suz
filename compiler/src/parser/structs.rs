@@ -176,7 +176,9 @@ pub(super) fn collect(
             };
             super::names::check(super::names::Shape::Type, name, location)?;
             let name = name.to_owned();
-            if enums.iter().any(|decl| decl.name == name)
+            // 列挙型との重複と同じく、構造体の名前の位置で報告する。
+            if fntypes.iter().any(|decl| decl.name == name)
+                || enums.iter().any(|decl| decl.name == name)
                 || headers.iter().any(|decl| decl.name == name)
             {
                 return Err(location.error(

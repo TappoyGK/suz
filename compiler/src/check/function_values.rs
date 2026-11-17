@@ -18,6 +18,15 @@ pub(super) fn value(
     expected: Option<Type>,
     scope: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
+    if scope.contains_key(name) {
+        return Err(expr.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "fn.value-mark",
+                "do not prefix a binding with fn; use {name} directly"
+            ),
+        ));
+    }
     let error = || {
         expr.location.error(
             ErrorKind::InvalidSource,

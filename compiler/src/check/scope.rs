@@ -109,11 +109,26 @@ impl Scope {
         matches!(self.mode, Mode::Instance(_))
     }
 
-    pub fn type_name(&self, ty: Type) -> &str {
+    pub fn type_name(&self, ty: Type) -> String {
         match ty {
-            Type::Enum(ty) => &self.enums[ty.id].name,
-            Type::Struct(id) => &self.structs[id].name,
-            _ => ty.name(),
+            Type::Enum(ty) => self.enums[ty.id].name.clone(),
+            Type::Struct(id) => self.structs[id].name.clone(),
+            Type::Function(id) => {
+                if let Some(declaration) = self.fntypes.iter().find(|d| d.type_id == id) {
+                    return format!("fn {}", declaration.name);
+                }
+                // 名前のない推論型では、違いが分かるよう仮引数と戻り値を表示する。
+                let types = self.function_types.borrow();
+                let signature = &types[id];
+                let parameters = signature
+                    .parameters
+                    .iter()
+                    .map(|&ty| self.type_name(ty))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("fn({parameters}) -> {}", self.type_name(signature.result))
+            }
+            _ => ty.name().into(),
         }
     }
     pub fn is_type_name(&self, name: &str) -> bool {
