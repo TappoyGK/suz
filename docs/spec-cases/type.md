@@ -316,7 +316,7 @@ valueは初期化時にi64と決まる。returnの要求するu8へ暗黙変換�
 
 主根拠：`[type.value-copy]`。
 
-補助根拠：`[struct.literal]`、`[struct.shorthand]`、`[struct.shorthand-name]`、`[struct.shorthand-rules]`。
+補助根拠：`[struct.literal]`、`[struct.shorthand]`、`[struct.shorthand-name]`、`[struct.shorthand-rules]`、`[struct.with]`。
 
 **ソース：**
 
@@ -328,7 +328,8 @@ fn main() -> u8 {
     fix original = Point { x }
     var copied = original
     copied.x = 2
-    return ifexpr original.x == 1 && copied.x == 2 { 0 } else { 1 }
+    fix updated = original with { x: 3 }
+    return ifexpr original.x == 1 && copied.x == 2 && updated.x == 3 { 0 } else { 1 }
 }
 ```
 
@@ -338,7 +339,7 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | 正常終了 | 0 | 0 |
 
-`Point { x }` は `Point { x: x }` と同じ意味である。structで宣言した型はコピー可能。コピー先のフィールドを変更しても元の値は変わらない。
+`Point { x }` は `Point { x: x }` と同じ意味である。structで宣言した型はコピー可能。コピー先のフィールドを変更しても元の値は変わらない。`with`式でも、元の値を変更せずにフィールドの値が異なるコピーを作れる。
 
 ### type-014 列挙型を宣言して値をコピーする
 

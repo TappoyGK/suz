@@ -42,6 +42,7 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
         ExpressionKind::Len(_) => Some(Type::Integer(IntegerType::Len)),
         ExpressionKind::Template(_) => Some(Type::Symbol),
         ExpressionKind::Struct { id, .. } => Some(Type::Struct(*id)),
+        ExpressionKind::With { target, .. } => operand_type(target, bindings),
         ExpressionKind::Field { target, name } => {
             let Type::Struct(id) = operand_type(target, bindings)? else {
                 return None;
@@ -332,9 +333,9 @@ fn expression_inner(
             ExpressionKind::Template(parts) => {
                 super::text::template(parts, expr.location, bindings)?
             }
-            ExpressionKind::Struct { .. } | ExpressionKind::Field { .. } => {
-                structs::check(expr, bindings)?
-            }
+            ExpressionKind::Struct { .. }
+            | ExpressionKind::With { .. }
+            | ExpressionKind::Field { .. } => structs::check(expr, bindings)?,
             ExpressionKind::Variant { enum_name, variant } => {
                 let decl = bindings
                     .enums

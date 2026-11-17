@@ -71,7 +71,7 @@ Suzは次のものを含む。
 ```text
 fix var fn struct enum
 if ifexpr elif else while loop for rev in break continue return match matchexpr
-as or not len log allow expr
+as or not len log allow expr with
 true false nan inf
 ```
 
@@ -343,6 +343,50 @@ fn make_range(lo: u8, hi: u16) -> Range {
 
 **[struct.recursion]** 構造体は、直接・間接を問わず、自分自身をフィールドの値として含められない。そのような型の宣言はコンパイルエラーである。
 
+**[struct.with]** `式 with { 初期値, ... }` は、左の式の値をコピーし、書いたフィールドを初期値の値に差し替えた値を結果とする。結果の型は、左の式の構造体型である。書かなかったフィールドには、初期値の評価を始める前に保存した左の式の値を使う。`with` 自体は、コピー元の変数へ代入しない。
+
+**[struct.with-target]** 左の式の型は構造体型でなければならない。それ以外の型の場合はコンパイルエラーである。
+
+**[struct.with-fields]** 初期値の書き方は、構造体リテラルの初期値（[struct.literal]）と同じである。各初期値には、そのフィールドの型を要求し、構造体リテラルのフィールドの初期値と同じく [conv.widen-places] の広げる変換を適用する。存在しないフィールドの指定、同じフィールドの重複、要求を満たさない初期値はコンパイルエラーである。すべてのフィールドを書く必要はない。初期値を 1 つも書かない場合（`p with {}`）はコンパイルエラーである。
+
+**[struct.with-shorthand]** 構造体リテラルのフィールドの省略形（[struct.shorthand]）は、`with` の初期値にも使える。`p with { x }` は `p with { x: x }` と同じ意味である。`x` は [struct.shorthand-name] に従って、その位置で参照できる値の名前として解決する。コピー元のフィールドを暗黙に参照するものではない。
+
+```suz
+fix x: i32 = 10
+fix q = p with { x }      // p with { x: x }
+```
+
+**[struct.with-nested]** 初期値で指定できるのは、左の式の構造体の直接のフィールドだけである。`pos.x` のような入れ子のフィールドは指定できない。入れ子の構造体の一部を変える場合は、初期値に `with` 式を書く。
+
+```suz
+struct Point { x: i32, y: i32 }
+struct Player {
+    pos: Point,
+    hp: i32,
+}
+
+fn main() -> u8 {
+    fix a = Player { pos: Point { x: 0, y: 0 }, hp: 10 }
+    fix b = a with { pos: a.pos with { x: 5 } }   // pos.x だけ 5
+    return 0
+}
+```
+
+**[struct.with-eval]** 左の式を最初に 1 回だけ評価し、構造体の値を保存する。続いて、初期値を書いた順に 1 回ずつ評価し、保存した値の対応するフィールドを差し替える。初期値の評価中にコピー元の変数が変更されても、保存済みの値には影響しない。
+
+初期値の式から呼ぶ関数が大域変数を書き換えるなど、式の評価による副作用は通常どおり発生する。たとえば `STATE with { x: change_state() }` で `change_state()` が `STATE.y` を変更しても、結果の `y` は関数を呼ぶ前に保存した値となる。`STATE` 自体には、その関数による変更が残る。
+
+**[struct.with-const]** 左の式と初期値がすべて定数式である `with` 式は、定数式である。[const.expression] の構成要素に加える。
+
+```suz
+fix ORIGIN = Point { x: 0, y: 0 }
+fix RIGHT = ORIGIN with { x: 1 }
+```
+
+**[struct.with-line]** `with` は、左の式の最後のトークンと同じ行に書く。左の式の後で改行すると、[src.statement-end] により文が終わる。初期値の並びは、構造体リテラルと同じく複数行に書ける。
+
+**[struct.with-precedence]** `with` は、フィールド参照や添字と同じく後置の演算として、左から順に結合する。`a.b with { x: 1 }` の左の式は `a.b` である。`p with { x: 1 }.x` は、`with` 式の結果のフィールド `x` を参照する。`p with { x: 1 } with { y: 2 }` は、最初の `with` 式の結果に次の `with` を適用する。
+
 ### 5.4 列挙型
 
 **[enum.base]** 列挙型は `enum Wave: u8 { Sine, Saw }` のように書き、基底となる整数型を必ず指定する。
@@ -428,7 +472,7 @@ fix empty = joined == ``
 
 **[const.initializer]** 定数の初期値には、[const.expression] の定数式を使う。定数間の循環参照はコンパイルエラーである。
 
-**[const.expression]** 定数名はトップレベルの `fix` の名前を指し、ブロック内の `fix` とすべての `var` の名前は含めない。定数式は、数値・真偽値・文字のリテラル、定数名、列挙子、定数式同士の演算と型変換、定数式から作る構造体リテラル、そのフィールド参照、丸括弧で囲んだ定数式から構成する。型変換と整数演算の `or` による代替値にも定数式を使える。埋め込みのないテンプレート、すべての埋め込みが定数式であるテンプレート、定数式の `symbol` 同士の比較も定数式である。`text` の定数式には [text.const-view] を適用する。
+**[const.expression]** 定数名はトップレベルの `fix` の名前を指し、ブロック内の `fix` とすべての `var` の名前は含めない。定数式は、数値・真偽値・文字のリテラル、定数名、列挙子、定数式同士の演算と型変換、定数式から作る構造体リテラル、そのフィールド参照、丸括弧で囲んだ定数式から構成する。型変換と整数演算の `or` による代替値にも定数式を使える。埋め込みのないテンプレート、すべての埋め込みが定数式であるテンプレート、定数式の `symbol` 同士の比較も定数式である。`text` の定数式には [text.const-view] を適用する。 左の式と指定したフィールドの初期値がすべて定数式である `with` 式も、定数式である（[struct.with-const]）。
 
 **[const.evaluation]** 定数式は、通常の式と同じ型、演算、評価順序、短絡評価の規則でコンパイル時に評価する。評価中にパニックの条件を満たし、その演算に対応する `or` による失敗処理がなければコンパイルエラーである。整数演算に対応する `or` がある場合は、演算に失敗したときだけ代替値を評価する。成功した場合は演算結果を使う。評価しない部分にも、定数式の構成と型の規則、および [const.cast-check] と [expr.cast-handler] と [symbol.cast-handler] の `or` を要求する規則を適用する。
 
@@ -577,9 +621,9 @@ fn choose(ready: bool) -> i32 {
 }
 ```
 
-### 7.4 構造体リテラルの位置
+### 7.4 構造体リテラルとwith式の位置
 
-**[expr.struct-in-cond]** `if`、`ifexpr`、`elif`、`while` の条件、`for` と `rev` の反復対象・範囲、`match`、`matchexpr` の対象の中には、構造体リテラルを括弧なしで書けない。括弧なしで書くとコンパイルエラーである。 構造体リテラルを囲む丸括弧には、式をグループ化する丸括弧と関数呼び出しの実引数を囲む丸括弧の両方を含む。たとえば、`if is_zero(Point { x: 0 }) { ... }` と書ける。
+**[expr.struct-in-cond]** `if`、`ifexpr`、`elif`、`while` の条件、`for` と `rev` の反復対象・範囲、`match`、`matchexpr` の対象の中には、構造体リテラルと `with` 式を括弧なしで書けない。括弧なしで書くとコンパイルエラーである。これらを囲む丸括弧には、式をグループ化する丸括弧と関数呼び出しの実引数を囲む丸括弧の両方を含む。たとえば、`if is_zero(Point { x: 0 }) { ... }`、`if is_zero(p with { x: 0 }) { ... }`、`if (p with { x: 0 }) == origin { ... }` と書ける。
 
 ```suz
 if p == (Vec2 { x: 0.0, y: 0.0 }) {
@@ -1636,7 +1680,8 @@ Product          ::= Cast ( ( "*" | "/" | "%" | "*%" ) Cast )*
 Cast             ::= Unary ( "as%" Type CastHandler? | "as" Type CastHandler? )*
 CastHandler      ::= "or" ( Expression | "return" Expression? )
 Unary            ::= ( "-" | "not" | "~" | "len" ) Unary | Postfix
-Postfix          ::= Primary ( "." IDENT | "[" Index "]" IndexHandler? )*
+Postfix          ::= Primary ( "." IDENT | "[" Index "]" IndexHandler?
+                             | "with" "{" NL* Initializers "}" )*
 Index            ::= Expression | Expression? ":" Expression?
 IndexHandler     ::= "or" ( Expression | "return" Expression? )
 Primary          ::= Literal | IDENT | FunctionCall | StructLiteral | TEMPLATE
@@ -1649,6 +1694,8 @@ StructLiteral    ::= IDENT "{" NL* Initializers? "}"
 Initializers     ::= Initializer ( "," NL* Initializer )* ","? NL*
 Initializer      ::= IDENT ":" Expression | IDENT
 ```
+
+`with` の後置には [struct.with]・[struct.with-target]・[struct.with-fields]・[struct.with-shorthand]・[struct.with-nested]・[struct.with-eval]・[struct.with-const]・[struct.with-line]・[struct.with-precedence] を適用する。`Initializers` は構造体リテラルと同じ規則を使い、[src.list-comma] と [src.trailing-comma] を適用する。`with` では初期値を1つ以上指定する。
 
 `IDENT` だけの `Initializer` には [struct.shorthand]・[struct.shorthand-name]・[struct.shorthand-rules] を適用する。
 
@@ -1673,7 +1720,7 @@ MatchArm         ::= Pattern "=>" ( Expression | Block )
 Pattern          ::= "_" | ConstExpression
 ```
 
-`Condition` は、[expr.struct-in-cond] の制約を付けて `Expression` を読む。`if`、`ifexpr`、`elif`、`while` の条件、`for` と `rev` の反復対象・両端、`match`、`matchexpr` の対象では、構造体リテラルを括弧で囲む。たとえば、`if ready { ... }` の `{` は条件の後のブロックを開き、`ready` に続く構造体リテラルとしては読まない。
+`Condition` は、[expr.struct-in-cond] の制約を付けて `Expression` を読む。`if`、`ifexpr`、`elif`、`while` の条件、`for` と `rev` の反復対象・両端、`match`、`matchexpr` の対象では、構造体リテラルと `with` 式を [expr.struct-in-cond] に従って括弧で囲む。たとえば、`if ready { ... }` の `{` は条件の後のブロックを開き、`ready` に続く構造体リテラルとしては読まない。
 
 構文だけでは表せない制約は、次の規則に従う。
 
@@ -1693,4 +1740,4 @@ Pattern          ::= "_" | ConstExpression
 ConstExpression ::= Expression
 ```
 
-`ConstExpression` は、[const.expression] の構成に制限して `Expression` を読む。演算子の優先順位と結合は A.5 と同じである。参照する名前はトップレベルの `fix` または列挙子として解決し、演算のオペランド、型変換の対象、構造体の各フィールドの初期値、フィールド参照の対象、丸括弧内の式、テンプレートの埋め込みにも再帰的に同じ制限を適用する。
+`ConstExpression` は、[const.expression] の構成に制限して `Expression` を読む。演算子の優先順位と結合は A.5 と同じである。参照する名前はトップレベルの `fix` または列挙子として解決し、演算のオペランド、型変換の対象、構造体の各フィールドの初期値、フィールド参照の対象、丸括弧内の式、テンプレートの埋め込みにも再帰的に同じ制限を適用する。 `with` 式にも、左の式と指定したフィールドの各初期値へ再帰的に定数式の制限を適用する。

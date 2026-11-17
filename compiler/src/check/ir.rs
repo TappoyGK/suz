@@ -188,6 +188,10 @@ pub(crate) enum Value {
     Struct {
         fields: Vec<(usize, CheckedExpression)>,
     },
+    With {
+        target: Box<CheckedExpression>,
+        fields: Vec<(usize, CheckedExpression)>,
+    },
     Field {
         target: Box<CheckedExpression>,
         index: usize,
@@ -311,6 +315,12 @@ macro_rules! constant_children_visitor {
                         if let crate::ast::TemplatePart::Value(value) = part {
                             visit(value);
                         }
+                    }
+                }
+                Self::With { target, fields } => {
+                    visit(target);
+                    for (_, value) in fields {
+                        visit(value);
                     }
                 }
                 Self::Struct { fields } => {

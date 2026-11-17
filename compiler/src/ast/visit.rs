@@ -56,6 +56,12 @@ pub(crate) fn walk_expression<V: Visitor + ?Sized>(
                 }
             }
         }
+        ExpressionKind::With { target, fields } => {
+            visitor.expression(target)?;
+            for field in fields {
+                visitor.expression(&field.value)?;
+            }
+        }
         ExpressionKind::Struct { fields, .. } => {
             for field in fields {
                 visitor.expression(&field.value)?;

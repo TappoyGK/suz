@@ -420,6 +420,18 @@ fn equal_structs(left: &CheckedExpression, right: &CheckedExpression) -> Option<
 }
 
 fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
+    if let Value::With { target, fields } = &expr.value {
+        let mut result = evaluate_raw(target)?;
+        let Value::Struct { fields: saved } = &mut result.value else {
+            return None;
+        };
+        // 差し替え前の値も含めて左辺を評価した後、記述順に初期値を評価する。
+        for (index, value) in fields {
+            let value = evaluate_raw(value)?;
+            saved.iter_mut().find(|(field, _)| field == index)?.1 = value;
+        }
+        return Some(result);
+    }
     if let Value::Field { target, index } = &expr.value {
         return constant_field(target, *index);
     }
@@ -648,6 +660,12 @@ fn validate_evaluation(expr: &CheckedExpression) -> Result<(), Diagnostic> {
                 if let crate::ast::TemplatePart::Value(value) = part {
                     validate_evaluation(value)?;
                 }
+            }
+        }
+        Value::With { target, fields } => {
+            validate_evaluation(target)?;
+            for (_, value) in fields {
+                validate_evaluation(value)?;
             }
         }
         Value::Struct { fields } => {

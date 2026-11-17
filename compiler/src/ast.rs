@@ -605,6 +605,10 @@ pub(crate) enum ExpressionKind {
         id: usize,
         fields: Vec<FieldInitializer>,
     },
+    With {
+        target: Box<Expression>,
+        fields: Vec<FieldInitializer>,
+    },
     Field {
         target: Box<Expression>,
         name: String,

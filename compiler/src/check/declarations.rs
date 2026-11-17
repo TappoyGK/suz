@@ -39,6 +39,12 @@ pub(super) fn dependencies(
                 }
             }
         }
+        ExpressionKind::With { target, fields } => {
+            dependencies(target, names)?;
+            for field in fields {
+                dependencies(&field.value, names)?;
+            }
+        }
         ExpressionKind::Struct { fields, .. } => {
             for field in fields {
                 dependencies(&field.value, names)?;

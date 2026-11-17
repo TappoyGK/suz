@@ -1,6 +1,145 @@
 use crate::test_util::compile_and_run_c23;
 
 #[test]
+fn struct_with_preserves_saved_values_order_and_constant_results() {
+    let source = r#"struct Point { x: i32, y: i32 }
+struct Player { pos: Point, name: symbol, view: text }
+struct Wide { x: i64 }
+fix RIGHT = ORIGIN with { x: 1 }
+fix ORIGIN = Point { x: 0, y: 2 }
+fix PLAYER = Player { pos: RIGHT, name: `old`, view: `abc`[:] }
+fix UPDATED = PLAYER with { pos: RIGHT with { y: 3 }, name: `new` }
+var STATE = ORIGIN with { x: 5 } allow [diagnostic.global-var: evaluation order test]
+var TRACE: i32 = 0 allow [diagnostic.global-var: evaluation order test]
+fn base() -> Point { TRACE = TRACE * 10 + 1
+    return STATE }
+fn mark(n: i32) -> i32 { TRACE = TRACE * 10 + n
+    STATE.y = 99
+    return n }
+fn generic(n: int) -> Point { return ORIGIN with { x: n as i32 or 0 } }
+fn accepts(p: Point) -> bool { return p.x == 8 }
+fn main() -> u8 {
+    fix snapshot = base() with { x: mark(2) }
+    if TRACE != 12 || snapshot.x != 2 || snapshot.y != 2 || STATE.y != 99 { return 1 }
+    TRACE = 0
+    fix ordered = base() with { y: mark(2), x: mark(3) }
+    if TRACE != 123 || ordered.x != 3 || ordered.y != 2 { return 2 }
+    fix x: u8 = 8
+    fix chained = ORIGIN with { x } with { y: 4 }
+    if chained.x != 8 || chained.y != 4 || ORIGIN.y != 2 { return 3 }
+    fix nested = PLAYER with { pos: PLAYER.pos with { y: 3 }, name: `new` }
+    if nested != UPDATED || PLAYER.pos.y != 2 || PLAYER.name != `old` { return 4 }
+    var copy = nested
+    copy.pos.x = 100
+    if nested.pos.x != 1 { return 5 }
+    if not accepts(ORIGIN with { x }) || (ORIGIN with { x }).x != 8 { return 6 }
+    fix direct = ORIGIN with { x: 9 }.x
+    if generic(7).x != 7 || direct != 9 { return 7 }
+    fix sliced = PLAYER with { name: `xyz` }.name[1:] or ``
+    if sliced != `yz` || nested.view != `abc` { return 8 }
+    fix block = expr { ORIGIN with { x } }
+    fix branch = ifexpr x == 8 { block with { y: 7 } } else { ORIGIN }
+    if branch.y != 7 { return 9 }
+    var local = ORIGIN
+    fix saved = local with {
+        x: expr { local.y = 20
+            10 },
+    }
+    if saved.x != 10 || saved.y != 2 || local.y != 20 { return 10 }
+    // withで作った定数と、その場で書いた定数式の両方をパターンに使える。
+    match 1 as i32 { RIGHT.x => {}
+        _ => { return 11 } }
+    match 2 as i32 { (ORIGIN with { x: 2 }).x => {}
+        _ => { return 12 } }
+    fix narrow: i8 = -7
+    fix wide = (Wide { x: 0 }) with { x: narrow }
+    if wide.x != -7 { return 13 }
+    fix casted = ORIGIN with { x: 3 }.x as u8 or 9
+    fix sum = base() with { x: 3 }.x + ORIGIN with { y: 1 }.y * 2
+    if casted != 3 || sum != 5 { return 14 }
+    return 0
+}
+"#;
+    let output = compile_and_run_c23(source, "with.suz");
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+}
+
+#[test]
+fn struct_with_rejects_invalid_targets_fields_and_hidden_writes() {
+    for (body, rule) in [
+        ("fix q = 1 with { x: 2 }", "struct.with-target"),
+        ("fix q = p with {}", "struct.with-fields"),
+        ("fix q = p with { z: 1 }", "struct.with-fields"),
+        ("fix q = p with { x, x: 2 }", "struct.with-fields"),
+        ("fix q = p with { x: true }", "type.expected"),
+        (
+            "fix large: i64 = 1\nfix q = p with { x: large }",
+            "type.expected",
+        ),
+        ("fix q = p with { y }", "decl.local-scope"),
+        ("fix q = p with { x: 1, }", "src.trailing-comma"),
+        ("fix q = p with {\nx: 1\n}", "src.trailing-comma"),
+        ("fix q = p\nwith { x: 1 }", "syntax.grammar"),
+        ("fix q = p with\n{ x: 1 }", "syntax.grammar"),
+        ("fix q = (p\nwith { x: 1 })", "struct.with-line"),
+        ("fix q = p with { x.y: 1 }", "struct.with-nested"),
+        ("fix with = 1", "src.ident"),
+        ("p = p with { x: expr { p.y = 1\n2 }, }", "assign.rhs-write"),
+        (
+            "fix q = p with { x: 300 as u8 or return 0 }",
+            "expr.or-return-position",
+        ),
+    ] {
+        let source = format!(
+            "struct Point {{ x: i32, y: i32 }}\nfn main() -> u8 {{\nfix x: i32 = 1\nvar p = Point {{ x, y: 0 }}\np.x = 2\n{body}\nreturn 0\n}}"
+        );
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(error.rule(), rule, "{source}: {error}");
+    }
+    // 差し替えるフィールドでも、コピー元を評価する際のエラーを無視しない。
+    let source = b"struct Point { x: u8 }\nfix BAD = (Point { x: 1 / 0 }) with { x: 1 }\nfn main() -> u8 { return 0 }";
+    assert_eq!(
+        suz::compile(source).unwrap_err().rule(),
+        "arith.div-zero-always"
+    );
+    // 関数呼び出しと大域varは、withのコピー元でも定数式にはならない。
+    for target in ["id(ORIGIN)", "STATE"] {
+        let source = format!(
+            "struct Point {{ x: i32 }}\nfix ORIGIN = Point {{ x: 0 }}\nvar STATE = ORIGIN\nfix BAD = {target} with {{ x: 1 }}\nfn id(p: Point) -> Point {{ return p }}\nfn main() -> u8 {{ STATE.x = 2\nreturn 0 }}"
+        );
+        assert_eq!(
+            suz::compile(source.as_bytes()).unwrap_err().rule(),
+            "const.expression",
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn struct_with_requires_parentheses_in_control_targets() {
+    for body in [
+        "if p with { x: 1 }.x == 1 {}",
+        "while p with { x: 1 }.x == 1 { break }",
+        "for i in 0..<p with { x: 1 }.x {}",
+        "rev i in 0..<p with { x: 1 }.x {}",
+        "match p with { x: 1 }.x { _ => {} }",
+        "fix q = ifexpr p with { x: 1 }.x == 1 { 0 } else { 1 }",
+        "fix q = matchexpr p with { x: 1 }.x { _ => 0 }",
+        "if false {} elif p with { x: 1 }.x == 1 {}",
+    ] {
+        let source = format!(
+            "struct Point {{ x: i32 }}\nfn main() -> u8 {{\nfix p = Point {{ x: 0 }}\n{body}\nreturn 0\n}}"
+        );
+        assert_eq!(
+            suz::compile(source.as_bytes()).unwrap_err().rule(),
+            "expr.struct-in-cond"
+        );
+        let grouped = source.replace("p with { x: 1 }", "(p with { x: 1 })");
+        suz::compile(grouped.as_bytes()).unwrap();
+    }
+}
+
+#[test]
 fn struct_shorthand_preserves_values_conversions_and_evaluation_order() {
     let source = r#"struct Pair { x: u16, y: u16 }
 struct Box { pair: Pair, label: symbol }

@@ -96,6 +96,10 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             Some(text) => super::text::constant(text, context),
             None => super::text::template(parts, location, context),
         },
+        Value::With {
+            ref target,
+            ref fields,
+        } => super::structs::with(target, fields, context),
         Value::Struct { ref fields } => {
             let crate::ast::Type::Struct(id) = expr.ty else {
                 unreachable!()
