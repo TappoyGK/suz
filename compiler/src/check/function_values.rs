@@ -212,6 +212,9 @@ pub(super) fn argument(
     let Type::Function(id) = required else {
         return expression::coerced(expr, Some(required), scope);
     };
+    if let ExpressionKind::Closure(closure) = &expr.kind {
+        return super::closures::check(closure, id, scope);
+    }
     if let ExpressionKind::Name(name) = &expr.kind
         && let Some(binding) = scope.get(name)
         && matches!(binding.ty, Type::Function(_))

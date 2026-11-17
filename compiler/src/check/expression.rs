@@ -38,6 +38,7 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
     #[cfg(test)]
     super::generic::work();
     match &expr.kind {
+        ExpressionKind::Closure(_) => None,
         ExpressionKind::FunctionValue(name) => {
             let signature = bindings.functions.get(name)?;
             if signature.is_generic() || name == "main" {
@@ -353,6 +354,15 @@ fn expression_inner(
         super::exact::check(expr, inference_hint, bindings, false)?
     } else {
         match &expr.kind {
+            ExpressionKind::Closure(_) => {
+                return Err(expr.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "closure.place",
+                        "closures are only allowed as direct arguments to fn parameters"
+                    ),
+                ));
+            }
             ExpressionKind::FunctionValue(name) => {
                 super::function_values::value(expr, name, required, bindings)?
             }
@@ -472,7 +482,17 @@ fn expression_inner(
                 let binding = bindings.get(name).ok_or_else(|| {
                     expr.location.error(
                         ErrorKind::InvalidSource,
-                        crate::diagnostic!("decl.local-scope", "binding '{name}' is not in scope"),
+                        if bindings.uncaptured.contains(name) {
+                            crate::diagnostic!(
+                                "closure.scope",
+                                "outer binding '{name}' must be listed in the capture list"
+                            )
+                        } else {
+                            crate::diagnostic!(
+                                "decl.local-scope",
+                                "binding '{name}' is not in scope"
+                            )
+                        },
                     )
                 })?;
                 if matches!(binding.ty, Type::Function(_)) {

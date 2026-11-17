@@ -241,6 +241,10 @@ impl Parser<'_, '_> {
         let kind = match self.token().kind {
             Kind::Keyword("fn") => {
                 self.cursor += 1;
+                if self.token().kind == Kind::Symbol("[") {
+                    let closure = self.closure(location)?;
+                    return self.primary_node(ExpressionKind::Closure(Box::new(closure)), location);
+                }
                 let Kind::Ident(name) = self.token().kind else {
                     return Err(self.error(
                         ErrorKind::InvalidSource,

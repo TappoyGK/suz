@@ -31,6 +31,7 @@ pub(super) fn declaration(function: &CheckedFunction) -> String {
 
 pub(super) fn emit(function: &CheckedFunction, context: &mut ExpressionContext) -> String {
     context.temporaries.clear();
+    context.closure_environments.clear();
     for ty in function.parameters.iter().chain([&function.result]) {
         if let Type::Function(id) = ty {
             context.call_only_types.insert(*id);
@@ -48,6 +49,9 @@ pub(super) fn emit(function: &CheckedFunction, context: &mut ExpressionContext) 
     }
     for (index, ty) in context.temporaries.iter().enumerate() {
         writeln!(c, "    {} suz_cmp_{index};", ty.c_name()).unwrap();
+    }
+    for declaration in &context.closure_environments {
+        writeln!(c, "    {declaration}").unwrap();
     }
     c.push_str(&body);
     c.push_str("}\n\n");

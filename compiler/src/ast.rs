@@ -359,6 +359,7 @@ pub(crate) struct Program {
 }
 
 /// 関数の仮引数。ソース上の名前・型注釈・位置を保持する。
+#[derive(Clone)]
 pub(crate) struct Parameter {
     pub name: String,
     pub ty: Type,
@@ -366,6 +367,7 @@ pub(crate) struct Parameter {
 }
 
 /// 関数の構文。仮引数・戻り値型・本体の文と、宣言の開始・終了位置を保持する。
+#[derive(Clone)]
 pub(crate) struct Function {
     pub keyword_location: Location,
     pub name: String,
@@ -616,9 +618,24 @@ pub(crate) enum FailureHandler {
     },
 }
 
+/// 明示した値のキャプチャーと、独立した仮引数・戻り先を持つクロージャ。
+#[derive(Clone)]
+pub(crate) struct Closure {
+    pub captures: Vec<Capture>,
+    pub function: Function,
+}
+
+/// キャプチャー一覧の名前と診断位置。型と参照先は外側のスコープで解決する。
+#[derive(Clone)]
+pub(crate) struct Capture {
+    pub name: String,
+    pub location: Location,
+}
+
 /// 式の構文ごとの内容。名前・リテラルの綴り・子の式を保持し、意味検査で [`crate::check::ir::Value`] へ変換する。
 #[derive(Clone)]
 pub(crate) enum ExpressionKind {
+    Closure(Box<Closure>),
     FunctionValue(String),
     Invoke {
         target: Box<Expression>,

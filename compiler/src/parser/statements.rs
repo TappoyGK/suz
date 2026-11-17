@@ -15,6 +15,9 @@ impl Parser<'_, '_> {
     // fn pick(1)を宣言と取り違えないよう、仮引数の型・戻り値・本体を確認する。
     fn starts_function_declaration(&self) -> bool {
         let tail = &self.tokens[self.cursor + 1..];
+        if tail.first().map(|t| t.kind) == Some(Kind::Symbol("[")) {
+            return false;
+        }
         if !matches!(tail.first().map(|t| t.kind), Some(Kind::Ident(_))) {
             return true;
         }

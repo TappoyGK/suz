@@ -387,7 +387,14 @@ pub(super) fn call(
     let signature = scope.functions.get(name).ok_or_else(|| {
         expr.location.error(
             ErrorKind::InvalidSource,
-            crate::diagnostic!("fn.call", "unknown function"),
+            if scope.uncaptured.contains(name) {
+                crate::diagnostic!(
+                    "closure.scope",
+                    "outer binding '{name}' must be listed in the capture list"
+                )
+            } else {
+                crate::diagnostic!("fn.call", "unknown function")
+            },
         )
     })?;
     if arguments.len() != signature.parameters.len() {

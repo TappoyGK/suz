@@ -19,6 +19,12 @@ pub(super) fn dependencies(
     names: &mut Vec<(String, Location)>,
 ) -> Result<(), Diagnostic> {
     match &expr.kind {
+        ExpressionKind::Closure(_) => {
+            return Err(expr.location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("fn.value-const", "closures are not constant expressions"),
+            ));
+        }
         ExpressionKind::Slice {
             target,
             start,

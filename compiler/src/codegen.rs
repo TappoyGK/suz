@@ -6,6 +6,7 @@ mod arithmetic;
 mod blocks;
 mod casts;
 mod characters;
+mod closures;
 mod exact;
 mod expressions;
 mod functions;
@@ -36,6 +37,8 @@ struct ExpressionContext {
     enum_logs: BTreeSet<usize>,
     functions: String,
     next_block: usize,
+    next_closure: usize,
+    closure_environments: Vec<String>,
     references: BTreeSet<usize>,
     helpers: BTreeSet<bool>,
     source_name: String,

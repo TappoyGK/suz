@@ -398,7 +398,12 @@ fn check_assign(
     if !binding.mutable {
         return Err(location.error(
             ErrorKind::InvalidSource,
-            if binding.parameter {
+            if context.bindings.value_captures.contains(name) {
+                crate::diagnostic!(
+                    "closure.capture-value",
+                    "cannot assign to a value capture '{name}'"
+                )
+            } else if binding.parameter {
                 crate::diagnostic!("fn.parameter", "cannot assign to parameter '{name}'")
             } else if binding.loop_variable {
                 crate::diagnostic!("for.variable", "cannot assign to loop variable '{name}'")
@@ -407,7 +412,7 @@ fn check_assign(
             },
         ));
     }
-    super::writes::check(value, name, fields)?;
+    super::writes::check(value, name, fields, binding.global)?;
     let (id, global, mut ty) = (binding.id, binding.global, binding.ty);
     let mut indices = Vec::new();
     for name in fields {

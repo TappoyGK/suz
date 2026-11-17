@@ -6,13 +6,24 @@
 use crate::{
     Diagnostic, ErrorKind,
     ast::{
-        Expression, Statement,
+        Expression, ExpressionKind, Statement,
         visit::{self, Visitor},
     },
 };
 
-struct Writes<'a>(&'a str, &'a [String]);
+struct Writes<'a> {
+    name: &'a str,
+    fields: &'a [String],
+    global: bool,
+}
 impl Visitor for Writes<'_> {
+    fn expression(&mut self, expr: &Expression) -> Result<(), Diagnostic> {
+        // 値キャプチャーは外側の変数を書き換えない。本体から同じ名前で書けるのは大域変数だけ。
+        if matches!(expr.kind, ExpressionKind::Closure(_)) && !self.global {
+            return Ok(());
+        }
+        visit::walk_expression(self, expr)
+    }
     fn statement(&mut self, statement: &Statement) -> Result<(), Diagnostic> {
         if let Statement::Assign {
             name,
@@ -20,8 +31,8 @@ impl Visitor for Writes<'_> {
             location,
             ..
         } = statement
-            && name == self.0
-            && (fields.starts_with(self.1) || self.1.starts_with(fields))
+            && name == self.name
+            && (fields.starts_with(self.fields) || self.fields.starts_with(fields))
         {
             return Err(location.error(
                 ErrorKind::InvalidSource,
@@ -34,6 +45,16 @@ impl Visitor for Writes<'_> {
         visit::walk_statement(self, statement)
     }
 }
-pub(super) fn check(value: &Expression, name: &str, fields: &[String]) -> Result<(), Diagnostic> {
-    Writes(name, fields).expression(value)
+pub(super) fn check(
+    value: &Expression,
+    name: &str,
+    fields: &[String],
+    global: bool,
+) -> Result<(), Diagnostic> {
+    Writes {
+        name,
+        fields,
+        global,
+    }
+    .expression(value)
 }

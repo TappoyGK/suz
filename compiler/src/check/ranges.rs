@@ -13,12 +13,33 @@ use crate::{
     ast::{Expression, ExpressionKind, Type},
 };
 
-struct References(std::collections::BTreeSet<String>);
+struct References {
+    mutable: std::collections::BTreeSet<String>,
+    globals: std::collections::BTreeSet<String>,
+}
 
 impl crate::ast::visit::Visitor for References {
     fn expression(&mut self, expr: &Expression) -> Result<(), Diagnostic> {
+        if let ExpressionKind::Closure(closure) = &expr.kind {
+            for capture in &closure.captures {
+                if self.mutable.contains(&capture.name) {
+                    return Err(capture.location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "for.bound-reference",
+                            "loop inputs cannot capture var bindings"
+                        ),
+                    ));
+                }
+            }
+            // 本体の仮引数と値キャプチャーは不変で、外側の同名のvarとは別の束縛。
+            let saved = std::mem::replace(&mut self.mutable, self.globals.clone());
+            let result = self.scope(&closure.function.statements, None);
+            self.mutable = saved;
+            return result;
+        }
         if let ExpressionKind::Name(name) | ExpressionKind::Call { name, .. } = &expr.kind
-            && self.0.contains(name)
+            && self.mutable.contains(name)
         {
             return Err(expr.location.error(
                 ErrorKind::InvalidSource,
@@ -34,9 +55,9 @@ impl crate::ast::visit::Visitor for References {
         crate::ast::visit::walk_statement(self, statement)?;
         if let crate::ast::Statement::Binding { name, mutable, .. } = statement {
             if *mutable {
-                self.0.insert(name.clone());
+                self.mutable.insert(name.clone());
             } else {
-                self.0.remove(name);
+                self.mutable.remove(name);
             }
         }
         Ok(())
@@ -46,29 +67,30 @@ impl crate::ast::visit::Visitor for References {
         statements: &[crate::ast::Statement],
         value: Option<&Expression>,
     ) -> Result<(), Diagnostic> {
-        let saved = self.0.clone();
+        let saved = self.mutable.clone();
         for statement in statements {
             self.statement(statement)?;
         }
         if let Some(value) = value {
             self.expression(value)?;
         }
-        self.0 = saved;
+        self.mutable = saved;
         Ok(())
     }
 }
 
 pub(super) fn check_references(expr: &Expression, bindings: &Scope) -> Result<(), Diagnostic> {
     use crate::ast::visit::Visitor;
-    References(
-        bindings
+    References {
+        mutable: bindings
             .locals
             .iter()
             .chain(bindings.globals.iter())
             .filter(|(_, b)| b.mutable)
             .map(|(name, _)| name.clone())
             .collect(),
-    )
+        globals: bindings.globals.keys().cloned().collect(),
+    }
     .expression(expr)
 }
 

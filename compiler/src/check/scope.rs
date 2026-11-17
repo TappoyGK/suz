@@ -56,6 +56,8 @@ pub(super) struct Scope {
     pub hint_depth: Rc<std::cell::Cell<usize>>,
     pub outputs: Outputs,
     pub locals: BTreeMap<String, Binding>,
+    pub value_captures: std::collections::BTreeSet<String>,
+    pub uncaptured: std::collections::BTreeSet<String>,
     // 不変の宣言は共有し、ローカル束縛の状態だけを複製する。
     pub constants: Rc<BTreeMap<String, Binding>>,
     // 大域変数の型・格納先と代入済みフラグを、全関数の検査で共有する。
@@ -159,6 +161,8 @@ impl Default for Scope {
             float_hints: Rc::default(),
             outputs: Default::default(),
             locals: BTreeMap::new(),
+            value_captures: Default::default(),
+            uncaptured: Default::default(),
             constants: Rc::default(),
             globals: Rc::default(),
             enums: Rc::default(),

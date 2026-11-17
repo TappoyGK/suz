@@ -78,7 +78,7 @@ impl Parser<'_, '_> {
         }
     }
 
-    fn parameter(&mut self) -> Result<Parameter, Diagnostic> {
+    pub(super) fn parameter(&mut self) -> Result<Parameter, Diagnostic> {
         let location = self.location();
         let Kind::Ident(name) = self.token().kind else {
             return Err(self.error(

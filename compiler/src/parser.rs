@@ -5,6 +5,7 @@
 
 mod allows;
 mod branches;
+mod closures;
 mod enums;
 mod expressions;
 mod function_types;

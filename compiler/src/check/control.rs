@@ -400,6 +400,9 @@ pub(super) fn check_return_shape(function: &crate::ast::Function) -> Result<(), 
             visit::walk_statement(self, statement)
         }
         fn expression(&mut self, expr: &Expression) -> Result<(), Diagnostic> {
+            if matches!(expr.kind, ExpressionKind::Closure(_)) {
+                return Ok(()); // 内側のreturnを外側の関数のreturnとして数えない。
+            }
             if let ExpressionKind::Cast { fallback, .. }
             | ExpressionKind::ArithmeticHandler { fallback, .. }
             | ExpressionKind::Slice { fallback, .. } = &expr.kind
