@@ -38,7 +38,7 @@ pub(crate) struct CheckedFunction {
 /// [`crate::ast::Statement`] の検査結果。
 /// 束縛と参照を番号へ解決し、束縛・代入の型を確定する。
 /// 式内の失敗時returnは専用の文へ移し、C生成で制御を組み立てられるようにする。
-/// 大きな列挙子の式をBoxに置き、全ての文がその大きさに引きずられるのを防ぐ。
+/// メモリ効率を高めるため、大きな列挙子の式をBoxに置き、全ての文の格納サイズを抑える。
 /// 失敗時returnの式は、検査中に作ったBoxをそのまま使う。
 #[derive(Clone)]
 pub(crate) enum CheckedStatement {

@@ -255,7 +255,7 @@ mod tests {
     #[test]
     #[cfg(target_pointer_width = "64")]
     fn statement_storage_stays_within_budget() {
-        // 大きな列挙子の式を直接格納する変更で、全ての文が再び肥大化するのを検出する。
+        // メモリ効率を維持するため、全ての文の格納サイズが再び肥大化する変更を検出する。
         assert!(std::mem::size_of::<ast::Statement>() <= 200);
         assert!(std::mem::size_of::<check::ir::CheckedStatement>() <= 208);
     }
