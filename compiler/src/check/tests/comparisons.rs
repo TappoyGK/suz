@@ -3,25 +3,9 @@ use crate::{ArithmeticMode, ErrorKind, compile, compile_with_mode};
 #[test]
 fn comparison_operands_keep_their_types_and_constrain_literals() {
     for (body, rule) in [
-        (
-            "fix value: u8 = 1\nfix result = value < 256\nreturn 0",
-            "lit.range",
-        ),
-        (
-            "fix value: u8 = 1\nfix result = -1 < value\nreturn 0",
-            "lit.range",
-        ),
-        (
-            "fix first: u8 = 1\nfix second: u16 = 1\nfix result = first == second\nreturn 0",
-            "type.expected",
-        ),
         ("fix result = 1 == true\nreturn 0", "type.expected"),
         ("fix result = true < false\nreturn 0", "expr.operator-types"),
         ("fix result: u8 = 1 < 2\nreturn 0", "type.expected"),
-        (
-            "fix result = 18446744073709551615 == 18446744073709551615\nreturn 0",
-            "lit.range",
-        ),
         (
             "fix value = 1\nfix result = not value == 0\nreturn 0",
             "expr.not",

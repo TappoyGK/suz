@@ -18,7 +18,7 @@ fn check(input: &[u8], case: &str, edit: &str, offset: usize, rules: &BTreeSet<&
         );
         assert!(error.line > 0 && error.column > 0, "{}: {error}", context());
         let rule = error
-            .message
+            .message()
             .rsplit_once(" [")
             .and_then(|(_, rule)| rule.strip_suffix(']'));
         assert!(
@@ -36,7 +36,7 @@ fn damaged_catalog_inputs_do_not_panic_or_lose_diagnostic_rules() {
     let mut checked = 0;
     for (id, case) in crate::catalog() {
         for offset in 0..case.bytes.len() {
-            // Byte deletion also exercises broken UTF-8 inside comments/templates.
+            // バイト削除により、コメントやテンプレート内の壊れたUTF-8も試す。
             let mut input = case.bytes.clone();
             input.remove(offset);
             check(&input, &id, "delete", offset, &rules);

@@ -7,13 +7,6 @@
 #include <string.h>
 #include <stdlib.h>
 
-struct suz_text_entry {
-    const char *bytes;
-    uint64_t length;
-    uint32_t hash;
-    uint64_t scalars;
-};
-
 static struct {
     suz_text *slots;
     uint64_t capacity;
@@ -57,8 +50,8 @@ static void *allocate(uint64_t size, bool retained, suz_text_location location) 
     size_t request = allocation_size(size, location);
     uint64_t total = retained ? add(pool.used, size, location) : pool.used;
     if (retained && pool.limit != 0 && total > pool.limit) {
-        /* Fixed storage suffices for three u64 values and these literals.
-           Reporting exhaustion must not ask the allocator for more memory. */
+        /* 固定領域で、三つのu64値とこれらの文字列に足りる。
+           メモリ不足の報告で、アロケーターへ追加のメモリを要求してはならない。 */
         char reason[192];
         char *out = literal(reason, "text pool limit exceeded: limit=");
         out = decimal(out, pool.limit);
@@ -87,7 +80,13 @@ uint64_t suz_text_pool_used(void) {
     return pool.used;
 }
 
-static uint32_t hash_bytes(const char *bytes, uint64_t length, uint64_t *scalars) {
+/* [rt.len-limit] 個数はバイト長以下なのでuint64_tであふれない。
+   計数とハッシュのループを終えた後、一度だけ上限を検査する。 */
+static void check_scalar_count(uint64_t scalars, suz_text_location location) {
+    if (scalars > INT32_MAX) length_failure(location);
+}
+
+static uint32_t hash_bytes(const char *bytes, uint64_t length, uint64_t *scalars, suz_text_location location) {
     uint32_t hash = UINT32_C(2166136261);
     *scalars = 0;
     for (uint64_t i = 0; i < length; ++i) {
@@ -96,6 +95,7 @@ static uint32_t hash_bytes(const char *bytes, uint64_t length, uint64_t *scalars
         hash ^= byte;
         hash *= UINT32_C(16777619);
     }
+    check_scalar_count(*scalars, location);
     return hash;
 }
 
@@ -116,7 +116,7 @@ static void grow(suz_text_location location) {
     if (capacity > UINT64_MAX / sizeof(suz_text)) length_failure(location);
     uint64_t size = capacity * sizeof(suz_text);
     suz_text *slots = allocate(size, true, location);
-    /* Assign NULL rather than assuming its representation is all zero bits. */
+    /* NULLの表現を全ビット0と仮定せず、NULLを代入する。 */
     for (uint64_t i = 0; i < capacity; ++i) slots[i] = NULL;
     for (uint64_t i = 0; i < pool.capacity; ++i) {
         suz_text entry = pool.slots[i];
@@ -134,7 +134,7 @@ suz_text suz_text_intern(const char *bytes, uint64_t length, bool constant,
                          suz_text_location location) {
     allocation_size(length, location);
     uint64_t scalars;
-    uint32_t hash = hash_bytes(bytes, length, &scalars);
+    uint32_t hash = hash_bytes(bytes, length, &scalars, location);
     if (pool.capacity != 0) {
         uint64_t index = slot_for(pool.slots, pool.capacity, hash, bytes, length);
         if (pool.slots[index] != NULL) return pool.slots[index];
@@ -220,7 +220,7 @@ suz_text suz_text_from_parsed(const char *bytes, uint64_t length, suz_text_locat
     suz_text_buffer buffer = {0};
     suz_text_buffer_append(&buffer, bytes, length, location);
     uint64_t consumed, decoded;
-    /* The validation pass has checked this exact immutable span. */
+    /* 検証の段階で、この不変の範囲そのものを確認済み。 */
     bool valid = suz_parse_string(bytes, length, &consumed, buffer.bytes, &decoded);
     if (!valid || consumed != length) abort();
     suz_text result = suz_text_intern(buffer.bytes, decoded, false, location);

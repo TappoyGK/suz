@@ -30,9 +30,8 @@ typedef struct {
     bool seen;
 } suz_parsed_value;
 
-/* Schema is a nonempty, acyclic Suz structure. Output has schema->slots
-   entries, one for each scalar leaf in declaration order. No allocation or
-   interning occurs. Ignore output on failure. Text spans include backquotes. */
+/* スキーマは空でない非循環のSuz構造体。出力は宣言順のスカラーの葉ごとに一項目、schema->slots項目を持つ。
+   メモリ確保とインターンは行わない。失敗時の出力は使わない。文字列の範囲にはバッククォートを含む。 */
 bool suz_parse_struct(const char *bytes, uint64_t length, const suz_parse_type *schema,
                        suz_parsed_value *output);
 float suz_parsed_f32(uint64_t bits);

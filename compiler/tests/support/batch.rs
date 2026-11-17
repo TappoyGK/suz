@@ -51,9 +51,8 @@ impl Batch {
     ) -> Result<Self> {
         let compiler = std::env::var_os("CC").unwrap_or_else(|| "clang".into());
         let runtime = Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime");
-        let flags = ["-std=c11", "-Wall", "-Wextra", "-Werror"];
-        // Keep translation units separate: private C helpers and static state
-        // from different Suz programs must not share a namespace.
+        let flags = ["-std=c23", "-Wall", "-Wextra", "-Werror"];
+        // 翻訳単位を分ける。異なるSuzプログラムの非公開C関数と静的状態が、同じ名前空間を共有してはならない。
         let compiled = parallel_map(inputs, workers, |(index, source)| {
             let text = fs::read_to_string(source)
                 .map_err(|error| format!("could not read generated C: {error}"))?;
@@ -158,7 +157,7 @@ impl Batch {
             return Err(error.clone());
         }
         let executable = self.executable.as_ref().ok_or("no executable cases")?;
-        // Each invocation is a new process, including repeated settings of a case.
+        // 同じ例の設定を繰り返す場合も、呼び出しごとに新しいプロセスで実行する。
         timed_output(Command::new(executable).arg(index.to_string()), &RUN_TIME)
             .map_err(|error| format!("could not start case runner: {error}"))
     }

@@ -39,7 +39,8 @@ void suz_env_free(void *ptr) {
     abort();
 }
 
-void suz_env_log(const char *bytes, size_t length) {
+void suz_env_log(suz_log_level level, const char *bytes, size_t length) {
+    (void)level;
     fwrite(bytes, 1, length, stderr);
 }
 

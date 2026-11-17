@@ -1,3 +1,8 @@
+//! 列挙型の宣言を先に収集し、基底型・列挙子・名前の条件を検査する。
+//!
+//! 利用元: [`crate::parser`]。
+//! 主な対象規則: `[decl.duplicate]`、`[enum.base]`、`[enum.nonempty]`、`[enum.variant]`、`[src.ident]`。
+
 use super::Parser;
 use crate::{
     Diagnostic, ErrorKind,
@@ -12,7 +17,7 @@ impl Parser<'_, '_> {
         let Kind::Ident(name) = self.token().kind else {
             return Err(self.error(
                 ErrorKind::InvalidSource,
-                "expected an enum variant name [enum.variant]",
+                crate::diagnostic!("enum.variant", "expected an enum variant name"),
             ));
         };
         super::names::check(super::names::Shape::Variant, name, location)?;
@@ -20,7 +25,7 @@ impl Parser<'_, '_> {
         if self.token().kind == Kind::Symbol("=") {
             return Err(self.error(
                 ErrorKind::InvalidSource,
-                "enum variants are numbered automatically [enum.variant]",
+                crate::diagnostic!("enum.variant", "enum variants are numbered automatically"),
             ));
         }
         Ok((name.into(), location))
@@ -32,7 +37,7 @@ impl Parser<'_, '_> {
         let Kind::Ident(name) = self.token().kind else {
             return Err(self.error(
                 ErrorKind::InvalidSource,
-                "expected an enum name [src.ident]",
+                crate::diagnostic!("src.ident", "expected an enum name"),
             ));
         };
         super::names::check(super::names::Shape::Type, name, location)?;
@@ -41,18 +46,20 @@ impl Parser<'_, '_> {
         if self.token().kind != Kind::Symbol(":") {
             return Err(self.error(
                 ErrorKind::InvalidSource,
-                "enum requires an integer base type [enum.base]",
+                crate::diagnostic!("enum.base", "enum requires an integer base type"),
             ));
         }
         self.cursor += 1;
         let base = match self.token().kind {
-            Kind::TypeName(name) => IntegerType::from_name(name),
+            Kind::TypeName(name) => {
+                IntegerType::from_name(name).filter(|ty| *ty != IntegerType::Len)
+            }
             _ => None,
         }
         .ok_or_else(|| {
             self.error(
                 ErrorKind::InvalidSource,
-                "enum base must be an integer type [enum.base]",
+                crate::diagnostic!("enum.base", "enum base must be an integer type"),
             )
         })?;
         self.cursor += 1;
@@ -60,7 +67,7 @@ impl Parser<'_, '_> {
         if variants.is_empty() {
             return Err(location.error(
                 ErrorKind::InvalidSource,
-                "enum requires at least one variant [enum.nonempty]",
+                crate::diagnostic!("enum.nonempty", "enum requires at least one variant"),
             ));
         }
         let mut seen = BTreeSet::new();
@@ -68,13 +75,16 @@ impl Parser<'_, '_> {
             if !seen.insert(name) {
                 return Err(location.error(
                     ErrorKind::InvalidSource,
-                    "duplicate enum variant [enum.variant]",
+                    crate::diagnostic!("enum.variant", "duplicate enum variant"),
                 ));
             }
             if index as i128 > base.bounds().1 {
                 return Err(location.error(
                     ErrorKind::InvalidSource,
-                    "enum variant exceeds the base type's range [enum.variant]",
+                    crate::diagnostic!(
+                        "enum.variant",
+                        "enum variant exceeds the base type's range"
+                    ),
                 ));
             }
         }
@@ -93,10 +103,11 @@ impl Parser<'_, '_> {
     }
 }
 
-// Register enum types before parsing annotations, allowing references to later
-// declarations. Function and expression blocks are skipped by delimiter depth.
+// 後方の宣言も参照できるよう、型注釈を解析する前に列挙型を登録する。
+// 関数と式のブロックは区切りの深さを使って読み飛ばす。
 pub(super) fn collect(tokens: &[Token<'_>]) -> Result<Vec<EnumDeclaration>, Diagnostic> {
     let mut p = Parser {
+        allows: Vec::new(),
         tokens,
         enums: &[],
         structs: &[],
@@ -113,7 +124,7 @@ pub(super) fn collect(tokens: &[Token<'_>]) -> Result<Vec<EnumDeclaration>, Diag
             if enums.iter().any(|e| e.name == declaration.name) {
                 return Err(declaration.location.error(
                     ErrorKind::InvalidSource,
-                    "duplicate enum name [decl.duplicate]",
+                    crate::diagnostic!("decl.duplicate", "duplicate enum name"),
                 ));
             }
             enums.push(declaration);

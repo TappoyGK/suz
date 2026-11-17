@@ -1,3 +1,9 @@
+//! 字句解析済みトークンからASTを作る。宣言を収集し、文・式・型注釈の構文を解析する。
+//!
+//! 利用元: [`crate::analyze`]。
+//! 主な対象規則: `[const.decl]`、`[decl.location]`、`[decl.top-level]`、`[fn.return]`、`[for.range]`、`[prog.main]`。
+
+mod allows;
 mod branches;
 mod enums;
 mod expressions;
@@ -19,6 +25,7 @@ enum FixedToken {
 }
 
 struct Parser<'a, 's> {
+    allows: Vec<crate::warnings::AllowScope>,
     tokens: &'a [Token<'s>],
     enums: &'a [crate::ast::EnumDeclaration],
     structs: &'a [crate::ast::StructDeclaration],
@@ -40,13 +47,13 @@ impl<'a, 's> Parser<'a, 's> {
         }
     }
 
-    fn error(&self, kind: ErrorKind, message: &str) -> Diagnostic {
-        // Valid range operators are consumed by the for header. If parsing
-        // fails at one, report its restricted use instead of a missing token.
+    fn error(&self, kind: ErrorKind, message: crate::DiagnosticMessage) -> Diagnostic {
+        // 有効な範囲演算子はforのヘッダーで消費する。それ以外で解析に失敗した場合は、
+        // トークンの欠落ではなく、使用場所の制約を報告する。
         let message = if kind == ErrorKind::InvalidSource
             && matches!(self.token().kind, Kind::Symbol("..<" | "..="))
         {
-            "range notation is only allowed in for or rev [for.range]"
+            crate::diagnostic!("for.range", "range notation is only allowed in for or rev")
         } else {
             message
         };
@@ -61,7 +68,7 @@ impl<'a, 's> Parser<'a, 's> {
         if self.token().kind != kind {
             return Err(self.error(
                 ErrorKind::InvalidSource,
-                &format!("expected '{text}' [syntax.grammar]"),
+                crate::diagnostic!("syntax.grammar", "expected '{text}'"),
             ));
         }
         self.cursor += 1;
@@ -75,6 +82,7 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     fn constant(&mut self) -> Result<ConstDeclaration, Diagnostic> {
+        let start = self.location();
         self.expect(FixedToken::Keyword("const"))?;
         let location = self.location();
         let name = match self.token().kind {
@@ -82,7 +90,7 @@ impl<'a, 's> Parser<'a, 's> {
             _ => {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
-                    "expected a non-reserved constant name [src.ident]",
+                    crate::diagnostic!("src.ident", "expected a non-reserved constant name"),
                 ));
             }
         };
@@ -94,7 +102,7 @@ impl<'a, 's> Parser<'a, 's> {
             if ty == Type::Void {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
-                    "bindings cannot have type void [type.void]",
+                    crate::diagnostic!("type.void", "bindings cannot have type void"),
                 ));
             }
             Some(ty)
@@ -104,13 +112,14 @@ impl<'a, 's> Parser<'a, 's> {
         if self.token().kind != Kind::Symbol("=") {
             return Err(self.error(
                 ErrorKind::InvalidSource,
-                "a constant requires an initializer [const.decl]",
+                crate::diagnostic!("const.decl", "a constant requires an initializer"),
             ));
         }
         self.cursor += 1;
         self.constant_expression = true;
         let initializer = self.expression()?;
         self.constant_expression = false;
+        self.allow_clause(start, allows::expression_contains_block(&initializer))?;
         Ok(ConstDeclaration {
             name,
             location,
@@ -124,6 +133,7 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
     let enums = enums::collect(tokens)?;
     let structs = structs::collect(tokens, &enums)?;
     let mut p = Parser {
+        allows: Vec::new(),
         enums: &enums,
         structs: &structs,
         restricted_condition: false,
@@ -161,26 +171,35 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
             Kind::Keyword("return") => {
                 return Err(p.error(
                     ErrorKind::InvalidSource,
-                    "return requires an enclosing function [fn.return]",
+                    crate::diagnostic!("fn.return", "return requires an enclosing function"),
                 ));
             }
             Kind::Keyword("fix" | "var") => {
                 return Err(p.error(
                     ErrorKind::InvalidSource,
-                    "variables must be declared inside a block [decl.location]",
+                    crate::diagnostic!(
+                        "decl.location",
+                        "variables must be declared inside a block"
+                    ),
                 ));
             }
             _ => {
                 return Err(p.error(
                     ErrorKind::InvalidSource,
-                    "expected a const, fn, struct or enum declaration [decl.top-level]",
+                    crate::diagnostic!(
+                        "decl.top-level",
+                        "expected a const, fn, struct or enum declaration"
+                    ),
                 ));
             }
         }
         if !matches!(p.token().kind, Kind::Newline | Kind::End) {
             return Err(p.error(
                 ErrorKind::InvalidSource,
-                "declarations must be separated by a newline [src.statement-end]",
+                crate::diagnostic!(
+                    "src.statement-end",
+                    "declarations must be separated by a newline"
+                ),
             ));
         }
         p.newlines();
@@ -188,10 +207,11 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
     if !main {
         return Err(p.error(
             ErrorKind::InvalidSource,
-            "main must be declared exactly once [prog.main]",
+            crate::diagnostic!("prog.main", "main must be declared exactly once"),
         ));
     }
     Ok(Program {
+        allows: p.allows,
         structs,
         enums,
         constants,

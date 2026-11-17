@@ -1,3 +1,7 @@
+//! 文字列定数・テンプレート・文字列の参照範囲をCへ変換する。補間値の評価と文字列の構築を分ける。
+//!
+//! 利用元: [`crate::codegen::expressions`]、[`crate::codegen::casts`]。
+
 use super::{
     ExpressionContext,
     expressions::{c_string, expression},
@@ -24,8 +28,8 @@ pub(super) fn constant(text: &str, context: &mut ExpressionContext) -> String {
     format!("suz_text_constant_{id}")
 }
 
-// A helper receives already evaluated values. All side effects are sequenced
-// at the call site, before assembling or interning any output bytes.
+// 補助関数は評価済みの値を受け取る。すべての副作用は呼び出し元で順に実行し、
+// その後に出力バイト列の構築やインターンを行う。
 pub(super) fn template(
     parts: &[TemplatePart<CheckedExpression>],
     location: Location,
@@ -63,6 +67,7 @@ pub(super) fn template(
                         let (bytes, length) = contents(value.ty, &name);
                         writeln!(body, "    suz_text_buffer_append(&buffer, {bytes}, {length}, location);").unwrap();
                     },
+                    Type::Exact => writeln!(body, "    {{ char digits[40]; size_t length = suz_format_exact({name}, digits); suz_text_buffer_append(&buffer, digits, length, location); }}").unwrap(),
                     Type::Char => writeln!(body, "    {{ char bytes[4]; size_t length = suz_char_encode({name}, bytes); suz_text_buffer_append(&buffer, bytes, length, location); }}").unwrap(),
                     Type::Bool => writeln!(body, "    suz_text_buffer_append(&buffer, {name} ? \"true\" : \"false\", {name} ? 4 : 5, location);").unwrap(),
                     Type::Enum(ty) => {
@@ -100,8 +105,8 @@ pub(super) fn template(
     format!("({})", setup.join(", "))
 }
 
-// Callers pass an already evaluated local so selecting its byte span cannot
-// duplicate expression evaluation. The generated C needs no generic dispatch.
+// 呼び出す側が評価済みのローカル値を渡すため、バイト範囲を選ぶ際に式を重複評価しない。
+// 生成Cに汎用型の動的な振り分けは不要。
 pub(super) fn contents(ty: Type, name: &str) -> (String, String) {
     let prefix = match ty {
         Type::Symbol => "suz_text",

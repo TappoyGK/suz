@@ -21,7 +21,7 @@ impl ExpectedDiagnostic {
             path.display(),
             self.line,
             self.column,
-            if warning { "warning: " } else { "" }
+            if warning { "warn: " } else { "" }
         );
         let Some(message) = stderr
             .strip_suffix('\n')
@@ -36,7 +36,7 @@ impl ExpectedDiagnostic {
         self.line == line
             && self.column == column
             && !message.contains(['\n', '\r'])
-            && !message.starts_with("warning:")
+            && !message.starts_with("warn:")
             && message
                 .strip_suffix(&format!(" [{}]", self.rule))
                 .is_some_and(|description| !description.trim().is_empty())
@@ -107,7 +107,7 @@ pub(super) fn diagnostic_table(
 pub(super) fn table(lines: &[&str], i: &mut usize) -> Result<Vec<Run>> {
     skip_blank(lines, i);
     let header = cells(lines.get(*i).ok_or("missing expectation table")?)?;
-    if header != ["設定", "結果", "終了コード", "整数演算の警告数"] {
+    if header != ["設定", "結果", "終了コード", "警告数"] {
         return Err("invalid table header".into());
     }
     *i += 1;
@@ -133,7 +133,7 @@ pub(super) fn table(lines: &[&str], i: &mut usize) -> Result<Vec<Run>> {
         } else {
             Some(number::<u8>(values[2])?)
         };
-        let arithmetic_warnings = number(values[3])?;
+        let warning_count = number(values[3])?;
         runs.push(Run {
             mode,
             result,
@@ -141,7 +141,7 @@ pub(super) fn table(lines: &[&str], i: &mut usize) -> Result<Vec<Run>> {
             stdout: None,
             stderr: None,
             stderr_prefix: None,
-            arithmetic_warnings,
+            warning_count,
             diagnostic: None,
             panic_diagnostic: None,
             warnings: Vec::new(),

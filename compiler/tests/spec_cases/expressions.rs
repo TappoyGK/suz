@@ -69,7 +69,7 @@ fn comparisons_preserve_integer_boundaries_and_boolean_precedence() {
                     "if (left {operator} left) != {expected} {{ return 5 }}\n"
                 ));
             }
-            // Type inference must work regardless of which side contains the literal.
+            // リテラルが左右のどちらにあっても、型推論が機能しなければならない。
             source.push_str(&format!("if not (left == {left}) {{ return 2 }}\nif not ({right} == right) {{ return 3 }}\n}}\n"));
         }
     }
@@ -168,18 +168,18 @@ fn bitwise_operators_reject_invalid_types_and_keep_arithmetic_diagnostics() {
         ("fix x = false | true\nreturn 0", "expr.operator-types"),
         (
             "fix x: u8 = 1\nfix y: i8 = 1\nfix z = x & y\nreturn 0",
-            "type.expected",
+            "width.same-type",
         ),
         ("fix x: u8 = ~256\nreturn 0", "lit.range"),
         (
             "fix x: u8 = 0\nfix y: u16 = x | 1\nreturn 0",
-            "type.expected",
+            "width.same-type",
         ),
     ] {
         let source = format!("fn main() -> u8 {{\n{body}\n}}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
-        assert!(error.message.contains(rule), "{error:?}");
+        assert!(error.message().contains(rule), "{error:?}");
     }
     let safe = b"fn main() -> u8 { return ~0 & 7 | 2 ^ 1 }";
     for mode in [
@@ -200,7 +200,7 @@ fn bitwise_operators_reject_invalid_types_and_keep_arithmetic_diagnostics() {
     let error = suz::compile_with_mode(negative, suz::ArithmeticMode::Deny)
         .err()
         .unwrap();
-    assert!(error.message.contains("diagnostic.arithmetic"));
+    assert!(error.message().contains("diagnostic.arithmetic"));
 }
 
 #[test]
@@ -254,17 +254,17 @@ fn wrapping_arithmetic_checks_types_but_is_not_an_arithmetic_diagnostic_target()
         ("fix x: u8 = 256 +% 0\nreturn 0", "lit.range"),
         (
             "fix x: u8 = 1\nfix y: i8 = 1\nfix z = x *% y\nreturn 0",
-            "type.expected",
+            "width.same-type",
         ),
         (
             "fix x: u8 = 1\nfix y: u16 = x -% 1\nreturn 0",
-            "type.expected",
+            "width.same-type",
         ),
     ] {
         let source = format!("fn main() -> u8 {{\n{body}\n}}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
-        assert!(error.message.contains(rule), "{error:?}");
+        assert!(error.message().contains(rule), "{error:?}");
     }
     let source = b"fn main() -> u8 { return 255 +% 1 -% 2 *% 3 }";
     for mode in [
@@ -285,7 +285,7 @@ fn wrapping_arithmetic_checks_types_but_is_not_an_arithmetic_diagnostic_target()
     let error = suz::compile_with_mode(source, suz::ArithmeticMode::Deny)
         .err()
         .unwrap();
-    assert!(error.message.contains("diagnostic.arithmetic"));
+    assert!(error.message().contains("diagnostic.arithmetic"));
 }
 
 #[test]
@@ -340,13 +340,12 @@ fn truncating_casts_check_source_types_without_propagating_target_types() {
         ("fix x = 1 as% f32\nreturn 0", "expr.as-trunc"),
         ("fix x = 1 as% void\nreturn 0", "expr.as-trunc"),
         ("return 18446744073709551615 as% u8", "lit.range"),
-        ("fix x: u16 = 1 as% u8\nreturn 0", "type.expected"),
         ("return 1 as% u16", "type.expected"),
     ] {
         let source = format!("fn main() -> u8 {{\n{body}\n}}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
-        assert!(error.message.contains(rule), "{error:?}");
+        assert!(error.message().contains(rule), "{error:?}");
     }
     let source = b"fn main() -> u8 { return 257 as% u8 }";
     for mode in [
@@ -371,7 +370,7 @@ fn truncating_casts_check_source_types_without_propagating_target_types() {
     let error = suz::compile_with_mode(source, suz::ArithmeticMode::Deny)
         .err()
         .unwrap();
-    assert!(error.message.contains("diagnostic.arithmetic"));
+    assert!(error.message().contains("diagnostic.arithmetic"));
 }
 
 #[test]
@@ -434,15 +433,11 @@ fn ifexpr_checks_all_branches_and_requires_values() {
             "return ifexpr false { continue } else { 0 }",
             "expr.jump-prohibited",
         ),
-        (
-            "fix x: u8 = 1\nfix y: u16 = 2\nfix z = ifexpr true { x } else { y }\nreturn 0",
-            "type.expected",
-        ),
     ] {
         let source = format!("fn main() -> u8 {{\n{body}\n}}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
-        assert!(error.message.contains(rule), "{error:?}");
+        assert!(error.message().contains(rule), "{error:?}");
     }
     let source = b"fn main() -> u8 { fix x = ifexpr true { 0 } else { -1 }\nreturn 0 }";
     let warned = suz::compile_with_mode(source, suz::ArithmeticMode::Warn).unwrap();
@@ -450,7 +445,7 @@ fn ifexpr_checks_all_branches_and_requires_values() {
     let error = suz::compile_with_mode(source, suz::ArithmeticMode::Deny)
         .err()
         .unwrap();
-    assert!(error.message.contains("diagnostic.arithmetic"));
+    assert!(error.message().contains("diagnostic.arithmetic"));
     let source = b"fn main() -> u8 { return ifexpr true { fix x: u8 = 0\nx } else { 1 } }";
     assert!(suz::compile(source).is_ok());
 }

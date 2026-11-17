@@ -1,3 +1,5 @@
+#[path = "spec_cases/allows.rs"]
+mod allows;
 #[path = "spec_cases/arithmetic.rs"]
 mod arithmetic;
 #[path = "spec_cases/arithmetic_handlers.rs"]
@@ -26,6 +28,8 @@ mod enums;
 mod execution;
 #[path = "spec_cases/expressions.rs"]
 mod expressions;
+#[path = "spec_cases/extra_flags.rs"]
+mod extra_flags;
 #[path = "spec_cases/float_logs.rs"]
 mod float_logs;
 #[path = "spec_cases/floats.rs"]
@@ -34,6 +38,10 @@ mod floats;
 mod format;
 #[path = "spec_cases/functions.rs"]
 mod functions;
+#[path = "spec_cases/generic_numeric.rs"]
+mod generic_numeric;
+#[path = "spec_cases/generic_properties.rs"]
+mod generic_properties;
 #[path = "support/integer_bounds.rs"]
 mod integer_bounds;
 #[path = "spec_cases/invalid_inputs.rs"]
@@ -46,6 +54,8 @@ mod matches;
 mod names;
 #[path = "spec_cases/native_cli.rs"]
 mod native_cli;
+#[path = "spec_cases/numeric.rs"]
+mod numeric;
 #[path = "spec_cases/panics.rs"]
 mod panics;
 #[path = "spec_cases/ranges.rs"]
@@ -241,3 +251,6 @@ fn run_spec_cases(optimized: bool) {
     support::runner::print_timings();
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+#[path = "spec_cases/length.rs"]
+mod length;

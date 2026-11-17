@@ -29,7 +29,7 @@ fn check(text: &str) {
     }
 }
 
-// Exact 2^-power written in decimal, including values below f64's range.
+// f64の範囲より小さい値も含め、正確な2の負のべき乗を十進表記にする。
 fn negative_power_of_two(power: usize) -> String {
     let mut digits = vec![1_u8];
     for _ in 0..power {
@@ -104,7 +104,7 @@ fn decimal_float_parsing_matches_independent_rounding_at_boundaries() {
         let exact = negative_power_of_two(power);
         check(&exact);
         check(&format!("-{exact}"));
-        // Discarded digits must still distinguish an exact tie from above it.
+        // 捨てた桁も、丸めの中点と中点より大きい値を区別できなければならない。
         check(&format!("{exact}{}1", "0".repeat(1000)));
         check(&format!("-{exact}{}1", "0".repeat(1000)));
     }

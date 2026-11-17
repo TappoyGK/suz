@@ -23,7 +23,7 @@ fn infers_integer_literals_and_copies_without_back_propagating_return_type() {
     }
     for body in [
         "fix value = 7\nreturn value",
-        "fix first: u8 = 7\nfix second: i64 = first\nreturn 0",
+        "fix first: i64 = 7\nfix second: u8 = first\nreturn 0",
     ] {
         let error = compile(program(body).as_bytes()).unwrap_err();
         assert_eq!(error.kind, ErrorKind::InvalidSource);

@@ -84,8 +84,8 @@ fn logs_reference_generated_and_long_symbol_without_allocating() {
     log info `inner: ${count}`
     return `count: ${count}`
 }
-fn write(message: symbol) -> void {
-    log info `outer: ${message} / ${1.5} / ${true}`
+fn write(message: symbol, top: u64) -> void {
+    log info `outer: ${message} / ${1.5} / ${true} / ${top * top} / ${top * top < inf}`
 }
 fn main() -> u8 { return 0 }
 "#;
@@ -98,7 +98,7 @@ int main(void) {
     assert(text_calls > before);
     size_t after = text_calls;
     text_fail_after = after;
-    suz_fn_1(value);
+    suz_fn_1(value, UINT64_MAX);
     assert(text_calls == after);
     text_fail_after = SIZE_MAX;
     char bytes[8192];
@@ -108,7 +108,7 @@ int main(void) {
     after = text_calls;
     size_t live = text_live;
     text_fail_after = after;
-    for (unsigned i = 0; i < 3; ++i) suz_fn_1(long_value);
+    for (unsigned i = 0; i < 3; ++i) suz_fn_1(long_value, UINT64_MAX);
     assert(text_calls == after && text_live == live);
     return 0;
 }
@@ -122,13 +122,14 @@ int main(void) {
         String::from_utf8_lossy(&result.stderr)
     );
     let mut expected =
-        b"info text.suz:2: inner: 3\ninfo text.suz:6: outer: count: 3 / 1.5 / true\n".to_vec();
+        b"info text.suz:2: inner: 3\ninfo text.suz:6: outer: count: 3 / 1.5 / true / 340282366920938463426481119284349108225 / true\n".to_vec();
     let mut bytes = vec![b'x'; 8192];
     bytes[4096] = 0;
     for _ in 0..3 {
         expected.extend_from_slice(b"info text.suz:6: outer: ");
         expected.extend_from_slice(&bytes);
-        expected.extend_from_slice(b" / 1.5 / true\n");
+        expected
+            .extend_from_slice(b" / 1.5 / true / 340282366920938463426481119284349108225 / true\n");
     }
     assert_eq!(result.stderr, expected);
 }

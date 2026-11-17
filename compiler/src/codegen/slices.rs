@@ -1,3 +1,7 @@
+//! 文字列の添字・範囲指定をランタイム呼び出しへ変換し、成功値と失敗時の処理を組み立てる。
+//!
+//! 利用元: [`crate::codegen::expressions`]、[`crate::codegen::statements`]。
+
 use super::{ExpressionContext, expressions::expression};
 use crate::{
     ast::Type,

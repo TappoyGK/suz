@@ -1,3 +1,8 @@
+//! 演算子の優先順位に従って式を解析し、呼び出し・構造体・比較の連鎖などのASTを作る。
+//!
+//! 利用元: [`crate::parser::statements`]、[`crate::parser::functions`]。
+//! 主な対象規則: `[assign.statement]`、`[const.expression]`、`[enum.access]`、`[expr.block]`、`[expr.comparison-chain]`、`[expr.if-value]`。
+
 use super::{FixedToken, Parser};
 use crate::{
     Diagnostic, ErrorKind,
@@ -31,7 +36,10 @@ impl Parser<'_, '_> {
             if self.constant_expression {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
-                    "control transfers are not constant expressions [const.expression]",
+                    crate::diagnostic!(
+                        "const.expression",
+                        "control transfers are not constant expressions"
+                    ),
                 ));
             }
             let location = self.location();
@@ -84,6 +92,7 @@ impl Parser<'_, '_> {
         let location = self.location();
         let mut operands = vec![first];
         let mut operators = Vec::new();
+        let mut locations = Vec::new();
         let mut direction = None;
         let mut not_equal = false;
         while let Kind::Symbol(symbol) = self.token().kind {
@@ -95,18 +104,25 @@ impl Parser<'_, '_> {
             {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
-                    "!= cannot occur in a comparison chain [expr.comparison-chain]",
+                    crate::diagnostic!(
+                        "expr.comparison-chain",
+                        "!= cannot occur in a comparison chain"
+                    ),
                 ));
             }
             if let Some(next) = operator.direction() {
                 if direction.is_some_and(|previous| previous != next) {
                     return Err(self.error(
                         ErrorKind::InvalidSource,
-                        "comparison chain changes ordering direction [expr.comparison-chain]",
+                        crate::diagnostic!(
+                            "expr.comparison-chain",
+                            "comparison chain changes ordering direction"
+                        ),
                     ));
                 }
                 direction = Some(next);
             }
+            locations.push(self.location());
             not_equal = matches!(operator, ComparisonOperator::NotEqual);
             self.cursor += 1;
             operands.push(self.binary(0)?);
@@ -117,6 +133,7 @@ impl Parser<'_, '_> {
         }
         Ok(Expression {
             kind: ExpressionKind::Comparison {
+                locations,
                 operators,
                 operands,
             },
@@ -180,7 +197,10 @@ impl Parser<'_, '_> {
             if matches!(parser.token().kind, Kind::Symbol("..<" | "..=")) {
                 Err(parser.location().error(
                     ErrorKind::InvalidSource,
-                    "text extraction uses ':' instead of a range operator [text.slice-omit]",
+                    crate::diagnostic!(
+                        "text.slice-omit",
+                        "text extraction uses ':' instead of a range operator"
+                    ),
                 ))
             } else {
                 Ok(())
@@ -201,7 +221,10 @@ impl Parser<'_, '_> {
         {
             return Err(self.error(
                 ErrorKind::InvalidSource,
-                "value blocks are not constant expressions [const.expression]",
+                crate::diagnostic!(
+                    "const.expression",
+                    "value blocks are not constant expressions"
+                ),
             ));
         }
         let location = self.location();
@@ -209,13 +232,19 @@ impl Parser<'_, '_> {
             Kind::Keyword("if") => {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
-                    "if is a statement; use ifexpr for a value [expr.if-value]",
+                    crate::diagnostic!(
+                        "expr.if-value",
+                        "if is a statement; use ifexpr for a value"
+                    ),
                 ));
             }
             Kind::Symbol("{") => {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
-                    "a standalone block is a statement; use expr for a value [expr.block]",
+                    crate::diagnostic!(
+                        "expr.block",
+                        "a standalone block is a statement; use expr for a value"
+                    ),
                 ));
             }
             Kind::Template(raw) => ExpressionKind::Template(self.template(raw)?),
@@ -254,6 +283,10 @@ impl Parser<'_, '_> {
                 self.cursor += 1;
                 ExpressionKind::BitNot(Box::new(self.unary()?))
             }
+            Kind::Keyword("len") => {
+                self.cursor += 1;
+                ExpressionKind::Len(Box::new(self.unary()?))
+            }
             Kind::Keyword("not") => {
                 self.cursor += 1;
                 ExpressionKind::Not(Box::new(self.unary()?))
@@ -263,14 +296,23 @@ impl Parser<'_, '_> {
                 if self.constant_expression && self.token().kind == Kind::Symbol("(") {
                     return Err(location.error(
                         ErrorKind::InvalidSource,
-                        "function calls are not constant expressions [const.expression]",
+                        crate::diagnostic!(
+                            "const.expression",
+                            "function calls are not constant expressions"
+                        ),
                     ));
                 }
                 if self.token().kind == Kind::Symbol("{")
                     && self.structs.iter().any(|decl| decl.name == name)
                 {
                     if self.restricted_condition {
-                        return Err(location.error(ErrorKind::InvalidSource, "struct literals in conditions require parentheses [expr.struct-in-cond]"));
+                        return Err(location.error(
+                            ErrorKind::InvalidSource,
+                            crate::diagnostic!(
+                                "expr.struct-in-cond",
+                                "struct literals in conditions require parentheses"
+                            ),
+                        ));
                     }
                     let id = self
                         .structs
@@ -288,7 +330,7 @@ impl Parser<'_, '_> {
                     let Kind::Ident(variant) = self.token().kind else {
                         return Err(self.error(
                             ErrorKind::InvalidSource,
-                            "expected an enum variant [enum.access]",
+                            crate::diagnostic!("enum.access", "expected an enum variant"),
                         ));
                     };
                     self.cursor += 1;
@@ -334,7 +376,7 @@ impl Parser<'_, '_> {
             _ => {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
-                    "expected an expression [syntax.grammar]",
+                    crate::diagnostic!("syntax.grammar", "expected an expression"),
                 ));
             }
         };
@@ -383,7 +425,7 @@ impl Parser<'_, '_> {
             let Kind::Ident(name) = self.token().kind else {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
-                    "expected a field name [struct.access]",
+                    crate::diagnostic!("struct.access", "expected a field name"),
                 ));
             };
             self.cursor += 1;
@@ -415,7 +457,10 @@ impl Parser<'_, '_> {
         ) {
             return Err(self.error(
                 ErrorKind::InvalidSource,
-                "assignment is a statement, not an expression [assign.statement]",
+                crate::diagnostic!(
+                    "assign.statement",
+                    "assignment is a statement, not an expression"
+                ),
             ));
         }
         Ok(result)

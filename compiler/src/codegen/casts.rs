@@ -1,8 +1,11 @@
+//! 型変換の値の評価、成功判定、変換結果を分けて生成し、値ハンドラーと早期returnで共有する。
+//!
+//! 利用元: [`crate::codegen::expressions`]、[`crate::codegen::statements`]。
+
 use super::{ExpressionContext, expressions::expression};
 use crate::check::CheckedExpression;
 
-// Return source evaluation, success test, and conversion separately so value
-// fallbacks and early returns use exactly the same range checks.
+// 元の値の評価・成功判定・変換を別々に返し、値の代替処理と早期returnで同じ値域検査を使う。
 pub(super) fn cast_parts(
     operand: &CheckedExpression,
     target: crate::ast::Type,
@@ -10,6 +13,18 @@ pub(super) fn cast_parts(
     location: crate::ast::Location,
     context: &mut ExpressionContext,
 ) -> (String, String, String) {
+    if operand.ty == crate::ast::Type::Exact {
+        let id = context.temporaries.len();
+        context.temporaries.push(crate::ast::Type::Exact);
+        let name = format!("suz_cmp_{id}");
+        let value = super::expressions::expression(operand, context);
+        return (
+            format!("{name} = {value}"),
+            super::exact::fits(target, &name),
+            super::exact::converted(target, &name, context),
+        );
+    }
+
     use crate::ast::{FloatType, IntegerType, Type};
     for ty in [operand.ty, target] {
         if let Type::Float(ty) = ty {
@@ -92,8 +107,8 @@ pub(super) fn cast_parts(
         (Type::Float(_), Type::Integer(to)) => {
             context.float_types.insert(FloatType::F64);
             let (min, max) = to.bounds();
-            // The upper bound is an exact power of two. For i64, min - 1
-            // is not representable: the next lower f64 is already out of range.
+            // 上限は正確な2のべき乗。i64ではmin - 1を表現できず、
+            // 一つ小さいf64の値は既に範囲外になる。
             let lower = if to == IntegerType::I64 {
                 format!("(double){local} >= {min}.0")
             } else {
@@ -112,7 +127,7 @@ pub(super) fn cast_parts(
                 conditions.push(format!("{local} >= INT64_C({to_min})"));
             }
             if from_max > to_max {
-                let prefix = if from.integer_storage().unwrap().bounds().0 < 0 {
+                let prefix = if from.integer_storage().unwrap().c_signed() {
                     "INT64_C"
                 } else {
                     "UINT64_C"

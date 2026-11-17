@@ -6,9 +6,13 @@
 
 **[tool.distribution]** 配布物は、対象OS・CPU向けの実行ファイル `suz` 1つである。コンパイラ、ランタイム本体、標準環境層、Ryu、そのライセンス表示に必要なデータを内包する。実行ファイルを移動した後も、その場所や元のソースツリーに依存せず動作する。
 
-**[tool.c-compiler]** 実行ファイルの生成には、外部のClangと対象環境のSDKを使う。`--cc PATH` を指定した場合はその実行ファイルを使い、省略した場合は `PATH` 上の `clang` を使う。指定値は1つの実行ファイルのパスとして扱う。Clangの引数はSuzが構成し、シェルを介さず起動する。対応環境は `[tool.platform]` で定める。
+**[tool.c-compiler]** 実行ファイルの生成には、外部のClangと対象環境のSDKを使う。`--cc PATH` を指定した場合はその実行ファイルを使い、省略した場合は `PATH` 上の `clang` を使う。指定できるのはC23に対応したClangだけである。指定値は1つの実行ファイルのパスとして扱う。Clangの引数はSuzが構成し、シェルを介さず起動する。対応環境は `[tool.platform]` で定める。
 
-**[tool.prerequisites]** `build` と `run` は、処理の開始時にClang・リンカー・SDKが利用できることを確認する。不足する場合は、不足しているものと導入方法を標準エラーに表示し、終了コード2で終了する。macOSではXcode Command Line Toolsの導入方法として `xcode-select --install` を案内する。コンパイラが見つからない場合とSDKが見つからない場合は、診断を区別する。外部ツールのインストールは利用者が行う。`check` と `emit-c` は、外部ツールを用意せず実行できる。
+**[tool.prerequisites]** `build` と `run` は、処理の開始時にClang・リンカー・SDKが利用できることを確認する。指定コンパイラがC23と128ビットの `_BitInt` に対応したClangでない場合は、[tool.c-compiler] の英語の診断を表示し、終了コード2で終了する。
+
+Clang・リンカー・SDKが不足する場合は、不足しているものと導入方法を標準エラーに表示し、終了コード2で終了する。macOSではXcode Command Line Toolsの導入方法として `xcode-select --install` を案内する。コンパイラが見つからない場合とSDKが見つからない場合は、診断を区別する。外部ツールのインストールは利用者が行う。
+
+`check` と `emit-c` は、外部ツールを用意せず実行できる。
 
 **[tool.platform]** 対象環境は次のとおりである。OSとClangのバージョンは、コンパイラ・ランタイムを実際に検証した値である。
 
@@ -66,7 +70,7 @@ suz check program.suz
 
 ### 2.4 emit-c
 
-**[tool.emit-c]** Cの調査や環境層との組み込みに使う一式を `DIRECTORY` に出力する。出力内容は次のとおりである。
+**[tool.emit-c]** 生成したCの調査や、独自の環境層とのリンクに必要な一式を `DIRECTORY` に出力する。ビルドスクリプトは `-std=c23` を使う。`CC` に指定できるのはC23に対応したClangだけであり、必要な機能は [runtime.c-check] で検査する。出力内容は次のとおりである。
 
 | パス | 内容 |
 |---|---|
@@ -93,17 +97,35 @@ cd generated
 | `--env FILE` | 可 | 可 | | 可 | 標準環境層を置き換えるCソース |
 | `--text-pool-limit SIZE` | 可 | 可 | | 可 | テキストプールの上限。既定は `1G` |
 | `--force` | 可 | | | | 既存の通常ファイルを出力先として置き換える |
+| `--log-allow` | 可 | 可 | 可 | 可 | 抑えた警告と理由を表示する |
 | `--warn-unhandled-arithmetic` | 可 | 可 | 可 | 可 | 整数演算の失敗処理がない箇所を警告する |
 | `--deny-unhandled-arithmetic` | 可 | 可 | 可 | 可 | 同じ箇所をコンパイルエラーにする |
 | `--help` | 可 | 可 | 可 | 可 | そのコマンドの使用方法を表示する |
 
-`-O0` と `-O2`、整数演算の警告と強制は、それぞれ排他的である。診断設定の意味は言語仕様の `[diagnostic.arithmetic]` に従う。設定を省略した場合は通常設定である。
+`-O0` と `-O2` は併用できない。`--warn-unhandled-arithmetic` と `--deny-unhandled-arithmetic` も併用できない。診断設定の意味は言語仕様の `[diagnostic.arithmetic]` に従う。設定を省略した場合は通常設定である。`[diagnostic.constant-comparison]` と `[diagnostic.integer-division-to-float]` の警告は、これらの整数演算の診断設定にかかわらず有効である。
 
 **[tool.environment]** `--env` のCソースは、ランタイム仕様の環境関数を実装する。`build` と `run` はそのファイルを標準環境層の代わりにリンクする。`emit-c` はその内容を出力先の `runtime/suz_env.c` に収録する。環境層のコンパイルには同梱の `suz_env.h` を使う。
 
-**[tool.build-settings]** C11と厳密な浮動小数点演算を使い、積和の縮約を停止し、非正規化数をIEEEの規則で扱う。Clangへの数値関連オプションはSuzが固定する。具体的には `-ffp-model=strict`、`-ffp-contract=off`、`-fdenormal-fp-math=ieee` を指定する。`CFLAGS`、`CPPFLAGS`、`LDFLAGS` に空でない値がある場合、`build` と `run` は使用方法のエラーにする。
+**[tool.build-settings]** C23と厳密な浮動小数点演算を使い、積和の縮約を停止し、非正規化数をIEEEの規則で扱う。Clangへの数値関連オプションはSuzが固定する。具体的には `-fhonor-nans`、`-fhonor-infinities`、`-ffp-contract=off`、`-fdenormal-fp-math=ieee` を指定する。`CFLAGS`、`CPPFLAGS`、`LDFLAGS` に空でない値がある場合、`build` と `run` は使用方法のエラーにする。追加のフラグは [tool.extra-flags] で渡す。
+
+**[tool.extra-flags]** `build`、`run` と、`emit-c` が出力する `scripts/build-c.sh` は、環境変数 `SUZ_CFLAGS` から次のフラグを受け付ける。
+
+| フラグ | 用途 |
+|---|---|
+| `-march=値`、`-mcpu=値`、`-mtune=値` | 対象CPUの指定 |
+| `-g` | デバッグ情報 |
+| `-fno-omit-frame-pointer` | プロファイラ |
+| `-flto`、`-flto=thin`、`-flto=full` | リンク時の最適化 |
+| `-fprofile-instr-generate`、`-fprofile-instr-generate=パス`、`-fprofile-instr-use=パス` | 実行の記録を使う最適化 |
+| `-fsanitize=値` | `address` と `undefined` のカンマ区切り |
+
+値はASCIIの空白（スペース・タブ・改行・復帰・垂直タブ・改ページ）で区切る。空の項目は無視する。引用符・バックスラッシュ・変数・コマンド・ワイルドカードの展開は行わないため、空白を含むパスは渡せない。`=` の後の値は空にできない。許可リストにないフラグは、その項目を示して使用方法のエラーにする。CPU名やPGOファイルの有効性など、受け付けた値の検証はClangが行う。値が不正な場合、`build` と `run` はClangの診断を表示し、ビルド失敗（終了コード4）として報告する。コンパイラとSDKの能力確認には追加フラグを使わない。
+
+CLIと出力用スクリプトは同じ許可リストを使う。受け付けた引数は、Suzが固定するフラグの前に置く。生成Cとランタイムのコンパイル・リンクは1回のClang呼び出しで行い、リンクにも同じフラグを適用する。
 
 ### 3.1 テキストプールの上限
+
+テキストプール全体の容量と、一つの `symbol` の個数上限は別である。`unlimited` や `2G` 以上を指定しても、Unicodeスカラー値が2^31−1個を超える `symbol` の生成は [rt.len-limit] によりパニックする。
 
 **[tool.text-pool-limit]** `--text-pool-limit SIZE` は、生成するプログラムのテキストプールの上限を指定する。`build`、`run`、`emit-c` で受け付ける。省略時は `1G` とする。設定は生成するプログラムに組み込む。`emit-c` では設定を生成物に含め、そのCから作った実行ファイルにも適用する。
 
@@ -133,14 +155,18 @@ suz emit-c program.suz -o generated --text-pool-limit unlimited
 
 ## 5. メッセージと終了
 
+**[tool.log-allow]** `--log-allow` は [allow.log] に従い、その設定で警告になる箇所のうち `allow` で抑えたものを理由とともに標準エラーへ書く。
+
 **[tool.messages]** ツールのメッセージは英語で出力する。`build`、`check`、`emit-c` の成功時は標準出力を空にする。警告・エラーは標準エラーに出力する。言語の診断は次の形式とし、規則名は言語仕様から使う。
 
 ```text
 FILE:LINE:COLUMN: MESSAGE [rule]
-FILE:LINE:COLUMN: warning: MESSAGE [rule]
+FILE:LINE:COLUMN: warn: MESSAGE [rule]
 ```
 
 ツールの使用方法・入出力・外部ツールのエラーは `suz: MESSAGE [tool.rule]` の形式にする。Clangが出力した診断は標準エラーへ伝え、Suzの言語診断と区別する。
+
+本体の違反や呼び出しの連鎖などの関連診断は、主診断に続けて `  note: 行:列: メッセージ [規則名]` の形式で1件ずつ出力する。各行は1つの位置と1つの規則名を持つ。
 
 **[tool.exit]** ツールの終了コードは次のとおりである。
 

@@ -67,10 +67,6 @@ fn safe_casts_keep_source_types_and_diagnostics() {
         ("return true as u8", "expr.as"),
         ("fix x = 1 as f32 or false\nreturn 0", "type.expected"),
         (
-            "fix value: f32 = 1.0\nfix fallback: f32 = 0.0\nfix x = value as f64 or fallback\nreturn 0",
-            "type.expected",
-        ),
-        (
             "fix x = 1 as f32 or (1.0e39 as f32)\nreturn 0",
             "const.cast-check",
         ),
@@ -89,7 +85,7 @@ fn safe_casts_keep_source_types_and_diagnostics() {
         let source = format!("fn main() -> u8 {{\n{body}\n}}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
-        assert!(error.message.contains(rule), "{error:?}");
+        assert!(error.message().contains(rule), "{error:?}");
     }
     let source = b"fn main() -> u8 { fix x = -1 as f32\nreturn 0 }";
     let warned = suz::compile_with_mode(source, suz::ArithmeticMode::Warn).unwrap();
@@ -98,7 +94,7 @@ fn safe_casts_keep_source_types_and_diagnostics() {
         suz::compile_with_mode(source, suz::ArithmeticMode::Deny)
             .err()
             .unwrap()
-            .message
+            .message()
             .contains("diagnostic.arithmetic")
     );
     let source = b"fn main() -> u8 { fix x = -1.0 as f64\nreturn 0 }";
@@ -178,7 +174,7 @@ fn checked_casts_require_handlers_and_check_unselected_expressions() {
         let source = format!("fn main() -> u8 {{\n{body}\n}}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
-        assert!(error.message.contains(rule), "{body}: {error:?}");
+        assert!(error.message().contains(rule), "{body}: {error:?}");
     }
     suz::compile(b"fn main() -> u8 { fix x = true || ((300 as u8 or 0) == 0)\nreturn 0 }").unwrap();
 }
@@ -196,8 +192,7 @@ fn checked_cast_codegen_evaluates_source_once_and_fallback_only_on_failure() {
         ("f64", "double", "256.0", 9, 12),
         ("f32", "float", "nan", 9, 12),
     ] {
-        // Instrument local reads in generated C while keeping Suz's declaration
-        // and type checking intact. A trace records both order and count.
+        // Suzの宣言と型検査はそのままに、生成Cのローカル読み取りを記録する。評価順と回数の両方を確認する。
         let source = format!(
             "fn main() -> u8 {{\nfix input: {ty} = {input}\nfix fallback: u8 = 9\nreturn input as u8 or fallback\n}}"
         );
@@ -271,11 +266,11 @@ fn narrowing_float_casts_preserve_rounding_boundaries_and_special_values() {
     let directory = TemporaryDirectory::new();
     let c_file = directory.0.join("narrow-floats.c");
     fs::write(&c_file, suz::compile(source).unwrap()).unwrap();
-    // Check both normal and optimized generated C, including overflow guards.
+    // 通常と最適化ありの生成Cを、オーバーフロー防止の処理も含めて検査する。
     for optimization in ["-O0", "-O2"] {
         let executable = directory.0.join(format!("narrow-floats{optimization}"));
         let built = runtime_link::compiler()
-            .args(["-std=c11", "-Wall", "-Wextra", "-Werror", optimization])
+            .args(["-std=c23", "-Wall", "-Wextra", "-Werror", optimization])
             .arg(&c_file)
             .arg("-o")
             .arg(&executable)
@@ -312,7 +307,7 @@ fn narrowing_float_casts_check_constant_success_and_handler_types() {
         let source = format!("fn main() -> u8 {{\n{body}\nreturn 0\n}}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
-        assert!(error.message.contains(rule), "{body}: {error:?}");
+        assert!(error.message().contains(rule), "{body}: {error:?}");
     }
 }
 
@@ -333,7 +328,7 @@ fn float_cast_codegen_evaluates_only_the_selected_path() {
             "fn main() -> u8 {{\nfix input: {from} = {input}\nfix fallback: {to} = 7.0\nfix result = input as {to} or fallback\nreturn ifexpr result == {expected} {{ 0 }} else {{ 1 }}\n}}"
         );
         let generated = suz::compile(source.as_bytes()).unwrap();
-        // Instrument only the reads in the cast, after both local declarations.
+        // 二つのローカル宣言より後の、型変換内の読み取りだけを記録する。
         let marker = if to == "f32" {
             "const float suz_local_2 ="
         } else {
@@ -408,8 +403,7 @@ fn float_to_integer_casts_cover_all_integer_boundaries() {
             values.sort_by(f64::total_cmp);
             values.dedup_by(|a, b| a.to_bits() == b.to_bits());
             for value in values {
-                // Scientific notation preserves tiny neighbors of zero as well
-                // as the representable values next to 64-bit integer bounds.
+                // 科学表記により、ゼロの近傍の微小値と、64ビット整数の境界に隣接する表現可能な値を保つ。
                 let literal = format!("{value:.17e}");
                 let truncated = value.trunc() as i128;
                 let expected = if (min..=max).contains(&truncated) {
@@ -442,12 +436,12 @@ fn float_to_integer_casts_cover_all_integer_boundaries() {
     let directory = TemporaryDirectory::new();
     let c_file = directory.0.join("float-to-int.c");
     fs::write(&c_file, suz::compile(source.as_bytes()).unwrap()).unwrap();
-    // The sanitizer also rejects an accidentally executed out-of-range C cast.
+    // 範囲外のCキャストを誤って実行した場合は、サニタイザーでも拒否する。
     for optimization in ["-O0", "-O2"] {
         let executable = directory.0.join(format!("float-to-int{optimization}"));
         let built = runtime_link::compiler()
             .args([
-                "-std=c11",
+                "-std=c23",
                 "-Wall",
                 "-Wextra",
                 "-Werror",
@@ -503,6 +497,6 @@ fn float_to_integer_casts_require_handlers_and_check_fallback_types() {
         let source = format!("fn main() -> u8 {{\n{body}\n}}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
-        assert!(error.message.contains(rule), "{body}: {error:?}");
+        assert!(error.message().contains(rule), "{body}: {error:?}");
     }
 }

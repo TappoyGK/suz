@@ -1,3 +1,7 @@
+//! 文字列をUnicodeスカラー単位でたどるforループを生成する。正順・逆順とcontinue時の更新を扱う。
+//!
+//! 利用元: [`crate::codegen::statements`]。
+
 use super::{ExpressionContext, expressions::expression, statements::emit_block};
 use crate::check::{CheckedExpression, CheckedStatement};
 use std::fmt::Write;
@@ -44,7 +48,7 @@ pub(super) fn emit_text_loop(
         writeln!(c, "{indent}        do {{ --suz_pos_{id}; }} while (suz_pos_{id} > 0 && ((unsigned char)suz_bytes_{id}[suz_pos_{id}] & 0xc0) == 0x80);").unwrap();
     }
     writeln!(c, "{indent}        uint32_t suz_scalar_{id} = 0;\n{indent}        uint64_t suz_width_{id} = 0;").unwrap();
-    // Text invariants guarantee valid UTF-8. Move before the body so continue advances.
+    // 文字列の不変条件によりUTF-8は有効。本体より前に移動し、continueでも次の文字へ進む。
     writeln!(c, "{indent}        (void)suz_char_decode(suz_bytes_{id} + suz_pos_{id}, suz_length_{id} - suz_pos_{id}, &suz_scalar_{id}, &suz_width_{id});").unwrap();
     if !reverse {
         writeln!(c, "{indent}        suz_pos_{id} += suz_width_{id};").unwrap();

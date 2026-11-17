@@ -58,8 +58,8 @@ fn generated_bindings_handle_c_names_and_large_integer_literals() {
     fix signed_maximum: i64 = 9223372036854775807
     fix wide: u32 = 4294967295
     fix negative: i32 = -2147483648
-    fix int: u8 = 7
-    fix suz_main = (int)
+    fix unsigned: u8 = 7
+    fix suz_main = (unsigned)
     fix suz_local_0 = suz_main
     return suz_local_0
 }
@@ -76,7 +76,7 @@ fn generated_bindings_handle_c_names_and_large_integer_literals() {
 fn unary_literal_diagnostics_follow_the_selected_mode() {
     let directory = TemporaryDirectory::new();
     let source = directory.0.join("negative.suz");
-    // Both negations are diagnosed even though the second follows a return.
+    // 二つ目がreturnの後にあっても、両方の符号反転を診断する。
     fs::write(
         &source,
         "fn main() -> u8 {\nfix small: i8 = -128\nreturn 0\nfix other = -1\n}",
@@ -96,7 +96,7 @@ fn unary_literal_diagnostics_follow_the_selected_mode() {
         assert_eq!(result.status.code(), Some(status));
         assert!(result.stdout.is_empty());
         let diagnostic = String::from_utf8(result.stderr).unwrap();
-        assert_eq!(diagnostic.matches(": warning: ").count(), warnings);
+        assert_eq!(diagnostic.matches(": warn: ").count(), warnings);
         if option.is_some() {
             assert!(diagnostic.contains("negative.suz:2:17:"), "{diagnostic}");
         }
@@ -252,7 +252,7 @@ fn compound_assignments_check_mutability_types_and_statement_position() {
         ("var value: u8 = 0\nvalue +%= 256\nreturn 0", "lit.range"),
         (
             "var value: u8 = 0\nfix other: i8 = 1\nvalue ^= other\nreturn 0",
-            "type.expected",
+            "width.same-type",
         ),
         (
             "var value = false\nvalue &= true\nreturn 0",
@@ -270,9 +270,9 @@ fn compound_assignments_check_mutability_types_and_statement_position() {
         let source = format!("fn main() -> u8 {{\n{body}\n}}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
-        assert!(error.message.contains(rule), "{error:?}");
+        assert!(error.message().contains(rule), "{error:?}");
     }
-    // Wrapping and bitwise compound operators are not arithmetic diagnostic targets.
+    // ラップ演算とビット演算の複合代入は、整数演算の診断対象ではない。
     let source = r#"fn main() -> u8 {
     var count: u8 = 255
     count +%= 1

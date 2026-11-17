@@ -208,7 +208,10 @@ fn exported_sources_build_independently_with_standard_and_custom_environments() 
 #include <stdlib.h>
 void *suz_env_alloc(size_t size) { return malloc(size); }
 void suz_env_free(void *ptr) { free(ptr); }
-void suz_env_log(const char *bytes, size_t length) { fwrite(bytes, 1, length, stdout); }
+void suz_env_log(suz_log_level level, const char *bytes, size_t length) {
+    (void)level;
+    fwrite(bytes, 1, length, stdout);
+}
 _Noreturn void suz_env_panic(void) { exit(101); }
 "#,
     )
@@ -229,7 +232,7 @@ _Noreturn void suz_env_panic(void) { exit(101); }
             command
                 .current_dir(&moved)
                 .args(["program.c", "-o", &output_name, optimization]);
-            for variable in ["CFLAGS", "CPPFLAGS", "LDFLAGS"] {
+            for variable in ["CFLAGS", "CPPFLAGS", "LDFLAGS", "SUZ_CFLAGS"] {
                 command.env_remove(variable);
             }
             let built = command.output().unwrap();
@@ -323,7 +326,7 @@ fn emitted_c_preserves_text_pool_limits() {
         build
             .current_dir(&generated)
             .args(["program.c", "-o", "program"]);
-        for name in ["CFLAGS", "CPPFLAGS", "LDFLAGS"] {
+        for name in ["CFLAGS", "CPPFLAGS", "LDFLAGS", "SUZ_CFLAGS"] {
             build.env_remove(name);
         }
         let built = build.output().unwrap();

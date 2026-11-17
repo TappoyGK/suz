@@ -1,8 +1,8 @@
 use crate::integer_bounds::INTEGER_BOUNDS;
-use crate::test_util::compile_and_run_c11;
+use crate::test_util::compile_and_run_c23;
 
 fn check_program(source: &str) {
-    let result = compile_and_run_c11(source, "text-casts.suz");
+    let result = compile_and_run_c23(source, "text-casts.suz");
     assert_eq!(
         result.status.code(),
         Some(0),
@@ -62,9 +62,9 @@ fn symbol_casts_reject_incomplete_formats_and_preserve_lazy_constant_evaluation(
         "１",
     ];
     let mut source = String::from(
-        r#"const GOOD = `1` as u8 or (1 / 0)
+        r#"const GOOD = `1` as u8 or (1 / (0 as u8))
 const BAD = `bad` as u8 or 7
-const WRAPPED = `-1` as% u8 or (1 / 0)
+const WRAPPED = `-1` as% u8 or (1 / (0 as u8))
 const YES = `true` as bool or false
 const NO = `false` as bool or true
 fn main() -> u8 {
@@ -83,8 +83,8 @@ fn main() -> u8 {
     for input in ["true ", "True", "TRUE", "1", "0", "false\\0", "", " false"] {
         source.push_str(&format!("{{\nfix input = `{input}`\nfix a = input as bool or false\nfix b = input as bool or true\nif a || not b {{ return 4 }}\n}}\n"));
     }
-    // More digits than any machine integer, with a result known independently:
-    // 10^128 is divisible by 2^64, so the last digit is the entire residue.
+    // マシン整数を超える桁数を使い、結果は独立に求める。
+    // 10^128は2^64で割り切れるので、最後の桁が剰余全体になる。
     let large = format!("1{}1", "0".repeat(127));
     source.push_str(&format!("fix large = `{large}` as% u64 or 7\nfix negative = `-{large}` as% i64 or 7\nif large != 1 || negative != -1 {{ return 5 }}\n"));
     source.push_str("return 0\n}\n");
@@ -120,11 +120,11 @@ fn symbol_cast_handlers_obey_type_and_control_constraints() {
         ),
         (
             "const N = `bad` as% u8 or (1 / 0)\nfn main() -> u8 { return N }",
-            "const.evaluation",
+            "arith.div-zero-always",
         ),
     ] {
         let error = suz::compile(source.as_bytes()).unwrap_err();
-        assert!(error.message.contains(rule), "{source}: {error:?}");
+        assert!(error.message().contains(rule), "{source}: {error:?}");
     }
     check_program(
         r#"fn parse(value: symbol) -> bool {

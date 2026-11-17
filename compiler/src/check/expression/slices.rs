@@ -1,4 +1,9 @@
-use super::{expression, operand_type};
+//! 文字列の添字・切り出し範囲と、失敗時のハンドラーを検査する。
+//!
+//! 利用元: [`crate::check::expression`]。
+//! 主な対象規則: `[text.slice-bounds]`、`[text.slice-handler]`。
+
+use super::expression;
 use crate::check::{
     ir::{CheckedExpression, CheckedHandler, Value},
     scope::Scope,
@@ -20,19 +25,15 @@ pub(super) fn check(expr: &Expression, bindings: &Scope) -> Result<CheckedExpres
         unreachable!()
     };
     let target = expression(target, Some(Type::Text), bindings)?;
-    let bound_type = start
-        .as_deref()
-        .and_then(|value| operand_type(value, bindings))
-        .or_else(|| {
-            end.as_deref()
-                .and_then(|value| operand_type(value, bindings))
-        });
     let bound = |value: &Expression| -> Result<Box<CheckedExpression>, Diagnostic> {
-        let checked = expression(value, bound_type, bindings)?;
-        if !matches!(checked.ty, Type::Integer(_)) {
+        let checked = expression(value, None, bindings)?;
+        if !checked.ty.is_integer() {
             return Err(value.location.error(
                 ErrorKind::InvalidSource,
-                "text positions require integer operands [text.slice-bounds]",
+                crate::diagnostic!(
+                    "text.slice-bounds",
+                    "text positions require integer operands"
+                ),
             ));
         }
         Ok(Box::new(checked))
@@ -44,9 +45,9 @@ pub(super) fn check(expr: &Expression, bindings: &Scope) -> Result<CheckedExpres
         return Err(expr.location.error(
             ErrorKind::InvalidSource,
             if fallible {
-                "text extraction requires or [text.slice-handler]"
+                crate::diagnostic!("text.slice-handler", "text extraction requires or")
             } else {
-                "full text view does not accept or [text.slice-handler]"
+                crate::diagnostic!("text.slice-handler", "full text view does not accept or")
             },
         ));
     }

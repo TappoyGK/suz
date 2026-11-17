@@ -1,4 +1,4 @@
-use crate::{integer_bounds::INTEGER_BOUNDS, test_util::compile_and_run_c11};
+use crate::{integer_bounds::INTEGER_BOUNDS, test_util::compile_and_run_c23};
 
 #[test]
 #[ignore = "release check: run scripts/test-release.sh"]
@@ -46,7 +46,7 @@ fn identity_bool(input: bool) -> bool { return input }
             "fn identity_{ty}(input: {ty}) -> {ty} {{ return input }}\n"
         ));
     }
-    let output = compile_and_run_c11(&source, "functions.suz");
+    let output = compile_and_run_c23(&source, "functions.suz");
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stdout.is_empty() && output.stderr.is_empty());
 }
@@ -78,7 +78,7 @@ fn fib(n: u8) -> u8 {
     return fib(n - 1) + fib(n - 2)
 }
 "#;
-    let output = compile_and_run_c11(source, "functions.suz");
+    let output = compile_and_run_c23(source, "functions.suz");
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stdout.is_empty() && output.stderr.is_empty());
 }
@@ -103,7 +103,7 @@ fn main() -> u8 {
     return 0
 }
 "#;
-    let output = compile_and_run_c11(source, "functions.suz");
+    let output = compile_and_run_c23(source, "functions.suz");
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stdout.is_empty());
     assert_eq!(
@@ -175,7 +175,7 @@ fn functions_reject_invalid_parameters_void_values_and_returns() {
             "{source}: {error}"
         );
         assert!(
-            error.message.contains(&format!("[{rule}]")),
+            error.message().contains(&format!("[{rule}]")),
             "{source}: {error}"
         );
     }

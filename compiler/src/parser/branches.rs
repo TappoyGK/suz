@@ -1,3 +1,8 @@
+//! if・match・値ブロックの構文を解析し、分岐と末尾の値をASTへまとめる。
+//!
+//! 利用元: [`crate::parser::expressions`]、[`crate::parser::statements`]。
+//! 主な対象規則: `[block.value]`、`[expr.else-line]`、`[expr.if-value]`、`[expr.jump-prohibited]`、`[if.elif]`、`[match.separator]`。
+
 use super::{FixedToken, Parser};
 use crate::{
     Diagnostic, ErrorKind,
@@ -15,7 +20,7 @@ impl Parser<'_, '_> {
         let Some(Statement::Expression(value)) = statements.pop() else {
             return Err(end.error(
                 ErrorKind::InvalidSource,
-                "a value block requires a final expression [block.value]",
+                crate::diagnostic!("block.value", "a value block requires a final expression"),
             ));
         };
         Ok((
@@ -56,7 +61,7 @@ impl Parser<'_, '_> {
                 _ => {
                     return Err(self.error(
                         ErrorKind::InvalidSource,
-                        "ifexpr requires an else branch [expr.if-value]",
+                        crate::diagnostic!("expr.if-value", "ifexpr requires an else branch"),
                     ));
                 }
             }
@@ -75,7 +80,10 @@ impl Parser<'_, '_> {
             }
             .error(
                 ErrorKind::InvalidSource,
-                "elif and else must follow '}' on the same line [expr.else-line]",
+                crate::diagnostic!(
+                    "expr.else-line",
+                    "elif and else must follow '}}' on the same line"
+                ),
             ));
         }
         Ok(())
@@ -101,7 +109,7 @@ impl Parser<'_, '_> {
                     if self.token().kind == Kind::Keyword("if") {
                         return Err(self.error(
                             ErrorKind::InvalidSource,
-                            "use elif for another condition [if.elif]",
+                            crate::diagnostic!("if.elif", "use elif for another condition"),
                         ));
                     }
                     let (otherwise, _) = self.block()?;
@@ -151,7 +159,10 @@ impl Parser<'_, '_> {
                 _ => {
                     return Err(self.error(
                         ErrorKind::InvalidSource,
-                        "match arms must be separated by a newline [match.separator]",
+                        crate::diagnostic!(
+                            "match.separator",
+                            "match arms must be separated by a newline"
+                        ),
                     ));
                 }
             }
@@ -176,8 +187,13 @@ impl Parser<'_, '_> {
                 self.token().kind,
                 Kind::Keyword("return" | "break" | "continue")
             ) {
-                return Err(self.error(ErrorKind::InvalidSource,
-                    "control transfers are forbidden inside value expressions [expr.jump-prohibited]"));
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "expr.jump-prohibited",
+                        "control transfers are forbidden inside value expressions"
+                    ),
+                ));
             }
             self.expression()
         }

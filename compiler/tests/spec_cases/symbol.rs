@@ -1,4 +1,4 @@
-use crate::test_util::compile_and_run_c11;
+use crate::test_util::compile_and_run_c23;
 
 #[test]
 fn templates_preserve_constant_dependencies_and_nested_value_scopes() {
@@ -18,7 +18,7 @@ fn main() -> u8 {
     if captured != `2` { return 2 }
     return 0
 }"#;
-    let result = compile_and_run_c11(source, "text.suz");
+    let result = compile_and_run_c23(source, "text.suz");
     assert_eq!(
         result.status.code(),
         Some(0),
@@ -45,11 +45,11 @@ fn template_contents_keep_diagnostics_and_scope_checks() {
         ),
         (
             "const VALUE = `${1 / 0}`\nfn main() -> u8 { return 0 }",
-            "const.evaluation",
+            "arith.div-zero-always",
         ),
     ] {
         let error = suz::compile(source.as_bytes()).unwrap_err();
-        assert!(error.message.contains(rule), "{source}: {error:?}");
+        assert!(error.message().contains(rule), "{source}: {error:?}");
     }
     let source = "fn main() -> u8 { fix value = `${1 + 2}`\nreturn 0 }";
     let result =
@@ -81,7 +81,7 @@ fn float_templates(values: impl IntoIterator<Item = (String, &'static str)>) {
     }
     body.push_str("return 0\n}\n");
     source.push_str(&body);
-    let result = compile_and_run_c11(&source, "float-text.suz");
+    let result = compile_and_run_c23(&source, "float-text.suz");
     assert_eq!(
         result.status.code(),
         Some(0),
@@ -108,7 +108,7 @@ fn constant_and_dynamic_float_templates_agree_at_format_boundaries() {
         f64::NEG_INFINITY,
     ];
     let singles = [
-        // Exact decimal midpoints: 1048576.25 and 1048576.75.
+        // 正確な十進の中点: 1048576.25と1048576.75。
         f32::from_bits(0x4980_0002),
         f32::from_bits(0x4980_0006),
         0.0,

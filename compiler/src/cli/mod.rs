@@ -1,3 +1,8 @@
+//! CLIの引数解析、ソース読み込み、検査・C出力・ビルド・実行をまとめる。ライブラリの診断を終了状態と表示へ変換する。
+//!
+//! 利用元: [`crate::main`]。
+//! 主な対象規則: `[tool.build]`、`[tool.check]`、`[tool.emit-c]`、`[tool.exit]`、`[tool.information]`、`[tool.messages]`。
+
 mod arguments;
 mod assets;
 mod emit;
@@ -78,16 +83,17 @@ pub fn run() -> Result<Outcome> {
                     format!("internal error: {}:{error}", options.input.display()),
                 ),
             };
+            let compilation_options = suz::CompilationOptions { arithmetic_mode: options.mode, text_pool_limit: options.text_pool_limit, log_allow: options.log_allow };
             let (c, warnings) = if options.command == Command::Check {
                 (
                     None,
-                    suz::check_source(&bytes, options.mode).map_err(diagnostic)?,
+                    suz::check_source_with_options(&bytes, &compilation_options).map_err(diagnostic)?,
                 )
             } else {
                 let compiled = suz::compile_with_options(
                     &bytes,
                     &options.input.display().to_string(),
-                    &suz::CompilationOptions { arithmetic_mode: options.mode, text_pool_limit: options.text_pool_limit },
+                    &compilation_options,
                 )
                 .map_err(diagnostic)?;
                 (Some(compiled.c), compiled.warnings)
@@ -96,11 +102,13 @@ pub fn run() -> Result<Outcome> {
             for warning in warnings {
                 writeln!(
                     stderr,
-                    "{}:{}:{}: warning: {}",
+                    "{}:{}:{}: {}: {}{}",
                     options.input.display(),
                     warning.line,
                     warning.column,
-                    warning.message
+                    if warning.allowed_reason.is_some() { "allowed" } else { "warn" },
+                    warning.message(),
+                    warning.allowed_reason.as_ref().map(|reason| format!(" {reason}")).unwrap_or_default()
                 )
                 .map_err(|e| Failure::tool(2, "tool.messages", e))?;
             }
@@ -113,7 +121,7 @@ pub fn run() -> Result<Outcome> {
                     } else {
                         let status = signals::execute(&mut std::process::Command::new(executable))
                             .map_err(|e| Failure::tool(2, "tool.run", e))?;
-                        // Drop the build directory before main propagates an exit signal.
+                        // mainが終了シグナルを再送する前に、ビルド用ディレクトリを破棄する。
                         drop(build);
                         use std::os::unix::process::ExitStatusExt;
                         return Ok(match status.signal() {

@@ -1,3 +1,7 @@
+//! 変換・比較・演算に必要なCの補助関数を、使用されたものだけ出力する。
+//!
+//! 利用元: [`crate::codegen`]。
+
 use super::ExpressionContext;
 use std::fmt::Write;
 
@@ -38,7 +42,7 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
     }
     if context.narrow_float_check {
         c.push_str(
-            r#"// The midpoint above FLT_MAX rounds to infinity (ties to even).
+            r#"// FLT_MAXの上側の中間値は無限大に丸める（偶数丸め）。
 static inline _Bool suz_f32_fits(double value) {
     return !(value >= 0x1.ffffffp127 || value <= -0x1.ffffffp127)
         || value > DBL_MAX || value < -DBL_MAX;
@@ -49,8 +53,8 @@ static inline _Bool suz_f32_fits(double value) {
     if context.narrow_float {
         c.push_str(
             r#"static inline float suz_narrow_f32(double value) {
-    // Finite inputs just above FLT_MAX round to FLT_MAX. Clamp them
-    // before the C cast, whose out-of-range behavior is not portable.
+    // FLT_MAXを少し超えた有限値はFLT_MAXへ丸める。
+    // 範囲外のCキャストの動作は移植可能でないため、その前に上限へ制限する。
     if (value > FLT_MAX && value <= DBL_MAX) return FLT_MAX;
     if (value < -FLT_MAX && value >= -DBL_MAX) return -FLT_MAX;
     return (float)value;
@@ -66,8 +70,8 @@ static inline _Bool suz_f32_fits(double value) {
         };
         writeln!(c, "static inline {} suz_{}(uint{bits}_t bits) {{\n    {} value;\n    memcpy(&value, &bits, sizeof(value));\n    return value;\n}}\n", ty.c_name(), ty.name(), ty.c_name()).unwrap();
     }
-    // Compare through parameters so valid self-comparisons do not trigger C's
-    // tautological-comparison warnings. Emit only helpers that are used.
+    // 引数を通じて比較し、有効な自己比較がCの恒真比較の警告を出さないようにする。
+    // 使われる補助関数だけを出力する。
     for ty in &context.bit_helpers {
         let (min, max) = ty.bounds();
         let mask = if min < 0 { max * 2 + 1 } else { max };
@@ -80,7 +84,7 @@ static inline _Bool suz_f32_fits(double value) {
         .unwrap();
         writeln!(c, "    bits &= UINT64_C({mask});").unwrap();
         if min < 0 {
-            // Both conversions fit int64_t; avoid out-of-range unsigned-to-signed casts.
+            // 両方の変換はint64_tに収まる。範囲外の符号なしから符号付きへの変換を避ける。
             writeln!(c, "    return bits <= UINT64_C({max}) ? (int64_t)bits : -INT64_C(1) - (int64_t)(UINT64_C({mask}) ^ bits);").unwrap();
         } else {
             writeln!(c, "    return ({})bits;", ty.c_name()).unwrap();

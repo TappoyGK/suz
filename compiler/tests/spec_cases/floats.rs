@@ -49,14 +49,6 @@ fn float_types_reject_overflow_and_implicit_conversions() {
         ("fix x: f32 = 1.0e40\nreturn 0", "lit.float-range"),
         ("fix x = 1.0e400\nreturn 0", "lit.float-range"),
         ("fix x: u8 = 1.0\nreturn 0", "type.expected"),
-        (
-            "fix x: f32 = 1.0\nfix y: f64 = x\nreturn 0",
-            "type.expected",
-        ),
-        (
-            "fix x: f32 = 1.0\nfix y: f64 = 1.0\nreturn ifexpr x == y { 0 } else { 1 }",
-            "type.expected",
-        ),
         ("fix x = 1\nfix y: f32 = x\nreturn 0", "type.expected"),
         ("fix x = 1.0 & 1.0\nreturn 0", "expr.operator-types"),
         ("fix x = 1.0 +% 1.0\nreturn 0", "expr.operator-types"),
@@ -65,7 +57,7 @@ fn float_types_reject_overflow_and_implicit_conversions() {
         let source = format!("fn main() -> u8 {{\n{body}\n}}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
-        assert!(error.message.contains(rule), "{error:?}");
+        assert!(error.message().contains(rule), "{error:?}");
     }
     let source = b"fn main() -> u8 { fix x: f32 = -1\nfix y: f64 = -0\nfix z = -inf\nreturn 0 }";
     for mode in [
@@ -122,7 +114,7 @@ fn float_arithmetic_preserves_rounding_and_ieee_results_when_optimized() {
     let executable = directory.0.join("float-arithmetic");
     fs::write(&c_file, suz::compile(source.as_bytes()).unwrap()).unwrap();
     let built = runtime_link::compiler()
-        .args(["-std=c11", "-O2", "-Wall", "-Wextra", "-Werror"])
+        .args(["-std=c23", "-O2", "-Wall", "-Wextra", "-Werror"])
         .arg(&c_file)
         .arg("-o")
         .arg(&executable)
@@ -141,10 +133,6 @@ fn float_arithmetic_preserves_rounding_and_ieee_results_when_optimized() {
 #[test]
 fn float_arithmetic_checks_types_and_stays_out_of_integer_diagnostics() {
     for (body, rule) in [
-        (
-            "fix x: f32 = 1.0\nfix y: f64 = 1.0\nfix z = x + y\nreturn 0",
-            "type.expected",
-        ),
         ("fix x = -true\nreturn 0", "expr.operator-types"),
         ("fix x = true + false\nreturn 0", "expr.operator-types"),
         ("fix x: f32 = 1.0\nx += 1.0\nreturn 0", "var.fix-assign"),
@@ -152,9 +140,9 @@ fn float_arithmetic_checks_types_and_stays_out_of_integer_diagnostics() {
         let source = format!("fn main() -> u8 {{\n{body}\n}}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
-        assert!(error.message.contains(rule), "{error:?}");
+        assert!(error.message().contains(rule), "{error:?}");
     }
-    let source = b"fn main() -> u8 { var x: f32 = -(1)\nx += -x * (2 - 1) / 2\nreturn 0 }";
+    let source = b"fn main() -> u8 { var x: f32 = -(1.0)\nx += -x * (2.0 - 1.0) / 2.0\nreturn 0 }";
     for mode in [
         suz::ArithmeticMode::Default,
         suz::ArithmeticMode::Warn,
@@ -180,8 +168,8 @@ fn float_arithmetic_checks_types_and_stays_out_of_integer_diagnostics() {
 #[test]
 fn entry_restores_floating_point_environment_before_suz_runs() {
     let directory = TemporaryDirectory::new();
-    // Even a program without floating-point expressions must initialize the
-    // environment. Check the flags before the driver performs any arithmetic.
+    // 浮動小数点式のないプログラムも環境を初期化する必要がある。
+    // テスト用コードが演算する前にフラグを確認する。
     let generated = suz::compile(b"fn main() -> u8 { return 7 }").unwrap();
     fs::write(directory.0.join("entry.c"), generated).unwrap();
     let driver = directory.0.join("driver.c");
@@ -201,8 +189,8 @@ int main(void) {
         if (fesetround(modes[i]) != 0) return 1;
         if (feraiseexcept(FE_INVALID | FE_DIVBYZERO | FE_INEXACT) != 0) return 2;
 #if defined(__APPLE__) && defined(__aarch64__)
-        // C has no portable trap/flush control. Exercise the host's exposed
-        // controls too, so resetting only the rounding mode cannot pass.
+        // Cには移植可能なトラップ・ゼロへのフラッシュ制御がない。
+        // ホストが提供する設定も試し、丸めモードだけを戻す実装では通らないようにする。
         fenv_t dirty;
         if (fegetenv(&dirty) != 0) return 11;
         dirty.__fpcr |= __fpcr_flush_to_zero | __fpcr_trap_invalid | __fpcr_trap_divbyzero;
@@ -228,7 +216,7 @@ int main(void) {
     for optimization in ["-O0", "-O2"] {
         let executable = directory.0.join(format!("entry{optimization}"));
         let built = runtime_link::compiler()
-            .args(["-std=c11", "-Wall", "-Wextra", "-Werror", optimization])
+            .args(["-std=c23", "-Wall", "-Wextra", "-Werror", optimization])
             .arg(&driver)
             .arg("-o")
             .arg(&executable)

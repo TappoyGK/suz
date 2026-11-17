@@ -27,8 +27,8 @@ bool suz_parse_integer(const char *bytes, uint64_t length, unsigned bits,
         const unsigned next = byte - '0';
         if (!wrap && (value > limit / 10 ||
                       (value == limit / 10 && next > limit % 10))) return false;
-        /* Unsigned overflow retains exactly the low bits required by as%.
-           No accumulator size limits the number of input digits. */
+        /* 符号なしのオーバーフローにより、as%に必要な下位ビットが正確に残る。
+           累積値の型の大きさによって入力桁数を制限しない。 */
         value = value * 10 + next;
     }
     *output = (negative ? UINT64_C(0) - value : value) & mask;

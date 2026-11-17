@@ -1,6 +1,6 @@
 use crate::{
     support::float_runtime,
-    test_util::{TemporaryDirectory, compile_and_run_c11},
+    test_util::{TemporaryDirectory, compile_and_run_c23},
 };
 use std::{
     fmt::Write as _,
@@ -23,7 +23,7 @@ fn main() -> u8 {
     return 0
 }
 "#;
-    let output = compile_and_run_c11(source, "float.suz");
+    let output = compile_and_run_c23(source, "float.suz");
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stdout.is_empty());
     assert_eq!(
@@ -32,8 +32,8 @@ fn main() -> u8 {
     );
 }
 
-// Compare the number of significant digits independently of fixed/scientific
-// layout and Suz's mandatory '.0'. Rust's formatter is the shortest reference.
+// 固定表記・科学表記やSuzで必須の「.0」に依存せず、有効桁数を比較する。
+// 最短表記の基準にはRustのフォーマッターを使う。
 fn significant_digits(text: &str) -> usize {
     let mantissa = text.split(['e', 'E']).next().unwrap();
     let digits: String = mantissa.chars().filter(char::is_ascii_digit).collect();
@@ -49,7 +49,7 @@ fn float_logs_round_trip_and_obey_exact_boundaries_without_undefined_behavior() 
     let mut command = Command::new(std::env::var_os("CC").unwrap_or_else(|| "clang".into()));
     command
         .args([
-            "-std=c11",
+            "-std=c23",
             "-pedantic-errors",
             "-Wall",
             "-Wextra",
@@ -70,8 +70,7 @@ fn float_logs_round_trip_and_obey_exact_boundaries_without_undefined_behavior() 
         String::from_utf8_lossy(&built.stderr)
     );
 
-    // The lower 10^-6 neighbor must use scientific form even when its shortest
-    // decimal is '1e-6'. 10^21 itself is exactly representable in binary64.
+    // 10^-6の一つ下の値は、最短表記が「1e-6」でも科学表記にする。10^21自体はbinary64で正確に表現できる。
     let expected: &[(u32, u64, &str)] = &[
         (64, 0, "0.0"),
         (64, 0x8000000000000000, "-0.0"),
@@ -106,8 +105,8 @@ fn float_logs_round_trip_and_obey_exact_boundaries_without_undefined_behavior() 
         .iter()
         .map(|&(width, bits, _)| (width, bits))
         .collect();
-    // Exercise every exponent at the normal/subnormal and power-of-two edges,
-    // then sample reproducible mantissas and signs across the whole bit space.
+    // 正規化数・非正規化数と2のべき乗の境界で全指数を試し、
+    // その後、仮数と符号を全ビット範囲から再現可能な方法で抽出する。
     for (width, mantissa, exponents) in [(32, 23, 255), (64, 52, 2047)] {
         for exponent in 1..exponents {
             for offset in [-1_i64, 0, 1] {
@@ -189,8 +188,8 @@ fn float_logs_round_trip_and_obey_exact_boundaries_without_undefined_behavior() 
         let (whole, fractional) = mantissa.split_once('.').unwrap();
         assert!(!whole.is_empty() && !fractional.is_empty(), "{text}");
     }
-    // All available locales must produce the same bytes, including those with
-    // a comma decimal separator. C is always available on conforming hosts.
+    // 小数点記号がコンマのものも含め、利用可能な全ロケールで同じバイト列を出す。
+    // 規格に従うホストではCロケールは必ず利用できる。
     let locales = Command::new("locale").arg("-a").output().unwrap();
     assert!(locales.status.success());
     for locale in String::from_utf8(locales.stdout)

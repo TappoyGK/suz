@@ -1,3 +1,8 @@
+//! for範囲の境界式について、反復変数への参照と値域を検査する。
+//!
+//! 利用元: [`crate::check::statements`]。
+//! 主な対象規則: `[for.bound-reference]`、`[for.bounds]`。
+
 use super::{
     expression::{expression, operand_type},
     ir::CheckedExpression,
@@ -17,7 +22,10 @@ impl crate::ast::visit::Visitor for References {
         {
             return Err(expr.location.error(
                 ErrorKind::InvalidSource,
-                "loop inputs cannot reference var bindings [for.bound-reference]",
+                crate::diagnostic!(
+                    "for.bound-reference",
+                    "loop inputs cannot reference var bindings"
+                ),
             ));
         }
         crate::ast::visit::walk_expression(self, expr)
@@ -54,6 +62,7 @@ pub(super) fn check_references(expr: &Expression, bindings: &Scope) -> Result<()
     use crate::ast::visit::Visitor;
     References(
         bindings
+            .locals
             .iter()
             .filter(|(_, b)| b.mutable)
             .map(|(name, _)| name.clone())
@@ -72,10 +81,15 @@ pub(super) fn bounds(
     let expected = operand_type(start, bindings).or_else(|| operand_type(end, bindings));
     let first = expression(start, expected, bindings)?;
     let last = expression(end, Some(first.ty), bindings)?;
-    if !matches!(first.ty, Type::Integer(_) | Type::Char) || first.ty != last.ty {
+    if !(first.ty.is_integer() || first.ty == Type::Char)
+        || !super::generic::domain::same(first.ty, last.ty)
+    {
         return Err(start.location.error(
             ErrorKind::InvalidSource,
-            "range bounds must have the same integer type or both be char [for.bounds]",
+            crate::diagnostic!(
+                "for.bounds",
+                "range bounds must have the same integer type or both be char"
+            ),
         ));
     }
     Ok((first, last))

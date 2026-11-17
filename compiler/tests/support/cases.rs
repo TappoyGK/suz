@@ -71,7 +71,7 @@ fn source(lines: &[&str]) -> Result<Source> {
                 diagnostic_table(lines, &mut i)?,
                 "panic diagnostic table",
             )?,
-            "**整数演算の警告：**" => unique(
+            "**警告：**" => unique(
                 &mut warnings,
                 diagnostic_table(lines, &mut i)?,
                 "warning table",
@@ -155,8 +155,13 @@ fn source(lines: &[&str]) -> Result<Source> {
             .iter_mut()
             .find(|r| r.mode == mode)
             .ok_or("warning does not apply to any run")?;
-        if warning.rule != "diagnostic.arithmetic" {
-            return Err("expected arithmetic warning rule".into());
+        if !matches!(
+            warning.rule.as_str(),
+            "diagnostic.arithmetic"
+                | "diagnostic.constant-comparison"
+                | "diagnostic.integer-division-to-float"
+        ) {
+            return Err("expected a supported warning rule".into());
         }
         if run.warnings.contains(&warning) {
             return Err("duplicate warning expectation".into());
@@ -164,7 +169,7 @@ fn source(lines: &[&str]) -> Result<Source> {
         run.warnings.push(warning);
     }
     for run in &runs {
-        if !run.warnings.is_empty() && run.warnings.len() != run.arithmetic_warnings {
+        if !run.warnings.is_empty() && run.warnings.len() != run.warning_count {
             return Err("warning table and warning count disagree".into());
         }
     }
@@ -215,7 +220,7 @@ pub fn extract(markdown: &str) -> Result<BTreeMap<String, Source>> {
      -> Result<()> {
         let mut parts = title.splitn(2, char::is_whitespace);
         let id = parts.next().unwrap_or_default();
-        // A primary-rule label also identifies a case with a malformed ID.
+        // 主根拠のラベルがあれば、IDが不正でも例として識別する。
         if !valid_id(id) && !has_rule {
             return Ok(());
         }

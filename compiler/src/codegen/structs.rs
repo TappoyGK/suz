@@ -1,3 +1,7 @@
+//! 構造体のC型、リテラル、比較に必要な補助処理を生成する。
+//!
+//! 利用元: [`crate::codegen`]、[`crate::codegen::expressions`]。
+
 use super::{ExpressionContext, expressions::expression};
 use crate::{ast::Type, check::CheckedExpression};
 use std::{collections::BTreeSet, fmt::Write};

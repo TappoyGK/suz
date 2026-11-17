@@ -1,10 +1,10 @@
+//! 名前から束縛・定数・関数宣言を引くスコープを保持する。汎用検査の状態と診断の出力先も共有する。
+//!
+//! 利用元: [`crate::check::functions`]、[`crate::check::statements`]、[`crate::check::expression`]。
+
 use super::statements::Binding;
 use crate::ast::{IntegerType, Type};
-use std::{
-    collections::BTreeMap,
-    ops::{Deref, DerefMut},
-    rc::Rc,
-};
+use std::{collections::BTreeMap, rc::Rc};
 
 #[derive(Clone)]
 pub(super) struct Signature {
@@ -13,16 +13,74 @@ pub(super) struct Signature {
     pub result: Type,
 }
 
+impl Signature {
+    pub fn declares(&self, family: super::generic::Family) -> bool {
+        self.parameters
+            .iter()
+            .chain([&self.result])
+            .any(|ty| super::generic::Family::of(*ty) == Some(family))
+    }
+    pub fn is_generic(&self) -> bool {
+        self.result.generic() || self.parameters.iter().any(|t| t.generic())
+    }
+}
+
+// 診断とランタイム定数の出力先を、字句スコープ間で共有する。
+#[derive(Clone, Default)]
+pub(super) struct Outputs {
+    pub divisions: Rc<std::cell::RefCell<std::collections::BTreeSet<(usize, usize)>>>,
+    pub comparisons: Rc<std::cell::RefCell<BTreeMap<(usize, usize), bool>>>,
+    pub constant_texts: Rc<std::cell::RefCell<std::collections::BTreeSet<String>>>,
+}
+
+#[derive(Clone, Copy, Default)]
+pub(super) enum Mode {
+    #[default]
+    Ordinary,
+    GenericCheck,
+    Instance(super::generic::GenericTypes),
+}
+
 #[derive(Clone)]
 pub(super) struct Scope {
-    pub constant_texts: Rc<std::cell::RefCell<std::collections::BTreeSet<String>>>,
+    pub mode: Mode,
+    pub deferred: Option<Rc<std::cell::RefCell<Vec<super::generic::Deferred>>>>,
+    // 起点の呼び出しから、この具体化までの共有可能な経路。
+    pub generic_calls: Option<Rc<super::generic::CallTrace>>,
+    pub instances: Rc<std::cell::RefCell<super::generic::Instances>>,
+    // 式のポインターを鍵とするキャッシュは、一回のヒント取得と一つの型代入の間だけ保持する。
+    pub type_hints: Rc<std::cell::RefCell<BTreeMap<usize, Option<Type>>>>,
+    pub float_hints: Rc<std::cell::RefCell<BTreeMap<usize, bool>>>,
+    pub hint_depth: Rc<std::cell::Cell<usize>>,
+    pub outputs: Outputs,
     pub locals: BTreeMap<String, Binding>,
+    // 不変の宣言は共有し、ローカル束縛の状態だけを複製する。
+    pub constants: Rc<BTreeMap<String, Binding>>,
     pub enums: Rc<Vec<crate::ast::EnumDeclaration>>,
     pub structs: Rc<Vec<crate::ast::StructDeclaration>>,
     pub functions: Rc<BTreeMap<String, Signature>>,
     pub result: Type,
 }
 impl Scope {
+    pub fn get(&self, name: &str) -> Option<&Binding> {
+        self.locals.get(name).or_else(|| self.constants.get(name))
+    }
+    pub fn contains_key(&self, name: &str) -> bool {
+        self.get(name).is_some()
+    }
+    pub fn resolve_type(&self, ty: Type) -> Type {
+        match self.mode {
+            Mode::Instance(types) => types.resolve(ty),
+            Mode::Ordinary | Mode::GenericCheck => ty,
+        }
+    }
+    pub fn generic_check(&self) -> bool {
+        matches!(self.mode, Mode::GenericCheck)
+    }
+    pub fn instance(&self) -> bool {
+        matches!(self.mode, Mode::Instance(_))
+    }
+
     pub fn type_name(&self, ty: Type) -> &str {
         match ty {
             Type::Enum(ty) => &self.enums[ty.id].name,
@@ -38,8 +96,16 @@ impl Scope {
 impl Default for Scope {
     fn default() -> Self {
         Self {
-            constant_texts: Rc::default(),
+            mode: Default::default(),
+            deferred: None,
+            generic_calls: None,
+            instances: Rc::default(),
+            type_hints: Rc::default(),
+            hint_depth: Rc::default(),
+            float_hints: Rc::default(),
+            outputs: Default::default(),
             locals: BTreeMap::new(),
+            constants: Rc::default(),
             enums: Rc::default(),
             structs: Rc::default(),
             functions: Rc::default(),
@@ -47,14 +113,9 @@ impl Default for Scope {
         }
     }
 }
-impl Deref for Scope {
-    type Target = BTreeMap<String, Binding>;
-    fn deref(&self) -> &Self::Target {
-        &self.locals
-    }
-}
-impl DerefMut for Scope {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.locals
+impl std::ops::Index<&str> for Scope {
+    type Output = Binding;
+    fn index(&self, name: &str) -> &Binding {
+        self.get(name).expect("checked binding name")
     }
 }

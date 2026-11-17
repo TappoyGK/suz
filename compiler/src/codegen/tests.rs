@@ -18,8 +18,8 @@ fn not(value: Value) -> Value {
 #[test]
 #[ignore = "release check: run scripts/test-release.sh"]
 fn generated_bool_values_preserve_negation_and_copies() {
-    // Exercise the backend directly: expose a bool as the C entry point's
-    // exit code, without adding a bool-to-integer conversion to Suz.
+    // C生成を直接テストする。Suzにboolから整数への変換を追加せず、
+    // Cの入口の終了コードとしてboolの値を観測する。
     let directory = std::env::temp_dir().join(format!("suz-bool-codegen-{}", std::process::id()));
     fs::create_dir(&directory).unwrap();
     struct Cleanup(std::path::PathBuf);
@@ -48,6 +48,8 @@ fn generated_bool_values_preserve_negation_and_copies() {
             enums: Vec::new(),
             structs: Vec::new(),
             unhandled_arithmetic: Vec::new(),
+            comparison_warnings: Vec::new(),
+            division_warnings: Vec::new(),
             main_id: 0,
             functions: vec![crate::check::ir::CheckedFunction {
                 id: 0,
@@ -84,7 +86,7 @@ fn generated_bool_values_preserve_negation_and_copies() {
         )
         .unwrap();
         let output = runtime_link::compiler()
-            .args(["-std=c11", "-Wall", "-Wextra", "-Werror"])
+            .args(["-std=c23", "-Wall", "-Wextra", "-Werror"])
             .arg(&c_file)
             .arg("-o")
             .arg(&executable)
@@ -130,8 +132,8 @@ fn logical_codegen_evaluates_operands_once_and_short_circuits() {
             left: Box::new(boolean(Value::Local(0))),
             right: Box::new(boolean(Value::Local(1))),
         });
-        // Instrument local reads in a C harness to observe evaluation order
-        // and counts, including operands whose evaluation must be skipped.
+        // Cのテスト用コードでローカルの読み取りを記録し、評価順と回数を確認する。
+        // 評価を省略すべきオペランドも含める。
         let c = format!(
             r#"static int trace;
 static _Bool probe(int id, _Bool value) {{ trace = trace * 10 + id; return value; }}
@@ -148,7 +150,7 @@ return result != {expected} || trace != {trace};
         let executable = directory.join(format!("{index}"));
         fs::write(&source, c).unwrap();
         let output = runtime_link::compiler()
-            .args(["-std=c11", "-Wall", "-Wextra", "-Werror"])
+            .args(["-std=c23", "-Wall", "-Wextra", "-Werror"])
             .arg(&source)
             .arg("-o")
             .arg(&executable)
@@ -218,6 +220,8 @@ fn comparison_codegen_sequences_and_reuses_operands() {
             enums: Vec::new(),
             structs: Vec::new(),
             unhandled_arithmetic: Vec::new(),
+            comparison_warnings: Vec::new(),
+            division_warnings: Vec::new(),
             main_id: 0,
             functions: vec![crate::check::ir::CheckedFunction {
                 id: 0,
@@ -226,7 +230,7 @@ fn comparison_codegen_sequences_and_reuses_operands() {
                 statements: vec![CheckedStatement::Return(expr)],
             }],
         };
-        // Replace local reads with probes only in the backend test harness.
+        // ローカルの読み取りの記録は、C生成のテスト用コードだけに入れる。
         let c = format!(
             r#"static int trace;
 static int probe(int id, int value) {{ trace = trace * 10 + id; return value; }}
@@ -250,7 +254,7 @@ return result != {expected} || trace != {trace};
         let executable = directory.join(format!("{index}"));
         fs::write(&source, c).unwrap();
         let built = runtime_link::compiler()
-            .args(["-std=c11", "-Wall", "-Wextra", "-Werror"])
+            .args(["-std=c23", "-Wall", "-Wextra", "-Werror"])
             .arg(&source)
             .arg("-o")
             .arg(&executable)

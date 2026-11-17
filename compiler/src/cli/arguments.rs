@@ -1,3 +1,8 @@
+//! CLIのコマンドとオプションを解析し、パスや文字列プール上限などの入力を検証する。
+//!
+//! 利用元: [`crate::cli`]。
+//! 主な対象規則: `[tool.arguments]`、`[tool.text-pool-size]`。
+
 use super::{Failure, Result};
 use std::{ffi::OsString, path::PathBuf};
 
@@ -35,6 +40,7 @@ pub struct Options {
     pub cc: Option<PathBuf>,
     pub optimization: OsString,
     pub force: bool,
+    pub log_allow: bool,
     pub mode: suz::ArithmeticMode,
     pub text_pool_limit: suz::TextPoolLimit,
 }
@@ -75,6 +81,7 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
     let mut mode = None;
     let mut text_pool_limit = None;
     let mut force = false;
+    let mut log_allow = false;
     let mut help = false;
     let mut paths_only = false;
     while let Some(arg) = args.next() {
@@ -83,6 +90,10 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
             match arg.to_str() {
                 Some("--") => {
                     paths_only = true;
+                    continue;
+                }
+                Some("--log-allow") if !log_allow => {
+                    log_allow = true;
                     continue;
                 }
                 Some("--help") if !help => {
@@ -162,6 +173,7 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
         cc,
         optimization: optimization.unwrap_or_else(|| "-O0".into()),
         force,
+        log_allow,
         mode: mode.unwrap_or_default(),
         text_pool_limit: text_pool_limit.unwrap_or_default(),
     }))

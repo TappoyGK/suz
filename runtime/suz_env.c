@@ -13,9 +13,10 @@ void suz_env_free(void *ptr) {
     free(ptr);
 }
 
-void suz_env_log(const char *text, size_t len) {
+void suz_env_log(suz_log_level level, const char *text, size_t len) {
+    (void)level; /* この引数が意図的に未使用であることをコンパイラへ示す。 */
 #ifdef SIGPIPE
-    /* A closed output pipe is an output failure, not a process failure. */
+    /* 閉じた出力パイプは出力の失敗として扱い、プロセスの異常終了にしない。 */
     (void)signal(SIGPIPE, SIG_IGN);
 #endif
     while (len != 0) {
@@ -34,7 +35,6 @@ void suz_env_log(const char *text, size_t len) {
 }
 
 _Noreturn void suz_env_panic(void) {
-    /* exit also attempts to flush buffered output. Flush failure does not
-       change the requested exit status. */
+    /* exitも出力バッファのフラッシュを試みる。フラッシュに失敗しても、指定した終了状態は変えない。 */
     exit(101);
 }

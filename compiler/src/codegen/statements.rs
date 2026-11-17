@@ -1,3 +1,7 @@
+//! IRの文をCの文へ変換する。分岐・反復・束縛・代入・returnを出力し、Suzの制御の意味を保つ。
+//!
+//! 利用元: [`crate::codegen::functions`]、[`crate::codegen::blocks`]。
+
 use super::{
     ExpressionContext, arithmetic::integer_parts, casts::cast_parts, expressions::expression,
 };
@@ -14,10 +18,14 @@ pub(super) fn emit_block(
     let indent = "    ".repeat(depth);
     for statement in statements {
         match statement {
-            CheckedStatement::Log { parts, location } => {
+            CheckedStatement::Log {
+                parts,
+                location,
+                level,
+            } => {
                 let id = *next_assignment;
                 *next_assignment += 1;
-                super::logs::emit(c, parts, *location, depth, id, context);
+                super::logs::emit(c, parts, (*location, *level), depth, id, context);
             }
             CheckedStatement::Expression(value) => {
                 writeln!(c, "{indent}(void)({});", expression(value, context)).unwrap();
@@ -35,9 +43,8 @@ pub(super) fn emit_block(
                 .unwrap();
                 writeln!(c, "{indent}    (void)suz_match_{id};").unwrap();
                 for (index, (pattern, body)) in arms.iter().enumerate() {
-                    // Exhaustiveness is checked before lowering, so the last
-                    // arm is unconditional. Avoid a C switch: break belongs
-                    // to the enclosing Suz loop, not to this match.
+                    // 網羅性はIRへ変換する前に検査済みなので、最後の分岐は無条件にする。
+                    // breakはmatchではなく外側のSuzループに属するため、Cのswitchを使わない。
                     if index + 1 == arms.len() {
                         writeln!(c, "{indent}    {}{{", if index == 0 { "" } else { "else " })
                             .unwrap();
@@ -95,10 +102,10 @@ pub(super) fn emit_block(
                     if !inclusive && character {
                         writeln!(c, "{indent}    if (suz_more_{id}) suz_cursor_{id} = suz_cursor_{id} == 0xe000 ? 0xd7ff : suz_cursor_{id} - 1;").unwrap();
                     } else if !inclusive {
-                        // Empty ranges must not subtract from the type's minimum.
+                        // 空の範囲では、型の最小値から減算してはならない。
                         writeln!(c, "{indent}    if (suz_more_{id}) --suz_cursor_{id};").unwrap();
                     }
-                    // Updating in the for clause also handles continue at the minimum.
+                    // forの更新節で進めることで、最小値でのcontinueも扱う。
                     let step = if character {
                         format!(
                             "suz_cursor_{id} -= suz_more_{id} ? (suz_cursor_{id} == 0xe000 ? 0x801 : 1) : 0"
@@ -110,7 +117,7 @@ pub(super) fn emit_block(
                 } else {
                     writeln!(c, "{indent}    {ty} suz_cursor_{id} = suz_start_{id};").unwrap();
                     writeln!(c, "{indent}    _Bool suz_more_{id} = 1;").unwrap();
-                    // Test before incrementing, including after continue at the maximum.
+                    // 最大値でのcontinue後も含め、加算する前に終了条件を検査する。
                     let step = if character {
                         format!(
                             "suz_cursor_{id} += suz_more_{id} ? (suz_cursor_{id} == 0xd7ff ? 0x801 : 1) : 0"
@@ -224,7 +231,7 @@ pub(super) fn emit_block(
                     expression(initializer, context)
                 )
                 .unwrap();
-                // Suz does not require reading every binding; suppress C unused warnings.
+                // Suzは全束縛の読み取りを要求しないため、Cの未使用警告を抑える。
                 writeln!(c, "{indent}(void)suz_local_{id};").unwrap();
             }
             CheckedStatement::Assign {

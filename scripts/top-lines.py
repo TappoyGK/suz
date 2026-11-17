@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Print the 20 largest files by line count, excluding Git-ignored files."""
+"""Gitの無視対象を除き、行数の多いファイルを上位20件表示する。"""
 
 import os
 from pathlib import Path

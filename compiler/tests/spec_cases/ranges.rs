@@ -16,7 +16,7 @@ fn assert_diagnostic(source: &str, line: usize, column: usize, message: &str) {
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource, "{source}");
         assert_eq!((error.line, error.column), (line, column), "{source}");
-        assert_eq!(error.message, message, "{source}");
+        assert_eq!(error.message(), message, "{source}");
     }
 }
 
@@ -211,7 +211,7 @@ fn ranges_handle_integer_extremes_and_nested_control_without_overflow() {
         let executable = directory.0.join(format!("ranges{optimization}"));
         let built = runtime_link::compiler()
             .args([
-                "-std=c11",
+                "-std=c23",
                 "-Wall",
                 "-Wextra",
                 "-Werror",
@@ -270,7 +270,7 @@ fn range_bounds_check_nested_references_scope_and_control_transfers() {
         for source in [source.clone(), source.replace("for ", "rev ")] {
             let error = suz::compile(source.as_bytes()).unwrap_err();
             assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
-            assert!(error.message.contains(rule), "{source}: {error:?}");
+            assert!(error.message().contains(rule), "{source}: {error:?}");
         }
     }
     let source = b"fn main() -> u8 {\nfix n: u8 = 2\nfor i in (n - 1)..<(n + 1) { fix x = i * 2 }\nreturn 0\n}";
@@ -288,7 +288,7 @@ fn range_bounds_check_nested_references_scope_and_control_transfers() {
         .err()
         .unwrap();
     assert_eq!((error.line, error.column), (3, 13));
-    // The compiler-generated range increment itself needs no arithmetic handler.
+    // コンパイラが生成する範囲の更新処理自体には、整数演算のハンドラーは不要。
     for keyword in ["for", "rev"] {
         let source = format!("fn main() -> u8 {{ {keyword} i in 0..=255 {{}}\nreturn 0 }}");
         suz::compile_with_mode(source.as_bytes(), suz::ArithmeticMode::Deny).unwrap();

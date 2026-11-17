@@ -1,3 +1,8 @@
+//! Clangと実行環境を確認し、生成Cのビルドと実行ファイルの公開を行う。
+//!
+//! 利用元: [`crate::cli`]。
+//! 主な対象規則: `[tool.build-settings]`、`[tool.extra-flags]`、`[tool.c-compiler]`、`[tool.environment]`、`[tool.messages]`、`[tool.output]`、`[tool.prerequisites]`。
+
 use super::{
     Failure, Result,
     arguments::Options,
@@ -14,6 +19,7 @@ use std::{
 pub struct Build {
     directory: StagedDirectory,
     cc: PathBuf,
+    extra_flags: Vec<String>,
 }
 
 fn error(rule: &str, error: impl std::fmt::Display) -> Failure {
@@ -42,10 +48,11 @@ impl Build {
             if std::env::var_os(name).is_some_and(|v| !v.is_empty()) {
                 return Err(error(
                     "tool.build-settings",
-                    format!("{name} must be empty; use -O0 or -O2"),
+                    format!("{name} must be empty; use SUZ_CFLAGS and -O0 or -O2"),
                 ));
             }
         }
+        let extra_flags = extra_flags()?;
         if let Some(output) = &options.output {
             validate_output(options, output)?;
         }
@@ -62,35 +69,67 @@ impl Build {
         let directory = StagedDirectory::new(&parent).map_err(|e| error("tool.temporary", e))?;
         let build = Self {
             directory,
+            extra_flags,
             cc: options.cc.clone().unwrap_or_else(|| "clang".into()),
         };
         build.probe()?;
         Ok(build)
     }
 
-    fn command(&self) -> Command {
+    fn command(&self, extra_flags: &[String]) -> Command {
         let mut command = Command::new(&self.cc);
         command.env("TMPDIR", self.directory.path());
+        command.args(extra_flags);
         command.args([
-            "-std=c11",
+            "-std=c23",
             "-Wall",
             "-Wextra",
             "-Werror",
-            "-ffp-model=strict",
+            "-fhonor-nans",
+            "-fhonor-infinities",
             "-ffp-contract=off",
             "-fdenormal-fp-math=ieee",
         ]);
         command
     }
 
+    // コンパイラとSDKの存在確認には利用者のフラグを混ぜない。
+    // 追加フラグの値の拒否は本ビルドでClangの診断とともに報告する。
     fn probe(&self) -> Result<()> {
         let root = self.directory.path();
         let source = root.join("probe.c");
         let object = root.join("probe.o");
+        fs::write(
+            &source,
+            r#"#if !defined(__clang__)
+#error "Clang required [tool.c-compiler]"
+#endif
+#if !defined(__STDC_VERSION__) || __STDC_VERSION__ < 202311L
+#error "C23 required [tool.c-compiler]"
+#endif
+_BitInt(128) suz_compiler_probe;
+"#,
+        )
+        .map_err(|e| error("tool.temporary", e))?;
+        let result = self
+            .command(&[])
+            .args(["-Wno-unused-command-line-argument", "-fsyntax-only"])
+            .arg(&source)
+            .output()
+            .map_err(|e| {
+                prerequisite(format!("cannot start Clang '{}': {e}", self.cc.display()))
+            })?;
+        if !result.status.success() {
+            compiler_output(&result)?;
+            return Err(error(
+                "tool.c-compiler",
+                "C23-capable Clang with 128-bit _BitInt support is required",
+            ));
+        }
         fs::write(&source, "#include <stdio.h>\n#include <stdlib.h>\n#include <fenv.h>\nint main(void) { return fesetenv(FE_DFL_ENV); }\n")
             .map_err(|e| error("tool.temporary", e))?;
         for link in [false, true] {
-            let mut command = self.command();
+            let mut command = self.command(&[]);
             if link {
                 command
                     .arg(&object)
@@ -133,7 +172,7 @@ impl Build {
         let root = self.directory.path();
         emit::unpack(c, root, environment.as_deref()).map_err(|e| error("tool.temporary", e))?;
         let executable = root.join("program");
-        let mut command = self.command();
+        let mut command = self.command(&self.extra_flags);
         command
             .arg(&options.optimization)
             .arg("-I")
@@ -213,4 +252,44 @@ fn validate_output(options: &Options, output: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+// 出力用スクリプトと同じ許可リストを使う。シェルの引用・展開は行わず、
+// 空白で分けた各項目をそのままClangの引数として渡す。
+fn extra_flags() -> Result<Vec<String>> {
+    let value = match std::env::var("SUZ_CFLAGS") {
+        Ok(value) => value,
+        Err(std::env::VarError::NotPresent) => return Ok(Vec::new()),
+        Err(_) => return Err(error("tool.extra-flags", "SUZ_CFLAGS must be valid UTF-8")),
+    };
+    value
+        .split([' ', '\t', '\n', '\r', '\x0b', '\x0c'])
+        .filter(|flag| !flag.is_empty())
+        .map(|flag| {
+            let allowed = include_str!("../../../scripts/cflags.txt")
+                .lines()
+                .filter(|line| !line.is_empty() && !line.starts_with('#'))
+                .any(|entry| {
+                    if entry.ends_with('=') {
+                        flag.strip_prefix(entry).is_some_and(|value| {
+                            !value.is_empty()
+                                && (entry != "-fsanitize="
+                                    || value
+                                        .split(',')
+                                        .all(|v| matches!(v, "address" | "undefined")))
+                        })
+                    } else {
+                        flag == entry
+                    }
+                });
+            if allowed {
+                Ok(flag.to_owned())
+            } else {
+                Err(error(
+                    "tool.extra-flags",
+                    format!("unsupported SUZ_CFLAGS flag: {flag}"),
+                ))
+            }
+        })
+        .collect()
 }

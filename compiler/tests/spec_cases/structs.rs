@@ -1,4 +1,4 @@
-use crate::test_util::compile_and_run_c11;
+use crate::test_util::compile_and_run_c23;
 
 #[test]
 #[ignore = "release check: run scripts/test-release.sh"]
@@ -27,7 +27,7 @@ fn main() -> u8 {
     return 0
 }
 "#;
-    let output = compile_and_run_c11(source, "structs.suz");
+    let output = compile_and_run_c23(source, "structs.suz");
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stdout.is_empty() && output.stderr.is_empty());
 }
@@ -41,7 +41,7 @@ fn failing() -> u8 {
     var value = Box { pair: Pair { x: 255, y: 0 } }
     value.pair.x += expr {
         value.pair.y = 7
-        255
+        255 as u8
     } + 1 or return expr {
         ifexpr value.pair.x == 255 && value.pair.y == 7 { 0 } else { 1 }
     }
@@ -60,7 +60,7 @@ fn main() -> u8 {
     return 5
 }
 "#;
-    let output = compile_and_run_c11(source, "structs.suz");
+    let output = compile_and_run_c23(source, "structs.suz");
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stdout.is_empty() && output.stderr.is_empty());
 }
@@ -79,7 +79,7 @@ fn struct_literals_require_parentheses_in_each_control_target() {
         let source = format!("struct Item {{ x: u8 }}\nfn main() -> u8 {{\n{body}\nreturn 0\n}}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert!(
-            error.message.contains("[expr.struct-in-cond]"),
+            error.message().contains("[expr.struct-in-cond]"),
             "{source}: {error}"
         );
         let grouped = source
@@ -133,7 +133,7 @@ fn struct_fields_reject_invalid_declarations_access_and_overlapping_writes() {
         (
             "struct Item { x: u8 }\nconst P = Item { x: 1 / 0 }",
             "",
-            "const.evaluation",
+            "arith.div-zero-always",
         ),
         (
             "struct Item { x: u8 }\nconst P = Item { x: P.x }",
@@ -149,7 +149,7 @@ fn struct_fields_reject_invalid_declarations_access_and_overlapping_writes() {
             "{source}: {error}"
         );
         assert!(
-            error.message.contains(&format!("[{rule}]")),
+            error.message().contains(&format!("[{rule}]")),
             "{source}: {error}"
         );
     }

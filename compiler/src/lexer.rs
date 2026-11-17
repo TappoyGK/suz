@@ -1,8 +1,15 @@
+//! 改行を正規化したソースを、位置付きのトークンへ分解する。数値・文字・テンプレートの字句形式を検査する。
+//!
+//! 利用元: [`crate::analyze`]、[`crate::parser`]。
+//! 主な対象規則: `[char.literal]`、`[for.range-spacing]`、`[lit.float]`、`[lit.integer]`、`[syntax.grammar]`。
+
 use crate::{Diagnostic, ErrorKind};
+pub(crate) mod allows;
 pub(crate) mod templates;
 use std::ops::Range;
 
 const KEYWORDS: &[&str] = &[
+    "allow",
     "const",
     "fix",
     "var",
@@ -26,6 +33,7 @@ const KEYWORDS: &[&str] = &[
     "as",
     "or",
     "not",
+    "len",
     "log",
     "expr",
     "true",
@@ -34,8 +42,8 @@ const KEYWORDS: &[&str] = &[
     "inf",
 ];
 const TYPES: &[&str] = &[
-    "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "bool", "char", "text",
-    "symbol", "void",
+    "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "len_t", "f32", "f64", "bool", "char",
+    "text", "symbol", "void", "int", "float",
 ];
 const SYMBOLS: &[&str] = &[
     "(", ")", "[", "]", "{", "}", ",", ":", ".", "->", "=>", "=", "+=", "-=", "*=", "/=", "%=",
@@ -45,6 +53,7 @@ const SYMBOLS: &[&str] = &[
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Kind<'a> {
+    AllowItem(&'a str),
     Char(u32),
     Template(&'a str),
     Ident(&'a str),
@@ -63,7 +72,7 @@ pub(crate) struct Token<'a> {
     pub kind: Kind<'a>,
     pub line: usize,
     pub column: usize,
-    /// Byte range in the source after CRLF normalization.
+    /// CRLFを正規化した後のソース内のバイト範囲。
     pub span: Range<usize>,
 }
 
@@ -74,13 +83,13 @@ pub(crate) fn position(prefix: &str) -> (usize, usize) {
     )
 }
 
-fn error(line: usize, column: usize, kind: ErrorKind, message: impl Into<String>) -> Diagnostic {
-    Diagnostic {
-        kind,
-        line,
-        column,
-        message: message.into(),
-    }
+fn error(
+    line: usize,
+    column: usize,
+    kind: ErrorKind,
+    message: crate::DiagnosticMessage,
+) -> Diagnostic {
+    Diagnostic::new(kind, line, column, message.rule, message.text)
 }
 
 fn valid_digit_separators(text: &str) -> bool {
@@ -93,7 +102,7 @@ fn valid_digit_separators(text: &str) -> bool {
     })
 }
 
-fn number(rest: &str) -> Result<(Kind<'_>, usize), &'static str> {
+fn number(rest: &str) -> Result<(Kind<'_>, usize), crate::DiagnosticMessage> {
     let integer_end = rest
         .bytes()
         .take_while(|b| b.is_ascii_digit() || *b == b'_')
@@ -121,32 +130,43 @@ fn number(rest: &str) -> Result<(Kind<'_>, usize), &'static str> {
                 .take_while(|b| b.is_ascii_digit() || **b == b'_')
                 .count();
             if start == end {
-                return Err("a floating-point exponent requires digits [lit.float]");
+                return Err(crate::diagnostic!(
+                    "lit.float",
+                    "a floating-point exponent requires digits"
+                ));
             }
         }
         if !valid_digit_separators(&rest[..end]) {
-            return Err(
-                "a floating-point separator must be a single underscore between digits [lit.float]",
-            );
+            return Err(crate::diagnostic!(
+                "lit.float",
+                "a floating-point separator must be a single underscore between digits"
+            ));
         }
         return Ok((Kind::Float(&rest[..end]), end));
     }
     let text = &rest[..end];
     if !valid_digit_separators(text) {
-        return Err(
-            "an integer separator must be a single underscore between digits [lit.integer]",
-        );
+        return Err(crate::diagnostic!(
+            "lit.integer",
+            "an integer separator must be a single underscore between digits"
+        ));
     }
     if bytes.get(end) == Some(&b'e') {
-        return Err("a floating-point exponent requires a decimal point [lit.float]");
+        return Err(crate::diagnostic!(
+            "lit.float",
+            "a floating-point exponent requires a decimal point"
+        ));
     }
-    // Keep range operators and named field access separate from numbers.
+    // 範囲演算子と名前によるフィールド参照を、数値から分離する。
     if bytes.get(end) == Some(&b'.')
         && !bytes
             .get(end + 1)
             .is_some_and(|next| *next == b'.' || next.is_ascii_alphabetic() || *next == b'_')
     {
-        return Err("a decimal point requires digits on both sides [lit.float]");
+        return Err(crate::diagnostic!(
+            "lit.float",
+            "a decimal point requires digits on both sides"
+        ));
     }
     Ok((Kind::Integer(text), end))
 }
@@ -209,7 +229,7 @@ fn continues_line(kind: Kind<'_>, previous: Option<Kind<'_>>) -> bool {
     }
 }
 
-/// Input must already have normalized newlines.
+/// 入力の改行は正規化済みでなければならない。
 pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
     let mut tokens: Vec<Token<'_>> = Vec::new();
     let mut delimiters = Vec::new();
@@ -242,6 +262,25 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
                 offset += 1;
                 line += 1;
                 column = 1;
+                continue;
+            }
+            '[' if matches!(tokens.last().map(|t| t.kind), Some(Kind::Keyword("allow")))
+                || (matches!(tokens.last().map(|t| t.kind), Some(Kind::Symbol(",")))
+                    && matches!(
+                        tokens.iter().rev().nth(1).map(|t| t.kind),
+                        Some(Kind::AllowItem(_))
+                    )) =>
+            {
+                let length = allows::scan(rest, line, column)?;
+                tokens.push(Token {
+                    kind: Kind::AllowItem(&rest[1..length - 1]),
+                    line,
+                    column,
+                    span: offset..offset + length,
+                });
+                offset += length;
+                column += rest[..length].chars().count();
+                continuation = false;
                 continue;
             }
             '\'' => {
@@ -301,7 +340,7 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
                 line,
                 column,
                 ErrorKind::InvalidSource,
-                "a decimal point requires digits on both sides [lit.float]",
+                crate::diagnostic!("lit.float", "a decimal point requires digits on both sides"),
             ));
         } else if let Some(symbol) = SYMBOLS
             .iter()
@@ -314,7 +353,7 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
                 line,
                 column,
                 ErrorKind::InvalidSource,
-                format!("unexpected character {ch:?} [syntax.grammar]"),
+                crate::diagnostic!("syntax.grammar", "unexpected character {ch:?}"),
             ));
         };
         continuation = continues_line(kind, tokens.last().map(|token| token.kind));
@@ -342,7 +381,7 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
             span: offset..offset + length,
         });
         offset += length;
-        column += length; // All supported non-comment tokens are ASCII.
+        column += length; // コメント以外の対応トークンはすべてASCII。
     }
     tokens.push(Token {
         kind: Kind::End,
@@ -352,8 +391,8 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
     });
     for (index, token) in tokens.iter().enumerate() {
         if matches!(token.kind, Kind::Symbol("..<" | "..=")) {
-            // Input boundaries are not whitespace. Missing bounds are syntax
-            // errors for the parser, including in isolated interpolations.
+            // 入力の端は空白ではない。単独で解析する補間式でも、
+            // 境界値の欠落は構文解析側で構文エラーにする。
             let touches_left = if index == 0 {
                 token.span.start == 0
             } else {
@@ -368,7 +407,10 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
                     token.line,
                     token.column,
                     ErrorKind::InvalidSource,
-                    "range bounds must touch the range operator [for.range-spacing]",
+                    crate::diagnostic!(
+                        "for.range-spacing",
+                        "range bounds must touch the range operator"
+                    ),
                 ));
             }
         }
@@ -376,8 +418,8 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
     Ok(tokens)
 }
 
-// Share literal parsing with text-to-structure conversion at runtime.
-pub(crate) fn char_literal(input: &str) -> Result<(u32, usize), &'static str> {
+// リテラルの解析を、実行時の文字列から構造体への変換と共有する。
+pub(crate) fn char_literal(input: &str) -> Result<(u32, usize), crate::DiagnosticMessage> {
     unsafe extern "C" {
         fn suz_parse_char_literal_status(
             bytes: *const u8,
@@ -387,8 +429,8 @@ pub(crate) fn char_literal(input: &str) -> Result<(u32, usize), &'static str> {
         ) -> u32;
     }
     let (mut value, mut consumed) = (0, 0);
-    // Status codes follow suz_char_literal_status. Input and outputs remain live
-    // for this bounded, allocation-free call.
+    // 状態コードはsuz_char_literal_statusに従う。長さを限定したメモリ確保なしの呼び出し中、
+    // 入力と出力は生存し続ける。
     let status = unsafe {
         suz_parse_char_literal_status(
             input.as_ptr(),
@@ -399,11 +441,26 @@ pub(crate) fn char_literal(input: &str) -> Result<(u32, usize), &'static str> {
     };
     match status {
         0 => Ok((value, consumed as usize)),
-        2 => Err("Unicode escape requires at least one hexadecimal digit [char.literal]"),
-        3 => Err("Unicode escape accepts at most six hexadecimal digits [char.literal]"),
-        4 => Err("Unicode escape cannot represent a surrogate (U+D800..U+DFFF) [char.literal]"),
-        5 => Err("Unicode escape exceeds U+10FFFF [char.literal]"),
-        _ => Err("expected one Unicode scalar in a character literal [char.literal]"),
+        2 => Err(crate::diagnostic!(
+            "char.literal",
+            "Unicode escape requires at least one hexadecimal digit"
+        )),
+        3 => Err(crate::diagnostic!(
+            "char.literal",
+            "Unicode escape accepts at most six hexadecimal digits"
+        )),
+        4 => Err(crate::diagnostic!(
+            "char.literal",
+            "Unicode escape cannot represent a surrogate (U+D800..U+DFFF)"
+        )),
+        5 => Err(crate::diagnostic!(
+            "char.literal",
+            "Unicode escape exceeds U+10FFFF"
+        )),
+        _ => Err(crate::diagnostic!(
+            "char.literal",
+            "expected one Unicode scalar in a character literal"
+        )),
     }
 }
 

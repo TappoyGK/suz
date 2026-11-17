@@ -1,9 +1,16 @@
+//! 検査済みの定数式を評価し、整数・浮動小数点・文字列の値と評価失敗を求める。
+//!
+//! 利用元: [`crate::check::declarations`]、[`crate::check::expression`]。
+//! 主な対象規則: `[const.evaluation]`。
+
+pub(super) mod generic;
 use super::ir::{CheckedExpression, CheckedHandler, IntegerOperation, Value};
 use crate::ast::{BinaryOperator, FloatType, IntegerType, Type};
+use crate::numeric::Int;
 use crate::{Diagnostic, ErrorKind};
 
-// Rust's saturating float-to-i128 conversion is used only for the range
-// check; every Suz integer range is strictly inside i128's bounds.
+// Rustの飽和するfloatからi128への変換は値域の確認だけに使う。
+// Suzのすべての整数型の値域はi128の範囲の内側に収まる。
 pub(super) fn float_to_integer(value: f64, ty: IntegerType) -> Option<i128> {
     let integer = value.trunc() as i128;
     let (min, max) = ty.bounds();
@@ -35,6 +42,12 @@ fn integer_result(operator: BinaryOperator, a: i128, b: i128, ty: IntegerType) -
 
 fn operation_result(operation: &IntegerOperation, ty: IntegerType) -> Option<i128> {
     match operation {
+        IntegerOperation::Exact(e) => {
+            let value = super::exact::evaluate(e)?.ok()?;
+            let n = value.to_i128()?;
+            let (lo, hi) = ty.bounds();
+            (lo..=hi).contains(&n).then_some(n)
+        }
         IntegerOperation::Binary {
             operator,
             left,
@@ -54,9 +67,11 @@ fn operation_result(operation: &IntegerOperation, ty: IntegerType) -> Option<i12
     }
 }
 
-// Evaluate the integer constant-expression forms supported by the checker.
-// Local bindings and value blocks are not constant expressions.
+// 検査器が受理する整数の定数式を評価する。ローカル束縛と値ブロックは定数式に含めない。
 fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
+    if expr.ty == Type::Exact {
+        return super::exact::constant(expr)?.to_i128();
+    }
     if let Value::Field { target, index } = &expr.value {
         return constant_integer_raw(&constant_field(target, *index)?);
     }
@@ -77,6 +92,7 @@ fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
         }),
         Value::Integer { value, .. } => Some(*value),
         Value::Cast(inner) => match inner.ty {
+            Type::Exact => super::exact::constant(inner)?.to_i128(),
             Type::Float(_) => float_to_integer(constant_float_raw(inner)?, ty),
             _ => constant_integer_raw(inner),
         },
@@ -91,22 +107,52 @@ fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
                     .and_then(|value| constant_integer_raw(&value))
                     .or_else(|| constant_integer_raw(fallback));
             }
-            // Both sides must belong to the constant-expression grammar.
+            // 両辺とも定数式の文法に従っていなければならない。
             if matches!(operand.ty, Type::Float(_)) {
                 let value = constant_float_raw(operand)?;
                 return float_to_integer(value, ty).or_else(|| constant_integer_raw(fallback));
             }
+            if operand.ty == Type::Exact {
+                let value = super::exact::constant(operand)?;
+                return if crate::numeric::Range::point(value).fits_type(expr.ty) {
+                    value.to_i128()
+                } else {
+                    constant_integer_raw(fallback)
+                };
+            }
             let value = constant_integer_raw(operand)?;
-            let (min, max) = expr.ty.integer_bounds()?;
-            if (min..=max).contains(&value)
-                && (expr.ty != Type::Char || !(0xd800..=0xdfff).contains(&value))
-            {
+            if crate::numeric::Range::point(Int::from_i128(value)).fits_type(expr.ty) {
                 Some(value)
             } else {
                 constant_integer_raw(fallback)
             }
         }
-        Value::Truncate(inner) => Some(wrap(constant_integer_raw(inner)?)),
+        Value::Truncate(inner) => {
+            if inner.ty == Type::Exact {
+                let n = super::exact::constant(inner)?;
+                let bits = ty.bits();
+                let mask = (1u128 << bits) - 1;
+                let low = if n.negative {
+                    0u128.wrapping_sub(n.magnitude)
+                } else {
+                    n.magnitude
+                } & mask;
+                let value = low as i128;
+                Some(if ty.bounds().0 < 0 && low & (1u128 << (bits - 1)) != 0 {
+                    value - (1i128 << bits)
+                } else {
+                    value
+                })
+            } else {
+                Some(wrap(constant_integer_raw(inner)?))
+            }
+        }
+        Value::Len(inner) => {
+            let Value::Text { text } = evaluate_raw(inner)?.value else {
+                return None;
+            };
+            Some(text.chars().count() as i128)
+        }
         Value::BitNot(inner) => Some(wrap(!constant_integer_raw(inner)?)),
         Value::Binary {
             operator,
@@ -118,7 +164,7 @@ fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
             Some(wrap(match operator {
                 BinaryOperator::WrapAdd => left + right,
                 BinaryOperator::WrapSubtract => left - right,
-                // Only the low 64 bits can affect an integer wrapping result.
+                // 整数のラップ変換の結果に影響するのは下位64ビットだけ。
                 BinaryOperator::WrapMultiply => (left as u64).wrapping_mul(right as u64) as i128,
                 BinaryOperator::And => left & right,
                 BinaryOperator::Or => left | right,
@@ -131,7 +177,7 @@ fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
 }
 
 fn integer_as_float(value: i128, ty: FloatType) -> f64 {
-    // Convert directly to f32, avoiding a second rounding through f64.
+    // f64を経由した二重丸めを避け、直接f32へ変換する。
     match ty {
         FloatType::F32 => (value as f32) as f64,
         FloatType::F64 => value as f64,
@@ -146,6 +192,17 @@ fn constant_float_raw(expr: &CheckedExpression) -> Option<f64> {
         return None;
     };
     let value = match &expr.value {
+        Value::IntegerArithmetic {
+            operation: IntegerOperation::Exact(e),
+            handler,
+            ..
+        } => match super::exact::evaluate(e)? {
+            Ok(n) => n.float(ty == FloatType::F32),
+            Err(_) => match handler {
+                Some(CheckedHandler::Value(v)) => constant_float_raw(v)?,
+                _ => return None,
+            },
+        },
         Value::Float(bits) => {
             return Some(match ty {
                 FloatType::F32 => f32::from_bits(*bits as u32) as f64,
@@ -154,6 +211,7 @@ fn constant_float_raw(expr: &CheckedExpression) -> Option<f64> {
         }
         Value::Negate(inner) => -constant_float_raw(inner)?,
         Value::Cast(inner) => match inner.ty {
+            Type::Exact => super::exact::constant(inner)?.float(ty == FloatType::F32),
             Type::Integer(_) => {
                 let integer = constant_integer_raw(inner)?;
                 return Some(integer_as_float(integer, ty));
@@ -173,6 +231,9 @@ fn constant_float_raw(expr: &CheckedExpression) -> Option<f64> {
                     .and_then(|value| constant_float_raw(&value))
                     .or_else(|| constant_float_raw(fallback));
             }
+            if operand.ty == Type::Exact {
+                return Some(super::exact::constant(operand)?.float(ty == FloatType::F32));
+            }
             if matches!(operand.ty, Type::Integer(_)) {
                 let integer = constant_integer_raw(operand)?;
                 return Some(integer_as_float(integer, ty));
@@ -191,8 +252,7 @@ fn constant_float_raw(expr: &CheckedExpression) -> Option<f64> {
         } => {
             let left = constant_float_raw(left)?;
             let right = constant_float_raw(right)?;
-            // Evaluate f32 operations at their own precision, without an
-            // intermediate f64 rounding (notably for division).
+            // f32の演算はその精度で評価する。特に除算で、途中にf64の丸めを挟まない。
             match ty {
                 FloatType::F32 => {
                     let (left, right) = (left as f32, right as f32);
@@ -256,36 +316,57 @@ fn constant_bool_raw(expr: &CheckedExpression) -> Option<bool> {
             let mut left = evaluate_raw(operands.first()?)?;
             for (operator, operand) in operators.iter().zip(operands.iter().skip(1)) {
                 let right = evaluate_raw(operand)?;
-                let order = match left.ty {
-                    Type::Symbol | Type::Text => {
-                        let (Value::Text { text: a, .. }, Value::Text { text: b, .. }) =
-                            (&left.value, &right.value)
-                        else {
-                            return None;
-                        };
-                        Some(a.cmp(b))
-                    }
-                    Type::Struct(_) => {
-                        let equal = equal_structs(&left, &right)?;
-                        let matches = match operator {
-                            Op::Equal => equal,
-                            Op::NotEqual => !equal,
-                            _ => return None,
-                        };
-                        if !matches {
-                            return Some(false);
+                let numeric = matches!(left.ty, Type::Integer(_) | Type::Float(_) | Type::Exact)
+                    && matches!(right.ty, Type::Integer(_) | Type::Float(_) | Type::Exact);
+                let order = if numeric {
+                    match (left.ty, right.ty) {
+                        (Type::Float(_), Type::Float(_)) => {
+                            constant_float_raw(&left)?.partial_cmp(&constant_float_raw(&right)?)
                         }
-                        left = right;
-                        continue;
+                        (Type::Float(_), _) => super::exact::constant(&right)?
+                            .compare_float(constant_float_raw(&left)?)
+                            .map(|o| o.reverse()),
+                        (_, Type::Float(_)) => super::exact::constant(&left)?
+                            .compare_float(constant_float_raw(&right)?),
+                        _ => Some(
+                            super::exact::constant(&left)?.cmp(&super::exact::constant(&right)?),
+                        ),
                     }
-                    Type::Void => return None,
-                    Type::Integer(_) | Type::Enum(_) | Type::Char => {
-                        Some(constant_integer_raw(&left)?.cmp(&constant_integer_raw(&right)?))
+                } else {
+                    match left.ty {
+                        Type::GenericInt | Type::GenericFloat | Type::Numeric(_) => return None,
+                        Type::Symbol | Type::Text => {
+                            let (Value::Text { text: a, .. }, Value::Text { text: b, .. }) =
+                                (&left.value, &right.value)
+                            else {
+                                return None;
+                            };
+                            Some(a.cmp(b))
+                        }
+                        Type::Struct(_) => {
+                            let equal = equal_structs(&left, &right)?;
+                            let matches = match operator {
+                                Op::Equal => equal,
+                                Op::NotEqual => !equal,
+                                _ => return None,
+                            };
+                            if !matches {
+                                return Some(false);
+                            }
+                            left = right;
+                            continue;
+                        }
+                        Type::Void | Type::Exact => return None,
+                        Type::Integer(_) | Type::Enum(_) | Type::Char => {
+                            Some(constant_integer_raw(&left)?.cmp(&constant_integer_raw(&right)?))
+                        }
+                        Type::Float(_) => {
+                            constant_float_raw(&left)?.partial_cmp(&constant_float_raw(&right)?)
+                        }
+                        Type::Bool => {
+                            Some(constant_bool_raw(&left)?.cmp(&constant_bool_raw(&right)?))
+                        }
                     }
-                    Type::Float(_) => {
-                        constant_float_raw(&left)?.partial_cmp(&constant_float_raw(&right)?)
-                    }
-                    Type::Bool => Some(constant_bool_raw(&left)?.cmp(&constant_bool_raw(&right)?)),
                 };
                 let matches = match operator {
                     Op::Equal => order == Some(Equal),
@@ -351,6 +432,7 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
         return slice_value(expr);
     }
     let value = match expr.ty {
+        Type::GenericInt | Type::GenericFloat | Type::Numeric(_) => return None,
         Type::Symbol | Type::Text => match &expr.value {
             Value::Text { .. } => expr.value.clone(),
             Value::Template {
@@ -381,6 +463,19 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
                     .collect::<Option<_>>()?,
             }
         }
+        Type::Exact => {
+            let Value::Exact(e) = &expr.value else {
+                return None;
+            };
+            let n = super::exact::evaluate(e)?.ok()?;
+            Value::Exact(Box::new(super::exact::Exact {
+                domains: None,
+                arithmetic: false,
+                kind: super::exact::ExactKind::Literal(n),
+                range: Some(crate::numeric::Range::point(n)),
+                location: e.location,
+            }))
+        }
         Type::Void => return None,
         Type::Integer(_) | Type::Enum(_) | Type::Char => Value::Integer {
             value: constant_integer_raw(expr)?,
@@ -398,73 +493,69 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
     Some(CheckedExpression { ty: expr.ty, value })
 }
 
-// Grammar and type checking cover unselected operands too; evaluation below
-// visits only the selected path and reports the first failing operation.
-pub(super) fn is_constant(expr: &CheckedExpression) -> bool {
-    match &expr.value {
-        Value::TextView(inner) | Value::Intern { operand: inner, .. } => is_constant(inner),
-        Value::Slice {
-            target,
-            start,
-            end,
-            handler,
-            ..
-        } => {
-            is_constant(target)
-                && [start, end]
-                    .into_iter()
-                    .flatten()
-                    .all(|value| is_constant(value))
-                && match handler {
-                    None => true,
-                    Some(CheckedHandler::Value(value)) => is_constant(value),
-                    _ => false,
-                }
+// 文法と型は選択されないオペランドも検査する。以下の評価は選択された経路だけをたどり、
+// 最初に失敗した演算を報告する。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ConstantKind {
+    Nonconstant,
+    Scalar,
+    Generic,
+}
+
+// 定数性と型への依存を同時に分類する。通常の定数評価では各ノードを一度だけ訪問し、
+// 汎用型を調べるための再走査をしない。
+fn constant_kind(expr: &CheckedExpression) -> ConstantKind {
+    let mut kind = if expr.ty.symbolic() || expr.value.symbolic_range() {
+        ConstantKind::Generic
+    } else {
+        ConstantKind::Scalar
+    };
+    let admitted = expr.value.visit_constant_children(&mut |child| {
+        if kind == ConstantKind::Nonconstant {
+            return;
         }
-        Value::Struct { fields } => fields.iter().all(|(_, value)| is_constant(value)),
-        Value::Field { target, .. } => is_constant(target),
-        Value::Text { .. } => true,
-        Value::Template { parts, .. } => parts.iter().all(|part| match part {
-            crate::ast::TemplatePart::Text(_) => true,
-            crate::ast::TemplatePart::Value(value) => is_constant(value),
-        }),
-        Value::Integer { .. } | Value::Float(_) | Value::Bool(_) => true,
-        Value::Cast(inner)
-        | Value::Negate(inner)
-        | Value::Truncate(inner)
-        | Value::BitNot(inner)
-        | Value::Not(inner) => is_constant(inner),
-        Value::CheckedCast {
-            operand, fallback, ..
-        } => is_constant(operand) && is_constant(fallback),
-        Value::IntegerArithmetic {
-            operation, handler, ..
-        } => {
-            operation.operands().all(is_constant)
-                && match handler {
-                    None => true,
-                    Some(CheckedHandler::Value(value)) => is_constant(value),
-                    Some(CheckedHandler::Return(_)) => false,
-                }
+        match constant_kind(child) {
+            ConstantKind::Nonconstant => kind = ConstantKind::Nonconstant,
+            ConstantKind::Generic => kind = ConstantKind::Generic,
+            ConstantKind::Scalar => {}
         }
-        Value::Binary { left, right, .. } | Value::Logical { left, right, .. } => {
-            is_constant(left) && is_constant(right)
-        }
-        Value::Comparison { operands, .. } => operands.iter().all(is_constant),
-        _ => false,
+    });
+    if admitted {
+        kind
+    } else {
+        ConstantKind::Nonconstant
     }
 }
 
+pub(super) fn is_constant(expr: &CheckedExpression) -> bool {
+    constant_kind(expr) != ConstantKind::Nonconstant
+}
+
+// 結果の型・値域または定数の部分式を通じて、値は汎用型に依存する。途中の具体型への変換では依存は消えない。
+// 型・値域の直接検査は、引数やそれを含む正確な整数式などの非定数にも適用する。
+// constant_kindは、型が代入に依存していても、これらを意図的にNonconstantへ分類する。
+pub(super) fn depends_on_generic(expr: &CheckedExpression) -> bool {
+    expr.ty.symbolic()
+        || expr.value.symbolic_range()
+        || constant_kind(expr) == ConstantKind::Generic
+}
+
 fn cast_succeeds(operand: &CheckedExpression, target: Type, wrap: bool) -> bool {
+    if operand.ty == Type::Exact {
+        return super::exact::constant(operand).is_some_and(|n| {
+            if matches!(target, Type::Float(_)) {
+                return true;
+            }
+            crate::numeric::Range::point(n).fits_type(target)
+        });
+    }
+
     if operand.ty.is_text() {
         return text_cast(operand, target, wrap).is_some();
     }
-    if operand.ty.integer_bounds().is_some()
-        && let Some((min, max)) = target.integer_bounds()
-    {
+    if operand.ty.integer_bounds().is_some() && target.integer_bounds().is_some() {
         let value = constant_integer_raw(operand).unwrap();
-        return (min..=max).contains(&value)
-            && (target != Type::Char || !(0xd800..=0xdfff).contains(&value));
+        return crate::numeric::Range::point(Int::from_i128(value)).fits_type(target);
     }
     match (operand.ty, target) {
         (Type::Float(_), Type::Integer(to)) => {
@@ -478,9 +569,61 @@ fn cast_succeeds(operand: &CheckedExpression, target: Type, wrap: bool) -> bool 
     }
 }
 
+// 演算失敗のハンドラーは、格納済みオペランド内の失敗を捕捉しない。
+// 正確な整数式が既に失敗していれば、それ以上たどらない。
+fn validate_exact_leaves(e: &super::exact::Exact) -> Result<(), Diagnostic> {
+    use super::exact::ExactKind;
+    match &e.kind {
+        ExactKind::Leaf(v) => validate_evaluation(v)?,
+        ExactKind::Negate(v) => validate_exact_leaves(v)?,
+        ExactKind::Binary(_, a, b) => {
+            validate_exact_leaves(a)?;
+            if !matches!(super::exact::evaluate(a), Some(Err(_))) {
+                validate_exact_leaves(b)?;
+            }
+        }
+        ExactKind::Literal(_) => {}
+    }
+    Ok(())
+}
+
 fn validate_evaluation(expr: &CheckedExpression) -> Result<(), Diagnostic> {
+    if let Value::Exact(e)
+    | Value::IntegerArithmetic {
+        operation: IntegerOperation::Exact(e),
+        ..
+    } = &expr.value
+    {
+        validate_exact_leaves(e)?;
+        let failed = match super::exact::evaluate(e) {
+            Some(Err(l)) => Some(l),
+            Some(Ok(n)) => {
+                if let Some((lo, hi)) = expr.ty.integer_bounds() {
+                    (!crate::numeric::Range::point(n).contained(lo, hi)).then_some(e.location)
+                } else {
+                    None
+                }
+            }
+            None => None,
+        };
+        if let Some(location) = failed {
+            if let Value::IntegerArithmetic {
+                handler: Some(CheckedHandler::Value(v)),
+                ..
+            } = &expr.value
+            {
+                return validate_evaluation(v);
+            }
+            return Err(location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("const.evaluation", "constant integer arithmetic failed"),
+            ));
+        }
+        return Ok(());
+    }
+
     match &expr.value {
-        Value::TextView(inner) | Value::Intern { operand: inner, .. } => {
+        Value::Len(inner) | Value::TextView(inner) | Value::Intern { operand: inner, .. } => {
             validate_evaluation(inner)?
         }
         Value::Slice {
@@ -530,7 +673,7 @@ fn validate_evaluation(expr: &CheckedExpression) -> Result<(), Diagnostic> {
                 }
                 return Err(location.error(
                     ErrorKind::InvalidSource,
-                    "constant integer arithmetic failed [const.evaluation]",
+                    crate::diagnostic!("const.evaluation", "constant integer arithmetic failed"),
                 ));
             }
         }
@@ -601,7 +744,8 @@ fn validate_evaluation(expr: &CheckedExpression) -> Result<(), Diagnostic> {
 }
 
 pub(super) fn evaluate(expr: &CheckedExpression) -> Result<Option<CheckedExpression>, Diagnostic> {
-    if !is_constant(expr) {
+    // 記号的な定数は通常の評価前に具体化する。結果が具体型でも、子に記号的な値がある場合を含む。
+    if constant_kind(expr) != ConstantKind::Scalar {
         return Ok(None);
     }
     validate_evaluation(expr)?;

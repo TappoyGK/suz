@@ -1,3 +1,8 @@
+//! 文字列テンプレートを文字列部分と補間式へ分け、エスケープと行の形式を検査する。
+//!
+//! 利用元: [`crate::lexer`]。
+//! 主な対象規則: `[symbol.escape]`、`[symbol.interpolation]`、`[symbol.template]`、`[symbol.template-line]`。
+
 use super::{Diagnostic, ErrorKind, error};
 
 pub(crate) enum Segment<'a> {
@@ -27,7 +32,10 @@ pub(crate) fn scan(
             b'\n' => {
                 return Err(fail(
                     cursor,
-                    "template must fit on one source line [symbol.template-line]",
+                    crate::diagnostic!(
+                        "symbol.template-line",
+                        "template must fit on one source line"
+                    ),
                 ));
             }
             b'`' => {
@@ -39,10 +47,18 @@ pub(crate) fn scan(
                 Some(b'\n') => {
                     return Err(fail(
                         cursor + 1,
-                        "template must fit on one source line [symbol.template-line]",
+                        crate::diagnostic!(
+                            "symbol.template-line",
+                            "template must fit on one source line"
+                        ),
                     ));
                 }
-                _ => return Err(fail(cursor, "unknown template escape [symbol.escape]")),
+                _ => {
+                    return Err(fail(
+                        cursor,
+                        crate::diagnostic!("symbol.escape", "unknown template escape"),
+                    ));
+                }
             },
             b'$' if bytes.get(cursor + 1) == Some(&b'{') => {
                 parts.push(Segment::Text(&source[text_start..cursor]));
@@ -51,10 +67,47 @@ pub(crate) fn scan(
                 let mut depth = 1;
                 while cursor < bytes.len() {
                     match bytes[cursor] {
+                        ch if ch.is_ascii_alphabetic() || ch == b'_' => {
+                            let word_start = cursor;
+                            while bytes
+                                .get(cursor)
+                                .is_some_and(|ch| ch.is_ascii_alphanumeric() || *ch == b'_')
+                            {
+                                cursor += 1;
+                            }
+                            if &source[word_start..cursor] == "allow" {
+                                loop {
+                                    while bytes.get(cursor) == Some(&b' ')
+                                        || bytes.get(cursor) == Some(&b'\t')
+                                    {
+                                        cursor += 1;
+                                    }
+                                    if bytes.get(cursor) != Some(&b'[') {
+                                        break;
+                                    }
+                                    let item_column = column + source[..cursor].chars().count();
+                                    cursor +=
+                                        super::allows::scan(&source[cursor..], line, item_column)?;
+                                    while bytes.get(cursor) == Some(&b' ')
+                                        || bytes.get(cursor) == Some(&b'\t')
+                                    {
+                                        cursor += 1;
+                                    }
+                                    if bytes.get(cursor) != Some(&b',') {
+                                        break;
+                                    }
+                                    cursor += 1;
+                                }
+                            }
+                            continue;
+                        }
                         b'\n' => {
                             return Err(fail(
                                 cursor,
-                                "template must fit on one source line [symbol.template-line]",
+                                crate::diagnostic!(
+                                    "symbol.template-line",
+                                    "template must fit on one source line"
+                                ),
                             ));
                         }
                         b'\'' => {
@@ -72,12 +125,18 @@ pub(crate) fn scan(
                             if let Some(end) = source[cursor..].find('\n') {
                                 return Err(fail(
                                     cursor + end,
-                                    "template must fit on one source line [symbol.template-line]",
+                                    crate::diagnostic!(
+                                        "symbol.template-line",
+                                        "template must fit on one source line"
+                                    ),
                                 ));
                             }
                             return Err(fail(
                                 start,
-                                "unclosed interpolation [symbol.interpolation]",
+                                crate::diagnostic!(
+                                    "symbol.interpolation",
+                                    "unclosed interpolation"
+                                ),
                             ));
                         }
                         b'{' => depth += 1,
@@ -92,7 +151,10 @@ pub(crate) fn scan(
                     cursor += 1;
                 }
                 if depth != 0 {
-                    return Err(fail(start, "unclosed interpolation [symbol.interpolation]"));
+                    return Err(fail(
+                        start,
+                        crate::diagnostic!("symbol.interpolation", "unclosed interpolation"),
+                    ));
                 }
                 parts.push(Segment::Expression {
                     source: &source[start..cursor],
@@ -104,7 +166,10 @@ pub(crate) fn scan(
             _ => cursor += 1,
         }
     }
-    Err(fail(0, "unclosed template [symbol.template]"))
+    Err(fail(
+        0,
+        crate::diagnostic!("symbol.template", "unclosed template"),
+    ))
 }
 
 pub(crate) fn decode(text: &str) -> String {

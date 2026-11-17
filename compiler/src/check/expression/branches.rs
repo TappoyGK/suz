@@ -1,3 +1,8 @@
+//! if式の条件と各分岐の値を検査し、分岐の結果型を揃える。
+//!
+//! 利用元: [`crate::check::expression`]。
+//! 主な対象規則: `[branch.expression]`、`[if.condition]`。
+
 use super::super::ir::{CheckedExpression, Value};
 use super::super::matches;
 use super::expression;
@@ -15,20 +20,20 @@ pub(super) fn check(
 ) -> Result<CheckedExpression, Diagnostic> {
     Ok(match &expr.kind {
         ExpressionKind::Match { target, arms } => {
-            let target = expression(target, None, bindings)?;
+            let target = crate::check::exact::use_value(target, bindings)?;
             let patterns = matches::patterns(target.ty, arms, expr.location, bindings)?;
             let ty = expected
                 .or_else(|| operand_type(expr, bindings))
-                .unwrap_or_else(|| default_type(expr));
+                .unwrap_or_else(|| default_type(expr, bindings));
             if ty == Type::Void {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
-                    "value branches cannot return void [branch.expression]",
+                    crate::diagnostic!("branch.expression", "value branches cannot return void"),
                 ));
             }
             let mut checked = Vec::new();
             for (arm, pattern) in arms.iter().zip(patterns.values) {
-                checked.push((pattern, expression(&arm.body, Some(ty), bindings)?));
+                checked.push((pattern, super::coerced(&arm.body, Some(ty), bindings)?));
             }
             CheckedExpression {
                 ty,
@@ -45,11 +50,11 @@ pub(super) fn check(
         } => {
             let ty = expected
                 .or_else(|| operand_type(expr, bindings))
-                .unwrap_or_else(|| default_type(expr));
+                .unwrap_or_else(|| default_type(expr, bindings));
             if ty == Type::Void {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
-                    "value branches cannot return void [branch.expression]",
+                    crate::diagnostic!("branch.expression", "value branches cannot return void"),
                 ));
             }
             let mut checked = Vec::new();
@@ -58,16 +63,22 @@ pub(super) fn check(
                 if checked_condition.ty != Type::Bool {
                     return Err(condition.location.error(
                         ErrorKind::InvalidSource,
-                        "ifexpr and elif conditions must be bool [if.condition]",
+                        crate::diagnostic!(
+                            "if.condition",
+                            "ifexpr and elif conditions must be bool"
+                        ),
                     ));
                 }
-                checked.push((checked_condition, expression(value, Some(ty), bindings)?));
+                checked.push((
+                    checked_condition,
+                    super::coerced(value, Some(ty), bindings)?,
+                ));
             }
             CheckedExpression {
                 ty,
                 value: Value::If {
                     branches: checked,
-                    otherwise: Box::new(expression(otherwise, Some(ty), bindings)?),
+                    otherwise: Box::new(super::coerced(otherwise, Some(ty), bindings)?),
                 },
             }
         }

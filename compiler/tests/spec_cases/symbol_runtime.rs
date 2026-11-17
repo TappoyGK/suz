@@ -6,8 +6,8 @@ use std::{
     sync::OnceLock,
 };
 
-// Release checks retain sanitizer coverage for both -O0 and -O2. Daily
-// checks execute the same assertions without sanitizer startup overhead.
+// リリース検査では-O0と-O2の両方でサニタイザーを使う。
+// 日常の検査は、サニタイザーの起動負荷なしで同じ検証を実行する。
 fn sanitizer_flags(optimized: bool) -> &'static [&'static str] {
     if optimized || !cfg!(debug_assertions) {
         &["-fsanitize=address,undefined", "-fno-sanitize-recover=all"]
@@ -26,7 +26,7 @@ fn executable(optimized: bool) -> &'static Path {
         let runtime = root.join("../runtime");
         let result = Command::new(std::env::var_os("CC").unwrap_or_else(|| "clang".into()))
             .args([
-                "-std=c11",
+                "-std=c23",
                 "-Wall",
                 "-Wextra",
                 "-Werror",
@@ -36,7 +36,6 @@ fn executable(optimized: bool) -> &'static Path {
             .arg("-I")
             .arg(&runtime)
             .arg(root.join("tests/spec_cases/symbol_runtime.c"))
-            .arg(runtime.join("suz_text.c"))
             .arg(runtime.join("suz_parse.c"))
             .arg(runtime.join("suz_parse_float.c"))
             .arg(runtime.join("suz_runtime.c"))
@@ -49,9 +48,8 @@ fn executable(optimized: bool) -> &'static Path {
             "{}",
             String::from_utf8_lossy(&result.stderr)
         );
-        // Keep one executable inode for all child processes. Rewriting the
-        // executable for each run repeats macOS executable validation.
-        // Cargo's output directory owns this replaceable build artifact.
+        // 全子プロセスで同じ実行ファイルのinodeを使う。実行ごとに書き直すとmacOSの実行ファイル検証が繰り返される。
+        // この置き換え可能なビルド生成物は、Cargoの出力ディレクトリで管理する。
         let path = PathBuf::from(env!("OUT_DIR")).join(if optimized {
             "symbol-runtime-O2"
         } else {
@@ -209,7 +207,7 @@ pub(super) fn build_with_environment_optimized(
     let executable = directory.0.join("program");
     let mut compiler = Command::new(std::env::var_os("CC").unwrap_or_else(|| "clang".into()));
     compiler
-        .args(["-std=c11", "-Wall", "-Wextra", "-Werror"])
+        .args(["-std=c23", "-Wall", "-Wextra", "-Werror"])
         .arg(if optimized { "-O2" } else { "-O0" })
         .args(sanitizer_flags(optimized))
         .arg("-I")
@@ -336,4 +334,13 @@ fn float_parsers_ignore_numeric_locales() {
         );
         assert!(output.stderr.is_empty());
     }
+}
+
+#[test]
+fn scalar_count_limit_is_independent_of_unlimited_pool() {
+    let output = run(false, "scalar-limit", "0", 101);
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("symbol length exceeds the supported range")
+    );
 }

@@ -1,16 +1,34 @@
 #ifndef SUZ_CONFIG_H
 #define SUZ_CONFIG_H
 
+#if !defined(__clang__)
+#error "Clang required [runtime.c-check]"
+#endif
+#if !defined(__STDC_VERSION__) || __STDC_VERSION__ < 202311L
+#error "C23 required; compile with -std=c23 [runtime.c-check]"
+#endif
+
 #include <float.h>
 #include <limits.h>
 #include <stdint.h>
+#include <stdckdint.h>
 
-#if defined(__FAST_MATH__) || (defined(__FINITE_MATH_ONLY__) && __FINITE_MATH_ONLY__ > 0)
-#error "unsafe floating-point optimization [runtime.float-environment]"
+#if !defined(BITINT_MAXWIDTH) || BITINT_MAXWIDTH < 128
+#error "Clang with 128-bit _BitInt support required [runtime.c-check]"
+#endif
+#if !defined(__STDC_VERSION_STDCKDINT_H__) || __STDC_VERSION_STDCKDINT_H__ < 202311L
+#error "C23 checked integer arithmetic required [runtime.c-check]"
 #endif
 
-/* Honor the environment initialized at entry and keep each operation separate. */
-#pragma STDC FENV_ACCESS ON
+/* フラグの指定履歴ではなく、最終的に危険な設定が残っている場合を拒否する。 */
+#if defined(__FAST_MATH__) || (defined(__FINITE_MATH_ONLY__) && __FINITE_MATH_ONLY__ > 0)
+#error "unsafe floating-point optimization [runtime.unsafe-math]"
+#endif
+
+/* 入口で初期化した環境に従い、各演算を分離したまま実行する。
+   pragmaだけではNaN・無限大を無視する設定やcontract=fastを抑止できない。
+   ビルド時に-fhonor-nans、-fhonor-infinities、-ffp-contract=offも指定する。 */
+#pragma float_control(precise, on)
 #pragma STDC FP_CONTRACT OFF
 
 _Static_assert(CHAR_BIT == 8, "8-bit bytes required [runtime.c-target]");

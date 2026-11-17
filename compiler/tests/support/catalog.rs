@@ -1,6 +1,6 @@
 use super::{
-    Result, Source, extract,
-    markdown::{cells, number, separator, skip_blank, unique},
+    Outcome, Result, Source, extract,
+    markdown::{number, skip_blank, table_cells, table_separator, unique},
 };
 use std::{collections::BTreeMap, fs, path::Path};
 
@@ -34,46 +34,81 @@ pub fn load(docs: &Path) -> Result<BTreeMap<String, Source>> {
     Ok(sources)
 }
 
-// The inventory declares the groups and counts; no group names or case counts live here.
+// 二つの目録は同じ表の形式を使い、見出しと行のキーだけが異なる。
 pub fn validate_inventory(markdown: &str, sources: &BTreeMap<String, Source>) -> Result<()> {
-    let mut actual = BTreeMap::<&str, usize>::new();
+    let mut groups = BTreeMap::<&str, usize>::new();
     for id in sources.keys() {
-        *actual.entry(id.split_once('-').unwrap().0).or_default() += 1;
+        *groups.entry(id.split_once('-').unwrap().0).or_default() += 1;
     }
-    let mut declared = BTreeMap::new();
-    let mut total = None;
-    let mut lines = markdown.lines().skip_while(|line| *line != "## 目次と件数");
+    validate_count_table(
+        markdown,
+        "## 目次と件数",
+        &["分野", "ID接頭辞", "対応する仕様", "件数"],
+        |row| {
+            row[1]
+                .strip_prefix('`')
+                .and_then(|s| s.strip_suffix('`'))
+                .ok_or_else(|| "invalid inventory prefix".into())
+        },
+        &groups,
+    )?;
+
+    const COMPARISON: &str = "診断設定の比較";
+    let mut outcomes: BTreeMap<_, _> = [Outcome::Exit, Outcome::CompileError, Outcome::Panic]
+        .iter()
+        .map(|outcome| (outcome.inventory_name(), 0))
+        .chain([(COMPARISON, 0)])
+        .collect();
+    for source in sources.values() {
+        let category = if source.runs.len() > 1 {
+            COMPARISON
+        } else {
+            source.runs[0].result.inventory_name()
+        };
+        *outcomes.get_mut(category).unwrap() += 1;
+    }
+    validate_count_table(
+        markdown,
+        "### 結果別件数",
+        &["結果", "件数"],
+        |row| Ok(row[0]),
+        &outcomes,
+    )
+}
+
+fn validate_count_table<'a>(
+    markdown: &'a str,
+    heading: &str,
+    header: &[&str],
+    key: impl Fn(&[&'a str]) -> Result<&'a str>,
+    actual: &BTreeMap<&str, usize>,
+) -> Result<()> {
+    let mut lines = markdown.lines().skip_while(|line| *line != heading);
     lines.next().ok_or("missing inventory")?;
-    let lines: Vec<_> = lines.take_while(|line| !line.starts_with("## ")).collect();
+    let lines: Vec<_> = lines.take_while(|line| !line.starts_with('#')).collect();
     let mut i = 0;
     skip_blank(&lines, &mut i);
-    if cells(lines.get(i).ok_or("missing inventory table")?)?
-        != ["分野", "ID接頭辞", "対応する仕様", "件数"]
-    {
+    if table_cells(lines.get(i).ok_or("missing inventory table")?, header.len())? != header {
         return Err("invalid inventory header".into());
     }
     i += 1;
-    separator(&lines, &mut i)?;
+    table_separator(&lines, &mut i, header.len())?;
+    let mut declared = BTreeMap::new();
+    let mut total = None;
     while i < lines.len() && lines[i].starts_with('|') {
-        let row = cells(lines[i])?;
+        let row = table_cells(lines[i], header.len())?;
         i += 1;
-        let count = number::<usize>(row[3])?;
+        let count = number::<usize>(row[header.len() - 1])?;
         if row[0] == "合計" {
-            if !row[1].is_empty() || !row[2].is_empty() {
+            if row[1..row.len() - 1].iter().any(|cell| !cell.is_empty()) {
                 return Err("invalid inventory total".into());
             }
             unique(&mut total, count, "inventory total")?;
-        } else {
-            let prefix = row[1]
-                .strip_prefix('`')
-                .and_then(|s| s.strip_suffix('`'))
-                .ok_or("invalid inventory prefix")?;
-            if declared.insert(prefix, count).is_some() {
-                return Err("duplicate inventory prefix".into());
-            }
+        } else if declared.insert(key(&row)?, count).is_some() {
+            return Err("duplicate inventory category".into());
         }
     }
-    if declared != actual || total != Some(sources.len()) {
+    if &declared != actual || total != Some(actual.values().sum()) {
         return Err("inventory and cases disagree".into());
     }
     Ok(())

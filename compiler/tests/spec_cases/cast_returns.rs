@@ -74,10 +74,6 @@ fn cast_return_positions_and_return_types_are_checked_before_lowering() {
             "type.expected",
         ),
         ("fix x = 1 as u8 or return false\nreturn 0", "type.expected"),
-        (
-            "fix x: u16 = 3 as u8 or return 7\nreturn 0",
-            "type.expected",
-        ),
         ("fix x = 300 as u8 or return\nreturn 0", "fn.return"),
         (
             "fix x = 300 as u8 or return x\nreturn 0",
@@ -92,7 +88,7 @@ fn cast_return_positions_and_return_types_are_checked_before_lowering() {
             suz::ErrorKind::InvalidSource,
             "{body}: {error:?}"
         );
-        assert!(error.message.contains(rule), "{body}: {error:?}");
+        assert!(error.message().contains(rule), "{body}: {error:?}");
     }
     let source = b"fn main() -> u8 { fix x = -1 as u8 or return (-2 as u8 or 7)\nreturn 0 }";
     let warned = suz::compile_with_mode(source, suz::ArithmeticMode::Warn).unwrap();
@@ -101,7 +97,7 @@ fn cast_return_positions_and_return_types_are_checked_before_lowering() {
         suz::compile_with_mode(source, suz::ArithmeticMode::Deny)
             .err()
             .unwrap()
-            .message
+            .message()
             .contains("diagnostic.arithmetic")
     );
 }

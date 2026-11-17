@@ -1,12 +1,30 @@
+//! Suzのソースを検査し、C23のソースへ変換するコンパイラ。
+//!
+//! [`compile_with_options`] と [`check_source_with_options`] が公開APIの入口となる。
+//! 入力のUTF-8・改行（src.encoding、src.newline）を検査した後、次の順に処理する。
+//!
+//! 1. [`lexer`] がソースを位置付きの [`lexer::Token`] に分解する。
+//! 2. [`parser`] がトークンから [`ast::Program`] を構築する。
+//! 3. [`check`] が名前・型・値を検査し、[`check::ir::CheckedProgram`] を作る。
+//! 4. [`warnings`] が診断候補へ警告設定とallowを適用する。
+//! 5. [`codegen`] が検査済みIRからCを生成する。検査だけのAPIはこの処理を省く。
+//!
+//! モジュールと型の内部リンクをたどるには、非公開項目も含めてrustdocを生成する。
+
+// 内部実装の案内も公開入口に載せるため、非公開項目を含むrustdoc生成を前提とする。
+#![allow(rustdoc::private_intra_doc_links)]
+
 #[cfg(test)]
 #[path = "../tests/support/integer_bounds.rs"]
 mod integer_bounds;
+mod numeric;
 
 mod ast;
 mod check;
 mod codegen;
 mod lexer;
 mod parser;
+mod warnings;
 
 use std::{fmt, num::NonZeroU64};
 
@@ -16,19 +34,64 @@ pub enum ErrorKind {
     Unsupported,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Diagnostic {
+    pub related: Vec<Diagnostic>,
     pub kind: ErrorKind,
     pub line: usize,
     pub column: usize,
-    pub message: String,
+    message: String,
+    rule_id: String,
 }
 
 impl fmt::Display for Diagnostic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}: {}", self.line, self.column, self.message)
+        write!(f, "{}:{}: {}", self.line, self.column, self.message)?;
+        for related in &self.related {
+            write!(f, "\n  note: {related}")?;
+        }
+        Ok(())
     }
 }
+
+impl Diagnostic {
+    pub fn new(
+        kind: ErrorKind,
+        line: usize,
+        column: usize,
+        rule: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        let rule_id = rule.into();
+        Self {
+            related: Vec::new(),
+            kind,
+            line,
+            column,
+            message: format!("{} [{}]", message.into(), rule_id),
+            rule_id,
+        }
+    }
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+    /// 表示用の文面から独立した規則識別子を返す。
+    pub fn rule(&self) -> &str {
+        &self.rule_id
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct DiagnosticMessage {
+    pub rule: &'static str,
+    pub text: String,
+}
+macro_rules! diagnostic {
+    ($rule:expr, $($message:tt)*) => {
+        $crate::DiagnosticMessage { rule: $rule, text: format!($($message)*) }
+    };
+}
+pub(crate) use diagnostic;
 
 impl std::error::Error for Diagnostic {}
 
@@ -40,8 +103,8 @@ pub enum ArithmeticMode {
     Deny,
 }
 
-/// Limit embedded in generated programs. Zero is reserved by the C runtime
-/// for unlimited storage and cannot be supplied as a finite limit.
+/// 生成プログラムに埋め込む上限。Cランタイムでは0を無制限の指定に予約しているため、
+/// 有限の上限として0は指定できない。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TextPoolLimit {
     Bytes(NonZeroU64),
@@ -61,17 +124,29 @@ impl TextPoolLimit {
     }
 }
 
+impl Warning {
+    pub fn rule(&self) -> &str {
+        &self.rule_id
+    }
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CompilationOptions {
+    pub log_allow: bool,
     pub arithmetic_mode: ArithmeticMode,
     pub text_pool_limit: TextPoolLimit,
 }
 
 #[derive(Debug)]
 pub struct Warning {
+    rule_id: String,
+    pub allowed_reason: Option<String>,
     pub line: usize,
     pub column: usize,
-    pub message: String,
+    message: String,
 }
 
 pub struct Compilation {
@@ -79,7 +154,7 @@ pub struct Compilation {
     pub warnings: Vec<Warning>,
 }
 
-/// Compile Suz source to C11.
+/// SuzのソースをC23へコンパイルする。
 pub fn compile(bytes: &[u8]) -> Result<String, Diagnostic> {
     compile_with_mode(bytes, ArithmeticMode::Default).map(|result| result.c)
 }
@@ -88,7 +163,7 @@ pub fn compile_with_mode(bytes: &[u8], mode: ArithmeticMode) -> Result<Compilati
     compile_with_source_name(bytes, mode, "<input>")
 }
 
-/// Compile with a source name used in generated runtime diagnostics.
+/// 実行時の診断に使うソース名を指定してコンパイルする。
 pub fn compile_with_source_name(
     bytes: &[u8],
     mode: ArithmeticMode,
@@ -104,72 +179,77 @@ pub fn compile_with_source_name(
     )
 }
 
-/// Compile with runtime settings embedded in the generated C.
+/// ランタイム設定を生成Cへ埋め込んでコンパイルする。
 pub fn compile_with_options(
     bytes: &[u8],
     source_name: &str,
     options: &CompilationOptions,
 ) -> Result<Compilation, Diagnostic> {
-    let (checked, warnings) = analyze(bytes, options.arithmetic_mode)?;
+    let (checked, warnings) = analyze(bytes, options.arithmetic_mode, options.log_allow)?;
     Ok(Compilation {
         c: codegen::generate(&checked, source_name, options.text_pool_limit),
         warnings,
     })
 }
 
-/// Validate source and return warnings without generating C.
+/// ソースを検査し、Cを生成せず警告を返す。
 pub fn check_source(bytes: &[u8], mode: ArithmeticMode) -> Result<Vec<Warning>, Diagnostic> {
-    analyze(bytes, mode).map(|(_, warnings)| warnings)
+    check_source_with_options(
+        bytes,
+        &CompilationOptions {
+            arithmetic_mode: mode,
+            ..CompilationOptions::default()
+        },
+    )
+}
+
+pub fn check_source_with_options(
+    bytes: &[u8],
+    options: &CompilationOptions,
+) -> Result<Vec<Warning>, Diagnostic> {
+    analyze(bytes, options.arithmetic_mode, options.log_allow).map(|(_, warnings)| warnings)
 }
 
 fn analyze(
     bytes: &[u8],
     mode: ArithmeticMode,
+    log_allow: bool,
 ) -> Result<(check::CheckedProgram, Vec<Warning>), Diagnostic> {
     let source = std::str::from_utf8(bytes).map_err(|error| {
         let prefix = std::str::from_utf8(&bytes[..error.valid_up_to()]).unwrap();
         let (line, column) = lexer::position(prefix);
-        Diagnostic {
-            kind: ErrorKind::InvalidSource,
+        Diagnostic::new(
+            ErrorKind::InvalidSource,
             line,
             column,
-            message: "source is not valid UTF-8 [src.encoding]".into(),
-        }
+            "src.encoding",
+            "source is not valid UTF-8",
+        )
     })?;
     for (offset, _) in source.match_indices('\r') {
         if source.as_bytes().get(offset + 1) != Some(&b'\n') {
             let (line, column) = lexer::position(&source[..offset]);
-            return Err(Diagnostic {
-                kind: ErrorKind::InvalidSource,
+            return Err(Diagnostic::new(
+                ErrorKind::InvalidSource,
                 line,
                 column,
-                message: "CR must be followed by LF [src.newline]".into(),
-            });
+                "src.newline",
+                "CR must be followed by LF",
+            ));
         }
     }
     let source = source.replace("\r\n", "\n");
     let tokens = lexer::lex(&source)?;
     let program = parser::parse(&tokens)?;
     let checked = check::check(&program)?;
-    let message = "integer arithmetic has no 'or' handler [diagnostic.arithmetic]";
-    if mode == ArithmeticMode::Deny
-        && let Some(location) = checked.unhandled_arithmetic.first()
-    {
-        return Err(location.error(ErrorKind::InvalidSource, message));
-    }
-    let warnings = if mode == ArithmeticMode::Warn {
-        checked
-            .unhandled_arithmetic
-            .iter()
-            .map(|location| Warning {
-                line: location.line,
-                column: location.column,
-                message: message.into(),
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
+    let warnings = warnings::collect(
+        &checked.unhandled_arithmetic,
+        &checked.comparison_warnings,
+        &checked.division_warnings,
+        &program.allows,
+        mode,
+        log_allow,
+    )?;
     Ok((checked, warnings))
 }
 

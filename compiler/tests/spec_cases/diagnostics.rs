@@ -23,7 +23,7 @@ fn diagnostic_expectations_are_strict() {
         correct.replace("decl.shadowing", "decl.duplicate"),
         correct.replace("example", "other"),
         format!("{correct}{correct}"),
-        correct.replace("name already", "warning: name already"),
+        correct.replace("name already", "warn: name already"),
     ] {
         assert!(!expected.matches(&wrong, path), "{wrong}");
     }
@@ -53,11 +53,11 @@ fn warning_table_is_parsed_and_validated() {
 
 **期待結果：**
 
-| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+| 設定 | 結果 | 終了コード | 警告数 |
 |---|---|---:|---:|
 | 警告 | 正常終了 | 0 | 2 |
 
-**整数演算の警告：**
+**警告：**
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
@@ -78,7 +78,7 @@ fn main() -> u8 {
     let runs = &cases["diag-001"].runs;
     assert_eq!(runs.len(), 1);
     assert_eq!(runs[0].mode, Mode::Warn);
-    assert_eq!(runs[0].arithmetic_warnings, 2);
+    assert_eq!(runs[0].warning_count, 2);
     assert_eq!(
         runs[0].warnings,
         [
@@ -95,11 +95,11 @@ fn main() -> u8 {
         ]
     );
 
-    // Mutate one field at a time to exercise invalid Markdown contracts.
+    // Markdownの検証契約に違反するケースを、一項目ずつ変えて試す。
     for invalid in [
         input.replace(
             "**ソース：**",
-            r#"**整数演算の警告：**
+            r#"**警告：**
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
@@ -132,8 +132,8 @@ fn warning_diagnostics_match_locations_and_counts() {
         },
     ];
     let path = std::path::Path::new("test.suz");
-    let first = "test.suz:2:21: warning: integer negation [diagnostic.arithmetic]\n";
-    let second = "test.suz:4:17: warning: integer negation [diagnostic.arithmetic]\n";
+    let first = "test.suz:2:21: warn: integer negation [diagnostic.arithmetic]\n";
+    let second = "test.suz:4:17: warn: integer negation [diagnostic.arithmetic]\n";
     assert!(support::warnings_match(warnings, &[first, second], path));
     assert!(support::warnings_match(warnings, &[second, first], path));
     for wrong in [
@@ -142,7 +142,7 @@ fn warning_diagnostics_match_locations_and_counts() {
         vec![first, second, first],
         vec![
             first,
-            "test.suz:4:18: warning: integer negation [diagnostic.arithmetic]\n",
+            "test.suz:4:18: warn: integer negation [diagnostic.arithmetic]\n",
         ],
         vec![
             first,
@@ -150,11 +150,11 @@ fn warning_diagnostics_match_locations_and_counts() {
         ],
         vec![
             first,
-            "test.suz:4:17: warning: integer negation [other.rule]\n",
+            "test.suz:4:17: warn: integer negation [other.rule]\n",
         ],
         vec![
             first,
-            "other.suz:4:17: warning: integer negation [diagnostic.arithmetic]\n",
+            "other.suz:4:17: warn: integer negation [diagnostic.arithmetic]\n",
         ],
     ] {
         assert!(

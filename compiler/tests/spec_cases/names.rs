@@ -88,7 +88,7 @@ fn declarations_reject_invalid_name_shapes_at_the_name() {
                 "{source}: {error}"
             );
             assert!(
-                error.message.contains(&format!("[{rule}]")),
+                error.message().contains(&format!("[{rule}]")),
                 "{source}: {error}"
             );
         }
@@ -117,7 +117,7 @@ fn valid_name_boundaries_and_exact_references_are_preserved() {
     ] {
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert!(
-            error.message.contains(&format!("[{rule}]")),
+            error.message().contains(&format!("[{rule}]")),
             "{source}: {error}"
         );
     }

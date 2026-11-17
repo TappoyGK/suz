@@ -39,7 +39,7 @@ fn loop_context_scope_and_syntactic_exits_are_checked() {
         assert_eq!(error.kind, ErrorKind::InvalidSource, "{error}");
         assert!(error.message.contains(rule), "expected {rule}: {error}");
     }
-    // Accepted infinite paths must not be executed by this test.
+    // 受理する無限ループの経路は、このテストでは実行しない。
     for body in [
         "loop { continue\nreturn 1 }",
         "loop {}\nreturn 0",

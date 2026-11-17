@@ -10,7 +10,7 @@ fn command(directory: &Path) -> Command {
     command
         .current_dir(directory)
         .env("TMPDIR", directory.join("temporary"));
-    for name in ["CFLAGS", "CPPFLAGS", "LDFLAGS"] {
+    for name in ["CFLAGS", "CPPFLAGS", "LDFLAGS", "SUZ_CFLAGS"] {
         command.env_remove(name);
     }
     command
@@ -40,6 +40,40 @@ fn clean(directory: &Path) {
             .to_string_lossy()
             .starts_with(".suz-")
     }));
+}
+
+#[cfg(unix)]
+#[test]
+fn native_build_rejects_non_clang_and_pre_c23_compilers() {
+    use std::os::unix::fs::PermissionsExt;
+    let directory = setup();
+    let wrapper = directory.0.join("compiler");
+    for flag in ["-U__clang__", "-std=c11"] {
+        fs::write(
+            &wrapper,
+            format!("#!/bin/sh\nexec \"${{REAL_CC:-clang}}\" \"$@\" {flag}\n"),
+        )
+        .unwrap();
+        fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o755)).unwrap();
+        for verb in ["build", "run"] {
+            let mut cmd = command(&directory.0);
+            cmd.env(
+                "REAL_CC",
+                std::env::var_os("CC").unwrap_or_else(|| "clang".into()),
+            )
+            .args([verb, "input.suz", "--cc", "./compiler"]);
+            if verb == "build" {
+                cmd.args(["-o", "program"]);
+            }
+            let result = code(cmd.output().unwrap(), 2);
+            assert!(result.stdout.is_empty());
+            let diagnostic = String::from_utf8_lossy(&result.stderr);
+            assert!(diagnostic.contains("[tool.c-compiler]"), "{diagnostic}");
+            assert!(diagnostic.contains("C23-capable Clang"), "{diagnostic}");
+            assert!(!directory.0.join("program").exists());
+            clean(&directory.0);
+        }
+    }
 }
 
 #[test]
@@ -76,7 +110,7 @@ fn native_settings_and_input_aliases_are_rejected_before_compilation() {
             .unwrap(),
         2,
     );
-    for variable in ["CFLAGS", "CPPFLAGS", "LDFLAGS"] {
+    for variable in ["CFLAGS", "CPPFLAGS", "LDFLAGS", "SUZ_CFLAGS"] {
         let result = code(
             command(&directory.0)
                 .env(variable, "-ffast-math")
@@ -85,7 +119,13 @@ fn native_settings_and_input_aliases_are_rejected_before_compilation() {
                 .unwrap(),
             2,
         );
-        assert!(String::from_utf8_lossy(&result.stderr).contains("[tool.build-settings]"));
+        assert!(
+            String::from_utf8_lossy(&result.stderr).contains(if variable == "SUZ_CFLAGS" {
+                "[tool.extra-flags]"
+            } else {
+                "[tool.build-settings]"
+            })
+        );
     }
     let result = code(
         command(&directory.0)
@@ -210,7 +250,8 @@ fn run_inherits_streams_and_cwd_and_cleans_up_after_signals() {
 #include <stdlib.h>
 void *suz_env_alloc(size_t size) { return malloc(size); }
 void suz_env_free(void *ptr) { free(ptr); }
-void suz_env_log(const char *s, size_t n) {
+void suz_env_log(suz_log_level level, const char *s, size_t n) {
+    (void)level;
     static int written; (void)s; (void)n;
     if (!written) { putchar(getchar()); written = 1; }
 }
@@ -238,7 +279,8 @@ _Noreturn void suz_env_panic(void) { exit(101); }
 #include <unistd.h>
 void *suz_env_alloc(size_t size) { return malloc(size); }
 void suz_env_free(void *ptr) { free(ptr); }
-void suz_env_log(const char *s, size_t n) {
+void suz_env_log(suz_log_level level, const char *s, size_t n) {
+    (void)level;
     (void)s; (void)n;
     FILE *f = fopen("ready", "w"); if (!f) exit(91);
     fputs("ready", f); fclose(f);

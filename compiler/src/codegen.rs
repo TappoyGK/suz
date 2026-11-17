@@ -1,7 +1,12 @@
+//! 検査済みIRからC23のソースを生成する。補助関数・定数・関数本体を出力順に組み立てる。
+//!
+//! 利用元: [`crate::compile_with_options`]。
+
 mod arithmetic;
 mod blocks;
 mod casts;
 mod characters;
+mod exact;
 mod expressions;
 mod functions;
 mod helpers;
@@ -99,8 +104,7 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
     for body in bodies {
         c.push_str(&body);
     }
-    // Mention function addresses without calling them, so valid unused Suz
-    // functions do not trigger C's unused-function warning.
+    // 関数を呼ばずにアドレスだけを参照し、Suzで有効な未使用関数にCの未使用警告が出ないようにする。
     let references: String = program
         .functions
         .iter()

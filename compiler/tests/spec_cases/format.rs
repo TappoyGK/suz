@@ -14,9 +14,28 @@ fn main() -> u8 { return 0 }
 
 **期待結果：**
 
-| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+| 設定 | 結果 | 終了コード | 警告数 |
 |---|---|---:|---:|
 | 通常 | 正常終了 | 0 | 0 |
+
+"#;
+
+const ONE_CASE_INVENTORY: &str = r#"## 目次と件数
+
+| 分野 | ID接頭辞 | 対応する仕様 | 件数 |
+|---|---|---|---:|
+| 例 | `lex` | 任意 | 1 |
+| 合計 | | | 1 |
+
+### 結果別件数
+
+| 結果 | 件数 |
+|---|---:|
+| 受理 | 1 |
+| コンパイルエラー | 0 |
+| 実行時パニック | 0 |
+| 診断設定の比較 | 0 |
+| 合計 | 1 |
 
 "#;
 
@@ -26,17 +45,7 @@ fn split_catalog_checks_cross_file_duplicates_and_missing_cases() {
     use std::fs;
 
     let directory = TemporaryDirectory::new();
-    fs::write(
-        directory.0.join("spec-cases.md"),
-        r#"## 目次と件数
-
-| 分野 | ID接頭辞 | 対応する仕様 | 件数 |
-|---|---|---|---:|
-| 字句 | `lex` | 第3章 | 1 |
-| 合計 | | | 1 |
-"#,
-    )
-    .unwrap();
+    fs::write(directory.0.join("spec-cases.md"), ONE_CASE_INVENTORY).unwrap();
     let cases = directory.0.join("spec-cases");
     fs::create_dir(&cases).unwrap();
     fs::write(cases.join("lex.md"), SMALL).unwrap();
@@ -159,11 +168,11 @@ fn malformed_expectation_tables_are_rejected() {
         ),
         (
             SMALL.replace(row, "| 通常 | 正常終了 | 0 | 0 | extra |"),
-            "four table columns",
+            "4 table columns",
         ),
         (
             format!(
-                "{SMALL}\n**期待結果：**\n\n| 設定 | 結果 | 終了コード | 整数演算の警告数 |\n|---|---|---|---|\n{row}\n"
+                "{SMALL}\n**期待結果：**\n\n| 設定 | 結果 | 終了コード | 警告数 |\n|---|---|---|---|\n{row}\n"
             ),
             "duplicate expectation table",
         ),
@@ -224,7 +233,7 @@ fn malformed_output_blocks_are_rejected() {
 
 #[test]
 fn cases_and_modes_come_from_the_document() {
-    // A new category and different case counts need no parser changes.
+    // 新しい分類と異なる例数を加えても、解析処理の変更は不要。
     let row = "| 通常 | 正常終了 | 0 | 0 |";
     let second = SMALL.replace("lex-001", "example-042").replace(
         row,
@@ -236,12 +245,12 @@ fn cases_and_modes_come_from_the_document() {
     assert_eq!(runs.len(), 2);
     assert_eq!(runs[0].mode, Mode::Warn);
     assert_eq!(runs[0].code, Some(7));
-    assert_eq!(runs[0].arithmetic_warnings, 2);
+    assert_eq!(runs[0].warning_count, 2);
     assert_eq!(runs[1].mode, Mode::Deny);
     assert_eq!(runs[1].result, Outcome::CompileError);
     assert_eq!(runs[1].code, None);
     assert!(runs[1].stdout.is_none());
-    // The group name does not select modes.
+    // グループ名によって実行モードを選ばない。
     assert_eq!(
         extract(&SMALL.replace("lex-001", "diag-001")).unwrap()["diag-001"]
             .runs
@@ -252,24 +261,46 @@ fn cases_and_modes_come_from_the_document() {
 
 #[test]
 fn inventory_is_checked_against_the_parsed_cases() {
-    let inventory = "## 目次と件数\n\n| 分野 | ID接頭辞 | 対応する仕様 | 件数 |\n|---|---|---|---:|\n| 例 | `lex` | 任意 | 1 |\n| 合計 | | | 1 |\n\n## 例\n\n";
-    let doc = format!("{inventory}{SMALL}");
+    let doc = format!("{ONE_CASE_INVENTORY}{SMALL}");
     let cases = extract(&doc).unwrap();
     validate_inventory(&doc, &cases).unwrap();
     for bad in [
         doc.replace("任意 | 1", "任意 | 2"),
-        doc.replace("合計 | | | 1", "合計 | | | 2"),
+        doc.replace("合計 | | | 1", "合計 | | | 2")
+            .replace("| 受理 | 1 |", "| 受理 | 2 |")
+            .replace("| 合計 | 1 |", "| 合計 | 2 |"),
         doc.replace("`lex`", "`other`"),
+        doc.replace("| 受理 | 1 |", "| 受理 | 0 |")
+            .replace("| コンパイルエラー | 0 |", "| コンパイルエラー | 1 |"),
+        doc.replace("| 合計 | 1 |", "| 合計 | 2 |"),
+        doc.replace("| 受理 | 1 |", "| 受理 | 1 |\n| 受理 | 1 |"),
+        doc.replace("### 結果別件数", "### その他"),
+        doc.replace("| 実行時パニック | 0 |\n", ""),
+        doc.replace("| 受理 | 1 |", "| 受理 |"),
     ] {
         assert!(validate_inventory(&bad, &cases).is_err());
     }
     let extended = format!(
         "{}{}",
         doc.replace("任意 | 1", "任意 | 2")
-            .replace("合計 | | | 1", "合計 | | | 2"),
+            .replace("合計 | | | 1", "合計 | | | 2")
+            .replace("| 受理 | 1 |", "| 受理 | 2 |")
+            .replace("| 合計 | 1 |", "| 合計 | 2 |"),
         SMALL.replace("lex-001", "lex-002")
     );
     validate_inventory(&extended, &extract(&extended).unwrap()).unwrap();
+    // 二つの設定が両方とも正常終了しても、比較例としては一例に数える。
+    let compared = format!(
+        "{}{}",
+        ONE_CASE_INVENTORY
+            .replace("| 受理 | 1 |", "| 受理 | 0 |")
+            .replace("| 診断設定の比較 | 0 |", "| 診断設定の比較 | 1 |"),
+        SMALL.replace(
+            "| 通常 | 正常終了 | 0 | 0 |",
+            "| 通常 | 正常終了 | 0 | 0 |\n| 警告 | 正常終了 | 0 | 0 |"
+        )
+    );
+    validate_inventory(&compared, &extract(&compared).unwrap()).unwrap();
 }
 
 #[test]
@@ -347,7 +378,7 @@ The following program returns zero.
 
 **期待結果：**
 
-| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+| 設定 | 結果 | 終了コード | 警告数 |
 |---|---|---:|---:|
 | 通常 | 正常終了 | 0 | 0 |
 
@@ -376,7 +407,7 @@ This is not an expectation table.
     assert_eq!(cases["lex-001"].rule, "src.encoding");
     assert_eq!(cases["lex-001"].bytes, b"fn main() -> u8 { return 0 }\n");
 
-    // Every heading at the case level or above closes the case.
+    // 例と同じ階層かそれより上の見出しは、現在の例を終了させる。
     for heading in ["# Appendix", "## Appendix", "### Further reading"] {
         let input = document.replace("### Further reading", heading);
         assert_eq!(extract(&input).unwrap().len(), 1);

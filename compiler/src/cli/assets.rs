@@ -1,3 +1,7 @@
+//! 生成Cと一緒に出力するランタイムのソース・ヘッダーをバイナリへ埋め込む。
+//!
+//! 利用元: [`crate::cli::emit`]。
+
 macro_rules! bundled {
     ($($path:literal),* $(,)?) => {
         pub const FILES: &[(&str, &[u8])] = &[
@@ -10,6 +14,7 @@ bundled!(
     "LICENSE-MIT",
     "LICENSE-APACHE",
     "scripts/build-c.sh",
+    "scripts/cflags.txt",
     "runtime/suz_config.h",
     "runtime/suz_env.h",
     "runtime/suz_env.c",

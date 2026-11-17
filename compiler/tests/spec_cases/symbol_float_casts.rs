@@ -1,11 +1,11 @@
-use crate::test_util::compile_and_run_c11;
+use crate::test_util::compile_and_run_c23;
 
 #[test]
 fn symbol_float_casts_share_constant_rounding_and_lazy_handlers() {
     let source = r#"const MID = `1.0000000596046447753906250000000000001` as f32 or 7.0
 const HUGE = `1.0e1000` as f64 or 7.0
 const TINY = `-1.0e-1000` as f64 or 7.0
-const GOOD = `1.5` as f32 or ((1 as i64) / 0) as f32
+const GOOD = `1.5` as f32 or ((1 as i64) / (0 as u8)) as f32
 fn source(value: symbol) -> symbol {
     log info `source`
     return value
@@ -29,7 +29,7 @@ fn main() -> u8 {
     if parse(`1.5`) != 1.5 || parse(`bad`) != 7.0 { return 4 }
     return 0
 }"#;
-    let result = compile_and_run_c11(source, "text-float.suz");
+    let result = compile_and_run_c23(source, "text-float.suz");
     assert_eq!(
         result.status.code(),
         Some(0),
@@ -56,10 +56,10 @@ fn symbol_float_casts_require_handlers_and_check_unselected_values() {
         ),
         (
             "const A = `bad` as f32 or ((1 as i64) / 0) as f32\nfn main() -> u8 { return 0 }",
-            "const.evaluation",
+            "arith.div-zero-always",
         ),
     ] {
         let error = suz::compile(source.as_bytes()).unwrap_err();
-        assert!(error.message.contains(rule), "{source}: {error:?}");
+        assert!(error.message().contains(rule), "{source}: {error:?}");
     }
 }

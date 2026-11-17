@@ -1,8 +1,19 @@
+//! 検査済みの式と文から、整数除算・比較・未処理の整数演算の診断候補を集める。
+//!
+//! 利用元: [`crate::check::functions`]。
+//! 主な対象規則: `[diagnostic.integer-division-to-float]`、`[diagnostic.constant-comparison]`、`[diagnostic.arithmetic]`。
+
 use super::ir::{CheckedExpression, CheckedHandler, CheckedStatement, Value};
 use crate::ast::Location;
 
 pub(super) fn collect(expr: &CheckedExpression, locations: &mut Vec<Location>) {
     match &expr.value {
+        Value::Exact(e) => {
+            if e.arithmetic {
+                locations.push(e.location);
+            }
+            e.leaves(&mut |v| collect(v, locations));
+        }
         Value::TextView(inner) | Value::Intern { operand: inner, .. } => collect(inner, locations),
         Value::Slice {
             target,
@@ -70,6 +81,9 @@ pub(super) fn collect(expr: &CheckedExpression, locations: &mut Vec<Location>) {
                         unreachable!("failure returns must be lowered to statements")
                     }
                 }
+            }
+            if let super::ir::IntegerOperation::Exact(e) = operation {
+                e.leaves(&mut |v| collect(v, locations));
             }
             for operand in operation.operands() {
                 collect(operand, locations);
@@ -161,6 +175,9 @@ fn collect_statements(statements: &[CheckedStatement], locations: &mut Vec<Locat
                 let Value::IntegerArithmetic { operation, .. } = &operation.value else {
                     unreachable!()
                 };
+                if let super::ir::IntegerOperation::Exact(e) = operation {
+                    e.leaves(&mut |v| collect(v, locations));
+                }
                 for operand in operation.operands() {
                     collect(operand, locations);
                 }

@@ -1,3 +1,8 @@
+//! 関数の引数・戻り値型・本体を解析し、mainの形と型名を検査する。
+//!
+//! 利用元: [`crate::parser`]。
+//! 主な対象規則: `[fn.parameter]`、`[fn.return-type]`、`[prog.main]`、`[src.ident]`、`[src.list-comma]`、`[src.trailing-comma]`。
+
 use super::{FixedToken, Parser};
 use crate::{
     Diagnostic, ErrorKind,
@@ -36,7 +41,10 @@ impl Parser<'_, '_> {
             if separated && comma {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
-                    "a list comma cannot follow a statement newline [syntax.grammar]",
+                    crate::diagnostic!(
+                        "syntax.grammar",
+                        "a list comma cannot follow a statement newline"
+                    ),
                 ));
             }
             if comma {
@@ -52,7 +60,10 @@ impl Parser<'_, '_> {
                 {
                     return Err(self.error(
                         ErrorKind::InvalidSource,
-                        "invalid trailing comma for the list layout [src.trailing-comma]",
+                        crate::diagnostic!(
+                            "src.trailing-comma",
+                            "invalid trailing comma for the list layout"
+                        ),
                     ));
                 }
                 self.cursor += 1;
@@ -61,7 +72,7 @@ impl Parser<'_, '_> {
             if !comma {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
-                    "list elements require commas [src.list-comma]",
+                    crate::diagnostic!("src.list-comma", "list elements require commas"),
                 ));
             }
         }
@@ -72,7 +83,7 @@ impl Parser<'_, '_> {
         let Kind::Ident(name) = self.token().kind else {
             return Err(self.error(
                 ErrorKind::InvalidSource,
-                "expected a parameter name [src.ident]",
+                crate::diagnostic!("src.ident", "expected a parameter name"),
             ));
         };
         super::names::check(super::names::Shape::Value, name, location)?;
@@ -81,7 +92,7 @@ impl Parser<'_, '_> {
         if self.token().kind != Kind::Symbol(":") {
             return Err(self.error(
                 ErrorKind::InvalidSource,
-                "parameter type is required [fn.parameter]",
+                crate::diagnostic!("fn.parameter", "parameter type is required"),
             ));
         }
         self.cursor += 1;
@@ -89,7 +100,7 @@ impl Parser<'_, '_> {
         if ty == Type::Void {
             return Err(location.error(
                 ErrorKind::InvalidSource,
-                "parameters cannot have type void [type.void]",
+                crate::diagnostic!("type.void", "parameters cannot have type void"),
             ));
         }
         Ok(Parameter { name, ty, location })
@@ -112,13 +123,14 @@ impl Parser<'_, '_> {
                 .ok_or_else(|| {
                     self.error(
                         ErrorKind::InvalidSource,
-                        &format!("unknown type '{name}' [type.name]"),
+                        crate::diagnostic!("type.name", "unknown type '{name}'"),
                     )
                 })?,
             _ => {
-                return Err(
-                    self.error(ErrorKind::InvalidSource, "expected a type [syntax.grammar]")
-                );
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("syntax.grammar", "expected a type"),
+                ));
             }
         };
         self.cursor += 1;
@@ -132,7 +144,7 @@ impl Parser<'_, '_> {
         let Kind::Ident(name) = self.token().kind else {
             return Err(self.error(
                 ErrorKind::InvalidSource,
-                "expected a function name [src.ident]",
+                crate::diagnostic!("src.ident", "expected a function name"),
             ));
         };
         super::names::check(super::names::Shape::Value, name, location)?;
@@ -142,7 +154,7 @@ impl Parser<'_, '_> {
             if has_main {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
-                    "main must be declared exactly once [prog.main]",
+                    crate::diagnostic!("prog.main", "main must be declared exactly once"),
                 ));
             }
             for token in [
@@ -154,7 +166,10 @@ impl Parser<'_, '_> {
                 if self.token().kind != token {
                     return Err(self.error(
                         ErrorKind::InvalidSource,
-                        "main must have the signature fn main() -> u8 [prog.main]",
+                        crate::diagnostic!(
+                            "prog.main",
+                            "main must have the signature fn main() -> u8"
+                        ),
                     ));
                 }
                 self.cursor += 1;
@@ -165,7 +180,7 @@ impl Parser<'_, '_> {
             if self.token().kind != Kind::Symbol("->") {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
-                    "function return type is required [fn.return-type]",
+                    crate::diagnostic!("fn.return-type", "function return type is required"),
                 ));
             }
             self.cursor += 1;

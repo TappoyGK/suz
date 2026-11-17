@@ -8,7 +8,7 @@ const PANIC: &str = r#"### check-001 panic example
 
 **期待結果：**
 
-| 設定 | 結果 | 終了コード | 整数演算の警告数 |
+| 設定 | 結果 | 終了コード | 警告数 |
 |---|---|---:|---:|
 | 通常 | パニック | 101 | 0 |
 | 警告 | パニック | 101 | 1 |
@@ -21,7 +21,7 @@ const PANIC: &str = r#"### check-001 panic example
 | 通常 | `[rt.int-overflow]` | 3 | 22 |
 | 警告 | `[rt.int-overflow]` | 3 | 22 |
 
-**整数演算の警告：**
+**警告：**
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
@@ -161,7 +161,7 @@ fn direct_compilation_rejects_wrong_diagnostics_and_warnings() {
             3 => run.warnings[0].rule = "lit.range".into(),
             4 => {
                 run.warnings.clear();
-                run.arithmetic_warnings = 0;
+                run.warning_count = 0;
             }
             5 => {
                 run.warnings.push(support::ExpectedDiagnostic {
@@ -169,7 +169,7 @@ fn direct_compilation_rejects_wrong_diagnostics_and_warnings() {
                     line: 3,
                     column: 22,
                 });
-                run.arithmetic_warnings = 2;
+                run.warning_count = 2;
             }
             _ => unreachable!(),
         }

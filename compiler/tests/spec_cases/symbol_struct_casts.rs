@@ -1,4 +1,4 @@
-use crate::test_util::compile_and_run_c11;
+use crate::test_util::compile_and_run_c23;
 
 #[test]
 fn struct_symbol_casts_preserve_constants_scalar_types_and_lazy_evaluation() {
@@ -8,7 +8,7 @@ const INPUT = `Values { low: -128, high: 18446744073709551615, small: 1.00000005
 const FALLBACK = Values { low: 0, high: 0, small: 0.0, wide: 0.0, flag: false, mode: Mode.First, label: `` }
 const SAVED = INPUT as Values or FALLBACK
 const FAILED = `bad` as Values or SAVED
-const SHORT = false && ((`bad` as Values or Values { low: 1 / 0, high: 0, small: 0.0, wide: 0.0, flag: false, mode: Mode.First, label: `` }).flag)
+const SHORT = false && ((`bad` as Values or Values { low: 1 / (0 as u8), high: 0, small: 0.0, wide: 0.0, flag: false, mode: Mode.First, label: `` }).flag)
 fn source(value: symbol) -> symbol { log info `source`
     return value
 }
@@ -25,7 +25,7 @@ fn main() -> u8 {
     log info `${good.label}`
     return 0
 }"#;
-    let output = compile_and_run_c11(source, "text-struct.suz");
+    let output = compile_and_run_c23(source, "text-struct.suz");
     assert_eq!(
         output.status.code(),
         Some(0),
@@ -67,7 +67,7 @@ fn main() -> u8 {
     if paired != PAIR || paired.left.name != `left` || paired.right.name != `right` { return 17 }
     return 0
 }"#;
-    let output = compile_and_run_c11(source, "text-struct.suz");
+    let output = compile_and_run_c23(source, "text-struct.suz");
     assert_eq!(
         output.status.code(),
         Some(0),
@@ -94,7 +94,7 @@ fn struct_symbol_casts_require_handlers_and_validate_constant_fallbacks() {
         ),
         (
             "const V = `bad` as Item or Item { value: 1 / 0 }\nfn main() -> u8 { return 0 }",
-            "const.evaluation",
+            "arith.div-zero-always",
         ),
         (
             "fn main() -> u8 { fix v = expr { `bad` as Item or return 1 }\nreturn 0 }",
@@ -103,6 +103,6 @@ fn struct_symbol_casts_require_handlers_and_validate_constant_fallbacks() {
     ] {
         let source = format!("struct Item {{ value: u8 }}\n{body}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
-        assert!(error.message.contains(rule), "{source}: {error:?}");
+        assert!(error.message().contains(rule), "{source}: {error:?}");
     }
 }

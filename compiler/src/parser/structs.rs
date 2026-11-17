@@ -1,3 +1,8 @@
+//! 構造体宣言を収集し、フィールドの名前・型・再帰とリテラルの構文を検査する。
+//!
+//! 利用元: [`crate::parser`]。
+//! 主な対象規則: `[decl.duplicate]`、`[src.ident]`、`[struct.field]`、`[struct.literal]`、`[struct.nonempty]`、`[struct.recursion]`。
+
 use super::{FixedToken, Parser};
 use crate::{
     Diagnostic, ErrorKind,
@@ -27,7 +32,7 @@ impl Parser<'_, '_> {
         let Kind::Ident(name) = self.token().kind else {
             return Err(self.error(
                 ErrorKind::InvalidSource,
-                "expected a field name [struct.field]",
+                crate::diagnostic!("struct.field", "expected a field name"),
             ));
         };
         super::names::check(super::names::Shape::Value, name, location)?;
@@ -36,7 +41,7 @@ impl Parser<'_, '_> {
         if self.token().kind != Kind::Symbol(":") {
             return Err(self.error(
                 ErrorKind::InvalidSource,
-                "field type is required [struct.field]",
+                crate::diagnostic!("struct.field", "field type is required"),
             ));
         }
         self.cursor += 1;
@@ -44,7 +49,7 @@ impl Parser<'_, '_> {
         if ty == Type::Void {
             return Err(location.error(
                 ErrorKind::InvalidSource,
-                "field type cannot be void [type.void]",
+                crate::diagnostic!("type.void", "field type cannot be void"),
             ));
         }
         Ok(StructField { name, ty, location })
@@ -54,7 +59,7 @@ impl Parser<'_, '_> {
         let Kind::Ident(name) = self.token().kind else {
             return Err(self.error(
                 ErrorKind::InvalidSource,
-                "expected a named field initializer [struct.literal]",
+                crate::diagnostic!("struct.literal", "expected a named field initializer"),
             ));
         };
         let name = name.to_owned();
@@ -62,7 +67,7 @@ impl Parser<'_, '_> {
         if self.token().kind != Kind::Symbol(":") {
             return Err(self.error(
                 ErrorKind::InvalidSource,
-                "field initializer requires ':' [struct.literal]",
+                crate::diagnostic!("struct.literal", "field initializer requires ':'"),
             ));
         }
         self.cursor += 1;
@@ -79,6 +84,7 @@ pub(super) fn collect(
     enums: &[EnumDeclaration],
 ) -> Result<Vec<StructDeclaration>, Diagnostic> {
     let mut p = Parser {
+        allows: Vec::new(),
         tokens,
         enums,
         structs: &[],
@@ -97,7 +103,7 @@ pub(super) fn collect(
             let Kind::Ident(name) = p.token().kind else {
                 return Err(p.error(
                     ErrorKind::InvalidSource,
-                    "expected a struct name [src.ident]",
+                    crate::diagnostic!("src.ident", "expected a struct name"),
                 ));
             };
             super::names::check(super::names::Shape::Type, name, location)?;
@@ -107,7 +113,7 @@ pub(super) fn collect(
             {
                 return Err(location.error(
                     ErrorKind::InvalidSource,
-                    "duplicate type name [decl.duplicate]",
+                    crate::diagnostic!("decl.duplicate", "duplicate type name"),
                 ));
             }
             p.cursor += 1;
@@ -120,7 +126,7 @@ pub(super) fn collect(
                     Kind::End => {
                         return Err(p.error(
                             ErrorKind::InvalidSource,
-                            "unclosed struct declaration [struct.field]",
+                            crate::diagnostic!("struct.field", "unclosed struct declaration"),
                         ));
                     }
                     _ => {}
@@ -151,7 +157,7 @@ pub(super) fn collect(
         if decl.fields.is_empty() {
             return Err(decl.location.error(
                 ErrorKind::InvalidSource,
-                "struct requires at least one field [struct.nonempty]",
+                crate::diagnostic!("struct.nonempty", "struct requires at least one field"),
             ));
         }
         let mut names = BTreeSet::new();
@@ -159,7 +165,7 @@ pub(super) fn collect(
             if !names.insert(&field.name) {
                 return Err(field.location.error(
                     ErrorKind::InvalidSource,
-                    "duplicate field name [struct.field]",
+                    crate::diagnostic!("struct.field", "duplicate field name"),
                 ));
             }
         }
@@ -178,7 +184,7 @@ pub(super) fn collect(
                 if states[child] == 1 {
                     return Err(field.location.error(
                         ErrorKind::InvalidSource,
-                        "struct contains itself by value [struct.recursion]",
+                        crate::diagnostic!("struct.recursion", "struct contains itself by value"),
                     ));
                 }
                 visit(child, declarations, states)?;

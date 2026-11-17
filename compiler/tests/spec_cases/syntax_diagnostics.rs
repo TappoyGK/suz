@@ -54,7 +54,7 @@ fn invalid_syntax_reports_source_errors_through_check() {
             suz::ErrorKind::InvalidSource,
             "{source}: {error}"
         );
-        assert!(error.message.contains(message), "{source}: {error}");
+        assert!(error.message().contains(message), "{source}: {error}");
         let input = directory.0.join(format!("invalid-{index}.suz"));
         fs::write(&input, source).unwrap();
         let result = Command::new(env!("CARGO_BIN_EXE_suz"))
@@ -102,7 +102,7 @@ fn main() -> u8 {
             );
             assert!(error.line > 0 && error.column > 0);
             let rule = error
-                .message
+                .message()
                 .rsplit_once(" [")
                 .and_then(|(_, rule)| rule.strip_suffix(']'));
             assert!(
@@ -122,10 +122,10 @@ fn list_commas_follow_elements_before_statement_newlines() {
     ] {
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
-        assert!(error.message.ends_with("[syntax.grammar]"), "{error}");
+        assert!(error.message().ends_with("[syntax.grammar]"), "{error}");
         assert_eq!(error.column, 1);
     }
-    // Physical newlines inside parentheses are removed by the lexer.
+    // 括弧内の物理的な改行は、字句解析で取り除かれる。
     suz::compile(
         b"fn sum(a: u8\n, b: u8) -> u8 { return a + b }\nfn main() -> u8 { return sum(1\n, 2) }",
     )

@@ -1,3 +1,8 @@
+//! 生成Cと同梱ランタイムを出力ディレクトリへ配置する。公開前の一時領域と環境ファイルの選択を扱う。
+//!
+//! 利用元: [`crate::cli`]、[`crate::cli::native`]。
+//! 主な対象規則: `[tool.environment]`、`[tool.output]`、`[tool.publish-output]`。
+
 use super::{Failure, Result, assets, output::StagedDirectory};
 use std::{fs, path::Path};
 

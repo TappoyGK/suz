@@ -56,7 +56,7 @@ fn shifts_check_types_diagnostics_and_constant_evaluation() {
         let source = format!("fn main() -> u8 {{\n{body}\n}}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
-        assert!(error.message.contains("expr.operator-types"), "{error:?}");
+        assert!(error.message().contains("expr.operator-types"), "{error:?}");
     }
     for declaration in [
         "const VALUE: u8 = 1 << 8",
@@ -69,7 +69,7 @@ fn shifts_check_types_diagnostics_and_constant_evaluation() {
         let source = format!("{declaration}\nfn main() -> u8 {{ return 0 }}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert!(
-            error.message.contains("const.evaluation"),
+            error.message().contains("const.evaluation"),
             "{source}: {error:?}"
         );
     }
@@ -94,7 +94,7 @@ const MINIMUM: i64 = -1 << 63
 const SIGN_FILL: i64 = MINIMUM >> 63
 const LARGEST_BIT: u64 = 1 << 63
 const FALLBACK: u8 = 1 << 256 or 7
-const LAZY: u8 = 1 << 1 or (1 / 0)
+const LAZY: u8 = 1 << 1 or (1 / (0 as u8))
 const SHORT = true || (1 << 64 == 0)
 fn main() -> u8 {
     return ifexpr INFERRED == 256 && SIGN_FILL == -1 && LARGEST_BIT == 9223372036854775808 && FALLBACK == 7 && LAZY == 2 && SHORT { 0 } else { 1 }

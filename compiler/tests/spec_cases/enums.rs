@@ -1,4 +1,4 @@
-use crate::{integer_bounds::INTEGER_BOUNDS, test_util::compile_and_run_c11};
+use crate::{integer_bounds::INTEGER_BOUNDS, test_util::compile_and_run_c23};
 
 #[test]
 #[ignore = "release check: run scripts/test-release.sh"]
@@ -24,7 +24,7 @@ fn enum_conversions_use_variant_ranges_and_preserve_integer_boundaries() {
     for (base, _, _) in INTEGER_BOUNDS {
         source.push_str(&format!("enum Kind{base}: {base} {{ A, B }}\n"));
     }
-    let output = compile_and_run_c11(&source, "enums.suz");
+    let output = compile_and_run_c23(&source, "enums.suz");
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stdout.is_empty() && output.stderr.is_empty());
 }
@@ -75,7 +75,7 @@ fn main() -> u8 {
 }
 enum Mode: u8 { A, B }
 "#;
-    let output = compile_and_run_c11(source, "enums.suz");
+    let output = compile_and_run_c23(source, "enums.suz");
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stdout.is_empty());
     assert_eq!(
@@ -103,15 +103,15 @@ fn enum_numbering_and_narrowing_cover_signed_and_unsigned_limits() {
             "enum Code: {base} {{ {variants} }}\nfn main() -> u8 {{ return Code.V{max} as u8 }}"
         );
         assert_eq!(
-            compile_and_run_c11(&source, "enums.suz").status.code(),
+            compile_and_run_c23(&source, "enums.suz").status.code(),
             Some(max as i32)
         );
         let invalid = source.replace(&format!("V{max} }}"), &format!("V{max}, Overflow }}"));
         let error = suz::compile(invalid.as_bytes()).unwrap_err();
         assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
-        assert!(error.message.contains("[enum.variant]"));
+        assert!(error.message().contains("[enum.variant]"));
     }
-    // A signed storage type must not introduce mixed-sign C comparisons.
+    // 符号付きの格納型を使っても、Cの比較に符号の混在を持ち込んではならない。
     let variants = (0..=128)
         .map(|i| format!("V{i}"))
         .collect::<Vec<_>>()
@@ -131,7 +131,7 @@ fn main() -> u8 {{
 "#
     );
     assert_eq!(
-        compile_and_run_c11(&source, "enums.suz").status.code(),
+        compile_and_run_c23(&source, "enums.suz").status.code(),
         Some(0)
     );
 }
@@ -168,11 +168,11 @@ fn enum_types_remain_nominal_and_require_checked_conversions() {
             "{source}: {error}"
         );
         assert!(
-            error.message.contains(&format!("[{rule}]")),
+            error.message().contains(&format!("[{rule}]")),
             "{source}: {error}"
         );
         if body.starts_with("fix wrong: Second") {
-            assert!(error.message.contains("expected Second, found First"));
+            assert!(error.message().contains("expected Second, found First"));
         }
     }
     for declaration in ["struct First { value: u8 }", "enum First: i8 { A }"] {
@@ -180,7 +180,7 @@ fn enum_types_remain_nominal_and_require_checked_conversions() {
         assert!(
             suz::compile(source.as_bytes())
                 .unwrap_err()
-                .message
+                .message()
                 .contains("[decl.duplicate]")
         );
     }

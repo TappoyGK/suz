@@ -25,8 +25,8 @@ pub fn worker_count(value: Option<&str>) -> Result<usize> {
         .ok_or_else(|| "SUZ_JOBS must be a positive integer".into())
 }
 
-// Each worker claims the next available job. Results retain input order even
-// when jobs finish out of order; ordinary failures do not cancel later jobs.
+// 各ワーカーが次の未処理ジョブを取得する。完了順が変わっても結果は入力順に保ち、
+// 通常の失敗で後続のジョブを取り消さない。
 pub fn parallel_map<T: Sync, R: Send>(
     jobs: &[T],
     workers: usize,
@@ -64,7 +64,7 @@ pub fn build_and_run_c(c_file: &Path, executable: &Path) -> Result<Output> {
     let compiler = std::env::var_os("CC").unwrap_or_else(|| "clang".into());
     let mut command = Command::new(compiler);
     command
-        .args(["-std=c11", "-Wall", "-Wextra", "-Werror"])
+        .args(["-std=c23", "-Wall", "-Wextra", "-Werror"])
         .arg(c_file);
     let source =
         std::fs::read_to_string(c_file).map_err(|e| format!("could not read generated C: {e}"))?;
@@ -128,7 +128,7 @@ pub fn compile(
     if run.result == Outcome::Panic && run.panic_diagnostic.is_none() {
         return Err("missing panic diagnostic expectation".into());
     }
-    if run.warnings.len() != run.arithmetic_warnings {
+    if run.warnings.len() != run.warning_count {
         return Err("missing warning expectations".into());
     }
     if run.result == Outcome::CompileError && run.diagnostic.is_none() {
@@ -151,7 +151,7 @@ pub fn compile(
             }
             let expected = run.diagnostic.as_ref().unwrap();
             if error.kind != suz::ErrorKind::InvalidSource
-                || !expected.matches_parts(error.line, error.column, &error.message)
+                || !expected.matches_parts(error.line, error.column, error.message())
             {
                 return Err(format!("expected {expected:?}, got {error:?}"));
             }
@@ -170,7 +170,7 @@ pub fn compile(
     let mut remaining: Vec<_> = compilation.warnings.iter().collect();
     for expected in &run.warnings {
         let Some(index) = remaining.iter().position(|warning| {
-            expected.matches_parts(warning.line, warning.column, &warning.message)
+            expected.matches_parts(warning.line, warning.column, warning.message())
         }) else {
             return Err(format!(
                 "expected warnings {:?}, got {:?}",
