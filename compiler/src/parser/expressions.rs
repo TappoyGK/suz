@@ -33,6 +33,9 @@ impl Parser<'_, '_> {
     }
 
     fn failure_handler(&mut self) -> Result<FailureHandler, Diagnostic> {
+        if self.token().kind == Kind::Keyword("error") {
+            return self.error_handler();
+        }
         if self.token().kind == Kind::Keyword("panic") {
             let crate::ast::Statement::Log {
                 parts, location, ..
@@ -45,16 +48,7 @@ impl Parser<'_, '_> {
             )));
         }
         if self.token().kind == Kind::Keyword("ignore") {
-            let location = self.location();
-            self.cursor += 1;
-            if !matches!(self.token().kind, Kind::IgnoreReason(_)) {
-                return Err(self.error(
-                    ErrorKind::InvalidSource,
-                    crate::diagnostic!("err.or-ignore", "ignore requires ': reason'"),
-                ));
-            }
-            self.cursor += 1;
-            return Ok(FailureHandler::Ignore(location));
+            return Ok(FailureHandler::Ignore(self.ignore_reason()?));
         }
         if self.token().kind == Kind::Keyword("fail") {
             let location = self.location();

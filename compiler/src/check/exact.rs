@@ -515,6 +515,9 @@ pub(super) fn cast(
     let safe = value_range(&operand).is_some_and(fits);
     if let Some(handler) = fallback {
         let value = match handler {
+            FailureHandler::Errors(handler) => {
+                return Err(super::errors::invalid_handler(handler.location));
+            }
             FailureHandler::Fail { location, .. } | FailureHandler::Ignore(location) => {
                 return Err(super::errors::invalid_handler(*location));
             }

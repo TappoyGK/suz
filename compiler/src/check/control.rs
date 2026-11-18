@@ -22,6 +22,32 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
         in_value: bool,
     ) -> Result<(), Diagnostic> {
         match fallback {
+            Some(FailureHandler::Errors(handler)) => {
+                let crate::ast::ErrorHandler { arms, location } = handler.as_ref();
+                if error_arms_escape(arms) && (in_value || !allowed) {
+                    let message = if in_value {
+                        crate::diagnostic!(
+                            "expr.jump-prohibited",
+                            "control transfers are forbidden inside value expressions"
+                        )
+                    } else {
+                        crate::diagnostic!(
+                            "expr.or-return-position",
+                            "error handlers with control transfers require an entire initializer, assignment RHS, or call statement"
+                        )
+                    };
+                    return Err(location.error(ErrorKind::InvalidSource, message));
+                }
+                for arm in arms {
+                    match &arm.body {
+                        crate::ast::ErrorArmBody::Value(value) => visit(value, false, in_value)?,
+                        crate::ast::ErrorArmBody::Statements { body, .. } => {
+                            validate_statements(body, in_value)?
+                        }
+                    }
+                }
+            }
+
             Some(FailureHandler::Return { value, location }) => {
                 if in_value || !allowed {
                     return Err(location.error(
@@ -142,6 +168,7 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
                 visit(otherwise, false, true)?;
             }
             ExpressionKind::Negate(inner)
+            | ExpressionKind::Len(inner)
             | ExpressionKind::BitNot(inner)
             | ExpressionKind::Not(inner) => visit(inner, false, in_value)?,
             ExpressionKind::Binary { left, right, .. }
@@ -201,7 +228,9 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
                     visit(value, true, in_value)?;
                 }
             }
-            Statement::Return(value) | Statement::Fail(value) => visit(value, false, in_value)?,
+            Statement::Return(value) | Statement::Fail(value) | Statement::Recover(value) => {
+                visit(value, false, in_value)?
+            }
             Statement::Loop { condition, body } => {
                 if let Some(condition) = condition {
                     visit(condition, false, in_value)?;
@@ -243,7 +272,9 @@ fn has_return_handler(expr: &CheckedExpression) -> bool {
         Value::Cast(inner) | Value::TextView(inner) => has_return_handler(inner),
         Value::HandledCall { handler, .. } => matches!(
             handler.as_ref(),
-            super::ir::CallHandler::Return(_) | super::ir::CallHandler::Fail(_)
+            super::ir::CallHandler::Return(_)
+                | super::ir::CallHandler::Fail(_)
+                | super::ir::CallHandler::Branches(_)
         ),
         Value::CastReturn { .. }
         | Value::Slice {
@@ -264,7 +295,7 @@ pub(super) fn lower_return_handler(
     statements: &mut Vec<CheckedStatement>,
     next_id: &mut usize,
 ) -> bool {
-    if matches!(&expr.value, Value::HandledCall { handler, .. } if matches!(handler.as_ref(), super::ir::CallHandler::Return(_) | super::ir::CallHandler::Fail(_)))
+    if matches!(&expr.value, Value::HandledCall { handler, .. } if matches!(handler.as_ref(), super::ir::CallHandler::Return(_) | super::ir::CallHandler::Fail(_) | super::ir::CallHandler::Branches(_)))
     {
         let id = *next_id;
         *next_id += 1;
@@ -406,26 +437,36 @@ pub(super) fn lower_return_handler(
 }
 
 fn contains_break(statements: &[Statement]) -> bool {
-    statements.iter().any(|statement| match statement {
-        Statement::Match { arms, .. } => arms.iter().any(|arm| contains_break(&arm.body)),
-        Statement::Break(_) => true,
-        Statement::Block(inner) => contains_break(inner),
-        Statement::If {
-            branches,
-            otherwise,
-        } => {
-            branches.iter().any(|(_, body)| contains_break(body))
-                || otherwise.as_ref().is_some_and(|body| contains_break(body))
+    use crate::ast::visit::{self, Visitor};
+    struct Breaks(bool);
+    impl Visitor for Breaks {
+        fn statement(&mut self, statement: &Statement) -> Result<(), Diagnostic> {
+            match statement {
+                Statement::Break(_) => self.0 = true,
+                // 入れ子のループ内のbreakは、その内側のループに属する。
+                Statement::For { .. } | Statement::Loop { .. } => return Ok(()),
+                _ => {}
+            }
+            visit::walk_statement(self, statement)
         }
-        // 入れ子のループ内のbreakは、その内側のループに属する。
-        _ => false,
-    })
+        fn expression(&mut self, expr: &Expression) -> Result<(), Diagnostic> {
+            if matches!(expr.kind, ExpressionKind::Closure(_)) {
+                return Ok(());
+            }
+            // 式内のor errorにも、現在のループを抜けるbreakが書ける。
+            visit::walk_expression(self, expr)
+        }
+    }
+    let mut breaks = Breaks(false);
+    breaks.scope(statements, None).unwrap();
+    breaks.0
 }
-fn stops(statements: &[Statement]) -> bool {
+pub(super) fn stops(statements: &[Statement]) -> bool {
     statements.iter().any(|statement| match statement {
         Statement::Match { arms, .. } => arms.iter().all(|arm| stops(&arm.body)),
         Statement::Return(_)
         | Statement::Fail(_)
+        | Statement::Recover(_)
         | Statement::Break(_)
         | Statement::Continue(_)
         | Statement::Log {
@@ -507,4 +548,45 @@ pub(super) fn check_return_shape(function: &crate::ast::Function) -> Result<(), 
         ));
     }
     Ok(())
+}
+
+/// 内側のクロージャの脱出は、そのクロージャ自身に属する。
+pub(super) fn error_arms_escape(arms: &[crate::ast::MatchArm<crate::ast::ErrorArmBody>]) -> bool {
+    use crate::ast::visit::{self, Visitor};
+    struct Jumps(bool);
+    impl Visitor for Jumps {
+        fn statement(&mut self, statement: &Statement) -> Result<(), Diagnostic> {
+            self.0 |= matches!(
+                statement,
+                Statement::Return(_)
+                    | Statement::Fail(_)
+                    | Statement::Break(_)
+                    | Statement::Continue(_)
+            );
+            visit::walk_statement(self, statement)
+        }
+        fn expression(&mut self, expr: &Expression) -> Result<(), Diagnostic> {
+            if matches!(expr.kind, ExpressionKind::Closure(_)) {
+                return Ok(());
+            }
+            if let ExpressionKind::ArithmeticHandler { fallback, .. }
+            | ExpressionKind::Cast { fallback, .. }
+            | ExpressionKind::Slice { fallback, .. } = &expr.kind
+            {
+                self.0 |= matches!(
+                    fallback,
+                    Some(FailureHandler::Return { .. } | FailureHandler::Fail { .. })
+                );
+            }
+            visit::walk_expression(self, expr)
+        }
+    }
+    let mut jumps = Jumps(false);
+    for arm in arms {
+        match &arm.body {
+            crate::ast::ErrorArmBody::Value(value) => jumps.expression(value).unwrap(),
+            crate::ast::ErrorArmBody::Statements { body, .. } => jumps.scope(body, None).unwrap(),
+        }
+    }
+    jumps.0
 }

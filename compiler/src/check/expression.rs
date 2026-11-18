@@ -5,7 +5,7 @@
 
 use crate::check::generic::domain;
 use crate::check::scope::Scope;
-mod blocks;
+pub(super) mod blocks;
 mod branches;
 pub(in crate::check) mod casts;
 mod operators;

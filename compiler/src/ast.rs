@@ -463,6 +463,8 @@ pub(crate) enum Statement {
     },
     Return(Expression),
     Fail(Expression),
+    Recover(Expression),
+    Ignore(Location),
 }
 
 /// 構文解析済みの式とソース位置。型は意味検査で決定する。
@@ -621,9 +623,24 @@ impl BinaryOperator {
     }
 }
 
+/// errorハンドラーの腕。ブロックだけがrecoverを文として使える。
+#[derive(Clone)]
+pub(crate) enum ErrorArmBody {
+    Value(Box<Expression>),
+    Statements { body: Vec<Statement>, block: bool },
+}
+
+#[derive(Clone)]
+pub(crate) struct ErrorHandler {
+    pub arms: Vec<MatchArm<ErrorArmBody>>,
+    pub location: Location,
+}
+
 /// 失敗時に値を返す処理、または関数からreturnする処理の構文。
 #[derive(Clone)]
 pub(crate) enum FailureHandler {
+    // 腕のない通常の式まで大きくしないよう、分岐の内容をまとめて保持する。
+    Errors(Box<ErrorHandler>),
     Fail {
         value: Option<Box<Expression>>,
         location: Location,

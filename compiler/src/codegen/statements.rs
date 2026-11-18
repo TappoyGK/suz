@@ -18,6 +18,22 @@ pub(super) fn emit_block(
     let indent = "    ".repeat(depth);
     for statement in statements {
         match statement {
+            CheckedStatement::Recover(value) => {
+                let target = context
+                    .recovery
+                    .as_mut()
+                    .expect("recover belongs to an error arm");
+                target.used = true;
+                let result = target.result.clone().expect("recover requires a value");
+                let label = target.label.clone();
+                writeln!(
+                    c,
+                    "{indent}{result} = {};\n{indent}goto {label};",
+                    expression(value, context)
+                )
+                .unwrap();
+            }
+
             CheckedStatement::Fail(value) => {
                 let failure = super::errors::fail(Some(value), "", context);
                 writeln!(c, "{indent}{failure}").unwrap();

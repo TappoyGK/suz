@@ -83,9 +83,13 @@ pub(super) fn check_statements(
         declared,
         output: Vec::new(),
     };
-    for statement in input {
-        check_statement(statement, &mut context)?;
-    }
+    let saved_loop = context.bindings.loop_depth;
+    context.bindings.loop_depth = loop_depth;
+    let result = input
+        .iter()
+        .try_for_each(|statement| check_statement(statement, &mut context));
+    context.bindings.loop_depth = saved_loop;
+    result?;
     Ok(context.output)
 }
 
@@ -104,6 +108,31 @@ fn check_statement(
     #[cfg(test)]
     super::generic::work();
     match statement {
+        Statement::Recover(value) => {
+            let Some(ty) = context.bindings.recovery.filter(|ty| *ty != Type::Void) else {
+                return Err(value.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "err.recover",
+                        "recover requires a non-void error block arm"
+                    ),
+                ));
+            };
+            let value = super::expression::coerced(value, Some(ty), context.bindings)?;
+            context.output.push(CheckedStatement::Recover(value));
+        }
+        Statement::Ignore(location) => {
+            if context.bindings.recovery != Some(Type::Void) {
+                return Err(location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "err.or-ignore",
+                        "ignore statements require a void error arm"
+                    ),
+                ));
+            }
+        }
+
         Statement::Fail(value) => context
             .output
             .push(CheckedStatement::Fail(super::errors::fail(

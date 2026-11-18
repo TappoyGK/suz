@@ -174,7 +174,7 @@ pub(super) fn invoke(
         },
         &signature.errors,
         handler,
-        expr.location,
+        expr,
         scope,
     )
 }

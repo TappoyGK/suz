@@ -180,3 +180,89 @@ fn main() -> u8 {
 | 設定 | 結果 | 終了コード | 警告数 |
 |---|---|---:|---:|
 | 通常 | 正常終了 | 7 | 0 |
+
+### err-008 エラー別の代替値とrecover
+
+主根拠：`[err.or-error]`。
+
+補助根拠：`[err.recover]`。
+
+ブロック腕のrecoverは関数から戻らず、呼び出しの代替値を決めて後続処理へ進む。
+
+**ソース：**
+
+```suz
+error ReadError { Missing, Denied }
+fn read() -> u8 or ReadError { fail ReadError.Denied }
+fn main() -> u8 {
+    fix value = read() or error {
+        ReadError.Missing => 1
+        ReadError.Denied => {
+            fix fallback: u8 = 7
+            recover fallback
+        }
+    }
+    return value
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 7 | 0 |
+
+### err-009 voidのエラー分岐から続行する
+
+主根拠：`[err.or-error]`。
+
+voidの腕は理由付きで失敗を無視するか、空でないブロックの末尾へ到達して続行できる。
+
+**ソース：**
+
+```suz
+error SendError { Offline, Busy }
+fn send() -> void or SendError { fail SendError.Busy }
+fn main() -> u8 {
+    var result: u8 = 0
+    send() or error {
+        SendError.Offline => ignore: オフライン時は通知を省略
+        SendError.Busy => { result = 3 }
+    }
+    return result
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 3 | 0 |
+
+### err-010 エラー分岐の網羅不足
+
+主根拠：`[err.or-error]`。
+
+実際に返す値ではなく、呼び出し先の宣言に含まれる全エラーを処理する必要がある。
+
+**ソース：**
+
+```suz
+error ReadError { Missing, Denied }
+fn read() -> u8 or ReadError { fail ReadError.Missing }
+fn main() -> u8 {
+    return read() or error { ReadError.Missing => 0 }
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[err.or-error]` | 4 | 22 |

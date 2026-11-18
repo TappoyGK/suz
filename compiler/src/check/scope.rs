@@ -44,6 +44,10 @@ pub(super) enum Mode {
 
 #[derive(Clone)]
 pub(super) struct Scope {
+    // 最も内側のerror腕の成功型。関数の戻り値型とは独立し、クロージャ境界で解除する。
+    pub recovery: Option<Type>,
+    // 式のerror腕からbreak・continueできるかを調べるため、文のループ深さを渡す。
+    pub loop_depth: usize,
     pub fnshapes: Rc<Vec<crate::ast::FnShapeDeclaration>>,
     pub function_types: Rc<std::cell::RefCell<Vec<crate::ast::FunctionType>>>,
     pub mode: Mode,
@@ -152,6 +156,8 @@ impl Scope {
 impl Default for Scope {
     fn default() -> Self {
         Self {
+            recovery: None,
+            loop_depth: 0,
             fnshapes: Rc::default(),
             function_types: Rc::default(),
             mode: Default::default(),

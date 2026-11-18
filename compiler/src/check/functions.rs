@@ -314,6 +314,8 @@ pub(super) fn check_with_captures(
     references: &BTreeMap<String, Binding>,
 ) -> Result<(CheckedFunction, Vec<crate::ast::Location>), Diagnostic> {
     control::validate_return_positions(&function.statements)?;
+    scope.recovery = None;
+    scope.loop_depth = 0;
     let mut warnings = Vec::new();
     // [num.fn-same]、[num.fn-body-type]、[num.fn-recursion]: 関数の具体化内の全型注釈に同じ代入を適用する。
     // 汎用の診断は記号的な型で一度収集済み。具体化では定数登録を残すが、型ごとの警告は追加しない。
@@ -468,7 +470,7 @@ pub(super) fn call(
         },
         &signature.errors,
         handler,
-        expr.location,
+        expr,
         scope,
     )
 }

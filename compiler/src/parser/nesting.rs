@@ -85,6 +85,17 @@ impl Parser<'_, '_> {
 
 fn handler_height(handler: &Option<FailureHandler>) -> usize {
     match handler {
+        Some(FailureHandler::Errors(handler)) => {
+            let arms = &handler.arms;
+            1 + arms
+                .iter()
+                .map(|arm| match &arm.body {
+                    crate::ast::ErrorArmBody::Value(value) => value.height,
+                    crate::ast::ErrorArmBody::Statements { body, .. } => block_height(body),
+                })
+                .max()
+                .unwrap_or(0)
+        }
         Some(
             FailureHandler::Value(value)
             | FailureHandler::Return { value, .. }
@@ -106,9 +117,10 @@ fn statement_height(statement: &Statement) -> usize {
         Statement::Assign {
             value, compound, ..
         } => value.height - usize::from(*compound),
-        Statement::Return(value) | Statement::Fail(value) | Statement::Expression(value) => {
-            value.height
-        }
+        Statement::Return(value)
+        | Statement::Fail(value)
+        | Statement::Recover(value)
+        | Statement::Expression(value) => value.height,
         Statement::Log { parts, .. } => {
             1 + parts
                 .iter()
@@ -150,7 +162,7 @@ fn statement_height(statement: &Statement) -> usize {
                 .max()
                 .unwrap_or(0),
         ),
-        Statement::Break(_) | Statement::Continue(_) => 0,
+        Statement::Break(_) | Statement::Continue(_) | Statement::Ignore(_) => 0,
     }
 }
 

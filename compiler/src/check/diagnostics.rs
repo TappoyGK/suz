@@ -152,7 +152,9 @@ fn collect_statements(statements: &[CheckedStatement], locations: &mut Vec<Locat
                 collect(call, locations);
                 collect_handler(handler, locations);
             }
-            CheckedStatement::Fail(value) => collect(value, locations),
+            CheckedStatement::Fail(value) | CheckedStatement::Recover(value) => {
+                collect(value, locations)
+            }
             CheckedStatement::SliceReturn {
                 operation,
                 return_value,
@@ -252,6 +254,11 @@ pub(super) fn unhandled_arithmetic(statements: &[CheckedStatement]) -> Vec<Locat
 
 fn collect_handler(handler: &super::ir::CallHandler, locations: &mut Vec<Location>) {
     match handler {
+        super::ir::CallHandler::Branches(arms) => {
+            for (_, body) in arms {
+                collect_statements(body, locations);
+            }
+        }
         super::ir::CallHandler::Value(v)
         | super::ir::CallHandler::Return(v)
         | super::ir::CallHandler::Fail(Some(v)) => collect(v, locations),

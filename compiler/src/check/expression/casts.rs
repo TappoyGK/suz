@@ -188,6 +188,9 @@ pub(in crate::check) fn check(
                 return Ok(checked);
             }
             let fallback = match fallback {
+                Some(FailureHandler::Errors(handler)) => {
+                    return Err(crate::check::errors::invalid_handler(handler.location));
+                }
                 Some(FailureHandler::Fail { location, .. } | FailureHandler::Ignore(location)) => {
                     return Err(crate::check::errors::invalid_handler(*location));
                 }

@@ -321,3 +321,241 @@ fn void_statement_exception_does_not_allow_nested_or_value_call_jumps() {
         assert!(error.contains(&format!("[{rule}]")), "{source}\n{error}");
     }
 }
+
+#[test]
+fn error_arms_select_variants_and_recover_with_nested_scopes() {
+    let source = r#"
+error ReadError { Missing, Denied }
+error DecodeError { Broken }
+fn read(which: u8) -> i32 or ReadError, DecodeError {
+    if which == 0 { return 7 }
+    if which == 1 { fail ReadError.Missing }
+    if which == 2 { fail ReadError.Denied }
+    fail DecodeError.Broken
+}
+fn fallback(n: i32) -> i32 { log info `fallback ${n}`
+    return n }
+fn pick(which: u8) -> i32 {
+    return read(which) or error {
+        ReadError.Missing => 11
+        ReadError.Denied => {
+            fix n = read(3) or error { _ => 4 }
+            recover n + 8
+        }
+        DecodeError.Broken => fallback(13)
+    }
+}
+fn main() -> u8 {
+    log info `${pick(0)} ${pick(1)} ${pick(2)} ${pick(3)}`
+    var counter: i32 = 0
+    fix value = read(1) or error {
+        ReadError.Missing => { counter = 5
+            if true { recover counter } else { recover 0 }
+        }
+        _ => 0
+    }
+    log info `${value} ${counter}`
+    return 0
+}
+"#;
+    let output = compile_and_run_c23(source, "arms.suz");
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains(": 7 11 12 13\n"), "{stderr}");
+    assert_eq!(stderr.matches(": fallback 13\n").count(), 1, "{stderr}");
+    assert!(stderr.contains(": 5 5\n"), "{stderr}");
+}
+
+#[test]
+fn error_arm_jumps_reach_the_enclosing_function_and_loop() {
+    let source = r#"
+error Err { Bad, Other }
+fn read(n: u8) -> i32 or Err {
+    if n == 0 { return 7 }
+    if n == 1 { fail Err.Bad }
+    fail Err.Other
+}
+fn returned() -> i32 {
+    fix value = read(1) or error { Err.Bad => return 8
+        Err.Other => 9 }
+    return value
+}
+fn failed() -> i32 or Err {
+    fix value = read(1) or error {
+        Err.Bad => fail Err.Other
+        Err.Other => 9
+    }
+    return value
+}
+fn main() -> u8 {
+    log info `${returned()} ${failed() or 10}`
+    for i in 0..<4 {
+        fix value = read(i as u8 or 0) or error {
+            Err.Bad => continue
+            Err.Other => break
+        }
+        log info `${value}`
+    }
+    return 0
+}
+"#;
+    let output = compile_and_run_c23(source, "jumps.suz");
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains(": 8 10\n"), "{stderr}");
+    assert_eq!(stderr.matches(": 7\n").count(), 1, "{stderr}");
+}
+
+#[test]
+fn void_error_arms_allow_ignore_and_nonempty_fallthrough() {
+    let source = r#"
+error Err { Bad, Other }
+fn send(n: u8) -> void or Err {
+    if n == 1 { fail Err.Bad }
+    if n == 2 { fail Err.Other }
+}
+fn main() -> u8 {
+    send(0) or error { _ => panic `unexpected` }
+    send(1) or error {
+        Err.Bad => ignore: 通知は不要 // 理由
+        Err.Other => { log info `unexpected` }
+    }
+    send(2) or error {
+        Err.Bad => ignore: 通知は不要
+        Err.Other => { log info `handled` }
+    }
+    send(1) or error { _ => return 7 }
+    return 8
+}
+"#;
+    let output = compile_and_run_c23(source, "void-arms.suz");
+    assert_eq!(output.status.code(), Some(7), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains(": handled\n"), "{stderr}");
+    assert!(!stderr.contains("unexpected"), "{stderr}");
+}
+
+#[test]
+fn error_arms_reject_invalid_coverage_values_and_control_positions() {
+    let prefix = "error Err { Bad, Other }\nerror Extra { Bad }\nfn read() -> u8 or Err { fail Err.Bad }\nfn send() -> void or Err { fail Err.Bad }\nfnshape Once() -> void\nfn invoke(f: fn Once) -> void { f() }\nfn read_text() -> text or Err { fail Err.Bad }\n";
+    for (body, rule) in [
+        (
+            "fix n = read() or error { Err.Bad => 0 }\nreturn 0",
+            "err.or-error",
+        ),
+        (
+            "fix n = read() or error { Err.Bad => 0\nErr.Bad => 1\n_ => 2 }\nreturn 0",
+            "err.or-error",
+        ),
+        (
+            "fix n = read() or error { Extra.Bad => 0\n_ => 2 }\nreturn 0",
+            "err.or-error",
+        ),
+        (
+            "fix n = read() or error { _ => 0\nErr.Bad => 1 }\nreturn 0",
+            "err.or-error",
+        ),
+        (
+            "fix n = read() or error { _ => {} }\nreturn 0",
+            "err.or-error",
+        ),
+        (
+            "fix n = read() or error { _ => { if true { recover 0 } } }\nreturn 0",
+            "err.or-error",
+        ),
+        (
+            "fix n = read() or error { _ => true }\nreturn 0",
+            "type.expected",
+        ),
+        ("send() or error { _ => {} }\nreturn 0", "err.or-error"),
+        (
+            "send() or error { _ => { recover 0 } }\nreturn 0",
+            "err.recover",
+        ),
+        ("send() or error { _ => 0 }\nreturn 0", "err.or-error"),
+        (
+            "fix n = read() or error { _ => { ignore: 理由\nrecover 0 } }\nreturn 0",
+            "err.or-ignore",
+        ),
+        (
+            "if false { return 0 }\nloop { read() or error { _ => break } }",
+            "fn.fallthrough",
+        ),
+        (
+            "fix n = read() or error { _ => { loop { read() or error { _ => break } } } }\nreturn n",
+            "err.or-error",
+        ),
+        (
+            "fix n = read() or error { _ => 0 } allow [diagnostic.arithmetic: 理由]\nreturn n",
+            "allow.contains-block",
+        ),
+        (
+            "fix n = read() or error { _ => { invoke(fn []() -> void { recover 0 })\nrecover 0 } }\nreturn n",
+            "err.recover",
+        ),
+        (
+            "loop { fix n = read() or error { _ => { invoke(fn []() -> void { break })\nrecover 0 } } }\nreturn 0",
+            "loop.jump-context",
+        ),
+        (
+            "fix n = len (read_text() or error { _ => return 0 })\nreturn 0",
+            "expr.or-return-position",
+        ),
+        ("recover 0", "err.recover"),
+        ("ignore: 理由\nreturn 0", "err.or-ignore"),
+        (
+            "return read() or error { _ => return 0 }",
+            "expr.or-return-position",
+        ),
+        (
+            "fix n = expr { fix v = read() or error { _ => return 0 }\nv }\nreturn n",
+            "expr.jump-prohibited",
+        ),
+        (
+            "fix n = read() or error { _ => break }\nreturn n",
+            "loop.jump-context",
+        ),
+    ] {
+        let source = format!("{prefix}fn main() -> u8 {{ {body} }}");
+        let error = suz::compile(source.as_bytes()).unwrap_err().to_string();
+        assert!(error.contains(&format!("[{rule}]")), "{source}\n{error}");
+    }
+}
+
+#[test]
+fn error_arms_keep_generic_types_and_closure_recovery_scopes() {
+    let source = r#"
+error Err { Bad }
+fnshape Reader(i16) -> i16 or Err
+fn read(n: int) -> int or Err {
+    if n == 0 { fail Err.Bad }
+    return n
+}
+fn relay(n: int) -> int {
+    return read(n) or error { _ => { recover n } }
+}
+fnshape Once() -> i16
+fn invoke(f: fn Once) -> i16 { return f() }
+fn main() -> u8 {
+    fix reader: static fn Reader = fn read
+    var count: i16 = 0
+    fix n = reader(0) or error { _ => {
+        fix inner = reader(0) or error { _ => {
+            count = 3
+            recover invoke(fn []() -> i16 {
+                fix n = read(0 as i16) or error { _ => return 4 }
+                return n
+            })
+        } }
+        count += inner
+        recover count
+    } }
+    log info `${n} ${count} ${relay(2 as i16)}`
+    return 0
+}
+"#;
+    let output = compile_and_run_c23(source, "generic-arms.suz");
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains(": 7 7 2\n"), "{stderr}");
+}

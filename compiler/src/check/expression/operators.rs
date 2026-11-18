@@ -86,6 +86,9 @@ pub(super) fn check(
             }
             *handler =
                 Some(match fallback.as_ref().unwrap() {
+                    FailureHandler::Errors(handler) => {
+                        return Err(crate::check::errors::invalid_handler(handler.location));
+                    }
                     FailureHandler::Fail { location, .. } | FailureHandler::Ignore(location) => {
                         return Err(super::super::errors::invalid_handler(*location));
                     }

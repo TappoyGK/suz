@@ -76,10 +76,12 @@ impl Parser<'_, '_> {
         }
     }
 
-    fn statement(&mut self) -> Result<Statement, Diagnostic> {
+    pub(super) fn statement(&mut self) -> Result<Statement, Diagnostic> {
         let start = self.location();
-        let statement = if self.token().kind == Kind::Keyword("fail") {
-            self.fail_statement()?
+        let statement = if matches!(self.token().kind, Kind::Keyword("fail" | "recover")) {
+            self.error_value_statement()?
+        } else if self.token().kind == Kind::Keyword("ignore") {
+            Statement::Ignore(self.ignore_reason()?)
         } else {
             self.statement_inner()?
         };
@@ -87,18 +89,24 @@ impl Parser<'_, '_> {
         Ok(statement)
     }
 
-    fn fail_statement(&mut self) -> Result<Statement, Diagnostic> {
+    fn error_value_statement(&mut self) -> Result<Statement, Diagnostic> {
         if self.in_value {
             return Err(self.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(
                     "expr.jump-prohibited",
-                    "fail is forbidden inside value expressions"
+                    "fail and recover are forbidden inside value expressions"
                 ),
             ));
         }
+        let recover = self.token().kind == Kind::Keyword("recover");
         self.cursor += 1;
-        Ok(Statement::Fail(self.expression()?))
+        let value = self.expression()?;
+        Ok(if recover {
+            Statement::Recover(value)
+        } else {
+            Statement::Fail(value)
+        })
     }
 
     fn statement_inner(&mut self) -> Result<Statement, Diagnostic> {

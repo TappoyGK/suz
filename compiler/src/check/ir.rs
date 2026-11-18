@@ -44,6 +44,7 @@ pub(crate) struct CheckedFunction {
 /// 失敗時returnの式は、検査中に作ったBoxをそのまま使う。
 #[derive(Clone)]
 pub(crate) enum CheckedStatement {
+    Recover(CheckedExpression),
     Fail(CheckedExpression),
     HandleCall {
         id: usize,
@@ -131,6 +132,7 @@ pub(crate) enum CheckedHandler {
 /// 呼び出しの失敗処理。脱出するものはC生成前に文へ持ち上げる。
 #[derive(Clone)]
 pub(crate) enum CallHandler {
+    Branches(Vec<(Option<crate::ast::ErrorVariant>, Vec<CheckedStatement>)>),
     Value(CheckedExpression),
     Return(CheckedExpression),
     Fail(Option<CheckedExpression>),

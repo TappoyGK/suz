@@ -115,6 +115,13 @@ fn handler_dependencies(
     names: &mut Vec<(String, Location)>,
 ) -> Result<(), Diagnostic> {
     match fallback {
+        Some(FailureHandler::Errors(handler)) => Err(handler.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "const.expression",
+                "error handlers are not constant expressions"
+            ),
+        )),
         Some(FailureHandler::Value(value)) => dependencies(value, names),
         Some(
             FailureHandler::Return { location, .. }
