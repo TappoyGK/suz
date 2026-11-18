@@ -196,6 +196,7 @@ _BitInt(128) suz_compiler_probe;
             command.arg(root.join(path));
         }
         let result = command
+            .args(&options.foreign.args)
             .args(["-lm", "-o"])
             .arg(&executable)
             .output()
