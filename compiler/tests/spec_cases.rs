@@ -34,6 +34,8 @@ mod expressions;
 mod extra_flags;
 #[path = "spec_cases/ffi.rs"]
 mod ffi;
+#[path = "spec_cases/ffi_bytes.rs"]
+mod ffi_bytes;
 #[path = "spec_cases/ffi_link.rs"]
 mod ffi_link;
 #[path = "spec_cases/float_logs.rs"]

@@ -113,7 +113,8 @@ impl Schema {
                 entry.count = fields.len();
                 self.fields.push(fields);
             }
-            Type::CInteger(_)
+            Type::CPointer
+            | Type::CInteger(_)
             | Type::StaticFunction(_)
             | Type::Function(_)
             | Type::GenericInt

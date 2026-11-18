@@ -21,6 +21,7 @@ pub(super) fn c_string(text: &str) -> String {
 }
 
 pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionContext) -> String {
+    context.uses_c_pointer |= matches!(expr.ty, crate::ast::Type::CPointer);
     context.uses_c_integer |= matches!(expr.ty, crate::ast::Type::CInteger(_));
     if matches!(
         expr.value,
@@ -32,6 +33,11 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
         return super::exact::stored(expr, context);
     }
     match expr.value {
+        Value::CBytes(ref operand) => super::ffi::bytes(operand, context),
+        Value::CByteLen {
+            ref operand,
+            location,
+        } => super::ffi::byte_len(operand, location, context),
         Value::CIntegerLiteral { value, location } => {
             super::ffi::literal(value, expr.ty, location, context)
         }

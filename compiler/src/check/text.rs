@@ -30,6 +30,7 @@ pub(super) fn parts(
                             | Type::Function(_)
                             | Type::Void
                             | Type::Struct(_)
+                            | Type::CPointer
                             | Type::CInteger(_)
                     ) {
                         return Err(value.location.error(

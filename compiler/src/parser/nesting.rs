@@ -215,7 +215,7 @@ fn kind_height(kind: &ExpressionKind) -> usize {
         Cast {
             operand, fallback, ..
         } => (operand.height + usize::from(fallback.is_some())).max(handler_height(fallback)),
-        Len(v) | Negate(v) | BitNot(v) | Not(v) | Group(v) => v.height,
+        CBytes(v) | CByteLen(v) | Len(v) | Negate(v) | BitNot(v) | Not(v) | Group(v) => v.height,
         If {
             branches,
             otherwise,

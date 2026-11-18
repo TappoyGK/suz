@@ -353,6 +353,15 @@ pub(super) fn check(
                     ),
                 ));
             }
+            if crate::check::ffi::contains_pointer(ty, bindings) {
+                return Err(expr.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "ffi.pointer-operations",
+                        "pointer values cannot be compared"
+                    ),
+                ));
+            }
             if bindings.contains_function(ty) {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,

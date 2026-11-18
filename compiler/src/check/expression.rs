@@ -58,6 +58,8 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
             Some(bindings.function_types.borrow()[id].result)
         }
         ExpressionKind::Slice { index, .. } => Some(if *index { Type::Char } else { Type::Text }),
+        ExpressionKind::CBytes(_) => Some(Type::CPointer),
+        ExpressionKind::CByteLen(_) => Some(Type::CInteger(crate::ast::CIntegerType::Size)),
         ExpressionKind::Len(_) => Some(Type::Integer(IntegerType::Len)),
         ExpressionKind::Template(_) => Some(Type::Symbol),
         ExpressionKind::Struct { id, .. } => Some(Type::Struct(*id)),
@@ -426,6 +428,9 @@ fn expression_inner(
             }
             ExpressionKind::Block { statements, value } => {
                 blocks::check(statements, value, inference_hint, bindings)?
+            }
+            ExpressionKind::CBytes(inner) | ExpressionKind::CByteLen(inner) => {
+                super::ffi::bytes(expr, inner, bindings)?
             }
             ExpressionKind::Len(inner) => {
                 let operand = expression(inner, None, bindings)?;

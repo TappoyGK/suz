@@ -81,7 +81,9 @@ impl Parser<'_, '_> {
                         | Type::Bool
                 )
             };
-            if !parameters.iter().all(|p| supported(p.ty))
+            if !parameters
+                .iter()
+                .all(|p| p.ty == Type::CPointer || supported(p.ty))
                 || !(result == Type::Void || supported(result))
             {
                 return Err(location.error(

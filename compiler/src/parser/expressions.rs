@@ -336,17 +336,17 @@ impl Parser<'_, '_> {
                 self.cursor += 1;
                 ExpressionKind::Bool(value)
             }
-            Kind::Symbol("~") => {
+            Kind::Symbol("~") | Kind::Keyword("len" | "not" | "c_bytes" | "c_byte_len") => {
+                let constructor: fn(Box<Expression>) -> ExpressionKind = match self.token().kind {
+                    Kind::Symbol("~") => ExpressionKind::BitNot,
+                    Kind::Keyword("len") => ExpressionKind::Len,
+                    Kind::Keyword("not") => ExpressionKind::Not,
+                    Kind::Keyword("c_bytes") => ExpressionKind::CBytes,
+                    Kind::Keyword("c_byte_len") => ExpressionKind::CByteLen,
+                    _ => unreachable!(),
+                };
                 self.cursor += 1;
-                ExpressionKind::BitNot(Box::new(self.unary()?))
-            }
-            Kind::Keyword("len") => {
-                self.cursor += 1;
-                ExpressionKind::Len(Box::new(self.unary()?))
-            }
-            Kind::Keyword("not") => {
-                self.cursor += 1;
-                ExpressionKind::Not(Box::new(self.unary()?))
+                constructor(Box::new(self.unary()?))
             }
             Kind::Ident(name) => {
                 self.cursor += 1;

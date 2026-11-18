@@ -10,6 +10,8 @@ use std::ops::Range;
 
 const KEYWORDS: &[&str] = &[
     "extern",
+    "c_bytes",
+    "c_byte_len",
     "unsafe",
     "allow",
     "fix",

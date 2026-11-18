@@ -159,6 +159,7 @@ pub(crate) const NUMERIC_COMBINATIONS: usize = 18;
 /// Structの番号は構造体宣言、Functionの番号は共通化した関数値の型を参照する。汎用の型はC生成までに具体化する。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Type {
+    CPointer,
     CInteger(CIntegerType),
     GenericInt,
     GenericFloat,
@@ -256,6 +257,7 @@ impl Type {
     }
     pub fn name(self) -> &'static str {
         match self {
+            Self::CPointer => "*const void",
             Self::CInteger(ty) => ty.name(),
             Self::Exact => "exact integer",
             Self::GenericInt => "int",
@@ -281,6 +283,7 @@ impl Type {
     }
     pub fn c_name(self) -> String {
         match self {
+            Self::CPointer => "suz_ffi_bytes".into(),
             Self::CInteger(ty) => ty.c_name().into(),
             Self::Exact => "suz_exact".into(),
             Self::GenericInt | Self::GenericFloat | Self::Numeric(_) => {
@@ -736,6 +739,8 @@ pub(crate) enum ExpressionKind {
         target: Type,
         fallback: Option<FailureHandler>,
     },
+    CBytes(Box<Expression>),
+    CByteLen(Box<Expression>),
     Len(Box<Expression>),
     Negate(Box<Expression>),
     Float(String),

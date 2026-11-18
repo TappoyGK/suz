@@ -168,6 +168,8 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
                 visit(otherwise, false, true)?;
             }
             ExpressionKind::Negate(inner)
+            | ExpressionKind::CBytes(inner)
+            | ExpressionKind::CByteLen(inner)
             | ExpressionKind::Len(inner)
             | ExpressionKind::BitNot(inner)
             | ExpressionKind::Not(inner) => visit(inner, false, in_value)?,

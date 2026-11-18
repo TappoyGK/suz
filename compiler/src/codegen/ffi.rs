@@ -1,4 +1,4 @@
-//! Cヘッダーとの型照合と、C環境の整数範囲に依存する変換を生成する。
+//! Cヘッダーとの型照合、C固有型の変換、文字列のバイト列取得を生成する。
 use super::{ExpressionContext, expressions::expression};
 use crate::{
     ast::{IntegerType, Location, Type},
@@ -154,22 +154,43 @@ pub(super) fn truncate(
 
 /// 宣言だけのC型も含めて検出し、FFIを使わないプログラムには制約を追加しない。
 pub(super) fn checks(c: &mut String, program: &CheckedProgram, context: &ExpressionContext) {
-    let c_integer = |ty: &Type| matches!(ty, Type::CInteger(_));
-    let uses_c_integer = context.uses_c_integer
-        || program
+    let uses_type = |predicate: fn(&Type) -> bool| {
+        program
             .functions
             .iter()
-            .any(|f| c_integer(&f.result) || f.parameters.iter().any(c_integer))
-        || program
-            .function_types
-            .iter()
-            .any(|f| c_integer(&f.result) || f.parameters.iter().any(c_integer))
-        || program
-            .structs
-            .iter()
-            .any(|s| s.fields.iter().any(|f| c_integer(&f.ty)));
+            .any(|f| predicate(&f.result) || f.parameters.iter().any(predicate))
+            || program
+                .function_types
+                .iter()
+                .any(|f| predicate(&f.result) || f.parameters.iter().any(predicate))
+            || program
+                .structs
+                .iter()
+                .any(|s| s.fields.iter().any(|f| predicate(&f.ty)))
+            || program
+                .externs
+                .iter()
+                .any(|f| predicate(&f.result) || f.parameters.iter().any(|p| predicate(&p.ty)))
+    };
+    if context.uses_c_pointer || uses_type(|ty| matches!(ty, Type::CPointer)) {
+        // 参照先のconstと、Suzの固定束縛に付けるconstを分離する。
+        c.push_str("typedef const void *suz_ffi_bytes;\n");
+    }
+    let uses_c_integer = context.uses_c_integer || uses_type(|ty| matches!(ty, Type::CInteger(_)));
     if uses_c_integer || !program.externs.is_empty() {
         c.push_str("_Static_assert(sizeof(long) <= 8 && sizeof(size_t) <= 8, \"Suz FFI requires C integers of at most 64 bits\");\n");
+    }
+    if context.uses_c_byte_len {
+        // 64ビットsize_tでは検査自体を残さず、狭い対象だけで切り詰めを防ぐ。
+        c.push_str(r#"static inline size_t suz_ffi_byte_len(uint64_t length, const char *source, size_t line, size_t column) {
+#if SIZE_MAX < UINT64_MAX
+    if (length > SIZE_MAX) suz_panic(source, line, column, "byte length exceeds size_t [rt.ffi-byte-len]");
+#else
+    (void)source; (void)line; (void)column;
+#endif
+    return (size_t)length;
+}
+"#);
     }
     for check in &context.c_literal_checks {
         c.push_str(check);
@@ -206,4 +227,36 @@ pub(super) fn literal(
         .c_literal_checks
         .insert(format!("_Static_assert({condition}, {message});\n"));
     format!("({}){number}", ty.c_name())
+}
+
+/// symbolの実体またはtextのビューから、コピーせずに先頭アドレスを取り出す。
+pub(super) fn bytes(operand: &CheckedExpression, context: &mut ExpressionContext) -> String {
+    let value = expression(operand, context);
+    let bytes = if operand.ty == Type::Symbol {
+        format!("({value})->bytes")
+    } else {
+        format!("({value}).bytes")
+    };
+    format!("((const void *){bytes})")
+}
+
+/// 文字数ではなくバイト数を読み、Cのsize_tへ切り詰めずに変換する。
+pub(super) fn byte_len(
+    operand: &CheckedExpression,
+    location: Location,
+    context: &mut ExpressionContext,
+) -> String {
+    context.uses_c_byte_len = true;
+    let value = expression(operand, context);
+    let length = if operand.ty == Type::Symbol {
+        format!("({value})->length")
+    } else {
+        format!("({value}).length")
+    };
+    format!(
+        "suz_ffi_byte_len({length}, {}, {}, {})",
+        super::expressions::c_string(&context.source_name),
+        location.line,
+        location.column
+    )
 }

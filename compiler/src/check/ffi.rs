@@ -1,4 +1,4 @@
-//! 外部関数の名前と、C環境に依存する数値の受け渡しを検査する。
+//! 外部関数の名前、C固有型の変換、バイト列取得の型とunsafe境界を検査する。
 use super::scope::Signature;
 use crate::{Diagnostic, ErrorKind, ast::Program};
 use std::collections::{BTreeMap, BTreeSet};
@@ -67,7 +67,7 @@ use crate::ast::{Expression, ExpressionKind, FailureHandler, Location, Type};
 /// C固有型は文字列パーサーのスキーマに含めない。構造体内でも同じ制約を適用する。
 pub(super) fn contains_c_type(ty: Type, scope: &Scope) -> bool {
     match ty {
-        Type::CInteger(_) => true,
+        Type::CPointer | Type::CInteger(_) => true,
         Type::Struct(id) => scope.structs[id]
             .fields
             .iter()
@@ -194,4 +194,52 @@ pub(super) fn cast(
         }
     };
     Ok(CheckedExpression { ty: target, value })
+}
+
+/// ポインタを含む値にも比較を認めず、アドレス同一性を言語の値の等値性にしない。
+pub(super) fn contains_pointer(ty: Type, scope: &Scope) -> bool {
+    match ty {
+        Type::CPointer => true,
+        Type::Struct(id) => scope.structs[id]
+            .fields
+            .iter()
+            .any(|f| contains_pointer(f.ty, scope)),
+        _ => false,
+    }
+}
+
+/// バイト列取得のunsafe境界と対象型を検査する。長さだけの取得にはunsafeを要求しない。
+pub(super) fn bytes(
+    expr: &Expression,
+    inner: &Expression,
+    bindings: &Scope,
+) -> Result<CheckedExpression, Diagnostic> {
+    let bytes = matches!(expr.kind, ExpressionKind::CBytes(_));
+    if bytes && !bindings.unsafe_block {
+        return Err(expr.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!("ffi.unsafe", "c_bytes requires an unsafe block"),
+        ));
+    }
+    let operand = super::expression::expression(inner, None, bindings)?;
+    if !operand.ty.is_text() {
+        return Err(expr.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!("ffi.bytes-source", "C byte access requires symbol or text"),
+        ));
+    }
+    Ok(if bytes {
+        CheckedExpression {
+            ty: Type::CPointer,
+            value: Value::CBytes(Box::new(operand)),
+        }
+    } else {
+        CheckedExpression {
+            ty: Type::CInteger(crate::ast::CIntegerType::Size),
+            value: Value::CByteLen {
+                operand: Box::new(operand),
+                location: expr.location,
+            },
+        }
+    })
 }
