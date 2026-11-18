@@ -118,14 +118,14 @@ pub(super) fn finish(
             }
             CallHandler::Fail(None)
         }
-        FailureHandler::Ignore(_) => {
+        FailureHandler::Ignore(ignore) => {
             if call.ty != Type::Void {
                 return Err(location.error(
                     ErrorKind::InvalidSource,
                     crate::diagnostic!("err.or-ignore", "ignore is only allowed for void calls"),
                 ));
             }
-            CallHandler::Ignore
+            CallHandler::Ignore(ignore.clone())
         }
     };
     Ok(CheckedExpression {

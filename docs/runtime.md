@@ -80,6 +80,7 @@ typedef enum {
     SUZ_LOG_PANIC,
     SUZ_LOG_DEBUG,
     SUZ_LOG_ERROR,
+    SUZ_LOG_IGNORE,
 } suz_log_level;
 
 void *suz_env_alloc(size_t size);
@@ -94,7 +95,7 @@ _Noreturn void suz_env_panic(void);
 
 ### 4.1 出力
 
-**[runtime.env-log]** `suz_env_log(level, text, len)` は、`text` から始まる `len` バイトを標準エラーへ出力する。通常のログとパニックの診断の両方に使う。`level` は、`log debug` では `SUZ_LOG_DEBUG`、`log error` では `SUZ_LOG_ERROR`、`log info` では `SUZ_LOG_INFO`、`log warn` では `SUZ_LOG_WARN`、パニックの診断では `SUZ_LOG_PANIC` とする。同じ出力の接頭辞・本文・末尾の改行には、すべて同じレベルを渡す。標準環境層はレベルを無視して出力する。
+**[runtime.env-log]** `suz_env_log(level, text, len)` は、`text` から始まる `len` バイトを標準エラーへ出力する。通常のログ・ignoreの記録・パニックの診断に使う。`level` は、`log debug` では `SUZ_LOG_DEBUG`、`log error` では `SUZ_LOG_ERROR`、`log info` では `SUZ_LOG_INFO`、`log warn` では `SUZ_LOG_WARN`、ignoreの記録では `SUZ_LOG_IGNORE`、パニックの診断では `SUZ_LOG_PANIC` とする。同じ出力の接頭辞・本文・末尾の改行には、すべて同じレベルを渡す。標準環境層はレベルを無視して出力する。`SUZ_LOG_IGNORE`と`SUZ_LOG_PANIC`は通常ログの重要度の序列には含めない。
 
 | 項目 | 契約 |
 |---|---|
@@ -137,7 +138,7 @@ _Noreturn void suz_env_panic(void);
 
 埋め込みには言語仕様の [output.embed-value] を適用し、名前とそのフィールド参照から値を読む。計算が必要な場合はログ文の前で行う。
 
-**[runtime.log-fragments]** `suz_log_begin(level, source, line)` は `suz_log_level` の `SUZ_LOG_DEBUG`・`SUZ_LOG_INFO`・`SUZ_LOG_WARN`・`SUZ_LOG_ERROR` を受け取り、出力のロックを取得して接頭辞を書く。`suz_log_end()` は改行を出力してロックを解放する。ランタイム本体は、言語仕様の [log.output] と [log.fragments] に従って、接頭辞・本文の各断片・末尾の改行を `suz_env_log` へ順に渡す。分割位置と呼び出し回数によらず、連結した出力バイト列は同じでなければならない。
+**[runtime.log-fragments]** `suz_log_begin(level, source, line)` は `suz_log_level` の `SUZ_LOG_DEBUG`・`SUZ_LOG_INFO`・`SUZ_LOG_WARN`・`SUZ_LOG_ERROR`・`SUZ_LOG_IGNORE` を受け取り、出力のロックを取得して接頭辞を書く。`suz_log_end()` は改行を出力してロックを解放する。ランタイム本体は、言語仕様の [log.output] と [log.fragments] に従って、接頭辞・本文の各断片・末尾の改行を `suz_env_log` へ順に渡す。分割位置と呼び出し回数によらず、連結した出力バイト列は同じでなければならない。
 
 1つのログ文の接頭辞から末尾の改行までは、同じランタイムが出力する別のログやパニック診断を挟まず、ひとまとまりとして出力する。このアトミック性は、環境関数への受け渡しを複数回に分ける場合も、環境層が出力をバッファへ保留する場合も維持する。排他範囲は、すべての埋め込み式の評価が完了した後に開始し、末尾の改行を渡した後に終了する。
 

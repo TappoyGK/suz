@@ -41,6 +41,11 @@ pub(super) fn emit_block(
             CheckedStatement::HandleCall { id, call, handler } => {
                 super::errors::statement(c, *id, call, handler, &indent, context)
             }
+            CheckedStatement::Ignore(ignore) => {
+                if context.log_ignore {
+                    writeln!(c, "{indent}{};", super::logs::ignore(ignore, context)).unwrap();
+                }
+            }
             CheckedStatement::Log {
                 parts,
                 location,

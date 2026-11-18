@@ -466,7 +466,7 @@ pub(crate) enum Statement {
     Return(Expression),
     Fail(Expression),
     Recover(Expression),
-    Ignore(Location),
+    Ignore(Box<Ignore>),
 }
 
 /// 構文解析済みの式とソース位置。型は意味検査で決定する。
@@ -647,7 +647,7 @@ pub(crate) enum FailureHandler {
         value: Option<Box<Expression>>,
         location: Location,
     },
-    Ignore(Location),
+    Ignore(Box<Ignore>),
     Value(Box<Expression>),
     Return {
         value: Box<Expression>,
@@ -760,4 +760,11 @@ pub(crate) enum ExpressionKind {
     },
     Name(String),
     Group(Box<Expression>),
+}
+
+/// ignoreの実行位置と、補間・評価しない理由。記録を有効にした場合だけCへ出力する。
+#[derive(Clone, Debug)]
+pub(crate) struct Ignore {
+    pub location: Location,
+    pub reason: String,
 }

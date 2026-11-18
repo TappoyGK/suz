@@ -157,3 +157,18 @@ pub(super) fn panic_expression(
     });
     format!("({})", sequence.join(", "))
 }
+
+/// 理由は文字列プールへ登録せず、1件の記録全体を既存の出力ロックで囲む。
+pub(super) fn ignore(ignore: &crate::ast::Ignore, context: &ExpressionContext) -> String {
+    let filename = std::path::Path::new(&context.source_name)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(&context.source_name);
+    format!(
+        "(suz_log_begin(SUZ_LOG_IGNORE, {}, {}), suz_log_text({}, {}), suz_log_end())",
+        c_string(filename),
+        ignore.location.line,
+        c_string(&ignore.reason),
+        ignore.reason.len()
+    )
+}

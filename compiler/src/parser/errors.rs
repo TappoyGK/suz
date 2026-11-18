@@ -2,22 +2,23 @@
 use super::Parser;
 use crate::{
     Diagnostic, ErrorKind,
-    ast::{ErrorArmBody, ExpressionKind, FailureHandler, Location},
+    ast::{ErrorArmBody, ExpressionKind, FailureHandler},
     lexer::Kind,
 };
 
 impl Parser<'_, '_> {
-    pub(super) fn ignore_reason(&mut self) -> Result<Location, Diagnostic> {
+    pub(super) fn ignore_reason(&mut self) -> Result<Box<crate::ast::Ignore>, Diagnostic> {
         let location = self.location();
         self.cursor += 1;
-        if !matches!(self.token().kind, Kind::IgnoreReason(_)) {
+        let Kind::IgnoreReason(reason) = self.token().kind else {
             return Err(self.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!("err.or-ignore", "ignore requires ': reason'"),
             ));
-        }
+        };
+        let reason = reason.to_owned();
         self.cursor += 1;
-        Ok(location)
+        Ok(Box::new(crate::ast::Ignore { location, reason }))
     }
 
     pub(super) fn error_handler(&mut self) -> Result<FailureHandler, Diagnostic> {

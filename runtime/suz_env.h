@@ -10,6 +10,7 @@ typedef enum {
     SUZ_LOG_PANIC,
     SUZ_LOG_DEBUG,
     SUZ_LOG_ERROR,
+    SUZ_LOG_IGNORE,
 } suz_log_level;
 
 void *suz_env_alloc(size_t size);

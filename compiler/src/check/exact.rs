@@ -515,10 +515,13 @@ pub(super) fn cast(
     let safe = value_range(&operand).is_some_and(fits);
     if let Some(handler) = fallback {
         let value = match handler {
+            FailureHandler::Ignore(ignore) => {
+                return Err(crate::check::errors::invalid_handler(ignore.location));
+            }
             FailureHandler::Errors(handler) => {
                 return Err(super::errors::invalid_handler(handler.location));
             }
-            FailureHandler::Fail { location, .. } | FailureHandler::Ignore(location) => {
+            FailureHandler::Fail { location, .. } => {
                 return Err(super::errors::invalid_handler(*location));
             }
             FailureHandler::Value(v) => Value::CheckedCast {

@@ -92,6 +92,7 @@ fn generated_bool_values_preserve_negation_and_copies() {
                 "test.suz",
                 crate::TextPoolLimit::default(),
                 crate::LogLevel::default(),
+                false,
             ),
         )
         .unwrap();
@@ -266,7 +267,8 @@ return result != {expected} || trace != {trace};
                 &program,
                 "test.suz",
                 crate::TextPoolLimit::default(),
-                crate::LogLevel::default()
+                crate::LogLevel::default(),
+                false
             )
         );
         let source = directory.join(format!("{index}.c"));

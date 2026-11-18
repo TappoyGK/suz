@@ -85,11 +85,12 @@ fn runtime_keeps_log_fragments_atomic_across_threads() {
 static _Thread_local int writer;
 static atomic_int owner;
 static atomic_int lines;
-static const suz_log_level levels[] = { SUZ_LOG_DEBUG, SUZ_LOG_INFO, SUZ_LOG_WARN, SUZ_LOG_ERROR };
+static const suz_log_level levels[] = { SUZ_LOG_DEBUG, SUZ_LOG_INFO, SUZ_LOG_WARN, SUZ_LOG_ERROR, SUZ_LOG_IGNORE };
 void suz_env_log(suz_log_level level, const char *text, size_t len) {
     assert(level == levels[writer - 1]);
     if ((len == 4 && (memcmp(text, "info", 4) == 0 || memcmp(text, "warn", 4) == 0)) ||
-        (len == 5 && (memcmp(text, "debug", 5) == 0 || memcmp(text, "error", 5) == 0))) {
+        (len == 5 && (memcmp(text, "debug", 5) == 0 || memcmp(text, "error", 5) == 0)) ||
+        (len == 6 && memcmp(text, "ignore", 6) == 0)) {
         assert(atomic_exchange(&owner, writer) == 0);
     }
     assert(atomic_load(&owner) == writer);
@@ -113,11 +114,11 @@ static void *work(void *arg) {
     return NULL;
 }
 int main(void) {
-    pthread_t threads[4];
-    int writers[] = {1, 2, 3, 4};
-    for (int i = 0; i < 4; ++i) assert(pthread_create(&threads[i], NULL, work, &writers[i]) == 0);
-    for (int i = 0; i < 4; ++i) assert(pthread_join(threads[i], NULL) == 0);
-    assert(atomic_load(&lines) == 400);
+    pthread_t threads[5];
+    int writers[] = {1, 2, 3, 4, 5};
+    for (int i = 0; i < 5; ++i) assert(pthread_create(&threads[i], NULL, work, &writers[i]) == 0);
+    for (int i = 0; i < 5; ++i) assert(pthread_join(threads[i], NULL) == 0);
+    assert(atomic_load(&lines) == 500);
     return 0;
 }
 "#,

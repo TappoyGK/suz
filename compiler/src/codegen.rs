@@ -33,6 +33,7 @@ struct RecoveryTarget {
 #[derive(Default)]
 struct ExpressionContext {
     log_level: crate::LogLevel,
+    log_ignore: bool,
     function_result: Option<crate::ast::Type>,
     text_literals: std::collections::BTreeMap<String, usize>,
     uses_text: bool,
@@ -76,6 +77,7 @@ pub(crate) fn generate(
     source_name: &str,
     text_pool_limit: crate::TextPoolLimit,
     log_level: crate::LogLevel,
+    log_ignore: bool,
 ) -> String {
     let mut c = String::from(
         r#"#include <limits.h>
@@ -92,6 +94,7 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
     );
     let mut context = ExpressionContext {
         log_level,
+        log_ignore,
         source_name: source_name.into(),
         enums: program.enums.clone(),
         structs: program.structs.clone(),

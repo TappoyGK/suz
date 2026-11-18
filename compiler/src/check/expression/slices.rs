@@ -54,10 +54,13 @@ pub(super) fn check(expr: &Expression, bindings: &Scope) -> Result<CheckedExpres
     let ty = if *index { Type::Char } else { Type::Text };
     let handler =
         match fallback {
+            Some(FailureHandler::Ignore(ignore)) => {
+                return Err(crate::check::errors::invalid_handler(ignore.location));
+            }
             Some(FailureHandler::Errors(handler)) => {
                 return Err(crate::check::errors::invalid_handler(handler.location));
             }
-            Some(FailureHandler::Fail { location, .. } | FailureHandler::Ignore(location)) => {
+            Some(FailureHandler::Fail { location, .. }) => {
                 return Err(crate::check::errors::invalid_handler(*location));
             }
             Some(FailureHandler::Value(value)) => Some(CheckedHandler::Value(Box::new(

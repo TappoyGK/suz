@@ -269,3 +269,6 @@ mod length;
 
 #[path = "spec_cases/errors.rs"]
 mod errors;
+
+#[path = "spec_cases/log_ignore.rs"]
+mod log_ignore;

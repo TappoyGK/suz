@@ -41,6 +41,7 @@ pub struct Options {
     pub optimization: OsString,
     pub force: bool,
     pub log_allow: bool,
+    pub log_ignore: bool,
     pub log_level: suz::LogLevel,
     pub deny_global_var: bool,
     pub mode: suz::ArithmeticMode,
@@ -84,6 +85,7 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
     let mut text_pool_limit = None;
     let mut force = false;
     let mut log_allow = false;
+    let mut log_ignore = false;
     let mut log_level = None;
     let mut deny_global_var = false;
     let mut help = false;
@@ -98,6 +100,17 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
                 }
                 Some("--deny-global-var") if !deny_global_var => {
                     deny_global_var = true;
+                    continue;
+                }
+                Some("--log-ignore") => {
+                    if log_ignore {
+                        return Err(Failure::tool(
+                            2,
+                            "tool.log-ignore",
+                            "duplicate --log-ignore option",
+                        ));
+                    }
+                    log_ignore = true;
                     continue;
                 }
                 Some("--log-level") => {
@@ -204,6 +217,7 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
         optimization: optimization.unwrap_or_else(|| "-O0".into()),
         force,
         log_allow,
+        log_ignore,
         log_level: log_level.unwrap_or_default(),
         deny_global_var,
         mode: mode.unwrap_or_default(),
