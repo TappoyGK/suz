@@ -50,6 +50,10 @@ impl Parser<'_, '_> {
 
     fn capture(&mut self) -> Result<Capture, Diagnostic> {
         let location = self.location();
+        let by_reference = self.token().kind == Kind::Keyword("var");
+        if by_reference {
+            self.cursor += 1;
+        }
         let Kind::Ident(name) = self.token().kind else {
             return Err(location.error(
                 ErrorKind::InvalidSource,
@@ -61,6 +65,7 @@ impl Parser<'_, '_> {
         };
         self.cursor += 1;
         Ok(Capture {
+            by_reference,
             name: name.into(),
             location,
         })

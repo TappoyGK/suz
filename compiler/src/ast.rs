@@ -618,7 +618,7 @@ pub(crate) enum FailureHandler {
     },
 }
 
-/// 明示した値のキャプチャーと、独立した仮引数・戻り先を持つクロージャ。
+/// 明示した値・参照のキャプチャーと、独立した仮引数・戻り先を持つクロージャ。
 #[derive(Clone)]
 pub(crate) struct Closure {
     pub captures: Vec<Capture>,
@@ -628,6 +628,7 @@ pub(crate) struct Closure {
 /// キャプチャー一覧の名前と診断位置。型と参照先は外側のスコープで解決する。
 #[derive(Clone)]
 pub(crate) struct Capture {
+    pub by_reference: bool,
     pub name: String,
     pub location: Location,
 }

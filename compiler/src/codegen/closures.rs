@@ -1,4 +1,4 @@
-//! クロージャを環境引数付きのC関数にし、評価位置で値をスタック上の環境へ写す。
+//! クロージャを環境引数付きのC関数にし、評価位置で値・変数の位置をスタック上の環境へ保持する。
 //! 環境を呼び出しの外へ保存できないため、ループでも同じスタック領域を再利用できる。
 
 use super::{ExpressionContext, expressions::expression, statements::emit_block};
@@ -23,19 +23,37 @@ pub(super) fn emit(closure: &CheckedClosure, ty: Type, context: &mut ExpressionC
     for (index, capture) in closure.captures.iter().enumerate() {
         setup.push(format!(
             "suz_env_{id}.capture_{index} = {}",
-            expression(capture, context)
+            if capture.by_reference {
+                format!("&({})", expression(&capture.value, context))
+            } else {
+                expression(&capture.value, context)
+            }
         ));
     }
     let saved_temporaries = std::mem::take(&mut context.temporaries);
     let saved_environments = std::mem::take(&mut context.closure_environments);
     let saved_references = std::mem::take(&mut context.references);
+    // 値ブロックと同じ参照表現を使い、読み書きと再キャプチャーが外側の変数へ届くようにする。
+    context.references = closure
+        .captures
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| c.by_reference)
+        .map(|(i, _)| parameter_count + i)
+        .collect();
     let mut body = String::new();
     emit_block(&mut body, &function.statements, 1, &mut 0, context);
     let mut definition = String::new();
     if !closure.captures.is_empty() {
         writeln!(definition, "typedef struct {{").unwrap();
         for (index, capture) in closure.captures.iter().enumerate() {
-            writeln!(definition, "    {} capture_{index};", capture.ty.c_name()).unwrap();
+            writeln!(
+                definition,
+                "    {} {}capture_{index};",
+                capture.value.ty.c_name(),
+                if capture.by_reference { "*" } else { "" }
+            )
+            .unwrap();
         }
         writeln!(definition, "}} suz_closure_env_{id};").unwrap();
     }
@@ -55,10 +73,15 @@ pub(super) fn emit(closure: &CheckedClosure, ty: Type, context: &mut ExpressionC
     .unwrap();
     definition.push_str("    (void)environment;\n");
     for (index, capture) in closure.captures.iter().enumerate() {
-        writeln!(definition, "    const {} suz_local_{} = ((const suz_closure_env_{id} *)environment)->capture_{index};", capture.ty.c_name(), parameter_count + index).unwrap();
+        let local = parameter_count + index;
+        if capture.by_reference {
+            writeln!(definition, "    {} *const suz_ref_{local} = ((const suz_closure_env_{id} *)environment)->capture_{index};", capture.value.ty.c_name()).unwrap();
+        } else {
+            writeln!(definition, "    const {} suz_local_{local} = ((const suz_closure_env_{id} *)environment)->capture_{index};", capture.value.ty.c_name()).unwrap();
+        }
     }
     for index in 0..function.parameters.len() {
-        writeln!(definition, "    (void)suz_local_{index};").unwrap();
+        writeln!(definition, "    (void){};", context.local(index)).unwrap();
     }
     for (index, ty) in context.temporaries.iter().enumerate() {
         writeln!(definition, "    {} suz_cmp_{index};", ty.c_name()).unwrap();

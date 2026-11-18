@@ -18,8 +18,14 @@ struct Writes<'a> {
 }
 impl Visitor for Writes<'_> {
     fn expression(&mut self, expr: &Expression) -> Result<(), Diagnostic> {
-        // 値キャプチャーは外側の変数を書き換えない。本体から同じ名前で書けるのは大域変数だけ。
-        if matches!(expr.kind, ExpressionKind::Closure(_)) && !self.global {
+        // 本体へ同じ変数が引き継がれるのは、参照キャプチャーか大域変数の場合だけ。
+        if let ExpressionKind::Closure(closure) = &expr.kind
+            && !self.global
+            && !closure
+                .captures
+                .iter()
+                .any(|c| c.by_reference && c.name == self.name)
+        {
             return Ok(());
         }
         visit::walk_expression(self, expr)

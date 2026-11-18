@@ -226,3 +226,132 @@ fn closure_nesting_uses_the_enclosing_depth() {
         }
     }
 }
+
+#[test]
+fn reference_captures_write_the_original_binding() {
+    let source = r#"
+fntype Action() -> void
+fntype Once() -> i32
+struct Point { x: i32, y: i32 }
+fn execute(f: fn Action) -> void { f() }
+fn run(f: fn Once) -> i32 { return f() }
+fn pair(a: fn Action, b: fn Action) -> void { a()
+b() }
+fn after(f: fn Once, ignored: i32) -> i32 { return f() }
+fn generic(n: int) -> i32 {
+    var value = n
+    execute(fn [var value]() -> void { value += 1 })
+    return value as i32 or 0
+}
+fn main() -> u8 {
+    var total: i32 = 0
+    execute(fn [var total]() -> void { total = 3 })
+    if total != 3 { return 1 }
+    pair(fn [var total]() -> void { total += 2 }, fn [var total]() -> void { total *= 3 })
+    if total != 15 { return 2 }
+    // 作成時には値を読まず、後続の実引数の評価後に読む。
+    if after(fn [var total]() -> i32 { return total }, expr { total = 20
+        0 }) != 20 { return 3 }
+    var point = Point { x: 1, y: 2 }
+    execute(fn [var point]() -> void { point.x = 4
+        point.y += 3 })
+    if point.x != 4 || point.y != 5 { return 4 }
+    // 値ブロックとクロージャをまたいでも同じ変数へ書く。
+    fix nested = expr {
+        execute(fn [var total]() -> void {
+            execute(fn [var total]() -> void { total += 1 })
+            fix ignored = expr { total += 2
+                0 }
+        })
+        total
+    }
+    if nested != 23 { return 5 }
+    // 参照キャプチャーを値で再キャプチャーした場合は、その位置の値を保持する。
+    if run(fn [var total]() -> i32 {
+        return after(fn [total]() -> i32 { return total }, expr { total = 30
+            0 })
+    }) != 23 || total != 30 { return 6 }
+    if generic(3 as i8) != 4 || generic(5 as u64) != 6 { return 7 }
+    for i in 0..<1000 {
+        execute(fn [var total]() -> void { total += 1 })
+    }
+    if total != 1030 { return 8 }
+    // 別フィールドへの書き込みは右辺でも許される。
+    point.x = run(fn [var point]() -> i32 { point.y += 1
+        return 9 })
+    if point.x != 9 || point.y != 6 { return 9 }
+    return 0
+}
+"#;
+    let output = compile_and_run_c23(source, "reference-captures.suz");
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let c = suz::compile(source.as_bytes()).unwrap();
+    for allocation in ["malloc(", "calloc(", "realloc(", "alloca("] {
+        assert!(
+            !c.contains(allocation),
+            "unexpected allocation: {allocation}"
+        );
+    }
+}
+
+#[test]
+fn reference_captures_enforce_mutability_and_assignment_boundaries() {
+    let prelude = "fntype Once() -> i32\nfntype Action() -> void\nstruct Point { x: i32 }\nfn run(f: fn Once) -> i32 { return f() }\nfn execute(f: fn Action) -> void { f() }\n";
+    for (body, rule) in [
+        (
+            "fix n: i32 = 1\nrun(fn [var n]() -> i32 { return n })",
+            "closure.capture-list",
+        ),
+        (
+            "for i in 0..<1 { run(fn [var i]() -> i32 { return i as i32 or 0 }) }",
+            "closure.capture-list",
+        ),
+        (
+            "var n: i32 = 1\nrun(fn [n]() -> i32 { return run(fn [var n]() -> i32 { return n }) })\nn = 2",
+            "closure.capture-list",
+        ),
+        (
+            "var n: i32 = 1\nrun(fn [n, var n]() -> i32 { return n })\nn = 2",
+            "closure.capture-list",
+        ),
+        (
+            "var n: i32 = 1\nrun(fn [var n]() -> i32 { return n })",
+            "var.never-reassigned",
+        ),
+        (
+            "var n: i32 = 1\nn = run(fn [var n]() -> i32 { n += 1\nreturn n })",
+            "assign.rhs-write",
+        ),
+        (
+            "var n: i32 = 1\nn = run(fn [var n]() -> i32 { return run(fn [var n]() -> i32 { n = 2\nreturn n }) })",
+            "assign.rhs-write",
+        ),
+        (
+            "var p = Point { x: 1 }\np.x = run(fn [var p]() -> i32 { p.x = 2\nreturn 0 })",
+            "assign.rhs-write",
+        ),
+        (
+            "var n: i32 = 1\nfor i in 0..<run(fn [var n]() -> i32 { n = 2\nreturn n }) {}",
+            "for.bound-reference",
+        ),
+        (
+            "execute(fn []() -> void { var n: i32 = 1\nexecute(fn [var n]() -> void {}) })",
+            "var.never-reassigned",
+        ),
+    ] {
+        let source = format!("{prelude}fn main() -> u8 {{ {body}\nreturn 0 }}");
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert!(
+            error.to_string().contains(&format!("[{rule}]")),
+            "{source}: {error}"
+        );
+    }
+    let source = format!(
+        "{prelude}fn bad(n: i32) -> i32 {{ return run(fn [var n]() -> i32 {{ return n }}) }}\nfn main() -> u8 {{ return 0 }}"
+    );
+    let error = suz::compile(source.as_bytes()).unwrap_err();
+    assert!(
+        error.to_string().contains("[closure.capture-list]"),
+        "{error}"
+    );
+}

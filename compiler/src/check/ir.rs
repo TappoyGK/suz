@@ -121,12 +121,19 @@ pub(crate) enum CheckedHandler {
     Value(Box<CheckedExpression>),
     Return(Box<CheckedExpression>),
 }
-/// クロージャ本体と、評価位置で順に読み取るキャプチャー値。
-/// functionの仮引数列の末尾にキャプチャーを並べ、読み取り専用のローカル番号を割り当てる。
+/// クロージャ本体と、評価位置で順に保持する値・参照。
+/// functionの仮引数列の末尾にキャプチャーを並べ、本体で使うローカル番号を割り当てる。
 #[derive(Clone)]
 pub(crate) struct CheckedClosure {
     pub function: CheckedFunction,
-    pub captures: Vec<CheckedExpression>,
+    pub captures: Vec<CheckedCapture>,
+}
+
+/// 環境へ保持する値。参照キャプチャーではvalueが外側のローカル変数を指す。
+#[derive(Clone)]
+pub(crate) struct CheckedCapture {
+    pub value: CheckedExpression,
+    pub by_reference: bool,
 }
 
 /// [`crate::ast::ExpressionKind`] の整数演算を検査した表現。
