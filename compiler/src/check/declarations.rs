@@ -220,7 +220,7 @@ pub(super) fn resolve(
     for declaration in declarations {
         if resolver
             .bindings
-            .fntypes
+            .fnshapes
             .iter()
             .any(|d| d.name == declaration.name)
             || structs.iter().any(|s| s.name == declaration.name)

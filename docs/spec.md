@@ -69,7 +69,7 @@ Suzは次のものを含む。
 **[src.keywords]** 次の語はキーワードである。
 
 ```text
-fix var fn fntype static struct enum
+fix var fn fnshape static struct enum
 if ifexpr elif else while loop for rev in break continue return match matchexpr
 as or not len log allow expr with
 true false nan inf
@@ -211,9 +211,9 @@ fn main() -> u8 {
 
 ### 4.1 宣言とスコープ
 
-**[decl.top-level]** トップレベルには、`fix`・`var`・関数・構造体・列挙型・`fntype` の宣言だけを書ける。これらの名前は、ファイル内の宣言順序によらず参照できる。
+**[decl.top-level]** トップレベルには、`fix`・`var`・関数・構造体・列挙型・`fnshape` の宣言だけを書ける。これらの名前は、ファイル内の宣言順序によらず参照できる。
 
-**[decl.location]** `fix` と `var` はトップレベルとブロック内で宣言できる。関数、構造体、列挙型、`fntype` はトップレベルで宣言する。それぞれの宣言をこれらの場所以外に書くとコンパイルエラーである。
+**[decl.location]** `fix` と `var` はトップレベルとブロック内で宣言できる。関数、構造体、列挙型、`fnshape` はトップレベルで宣言する。それぞれの宣言をこれらの場所以外に書くとコンパイルエラーである。
 
 **[decl.duplicate]** 同じスコープで同じ名前を宣言するとコンパイルエラーである。定数、変数、仮引数、関数、型など、宣言の種類が違っても同じである。
 
@@ -227,7 +227,7 @@ fn main() -> u8 {
 
 **[name.value]** 関数、ブロック内の `fix`・`var`、仮引数、構造体のフィールド、`for` と `rev` のループ変数の名前はASCIIの小文字で始まり、小文字・数字・`_` だけからなる。`_` は末尾に置かず、連続させない。例は `read_count`、`count`、`x2` である。
 
-**[name.type]** 構造体・列挙型・`fntype` の名前はASCIIの大文字で始まり、英字と数字だけからなる。小文字を1文字以上含み、大文字を連続させない。例は `Vec2`、`IoError` である。`IOError`、`T`、`Load_Error` は認めない。
+**[name.type]** 構造体・列挙型・`fnshape` の名前はASCIIの大文字で始まり、英字と数字だけからなる。小文字を1文字以上含み、大文字を連続させない。例は `Vec2`、`IoError` である。`IOError`、`T`、`Load_Error` は認めない。
 
 **[name.variant]** 列挙子の名前はASCIIの大文字で始まり、英字と数字だけからなる。例は `Ready`、`A`、`F1`、`ESC` である。
 
@@ -235,7 +235,7 @@ fn main() -> u8 {
 
 ## 5. 型
 
-**[type.name]** 型として使う名前は、組み込み型名、またはファイル内で宣言された構造体・列挙型の名前でなければならない。関数値の型は [fn.type-mark] に従い `static fn` または `fn` と `fntype` の名前で書く。該当する型がない場合はコンパイルエラーである。
+**[type.name]** 型として使う名前は、組み込み型名、またはファイル内で宣言された構造体・列挙型の名前でなければならない。関数値の型は [fn.type-mark] に従い `static fn` または `fn` と `fnshape` の名前で書く。該当する型がない場合はコンパイルエラーである。
 
 ### 5.1 組み込み型
 
@@ -1389,17 +1389,17 @@ fn convert(value: u16) -> int {
 
 ### 8.8 関数値
 
-**[fntype.decl]** `fntype 名前(T1, T2, ...) -> R` は、仮引数の型の並びと戻り値の型に名前を付ける。仮引数は0個以上で、型だけを書く。この型を関数値の型と呼ぶ。仮引数・戻り値に `int`・`float` は書けず、`void` は戻り値だけに使える。
+**[fnshape.decl]** `fnshape 名前(T1, T2, ...) -> R` は、仮引数の型の並びと戻り値の型で決まる「関数の形」に名前を付ける。構造体や列挙型の宣言とは異なり、名前で区別する新しい型は作らない。仮引数は0個以上で、型だけを書く。この形を持つ関数値の型は [fn.type-mark] に従って書く。仮引数・戻り値に `int`・`float` は書けず、`void` は戻り値だけに使える。
 
-**[fntype.same]** 同じ種別（`static fn` か `fn`）で、仮引数の型の並びと戻り値の型が同じ関数値の型は、名前が違っても同じ型である。関数の宣言から推論した関数値の型にも、同じ規則を適用する。
+**[fnshape.same]** 同じ種別（`static fn` か `fn`）で、仮引数の型の並びと戻り値の型が同じ関数値の型は、名前が違っても同じ型である。関数の宣言から推論した関数値の型にも、同じ規則を適用する。
 
-**[fntype.recursion]** 関数値の型は、仮引数と戻り値を直接・間接にたどって自分自身を含むことはできない。循環する宣言はコンパイルエラーである。構造体を通して含む場合は認める。たとえば、`struct Node { visit: static fn Visit }` と `fntype Visit(Node) -> void` は宣言できる。
+**[fnshape.recursion]** 関数値の型は、仮引数と戻り値を直接・間接にたどって自分自身を含むことはできない。循環する宣言はコンパイルエラーである。構造体を通して含む場合は認める。たとえば、`struct Node { visit: static fn Visit }` と `fnshape Visit(Node) -> void` は宣言できる。
 
-**[fn.type-mark]** 関数値の型は `static fn 名前` または `fn 名前` と書く。名前は `fntype` で宣言した名前である。`fn` を付けないこと、`fntype` でない型に `fn` を付けること、`fn` 以外の型に `static` を付けることはコンパイルエラーである。`fntype` の宣言で付ける名前には `fn` を付けない。
+**[fn.type-mark]** 関数値の型は `static fn 名前` または `fn 名前` と書く。名前は `fnshape` で宣言した名前である。`fn` を付けないこと、`fnshape` でない型に `fn` を付けること、`fn` 以外の型に `static` を付けることはコンパイルエラーである。`fnshape` の宣言で付ける名前には `fn` を付けない。
 
-**[fn.type-static]** `static fn Shape` は、トップレベルの関数を指す値の型である。指している関数は、その値を渡した呼び出しが終わった後も有効である。どの関数を指すかは実行時に選べる。[value.copy-equivalent] に従い、仮引数・戻り値、トップレベルとブロック内の `fix`・`var`、構造体のフィールドに使える。`fntype` の宣言の仮引数と戻り値にも使える。
+**[fn.type-static]** `static fn Shape` は、トップレベルの関数を指す値の型である。指している関数は、その値を渡した呼び出しが終わった後も有効である。どの関数を指すかは実行時に選べる。[value.copy-equivalent] に従い、仮引数・戻り値、トップレベルとブロック内の `fix`・`var`、構造体のフィールドに使える。`fnshape` の宣言の仮引数と戻り値にも使える。
 
-**[fn.type-call]** `fn Shape` は、トップレベルの関数またはクロージャを指し、受け取った呼び出しの間だけ使える関数値の型である。関数の仮引数と、`fntype` の宣言の仮引数の型にだけ書ける。戻り値、`fix`・`var` の型注釈、構造体のフィールド、`fntype` の宣言の戻り値に書くとコンパイルエラーである。例えば、`fntype Runner(fn Tr) -> i32` は、`fn r(f: fn Tr) -> i32` から推論する関数値と同じ形を表す。
+**[fn.type-call]** `fn Shape` は、トップレベルの関数またはクロージャを指し、受け取った呼び出しの間だけ使える関数値の型である。関数の仮引数と、`fnshape` の宣言の仮引数の型にだけ書ける。戻り値、`fix`・`var` の型注釈、構造体のフィールド、`fnshape` の宣言の戻り値に書くとコンパイルエラーである。例えば、`fnshape Runner(fn Tr) -> i32` は、`fn r(f: fn Tr) -> i32` から推論する関数値と同じ形を表す。
 
 **[fn.call-only]** `fn Shape` の仮引数は、呼び出すことと、別の関数の `fn Shape` の仮引数へ名前をそのまま書いて渡すことだけができる。値でキャプチャーすることもでき、キャプチャー後も同じ制限を適用する（[closure.capture-list]）。それ以外の使い方はコンパイルエラーである。初期値・代入の右辺・`return`・フィールドの初期値・値ブロックの値には書けない。転送する実引数を丸括弧や値ブロックで包むこともできない。
 
@@ -1407,7 +1407,7 @@ fn convert(value: u16) -> int {
 
 **[fn.value-sharing]** `fn Shape` は [value.sharing] の型とする。クロージャが参照でキャプチャーした変数や、書き換え可能な実体を指す値を環境に保持する場合、呼び出しを通して外側から見える書き換えが起きうるためである。`static` のない型の書き方で、この性質を示す（[value.sharing-explicit]）。`static fn Shape` は [value.copy-equivalent] に従う。
 
-**[fn.value-from-name]** `fn saw` は、トップレベルの関数 `saw` を指す値を作る。汎用でない関数では、関数の仮引数と戻り値の型から `static fn` の型が決まり、同じ形の `fntype` の宣言や型注釈は必要ない。型が要求される場所では、その型と同じでなければコンパイルエラーである。汎用関数には [fn.value-generic] を適用する。`main` は値にできない。
+**[fn.value-from-name]** `fn saw` は、トップレベルの関数 `saw` を指す値を作る。汎用でない関数では、関数の仮引数と戻り値の型から `static fn` の型が決まり、同じ形の `fnshape` の宣言や型注釈は必要ない。型が要求される場所では、その型と同じでなければコンパイルエラーである。汎用関数には [fn.value-generic] を適用する。`main` は値にできない。
 
 **[fn.value-mark]** 関数名を値として使うときは `fn` を付ける。関数値を保持する変数・フィールド・呼び出しなどの式には付けない。これらに反するとコンパイルエラーである。名前で直接呼ぶ `saw(p)` には `fn` を付けない。`fn pick(i)` は認めず、関数値を返す関数の呼び出しは `pick(i)` と書く。関数名から作った値をその場で呼ぶ場合は `(fn saw)(p)` と書く。
 
@@ -1430,7 +1430,7 @@ fn convert(value: u16) -> int {
 **[fn.value-generic-check]** 具体型が決まった時点で、汎用検査で保留した判定をその組み合わせについて行う。その関数値を呼ばない場合も検査する。違反する場合は `fn 関数名` を主診断とし、本体に至る呼び出し・関数値の参照の連鎖と、本体の違反を関連診断として示す。
 
 ```suz
-fntype Transform(i32) -> i32
+fnshape Transform(i32) -> i32
 fn identity(x: int) -> int { return x }
 fn twice(x: i32) -> i32 { return x * 2 }
 fn apply(action: fn Transform, n: i32) -> i32 { return action(n) }
@@ -1464,7 +1464,7 @@ fn main() -> u8 {
 **[closure.generic]** クロージャ自身の仮引数・戻り値には `int`・`float` を書けない。汎用関数の本体で外側の汎用型の値をキャプチャーする場合は、外側の具体化ごとに本体を検査する。
 
 ```suz
-fntype Calc(i32) -> i32
+fnshape Calc(i32) -> i32
 fn apply(f: fn Calc, n: i32) -> i32 { return f(n) }
 fn main() -> u8 {
     fix scale: i32 = 2
@@ -1714,14 +1714,14 @@ CharEscape ::= "\" ( "0" | "n" | "r" | "t" | "\" | "'"
 ```ebnf
 Program          ::= NL* ( Declaration NL+ )* Declaration? EOF
 Declaration      ::= TopLevelBinding | FunctionDeclaration
-                   | StructDeclaration | EnumDeclaration | FnTypeDeclaration
+                   | StructDeclaration | EnumDeclaration | FnShapeDeclaration
 
 TopLevelBinding  ::= ( "fix" | "var" ) IDENT TypeAnnotation? "=" ConstExpression AllowClause?
 TypeAnnotation   ::= ":" Type
 
 FunctionDeclaration ::= "fn" IDENT "(" Parameters? ")" "->" Type Block
-FnTypeDeclaration ::= "fntype" IDENT "(" FnTypeParameters? ")" "->" Type
-FnTypeParameters ::= Type ( "," Type )* ","?
+FnShapeDeclaration ::= "fnshape" IDENT "(" FnShapeParameters? ")" "->" Type
+FnShapeParameters ::= Type ( "," Type )* ","?
 Parameters       ::= Parameter ( "," Parameter )* ","?
 Parameter        ::= IDENT ":" Type
 

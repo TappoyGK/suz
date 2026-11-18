@@ -178,7 +178,7 @@ impl Parser<'_, '_> {
                     "functions and types must be declared at top level"
                 ),
             )),
-            Kind::Keyword("enum" | "struct" | "fntype") => Err(self.error(
+            Kind::Keyword("enum" | "struct" | "fnshape") => Err(self.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(
                     "decl.location",

@@ -114,7 +114,7 @@ impl Parser<'_, '_> {
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(
                     "fn.type-call",
-                    "fn types are only allowed on function parameters and fntype parameters; use static fn here"
+                    "fn types are only allowed on function parameters and fnshape parameters; use static fn here"
                 ),
             ));
         }
@@ -130,7 +130,7 @@ impl Parser<'_, '_> {
                     ErrorKind::InvalidSource,
                     crate::diagnostic!(
                         "fn.type-mark",
-                        "static must be followed by fn and a declared fntype name"
+                        "static must be followed by fn and a declared fnshape name"
                     ),
                 ));
             }
@@ -140,7 +140,7 @@ impl Parser<'_, '_> {
             self.cursor += 1;
         }
         if let Kind::Ident(name) = self.token().kind
-            && let Some(decl) = self.fntypes.iter().find(|d| d.name == name)
+            && let Some(decl) = self.fnshapes.iter().find(|d| d.name == name)
         {
             if !marked {
                 return Err(self.error(
@@ -161,7 +161,7 @@ impl Parser<'_, '_> {
         if marked {
             return Err(self.error(
                 ErrorKind::InvalidSource,
-                crate::diagnostic!("fn.type-mark", "fn requires a declared fntype name"),
+                crate::diagnostic!("fn.type-mark", "fn requires a declared fnshape name"),
             ));
         }
         let ty = match self.token().kind {

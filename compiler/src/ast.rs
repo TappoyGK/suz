@@ -336,9 +336,9 @@ pub(crate) struct FunctionType {
     pub result: Type,
 }
 
-/// fntypeの名前と宣言位置。型の同一性は名前ではなく仮引数と戻り値の型で決まる。
+/// fnshapeの名前と宣言位置。型の同一性は名前ではなく仮引数と戻り値の型で決まる。
 #[derive(Clone)]
-pub(crate) struct FnTypeDeclaration {
+pub(crate) struct FnShapeDeclaration {
     pub name: String,
     pub location: Location,
     pub start: usize,
@@ -349,7 +349,7 @@ pub(crate) struct FnTypeDeclaration {
 /// 構文解析の結果全体。型宣言・トップレベル束縛・関数とallowの範囲を保持する。
 /// [`crate::check`] が検査して [`crate::check::ir::CheckedProgram`] へ変換する。
 pub(crate) struct Program {
-    pub fntypes: Vec<FnTypeDeclaration>,
+    pub fnshapes: Vec<FnShapeDeclaration>,
     pub function_types: Vec<FunctionType>,
     pub allows: Vec<crate::warnings::AllowScope>,
     pub structs: Vec<StructDeclaration>,

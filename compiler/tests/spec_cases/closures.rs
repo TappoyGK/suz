@@ -3,9 +3,9 @@ use crate::test_util::compile_and_run_c23;
 #[test]
 fn value_captures_preserve_evaluation_order_and_nested_environments() {
     let source = r#"
-fntype Calc(i32) -> i32
-fntype Once() -> i32
-fntype Action() -> void
+fnshape Calc(i32) -> i32
+fnshape Once() -> i32
+fnshape Action() -> void
 struct Point { x: i32 }
 var STATE: i32 = 1
 fn apply(f: fn Calc, n: i32) -> i32 { return f(n) }
@@ -80,7 +80,7 @@ fn main() -> u8 {
 
 #[test]
 fn closures_reject_escaping_implicit_captures_and_mutating_value_captures() {
-    let prelude = "fntype Once() -> i32\nfntype Action() -> void\nstruct Point { x: i32 }\nstruct Holder { f: static fn Once }\nfix TOP: i32 = 1\nfn run(f: fn Once) -> i32 { return f() }\nfn save(f: static fn Once) -> void {}\nfntype Calc(i32) -> i32\nfn apply(f: fn Calc) -> i32 { return f(1) }\n";
+    let prelude = "fnshape Once() -> i32\nfnshape Action() -> void\nstruct Point { x: i32 }\nstruct Holder { f: static fn Once }\nfix TOP: i32 = 1\nfn run(f: fn Once) -> i32 { return f() }\nfn save(f: static fn Once) -> void {}\nfnshape Calc(i32) -> i32\nfn apply(f: fn Calc) -> i32 { return f(1) }\n";
     for (body, rule) in [
         ("fix f = fn []() -> i32 { return 1 }", "closure.place"),
         ("var f = fn []() -> i32 { return 1 }", "closure.place"),
@@ -156,7 +156,7 @@ fn captured_function_parameters_remain_call_only() {
     // キャプチャー後も保存やstatic fnへの変換を許さず、環境が呼び出しの外へ逃げるのを防ぐ。
     for misuse in ["fix g = f", "save(f)"] {
         let source = format!(
-            "fntype Calc(i32) -> i32\n\
+            "fnshape Calc(i32) -> i32\n\
              fn apply(f: fn Calc) -> i32 {{ return f(1) }}\n\
              fn save(f: static fn Calc) -> void {{}}\n\
              fn wrap(f: fn Calc) -> i32 {{\n\
@@ -176,15 +176,15 @@ fn captured_function_parameters_remain_call_only() {
 fn closures_keep_return_and_range_boundaries_separate() {
     for (source, rule) in [
         (
-            "fntype Once() -> i32\nfn run(f: fn Once) -> i32 { return f() }\nfn main() -> u8 { run(fn []() -> i32 { return 1 }) }",
+            "fnshape Once() -> i32\nfn run(f: fn Once) -> i32 { return f() }\nfn main() -> u8 { run(fn []() -> i32 { return 1 }) }",
             "fn.value-return-required",
         ),
         (
-            "fntype Once() -> i32\nfn run(f: fn Once) -> i32 { return f() }\nfn main() -> u8 { return run(fn []() -> i32 { fix n = 1 }) as u8 or 0 }",
+            "fnshape Once() -> i32\nfn run(f: fn Once) -> i32 { return f() }\nfn main() -> u8 { return run(fn []() -> i32 { fix n = 1 }) as u8 or 0 }",
             "fn.value-return-required",
         ),
         (
-            "fntype Once() -> i32\nfn run(f: fn Once) -> i32 { return f() }\nfn main() -> u8 { var n: i32 = 2\nfor i in 0..<run(fn [n]() -> i32 { return n }) {}\nn = 3\nreturn 0 }",
+            "fnshape Once() -> i32\nfn run(f: fn Once) -> i32 { return f() }\nfn main() -> u8 { var n: i32 = 2\nfor i in 0..<run(fn [n]() -> i32 { return n }) {}\nn = 3\nreturn 0 }",
             "for.bound-reference",
         ),
     ] {
@@ -207,7 +207,7 @@ fn closure_nesting_uses_the_enclosing_depth() {
             " })".repeat(count)
         );
         let source = format!(
-            "fntype Once() -> i32\nfn run(f: fn Once) -> i32 {{ return f() }}\nfn main() -> u8 {{ fix n = {expression}\nreturn 0 }}"
+            "fnshape Once() -> i32\nfn run(f: fn Once) -> i32 {{ return f() }}\nfn main() -> u8 {{ fix n = {expression}\nreturn 0 }}"
         );
         std::fs::write(directory.0.join("depth.suz"), source).unwrap();
         let output = std::process::Command::new(env!("CARGO_BIN_EXE_suz"))
@@ -230,8 +230,8 @@ fn closure_nesting_uses_the_enclosing_depth() {
 #[test]
 fn reference_captures_write_the_original_binding() {
     let source = r#"
-fntype Action() -> void
-fntype Once() -> i32
+fnshape Action() -> void
+fnshape Once() -> i32
 struct Point { x: i32, y: i32 }
 fn execute(f: fn Action) -> void { f() }
 fn run(f: fn Once) -> i32 { return f() }
@@ -296,7 +296,7 @@ fn main() -> u8 {
 
 #[test]
 fn reference_captures_enforce_mutability_and_assignment_boundaries() {
-    let prelude = "fntype Once() -> i32\nfntype Action() -> void\nstruct Point { x: i32 }\nfn run(f: fn Once) -> i32 { return f() }\nfn execute(f: fn Action) -> void { f() }\n";
+    let prelude = "fnshape Once() -> i32\nfnshape Action() -> void\nstruct Point { x: i32 }\nfn run(f: fn Once) -> i32 { return f() }\nfn execute(f: fn Action) -> void { f() }\n";
     for (body, rule) in [
         (
             "fix n: i32 = 1\nrun(fn [var n]() -> i32 { return n })",

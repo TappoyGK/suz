@@ -24,7 +24,7 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
             || program.bindings.iter().any(|c| c.name == function.name)
             || program.enums.iter().any(|e| e.name == function.name)
             || program.structs.iter().any(|s| s.name == function.name)
-            || program.fntypes.iter().any(|s| s.name == function.name)
+            || program.fnshapes.iter().any(|s| s.name == function.name)
         {
             return Err(function.location.error(
                 ErrorKind::InvalidSource,
@@ -44,7 +44,7 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     let signatures = Rc::new(signatures);
     let scope = Scope {
         functions: signatures,
-        fntypes: Rc::new(program.fntypes.clone()),
+        fnshapes: Rc::new(program.fnshapes.clone()),
         function_types: Rc::new(std::cell::RefCell::new(program.function_types.clone())),
         instances: Rc::new(std::cell::RefCell::new(super::generic::Instances::new(
             program.functions.len(),

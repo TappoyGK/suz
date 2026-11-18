@@ -43,7 +43,7 @@ pub(super) enum Mode {
 
 #[derive(Clone)]
 pub(super) struct Scope {
-    pub fntypes: Rc<Vec<crate::ast::FnTypeDeclaration>>,
+    pub fnshapes: Rc<Vec<crate::ast::FnShapeDeclaration>>,
     pub function_types: Rc<std::cell::RefCell<Vec<crate::ast::FunctionType>>>,
     pub mode: Mode,
     pub deferred: Option<Rc<std::cell::RefCell<Vec<super::generic::Deferred>>>>,
@@ -121,7 +121,7 @@ impl Scope {
                 } else {
                     "fn"
                 };
-                if let Some(declaration) = self.fntypes.iter().find(|d| d.type_id == id) {
+                if let Some(declaration) = self.fnshapes.iter().find(|d| d.type_id == id) {
                     return format!("{prefix} {}", declaration.name);
                 }
                 // 名前のない推論型では、違いが分かるよう仮引数と戻り値を表示する。
@@ -142,7 +142,7 @@ impl Scope {
         }
     }
     pub fn is_type_name(&self, name: &str) -> bool {
-        self.fntypes.iter().any(|d| d.name == name)
+        self.fnshapes.iter().any(|d| d.name == name)
             || self.enums.iter().any(|decl| decl.name == name)
             || self.structs.iter().any(|decl| decl.name == name)
     }
@@ -150,7 +150,7 @@ impl Scope {
 impl Default for Scope {
     fn default() -> Self {
         Self {
-            fntypes: Rc::default(),
+            fnshapes: Rc::default(),
             function_types: Rc::default(),
             mode: Default::default(),
             deferred: None,
