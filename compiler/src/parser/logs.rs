@@ -54,6 +54,12 @@ impl Parser<'_, '_> {
                 ),
             ));
         };
+        if raw == "``" {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("panic.stmt", "panic requires a non-empty template"),
+            ));
+        }
         let parts = self.nested(self.location(), |p| p.template(raw))?;
         // テンプレートの検査・走査はlogと共通。Panicレベルが終了する文であることを表す。
         Ok(Statement::Log {

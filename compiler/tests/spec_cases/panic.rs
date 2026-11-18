@@ -8,9 +8,11 @@ fn panic_evaluates_before_output_and_preserves_bytes() {
     assert_eq!(output.status.code(), Some(101));
     assert!(output.stdout.is_empty());
     assert_eq!(output.stderr, "info panic.suz:1: first\nwarn panic.suz:3: second\npanic panic.suz:6:5: 日本語 7 true\0終\n次\n".as_bytes());
-    let output = compile_and_run_c23("fn main() -> u8 { panic `` }", "empty.suz");
-    assert_eq!(output.status.code(), Some(101));
-    assert_eq!(output.stderr, b"panic empty.suz:1:19: \n");
+    let error = suz::compile(b"fn main() -> u8 { panic `` }").unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "1:25: panic requires a non-empty template [panic.stmt]"
+    );
 
     // 先に評価する式のパニックだけを出す。外側の接頭辞と後続の式は実行しない。
     let source = "fn fail() -> i32 { panic `inner` }\nfn later() -> i32 { log info `unexpected`\nreturn 1 }\nfn main() -> u8 { panic `outer ${fail()} ${later()}` }";
