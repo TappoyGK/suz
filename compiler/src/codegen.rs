@@ -32,6 +32,8 @@ struct RecoveryTarget {
 
 #[derive(Default)]
 struct ExpressionContext {
+    log_level: crate::LogLevel,
+    log_ignore: bool,
     function_result: Option<crate::ast::Type>,
     text_literals: std::collections::BTreeMap<String, usize>,
     uses_text: bool,
@@ -74,6 +76,8 @@ pub(crate) fn generate(
     program: &CheckedProgram,
     source_name: &str,
     text_pool_limit: crate::TextPoolLimit,
+    log_level: crate::LogLevel,
+    log_ignore: bool,
 ) -> String {
     let mut c = String::from(
         r#"#include <limits.h>
@@ -89,6 +93,8 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
 "#,
     );
     let mut context = ExpressionContext {
+        log_level,
+        log_ignore,
         source_name: source_name.into(),
         enums: program.enums.clone(),
         structs: program.structs.clone(),
@@ -105,6 +111,8 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
             .collect(),
         ..ExpressionContext::default()
     };
+    // logの埋め込みは名前とフィールド参照だけ。ここには独立した宣言・式が必要とする
+    // symbol定数が入るため維持する。ログ本文と表示用の名前は、文の生成時だけ登録する。
     for value in &program.constant_texts {
         text::constant(value, &mut context);
     }

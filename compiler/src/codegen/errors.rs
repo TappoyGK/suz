@@ -29,7 +29,13 @@ pub(super) fn expression(
 ) -> String {
     let (call, error) = call(call_value, context);
     let CallHandler::Value(fallback) = handler else {
-        assert!(matches!(handler, CallHandler::Ignore));
+        let CallHandler::Ignore(ignore) = handler else {
+            unreachable!()
+        };
+        if context.log_ignore {
+            let output = super::logs::ignore(ignore, context);
+            return format!("({call}, {error} ? {output} : (void)0)");
+        }
         return call;
     };
     let fallback = value(fallback, context);

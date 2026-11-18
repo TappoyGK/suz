@@ -829,7 +829,10 @@ fn main() -> u8 {
 fn main() -> u8 {
     fix rounded: f32 = 16_777_217
     fix tiny: f32 = -1.0e-50
-    log info `${rounded} ${tiny} ${nan} ${inf} ${-inf}`
+    fix negative_inf = -inf
+    fix not_number = nan
+    fix infinity = inf
+    log info `${rounded} ${tiny} ${not_number} ${infinity} ${negative_inf}`
     return ifexpr nan != nan && not (nan == nan) { 0 } else { 1 }
 }
 ```
@@ -843,7 +846,7 @@ fn main() -> u8 {
 **標準エラー：**
 
 ```text
-info lex-030.suz:4: 16777216.0 -0.0 nan inf -inf
+info lex-030.suz:7: 16777216.0 -0.0 nan inf -inf
 ```
 
 ### lex-031 浮動小数点リテラルの範囲外
@@ -905,8 +908,14 @@ fn main() -> u8 {
 
 ```suz
 fn main() -> u8 {
-    log info `${'é' == '\u{E9}'} ${'あ'} ${'\u{1f600}'}`
-    log info `${'}'} ${'\''} ${'\\'}`
+    fix same = 'é' == '\u{E9}'
+    fix kana = 'あ'
+    fix emoji = '\u{1f600}'
+    log info `${same} ${kana} ${emoji}`
+    fix brace = '}'
+    fix quote = '\''
+    fix slash = '\\'
+    log info `${brace} ${quote} ${slash}`
     return 0
 }
 ```
@@ -920,8 +929,8 @@ fn main() -> u8 {
 **標準エラー：**
 
 ```text
-info lex-033.suz:2: true あ 😀
-info lex-033.suz:3: } ' \
+info lex-033.suz:5: true あ 😀
+info lex-033.suz:9: } ' \
 ```
 
 ### lex-034 見た目が1文字でも複数のスカラー値なら拒否する

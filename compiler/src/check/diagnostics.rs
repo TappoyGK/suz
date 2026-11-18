@@ -148,6 +148,7 @@ pub(super) fn collect(expr: &CheckedExpression, locations: &mut Vec<Location>) {
 fn collect_statements(statements: &[CheckedStatement], locations: &mut Vec<Location>) {
     for statement in statements {
         match statement {
+            CheckedStatement::Ignore(_) => {}
             CheckedStatement::HandleCall { call, handler, .. } => {
                 collect(call, locations);
                 collect_handler(handler, locations);

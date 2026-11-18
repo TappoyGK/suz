@@ -44,6 +44,7 @@ pub(crate) struct CheckedFunction {
 /// 失敗時returnの式は、検査中に作ったBoxをそのまま使う。
 #[derive(Clone)]
 pub(crate) enum CheckedStatement {
+    Ignore(Box<crate::ast::Ignore>),
     Recover(CheckedExpression),
     Fail(CheckedExpression),
     HandleCall {
@@ -136,7 +137,7 @@ pub(crate) enum CallHandler {
     Value(CheckedExpression),
     Return(CheckedExpression),
     Fail(Option<CheckedExpression>),
-    Ignore,
+    Ignore(Box<crate::ast::Ignore>),
 }
 
 /// クロージャ本体と、評価位置で順に保持する値・参照。

@@ -87,9 +87,9 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | `[symbol.interpolation]` | 4 | 17 |
 
-### log-004 voidの式をログに埋め込む
+### log-004 ログ内の関数呼び出しを禁止する
 
-主根拠：`[symbol.interpolation]`。
+主根拠：`[output.embed-value]`。
 
 **ソース：**
 
@@ -108,15 +108,15 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | コンパイルエラー | — | 0 |
 
-voidはログに埋め込める型ではない。
+戻り値の型によらず、出力の埋め込みに関数呼び出しは書けない。
 
 **コンパイル診断：**
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[symbol.interpolation]` | 4 | 17 |
+| 通常 | `[output.embed-value]` | 4 | 17 |
 
-### log-005 埋め込み式から別のログを出力する
+### log-005 計算した値をログに渡す
 
 主根拠：`[log.evaluation]`。
 
@@ -131,7 +131,8 @@ fn value() -> u8 {
 }
 
 fn main() -> u8 {
-    log info `outer: ${value()}`
+    fix result = value()
+    log info `outer: ${result}`
     return 0
 }
 ```
@@ -142,16 +143,16 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | 正常終了 | 0 | 0 |
 
-外側のログは、valueの評価を終えてから出力を始める。valueが出すinnerの行が先に完了し、その後にouterの行が続く。
+valueを先に呼び出して結果を束縛する。innerの行が完了した後、結果を使ったouterの行が続く。
 
 **標準エラー：**
 
 ```text
 info log-005.suz:2: inner
-info log-005.suz:7: outer: 3
+info log-005.suz:8: outer: 3
 ```
 
-### log-006 埋め込み式の評価中にパニックする
+### log-006 ログの前の計算でパニックする
 
 主根拠：`[log.evaluation]`。
 
@@ -166,7 +167,8 @@ fn divide(divisor: i32) -> i32 {
 }
 
 fn main() -> u8 {
-    log info `outer: ${divide(0)}`
+    fix result = divide(0)
+    log info `outer: ${result}`
     return 0
 }
 ```
@@ -177,7 +179,7 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | パニック | 101 | 0 |
 
-divideはinnerを出力した後、ゼロ除算でパニックする。外側のログは埋め込み式の評価が完了していないため、接頭辞も本文も出力しない。
+divideはinnerを出力した後、ゼロ除算でパニックする。後続のログ文には到達せず、接頭辞も本文も出力しない。
 
 **パニック診断：**
 
@@ -260,7 +262,11 @@ next
 enum Wave: u8 { Sine, Saw }
 
 fn main() -> u8 {
-    log info `${true} ${false} ${Wave.Saw} ${1_234} ${-7}`
+    fix yes = true
+    fix no = false
+    fix count = 1_234
+    fix negative = -7
+    log info `${yes} ${no} ${Wave.Saw} ${count} ${negative}`
     return 0
 }
 ```
@@ -276,7 +282,7 @@ enumは型名を付けず列挙子名だけを表示する。整数の区切り�
 **標準エラー：**
 
 ```text
-info log-009.suz:4: true false Saw 1234 -7
+info log-009.suz:8: true false Saw 1234 -7
 ```
 
 ### log-010 浮動小数点の通常表記と小さい値の指数表記
@@ -289,7 +295,11 @@ info log-009.suz:4: true false Saw 1234 -7
 
 ```suz
 fn main() -> u8 {
-    log info `${1.0} ${0.125} ${1.0e-8} ${-1.0e-8}`
+    fix whole = 1.0
+    fix fraction = 0.125
+    fix tiny = 1.0e-8
+    fix negative = -1.0e-8
+    log info `${whole} ${fraction} ${tiny} ${negative}`
     return 0
 }
 ```
@@ -305,7 +315,7 @@ fn main() -> u8 {
 **標準エラー：**
 
 ```text
-info log-010.suz:2: 1.0 0.125 1.0e-8 -1.0e-8
+info log-010.suz:6: 1.0 0.125 1.0e-8 -1.0e-8
 ```
 
 ### log-011 warnレベルと同名の変数
@@ -335,3 +345,65 @@ logの直後ではwarnレベルを指定し、埋め込み式のwarnは変数を
 ```text
 warn log-011.suz:3: count: 7
 ```
+
+### log-012 4レベルとerror出力後の続行
+
+主根拠：`[log.level]`。
+
+補助根拠：`[src.info]`、`[log.output]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix debug = 1
+    fix info = 2
+    fix warn = 3
+    log debug `${debug}`
+    log info `${info}`
+    log warn `${warn}`
+    log error `failed`
+    return 7
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 7 | 0 |
+
+既定の最低レベルはinfoなのでdebugの行は出力しない。errorレベルの出力後もreturnへ進む。errorは既存の予約語であり、変数名には使わない。
+
+**標準エラー：**
+
+```text
+info log-012.suz:6: 2
+warn log-012.suz:7: 3
+error log-012.suz:8: failed
+```
+
+### log-013 panicの埋め込みでも計算を禁止する
+
+主根拠：`[output.embed-value]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix count = 1
+    panic `count: ${count + 1}`
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[output.embed-value]` | 3 | 27 |

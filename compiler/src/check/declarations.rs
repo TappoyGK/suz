@@ -123,11 +123,16 @@ fn handler_dependencies(
             ),
         )),
         Some(FailureHandler::Value(value)) => dependencies(value, names),
-        Some(
-            FailureHandler::Return { location, .. }
-            | FailureHandler::Fail { location, .. }
-            | FailureHandler::Ignore(location),
-        ) => Err(location.error(
+        Some(FailureHandler::Return { location, .. } | FailureHandler::Fail { location, .. }) => {
+            Err(location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "const.expression",
+                    "control transfers are not constant expressions"
+                ),
+            ))
+        }
+        Some(FailureHandler::Ignore(ignore)) => Err(ignore.location.error(
             ErrorKind::InvalidSource,
             crate::diagnostic!(
                 "const.expression",

@@ -205,7 +205,8 @@ fn generic_symbolic_constants_are_substituted_before_formatting() {
 fn main() -> u8 {
     fix a: u8 = 1
     fix b: f32 = 1.0
-    log info `${render(a,b)}`
+    fix rendered = render(a,b)
+    log info `${rendered}`
     return 0
 }"#;
     let result = crate::test_util::compile_and_run_c23(source, "generic-constants.suz");
@@ -216,7 +217,7 @@ fn main() -> u8 {
     );
     assert_eq!(
         String::from_utf8(result.stderr).unwrap(),
-        "info generic-constants.suz:7: 2,1,3.0\n"
+        "info generic-constants.suz:8: 2,1,3.0\n"
     );
 }
 

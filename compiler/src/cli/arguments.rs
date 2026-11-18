@@ -41,6 +41,8 @@ pub struct Options {
     pub optimization: OsString,
     pub force: bool,
     pub log_allow: bool,
+    pub log_ignore: bool,
+    pub log_level: suz::LogLevel,
     pub deny_global_var: bool,
     pub mode: suz::ArithmeticMode,
     pub text_pool_limit: suz::TextPoolLimit,
@@ -83,6 +85,8 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
     let mut text_pool_limit = None;
     let mut force = false;
     let mut log_allow = false;
+    let mut log_ignore = false;
+    let mut log_level = None;
     let mut deny_global_var = false;
     let mut help = false;
     let mut paths_only = false;
@@ -96,6 +100,39 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
                 }
                 Some("--deny-global-var") if !deny_global_var => {
                     deny_global_var = true;
+                    continue;
+                }
+                Some("--log-ignore") => {
+                    if log_ignore {
+                        return Err(Failure::tool(
+                            2,
+                            "tool.log-ignore",
+                            "duplicate --log-ignore option",
+                        ));
+                    }
+                    log_ignore = true;
+                    continue;
+                }
+                Some("--log-level") => {
+                    let invalid_level = |message| Failure::tool(2, "tool.log-level", message);
+                    if log_level.is_some() {
+                        return Err(invalid_level("duplicate --log-level option"));
+                    }
+                    let value = args
+                        .next()
+                        .ok_or_else(|| invalid_level("expected LEVEL after --log-level"))?;
+                    log_level = Some(match value.to_str() {
+                        Some("debug") => suz::LogLevel::Debug,
+                        Some("info") => suz::LogLevel::Info,
+                        Some("warn") => suz::LogLevel::Warn,
+                        Some("error") => suz::LogLevel::Error,
+                        Some("off") => suz::LogLevel::Off,
+                        _ => {
+                            return Err(invalid_level(
+                                "expected debug, info, warn, error, or off after --log-level",
+                            ));
+                        }
+                    });
                     continue;
                 }
                 Some("--log-allow") if !log_allow => {
@@ -180,6 +217,8 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
         optimization: optimization.unwrap_or_else(|| "-O0".into()),
         force,
         log_allow,
+        log_ignore,
+        log_level: log_level.unwrap_or_default(),
         deny_global_var,
         mode: mode.unwrap_or_default(),
         text_pool_limit: text_pool_limit.unwrap_or_default(),

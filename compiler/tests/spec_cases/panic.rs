@@ -2,23 +2,20 @@ use crate::test_util::{TemporaryDirectory, compile_and_run_c23};
 use std::{fs, process::Command};
 
 #[test]
-fn panic_evaluates_before_output_and_preserves_bytes() {
-    let source = "fn first() -> i32 { log info `first`\nreturn 7 }\nfn second() -> bool { log warn `second`\nreturn true }\nfn main() -> u8 {\n    panic `日本語 ${first()} ${second()}\\0終\\n次`\n}";
+fn panic_reads_values_and_preserves_bytes() {
+    let source = "fn main() -> u8 {\n    fix number = 7\n    fix flag = true\n    panic `日本語 ${number} ${flag}\\0終\\n次`\n}";
     let output = compile_and_run_c23(source, "panic.suz");
     assert_eq!(output.status.code(), Some(101));
     assert!(output.stdout.is_empty());
-    assert_eq!(output.stderr, "info panic.suz:1: first\nwarn panic.suz:3: second\npanic panic.suz:6:5: 日本語 7 true\0終\n次\n".as_bytes());
+    assert_eq!(
+        output.stderr,
+        "panic panic.suz:4:5: 日本語 7 true\0終\n次\n".as_bytes()
+    );
     let error = suz::compile(b"fn main() -> u8 { panic `` }").unwrap_err();
     assert_eq!(
         error.to_string(),
         "1:25: panic requires a non-empty template [panic.stmt]"
     );
-
-    // 先に評価する式のパニックだけを出す。外側の接頭辞と後続の式は実行しない。
-    let source = "fn stop_now() -> i32 { panic `inner` }\nfn later() -> i32 { log info `unexpected`\nreturn 1 }\nfn main() -> u8 { panic `outer ${stop_now()} ${later()}` }";
-    let output = compile_and_run_c23(source, "nested.suz");
-    assert_eq!(output.status.code(), Some(101));
-    assert_eq!(output.stderr, b"panic nested.suz:1:24: inner\n");
 }
 
 #[test]
@@ -81,13 +78,13 @@ fn main() -> u8 {
 }
 
 #[test]
-fn panic_template_depth_counts_template_and_interpolation() {
+fn template_depth_counts_template_and_interpolation() {
     let directory = TemporaryDirectory::new();
     // 関数本体1 + テンプレート1 + リテラル1 + 丸括弧の数。
     // 境界超過でプロセスが異常終了しないことも検査する。
     for (count, accepted) in [(253, true), (254, false), (10_000, false)] {
         let source = format!(
-            "fn main() -> u8 {{ panic `${{{}1{}}}` }}",
+            "fn main() -> u8 {{ fix message = `${{{}1{}}}`\nlog info `${{message}}`\nreturn 0 }}",
             "(".repeat(count),
             ")".repeat(count)
         );

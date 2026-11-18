@@ -121,7 +121,8 @@ fn check_statement(
             let value = super::expression::coerced(value, Some(ty), context.bindings)?;
             context.output.push(CheckedStatement::Recover(value));
         }
-        Statement::Ignore(location) => {
+        Statement::Ignore(ignore) => {
+            let location = ignore.location;
             if context.bindings.recovery != Some(Type::Void) {
                 return Err(location.error(
                     ErrorKind::InvalidSource,
@@ -131,6 +132,9 @@ fn check_statement(
                     ),
                 ));
             }
+            context
+                .output
+                .push(CheckedStatement::Ignore(ignore.clone()));
         }
 
         Statement::Fail(value) => context

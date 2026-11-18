@@ -8,8 +8,9 @@ use std::fmt::Write;
 
 pub(super) fn c_string(text: &str) -> String {
     let mut result = String::from("\"");
+    // ?もエスケープし、三文字表記によるCコンパイラの警告や文字の置換を防ぐ。
     for byte in text.bytes() {
-        if (32..=126).contains(&byte) && !matches!(byte, b'"' | b'\\') {
+        if (32..=126).contains(&byte) && !matches!(byte, b'"' | b'\\' | b'?') {
             result.push(char::from(byte));
         } else {
             write!(result, "\\{byte:03o}").unwrap();

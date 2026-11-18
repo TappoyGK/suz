@@ -41,11 +41,20 @@ pub(super) fn emit_block(
             CheckedStatement::HandleCall { id, call, handler } => {
                 super::errors::statement(c, *id, call, handler, &indent, context)
             }
+            CheckedStatement::Ignore(ignore) => {
+                if context.log_ignore {
+                    writeln!(c, "{indent}{};", super::logs::ignore(ignore, context)).unwrap();
+                }
+            }
             CheckedStatement::Log {
                 parts,
                 location,
                 level,
             } => {
+                // 検査済みIRを保持したまま生成だけを省く。値の読み取りや表示用データも登録しない。
+                if !context.log_level.includes(*level) {
+                    continue;
+                }
                 let id = *next_assignment;
                 *next_assignment += 1;
                 super::logs::emit(c, parts, (*location, *level), depth, id, context);

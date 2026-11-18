@@ -198,7 +198,7 @@ fn exported_sources_build_independently_with_standard_and_custom_environments() 
     let binary = Path::new(env!("CARGO_BIN_EXE_suz"));
     fs::write(
         directory.0.join("input.suz"),
-        "fn main() -> u8 {\nlog info `${1.5} ${true}`\nreturn 7\n}",
+        "fn main() -> u8 {\nfix fraction = 1.5\nfix yes = true\nlog info `${fraction} ${yes}`\nreturn 7\n}",
     )
     .unwrap();
     fs::write(
@@ -243,7 +243,7 @@ _Noreturn void suz_env_panic(void) { exit(101); }
             );
             let result = Command::new(moved.join(output_name)).output().unwrap();
             assert_eq!(result.status.code(), Some(7));
-            let expected = b"info input.suz:2: 1.5 true\n";
+            let expected = b"info input.suz:4: 1.5 true\n";
             if custom {
                 assert_eq!(result.stdout, expected);
                 assert!(result.stderr.is_empty());

@@ -23,7 +23,7 @@ pub(super) fn emit(
     let indent = "    ".repeat(depth);
     writeln!(c, "{indent}{{").unwrap();
     // 出力ロックを取得する前に全補間値を評価する。
-    // 補間式中のログやパニックは、このログを開始する前に完了させる。
+    // 名前とフィールドから読んだ値を保持し、断片出力中は読み直さない。
     for (index, part) in parts.iter().enumerate() {
         if let TemplatePart::Value(value) = part {
             let evaluated = expression(value, context);
@@ -53,6 +53,8 @@ pub(super) fn emit(
             c,
             "{indent}    suz_log_begin({}, {}, {});",
             match level {
+                crate::ast::LogLevel::Debug => "SUZ_LOG_DEBUG",
+                crate::ast::LogLevel::Error => "SUZ_LOG_ERROR",
                 crate::ast::LogLevel::Info => "SUZ_LOG_INFO",
                 crate::ast::LogLevel::Warn => "SUZ_LOG_WARN",
                 crate::ast::LogLevel::Panic => unreachable!(),
@@ -154,4 +156,19 @@ pub(super) fn panic_expression(
         format!("({}){{0}}", ty.c_name())
     });
     format!("({})", sequence.join(", "))
+}
+
+/// 理由は文字列プールへ登録せず、1件の記録全体を既存の出力ロックで囲む。
+pub(super) fn ignore(ignore: &crate::ast::Ignore, context: &ExpressionContext) -> String {
+    let filename = std::path::Path::new(&context.source_name)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(&context.source_name);
+    format!(
+        "(suz_log_begin(SUZ_LOG_IGNORE, {}, {}), suz_log_text({}, {}), suz_log_end())",
+        c_string(filename),
+        ignore.location.line,
+        c_string(&ignore.reason),
+        ignore.reason.len()
+    )
 }

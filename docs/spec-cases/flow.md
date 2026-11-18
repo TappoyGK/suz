@@ -610,7 +610,8 @@ fn main() -> u8 {
         '5' => 2
         _ => 0
     }
-    log info `${kind} ${'0' <= ch <= '9'}`
+    fix digit = '0' <= ch <= '9'
+    log info `${kind} ${digit}`
     return 0
 }
 ```
@@ -624,7 +625,7 @@ fn main() -> u8 {
 **標準エラー：**
 
 ```text
-info flow-064.suz:8: 2 true
+info flow-064.suz:9: 2 true
 ```
 
 ### flow-020 整数matchの定数パターンとワイルドカード
@@ -1446,8 +1447,14 @@ info flow-062.suz:11: 256 -128
 
 ```suz
 fn main() -> u8 {
-    for ch in '\u{D7FF}'..='\u{E000}' { log info `${ch as u32}` }
-    rev ch in '\u{D7FF}'..='\u{E000}' { log info `${ch as u32}` }
+    for ch in '\u{D7FF}'..='\u{E000}' {
+        fix code = ch as u32
+        log info `${code}`
+    }
+    rev ch in '\u{D7FF}'..='\u{E000}' {
+        fix code = ch as u32
+        log info `${code}`
+    }
     for ch in '\u{10FFFF}'..='\u{10FFFF}' { continue }
     rev ch in '\0'..='\0' { continue }
     rev ch in '\0'..<'\0' { return 1 }
@@ -1464,10 +1471,10 @@ fn main() -> u8 {
 **標準エラー：**
 
 ```text
-info flow-065.suz:2: 55295
-info flow-065.suz:2: 57344
-info flow-065.suz:3: 57344
-info flow-065.suz:3: 55295
+info flow-065.suz:4: 55295
+info flow-065.suz:4: 57344
+info flow-065.suz:8: 57344
+info flow-065.suz:8: 55295
 ```
 
 ### flow-044 範囲演算子の前後の空白

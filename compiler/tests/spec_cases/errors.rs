@@ -31,14 +31,22 @@ fn invoke(f: fn Reader) -> i32 { return f(false) or 13 }
 fn main() -> u8 {
     fix f: static fn Reader = fn read
     fix g: static fn Same = f
-    log info `${read(true) or fallback()} ${forward(false) or 8} ${mapped() or 10}`
-    log info `${g(false) or fallback()} ${returned()} ${invoke(fn read)}`
-    log info `${invoke(fn [](ok: bool) -> i32 or ReadError, DecodeError.Broken { fail ReadError.Missing })}`
+    fix read_value = read(true) or fallback()
+    fix forwarded = forward(false) or 8
+    fix mapped_value = mapped() or 10
+    log info `${read_value} ${forwarded} ${mapped_value}`
+    fix indirect_value = g(false) or fallback()
+    fix returned_value = returned()
+    fix invoked = invoke(fn read)
+    log info `${indirect_value} ${returned_value} ${invoked}`
+    fix closure_value = invoke(fn [](ok: bool) -> i32 or ReadError, DecodeError.Broken { fail ReadError.Missing })
+    log info `${closure_value}`
     send() or ignore: 送信失敗は無視
     success() or panic `unexpected`
     falling() or ignore: 失敗は無視
     fix record = Record { problem: ReadError.Denied }
-    log info `${record.problem} ${record.problem == ReadError.Denied}`
+    fix denied = record.problem == ReadError.Denied
+    log info `${record.problem} ${denied}`
     match record.problem {
         ReadError.Missing => { return 1 }
         ReadError.Denied => { return 0 }
@@ -95,7 +103,7 @@ fn panic_handlers_work_for_existing_operations_and_calls() {
         "300 as u8",
     ] {
         let source = format!(
-            "error Err {{ Bad }}\nfn risky() -> i32 or Err {{ fail Err.Bad }}\nfn main() -> u8 {{ fix n = {operation} or panic `bad ${{7}}`\nreturn 0 }}"
+            "error Err {{ Bad }}\nfn risky() -> i32 or Err {{ fail Err.Bad }}\nfn main() -> u8 {{ fix reason = 7\nfix n = {operation} or panic `bad ${{reason}}`\nreturn 0 }}"
         );
         let output = compile_and_run_c23(&source, "panic-errors.suz");
         assert_eq!(output.status.code(), Some(101), "{operation}: {output:?}");
@@ -126,7 +134,9 @@ fn send() -> void or Err { fail Err.Bad }
 fn empty() -> void { send() or ignore: 理由 }
 fn main() -> u8 {
     fix f: static fn Generic = fn number
-    log info `${f(0) or 8} ${relay(2 as i16) or 9}`
+    fix first = f(0) or 8
+    fix second = relay(2 as i16) or 9
+    log info `${first} ${second}`
     var n: i32 = 0
     fix result = run(fn [var n]() -> i32 or Err {
         n = 5
@@ -159,13 +169,14 @@ fnshape Once() -> void
 fn run(f: fn Once) -> i32 { f()
     return 7 }
 fn main() -> u8 {
-    log info `${run(fn []() -> void { send() or ignore: // ` { ' \ })}`
+    fix message = `${run(fn []() -> void { send() or ignore: // ` { ' \ })}`
+    log info `${message}`
     return 0
 }
 "#;
     let output = compile_and_run_c23(source, "ignore.suz");
     assert_eq!(output.status.code(), Some(0), "{output:?}");
-    assert_eq!(output.stderr, b"info ignore.suz:7: 7\n");
+    assert_eq!(output.stderr, b"info ignore.suz:8: 7\n");
 }
 
 #[test]
@@ -198,8 +209,11 @@ fn main() -> u8 {
     direct()
     fix f: static fn Action = fn send
     f(false) or ignore: 関数値からの失敗
-    log info `${indirect(fn send, false)} ${indirect(fn send, true)}`
-    log info `${indirect(fn [](ok: bool) -> void or Err { send(ok) or fail }, false)}`
+    fix failed = indirect(fn send, false)
+    fix succeeded = indirect(fn send, true)
+    log info `${failed} ${succeeded}`
+    fix closure_result = indirect(fn [](ok: bool) -> void or Err { send(ok) or fail }, false)
+    log info `${closure_result}`
     send(false) or return 7
     return 8
 }
@@ -346,7 +360,11 @@ fn pick(which: u8) -> i32 {
     }
 }
 fn main() -> u8 {
-    log info `${pick(0)} ${pick(1)} ${pick(2)} ${pick(3)}`
+    fix a = pick(0)
+    fix b = pick(1)
+    fix c = pick(2)
+    fix d = pick(3)
+    log info `${a} ${b} ${c} ${d}`
     var counter: i32 = 0
     fix value = read(1) or error {
         ReadError.Missing => { counter = 5
@@ -388,7 +406,9 @@ fn failed() -> i32 or Err {
     return value
 }
 fn main() -> u8 {
-    log info `${returned()} ${failed() or 10}`
+    fix success_value = returned()
+    fix failure_value = failed() or 10
+    log info `${success_value} ${failure_value}`
     for i in 0..<4 {
         fix value = read(i as u8 or 0) or error {
             Err.Bad => continue
@@ -558,7 +578,8 @@ fn main() -> u8 {
         count += inner
         recover count
     } }
-    log info `${n} ${count} ${relay(2 as i16)}`
+    fix relayed = relay(2 as i16)
+    log info `${n} ${count} ${relayed}`
     return 0
 }
 "#;
