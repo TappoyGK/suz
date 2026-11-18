@@ -147,7 +147,7 @@ pub(crate) fn walk_statement<V: Visitor + ?Sized>(
                 }
             }
         }
-        Statement::Block(body) => visitor.scope(body, None)?,
+        Statement::Block(body) | Statement::Unsafe(body) => visitor.scope(body, None)?,
         Statement::Loop { condition, body } => {
             if let Some(condition) = condition {
                 visitor.expression(condition)?;

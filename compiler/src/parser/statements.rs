@@ -373,6 +373,13 @@ impl Parser<'_, '_> {
                 }
                 Ok(Statement::Return(self.expression()?))
             }
+            Kind::Keyword("unsafe") => {
+                self.cursor += 1;
+                self.nested(self.location(), |p| {
+                    let (body, _) = p.block()?;
+                    Ok(Statement::Unsafe(body))
+                })
+            }
             _ => Ok(Statement::Expression(self.expression()?)),
         }
     }

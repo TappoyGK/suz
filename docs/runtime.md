@@ -33,7 +33,7 @@
 
 **[runtime.c-compiler]** 生成したCとランタイムは、C23に対応したClangでビルドする。C23の言語機能、Clangが提供するヘッダー、Clangの拡張を使える。CライブラリのC23追加ヘッダーは、[tool.platform] のSDKが提供する場合に使える。Clangの最低バージョンは定めず、必要な機能を [runtime.c-check] で検査する。
 
-**[runtime.c-extensions]** 生成Cとランタイム本体が使うClang拡張は、名前と用途を本規則に記載し、使用する変更と同時に更新する。共通の設定ヘッダーで `#pragma float_control(precise, on)` を使い、浮動小数点の演算順序や符号付きゼロなどを無視する最適化を抑える（[runtime.unsafe-math]）。同梱のRyuが使う拡張はRyuのREADMEで扱う。
+**[runtime.c-extensions]** 生成Cとランタイム本体が使うClang拡張は、名前と用途を本規則に記載し、使用する変更と同時に更新する。共通の設定ヘッダーで `#pragma float_control(precise, on)` を使い、浮動小数点の演算順序や符号付きゼロなどを無視する最適化を抑える（[runtime.unsafe-math]）。FFIの関数型照合には `__typeof__` と `__builtin_types_compatible_p` を使う。C固有型の範囲検査にも128ビットの `_BitInt` を使う。同梱のRyuが使う拡張はRyuのREADMEで扱う。
 
 **[runtime.c-check]** `suz_config.h` は `__clang__` の定義、`__STDC_VERSION__ >= 202311L`、128ビット以上の `_BitInt`、C23の `<stdckdint.h>` を要求する。条件を満たさない場合は必要な機能を英語の診断で示し、コンパイルエラーとする。Clang拡張を使用する場合は、プリプロセッサで検査できる機能を本ヘッダーで検査する。
 
@@ -304,3 +304,25 @@ constant symbolの本体は計測対象に含めない。dynamic symbolの本体
 ## 大域変数
 
 **[runtime.top-var]** 大域変数の格納領域は、生成したCの静的な変数として確保する。コンパイル時に求めた初期値を、Suzの `main` の実行前に設定する。文字列を参照する初期値は、[runtime.symbol-init] の登録を終えてから設定する。変数の格納領域は静的に確保するが、値が参照する文字列の登録に必要な起動時のメモリ確保は行う。
+
+## C FFI
+
+**[runtime.ffi-types]** extern関数はCの呼出規約を使い、隠れた引数を追加しない。各型は次のC型へ対応する。
+
+| Suz | C |
+|---|---|
+| `i8`・`i16`・`i32`・`i64` | `int8_t`・`int16_t`・`int32_t`・`int64_t` |
+| `u8`・`u16`・`u32`・`u64` | `uint8_t`・`uint16_t`・`uint32_t`・`uint64_t` |
+| `f32`・`f64` | `float`・`double` |
+| `bool` | `_Bool` |
+| `_int`・`_uint` | `int`・`unsigned int` |
+| `_long`・`_ulong` | `long`・`unsigned long` |
+| `_size_t` | `size_t` |
+| `_char` | `char` |
+| `void`（戻り値のみ） | `void` |
+
+型照合にはCの型互換性を使い、サイズが同じだけでは一致扱いにしない。引数はSuzの通常の関数と同じ順序で、それぞれ1回評価する。C関数の戻り値をそのまま受け取り、Suzのエラー値への変換はラッパー関数が行う。
+
+**[runtime.ffi-range]** C固有型の整数範囲には `INT_MIN`・`INT_MAX`・`UINT_MAX`・`LONG_MIN`・`LONG_MAX`・`ULONG_MAX`・`SIZE_MAX`・`CHAR_MIN`・`CHAR_MAX` を使う。整数幅は64ビット以下を要求し、生成Cで検査する。`_char`の符号は対象環境に従う。変換失敗時には範囲外のCキャストを実行せず、`as%`もCの符号付き狭小化の処理系依存動作に頼らず値を作る。
+
+**[runtime.ffi-contract]** C側はC API自身の契約を守らなければならない。Suzのunsafeは外部コードのメモリ破壊や未定義動作を防止しない。安全なSuz関数として公開するラッパーの実装者は、その公開APIからC APIの契約違反が起きないようにする責任を持つ。

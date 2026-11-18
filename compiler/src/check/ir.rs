@@ -8,6 +8,8 @@ use crate::ast::{BinaryOperator, ComparisonOperator, Location, LogicalOperator, 
 /// 型・名前を解決した関数、入口の関数番号、文字列定数と診断候補を保持する。
 /// 型宣言はASTの表現を共有し、関数は必要な汎用型の具体化も含めてC生成へ渡す。
 pub(crate) struct CheckedProgram {
+    pub external_base: usize,
+    pub externs: Vec<crate::ast::ExternFunction>,
     pub function_types: Vec<crate::ast::FunctionType>,
     /// 整数除算を含む浮動小数点演算の警告候補。
     pub division_warnings: Vec<Location>,

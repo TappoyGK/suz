@@ -335,7 +335,10 @@ fn constant_bool_raw(expr: &CheckedExpression) -> Option<bool> {
                 } else {
                     match left.ty {
                         Type::StaticFunction(_) | Type::Function(_) => return None,
-                        Type::GenericInt | Type::GenericFloat | Type::Numeric(_) => return None,
+                        Type::CInteger(_)
+                        | Type::GenericInt
+                        | Type::GenericFloat
+                        | Type::Numeric(_) => return None,
                         Type::Symbol | Type::Text => {
                             let (Value::Text { text: a, .. }, Value::Text { text: b, .. }) =
                                 (&left.value, &right.value)
@@ -449,7 +452,9 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
             Value::Function(_) => expr.value.clone(),
             _ => return None,
         },
-        Type::GenericInt | Type::GenericFloat | Type::Numeric(_) => return None,
+        Type::CInteger(_) | Type::GenericInt | Type::GenericFloat | Type::Numeric(_) => {
+            return None;
+        }
         Type::Symbol | Type::Text => match &expr.value {
             Value::Text { .. } => expr.value.clone(),
             Value::Template {

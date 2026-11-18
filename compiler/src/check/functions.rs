@@ -34,6 +34,7 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
         signatures.insert(
             function.name.clone(),
             Signature {
+                external: false,
                 id,
                 parameters: function.parameters.iter().map(|p| p.ty).collect(),
                 result: function.result,
@@ -41,6 +42,7 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
             },
         );
     }
+    super::ffi::signatures(program, &mut signatures)?;
     let main_id = signatures["main"].id;
     let signatures = Rc::new(signatures);
     let scope = Scope {
@@ -48,7 +50,7 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
         fnshapes: Rc::new(program.fnshapes.clone()),
         function_types: Rc::new(std::cell::RefCell::new(program.function_types.clone())),
         instances: Rc::new(std::cell::RefCell::new(super::generic::Instances::new(
-            program.functions.len(),
+            program.functions.len() + program.externs.len(),
         ))),
         ..Scope::default()
     };
@@ -90,6 +92,8 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     // 比較・除算の候補は汎用検査からだけ集まる。
     warnings.dedup_by_key(|l| (l.line, l.column));
     Ok(CheckedProgram {
+        externs: program.externs.clone(),
+        external_base: program.functions.len(),
         function_types: globals.function_types.borrow().clone(),
         globals: initializers,
         global_warnings: program
@@ -314,6 +318,7 @@ pub(super) fn check_with_captures(
     references: &BTreeMap<String, Binding>,
 ) -> Result<(CheckedFunction, Vec<crate::ast::Location>), Diagnostic> {
     control::validate_return_positions(&function.statements)?;
+    scope.unsafe_block = false;
     scope.recovery = None;
     scope.loop_depth = 0;
     let mut warnings = Vec::new();
@@ -426,6 +431,12 @@ pub(super) fn call(
             },
         )
     })?;
+    if signature.external && !scope.unsafe_block {
+        return Err(expr.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!("ffi.unsafe", "C calls require an unsafe block"),
+        ));
+    }
     if arguments.len() != signature.parameters.len() {
         return Err(expr.location.error(
             ErrorKind::InvalidSource,

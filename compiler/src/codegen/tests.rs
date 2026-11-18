@@ -43,6 +43,8 @@ fn generated_bool_values_preserve_negation_and_copies() {
     .enumerate()
     {
         let program = CheckedProgram {
+            externs: Vec::new(),
+            external_base: 0,
             function_types: Vec::new(),
             globals: Vec::new(),
             global_warnings: Vec::new(),
@@ -226,6 +228,8 @@ fn comparison_codegen_sequences_and_reuses_operands() {
             });
         }
         let program = CheckedProgram {
+            externs: Vec::new(),
+            external_base: 0,
             function_types: Vec::new(),
             globals: Vec::new(),
             global_warnings: Vec::new(),

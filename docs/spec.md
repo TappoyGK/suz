@@ -20,7 +20,7 @@ Suzは次のものを含む。
 
 ### 1.2 安全性
 
-正しい Suz のプログラムは、未定義動作を起こさない。整数演算では、[9 章](#9-実行時の検査)で定める検査に違反し、対応する `or` がないときにパニックする。失敗しうる `as` と、`symbol`・`text` からの `as%` は、変換失敗を `or` で処理する。ラップする算術と `as%` はビット幅に収める規則に従い、浮動小数点数の演算は IEEE 754 に従う。
+正しい Suz のプログラムは、未定義動作を起こさない。ただし、FFIでは呼び出すC関数の契約を守る責任を呼び出し側が持ち、C側の不正動作はこの保証に含めない（[ffi.unsafe]）。整数演算では、[9 章](#9-実行時の検査)で定める検査に違反し、対応する `or` がないときにパニックする。失敗しうる `as` と、`symbol`・`text` からの `as%` は、変換失敗を `or` で処理する。ラップする算術と `as%` はビット幅に収める規則に従い、浮動小数点数の演算は IEEE 754 に従う。
 
 ### 1.3 値の受け渡し
 
@@ -60,7 +60,7 @@ Suzは次のものを含む。
 
 **[src.comment]** テンプレートの本文と文字リテラル以外では、`//` から行の終わりまではコメントである。コメントの末尾の改行は、通常の改行規則に従う。
 
-**[src.ident]** 識別子は、ASCII の英字か `_` で始まり、ASCII の英字、数字、`_` が続く。宣言する名前には4.2節の命名規則を適用する。大文字と小文字を区別する。キーワードと組み込み型名は識別子に使えない。`_` 単独は `match` と `matchexpr` のワイルドカードとして使う。
+**[src.ident]** 識別子は、ASCII の英字か `_` で始まり、ASCII の英字、数字、`_` が続く。宣言する名前には4.2節の命名規則を適用する。大文字と小文字を区別する。キーワードと組み込み型名は識別子に使えない。ただしextern宣言のC側の名前には [ffi.name] の例外を適用する。`_` 単独は `match` と `matchexpr` のワイルドカードとして使う。
 
 **[src.whitespace]** テンプレートの本文と文字リテラル以外では、スペースとタブはトークンの区切りとして扱う。`for` と `rev` の範囲演算子との境界には、[for.range-spacing] の隣接規則を適用する。
 
@@ -69,7 +69,7 @@ Suzは次のものを含む。
 **[src.keywords]** 次の語はキーワードである。
 
 ```text
-fix var fn fnshape static struct enum error
+fix var fn fnshape static struct enum error extern unsafe
 if ifexpr elif else while loop for rev in break continue return match matchexpr
 as or not len log panic fail ignore recover allow expr with
 true false nan inf
@@ -79,6 +79,7 @@ true false nan inf
 
 ```text
 i8 i16 i32 i64 u8 u16 u32 u64 len_t f32 f64 int float bool char symbol text void
+_int _uint _long _ulong _size_t _char
 ```
 
 **[src.info]** `debug`・`info`・`warn` は、`log` の直後でログレベルを表し、それ以外では識別子として使える。`error` は予約語のまま、`log` の直後でもログレベルを表す（[log.level]）。
@@ -211,9 +212,9 @@ fn main() -> u8 {
 
 ### 4.1 宣言とスコープ
 
-**[decl.top-level]** トップレベルには、`fix`・`var`・関数・構造体・列挙型・エラー型・`fnshape` の宣言だけを書ける。これらの名前は、ファイル内の宣言順序によらず参照できる。
+**[decl.top-level]** トップレベルには、`fix`・`var`・関数・構造体・列挙型・エラー型・`fnshape` の宣言、およびexternブロックだけを書ける。これらの名前は、ファイル内の宣言順序によらず参照できる。
 
-**[decl.location]** `fix` と `var` はトップレベルとブロック内で宣言できる。関数、構造体、列挙型、エラー型、`fnshape` はトップレベルで宣言する。それぞれの宣言をこれらの場所以外に書くとコンパイルエラーである。
+**[decl.location]** `fix` と `var` はトップレベルとブロック内で宣言できる。関数、構造体、列挙型、エラー型、`fnshape`、externブロックはトップレベルで宣言する。それぞれの宣言をこれらの場所以外に書くとコンパイルエラーである。
 
 **[decl.duplicate]** 同じスコープで同じ名前を宣言するとコンパイルエラーである。定数、変数、仮引数、関数、型など、宣言の種類が違っても同じである。
 
@@ -1509,6 +1510,40 @@ fn main() -> u8 {
 
 **[err.recover]** `recover 式` は、最も内側の `or error` のブロック腕を終了し、その呼び出しの成功値として式の値を使って続行する。式には呼び出しの成功型を要求する。成功型が `void` の腕、ブロックでない腕、腕の外には書けない。通常の値ブロックやクロージャの境界を越えて外側の腕を終了することはできない。それらの内部に書いた `or error` のブロック腕は、その内部の `recover` で終了できる。
 
+### 8.11 C関数の呼び出し
+
+**[ffi.decl]** `.suz`のトップレベルに `extern "ヘッダー名" { fn C名(仮引数...) -> 型 }` と書く。関数宣言は改行で区切る。宣言はファイル内だけで有効で、モジュールや別の宣言ファイルを必要としない。本体、`impl fn`、`or Error`は書けない。`.sif`への宣言は認めない。
+
+```suz
+extern "stdlib.h" {
+    fn abs(value: _int) -> _int
+}
+fn main() -> u8 {
+    unsafe {
+        if abs(-7) != 7 { return 1 }
+    }
+    return 0
+}
+```
+
+**[ffi.header]** ヘッダー名はexternの直後で二重引用符に囲む。ASCIIの英数字・`_`・`-`・`.`・`/`だけを使い、空文字列、絶対パス、空のパス要素、`.`・`..`だけの要素、エスケープを認めない。これは文字列値ではない。探索とC側の照合は [tool.ffi-header] に従う。
+
+**[ffi.name]** `fn C名 as Suz名(...) -> 型`で別名を付ける。C名はCの識別子の綴りとし、Suzの予約語や組み込み型名と同じ綴りも認める。Suz名には通常の関数名の規則と予約語・組み込み名との衝突禁止を適用し、`main`も使えない。`as Suz名`を省略するとC名をSuz名にする。例えばCの`log`は `fn log as natural_log(value: f64) -> f64` と宣言する。照合とリンクはC名で行う。
+
+**[ffi.duplicate]** 同じファイル内で同じC名を複数回宣言すると、ヘッダー・別名・型が同じかどうかによらずコンパイルエラーである。Suz名には [decl.duplicate]・[decl.shadowing] を適用する。
+
+**[ffi.type]** externの引数・戻り値には固定幅整数型、`f32`・`f64`・`bool`、下記のC固有型を使える。`void`は戻り値だけに使える。`len_t`・`char`・`text`・`symbol`・汎用型・構造体・列挙型・エラー型・関数値は使えない。Cとの対応表は [runtime.ffi-types] に定める。
+
+**[ffi.c-integer]** `_int`・`_uint`・`_long`・`_ulong`・`_size_t`・`_char`はそれぞれCの `int`・`unsigned int`・`long`・`unsigned long`・`size_t`・`char` に対応する別々の組み込み型である。externの内外で使え、値の保持、関数の引数・戻り値、構造体のフィールド、同じ型同士の等値・順序比較を認める。型の幅・符号・範囲はCの対象環境に従う。汎用型`int`には含めない。C固有型は通常の整数型を対象にした算術・ビット演算・反復・添字・テンプレート埋め込みの規則には含めず、それらの操作ではSuzの型へ明示的に変換する。文字列からC固有型およびそれを含む構造体への変換も認めない。
+
+**[ffi.literal-range]** 型注釈、引数、戻り値、比較相手などからC固有型が要求される整数リテラルは、その型の値とする。負のリテラルと括弧で囲んだリテラルも同じである。範囲は生成Cで検査し、範囲外なら評価時にパニックする。`_char`にSuzの文字リテラルを暗黙に変換しない。C環境に依存する値・変換はSuzの定数式には含めない。
+
+**[ffi.cast]** C固有型とSuzの整数型・浮動小数点型との変換、およびC固有型同士の変換は明示的に行う。異なる型への暗黙変換はない。`as`でC固有型またはSuzの整数型に変換する場合は、同じ型への変換を除き`or`を必須とし、変換先の範囲外なら既存の失敗処理を行う。浮動小数点からは0方向へ丸めた整数の範囲を検査し、NaN・無限大は失敗する。C固有型から浮動小数点型へは最近接・偶数丸めを行い、`or`を省略できる。`as%`は整数同士だけに認め、変換先のビット幅の下位ビットを使う。符号付きの変換先ではそのビット列を2の補数として解釈する。`len_t`を`as%`の変換先にはできない。整数の`as%`に`or`は付けない。
+
+**[ffi.unsafe]** extern関数の呼び出しは字句的に `unsafe { ... }` の内側だけで許可する。通常のブロックと同じスコープを作り、`return`・`break`・`continue`にも既存の規則を適用する。unsafeは別の関数・クロージャの本体へ引き継がない。unsafe内でも型・範囲などの検査を省略しない。呼び出すC APIの契約を守る責任を示す構文であり、Cの不正動作を検出・防止する保証ではない。C固有型の保持・比較・変換にはunsafeは不要である。
+
+**[ffi.function-value]** extern関数は名前による直接呼び出しだけに使える。`fn 名前`による関数値化はunsafe内でもコンパイルエラーである。関数値が必要なら、内部のunsafeでC関数を呼ぶ通常のSuz関数を用意し、その関数を値にする。
+
 ## 9. 実行時の検査
 
 ### 9.1 パニック
@@ -1787,7 +1822,10 @@ CharEscape ::= "\" ( "0" | "n" | "r" | "t" | "\" | "'"
 ```ebnf
 Program          ::= NL* ( Declaration NL+ )* Declaration? EOF
 Declaration      ::= TopLevelBinding | FunctionDeclaration
-                   | StructDeclaration | EnumDeclaration | ErrorDeclaration | FnShapeDeclaration
+                   | StructDeclaration | EnumDeclaration | ErrorDeclaration | FnShapeDeclaration | ExternBlock
+
+ExternBlock      ::= "extern" HEADER "{" NL* ( ExternFunction NL+ )* ExternFunction? "}"
+ExternFunction   ::= "fn" CNAME ( "as" IDENT )? "(" Parameters? ")" "->" Type
 
 TopLevelBinding  ::= ( "fix" | "var" ) IDENT TypeAnnotation? "=" ConstExpression AllowClause?
 TypeAnnotation   ::= ":" Type
@@ -1811,10 +1849,13 @@ ErrorSpecItem    ::= IDENT ( "." IDENT )?
 Variants         ::= IDENT ( "," NL* IDENT )* ","? NL*
 
 Type             ::= IntegerType | "len_t" | "f32" | "f64" | "bool" | "char" | "symbol" | "text" | "void"
-                   | "int" | "float" | IDENT | "static" "fn" IDENT | "fn" IDENT
+                   | "int" | "float" | IDENT | "static" "fn" IDENT | "fn" IDENT | CIntegerType
+CIntegerType     ::= "_int" | "_uint" | "_long" | "_ulong" | "_size_t" | "_char"
 IntegerType      ::= "i8" | "i16" | "i32" | "i64"
                    | "u8" | "u16" | "u32" | "u64"
 ```
+
+`HEADER`は [ffi.header] のヘッダー名、`CNAME`は [ffi.name] のC側の名前である。
 
 `TopLevelBinding` の `fix` には [const.decl]、`var` には [top.var] を適用する。どちらも初期値は定数式に限る。
 
@@ -1830,7 +1871,7 @@ Statement        ::= ( VariableDeclaration | Assignment | ReturnStatement
                      | "break" | "continue" | LogStatement | Expression ) AllowClause?
                    | WhileStatement | LoopStatement | ForStatement | RevStatement
                    | IfStatement | MatchStatement | Block | AllowStatement | PanicStatement | FailStatement
-                   | RecoverStatement | IgnoreStatement
+                   | RecoverStatement | IgnoreStatement | "unsafe" Block
 
 VariableDeclaration ::= ( "fix" | "var" ) IDENT TypeAnnotation?
                         "=" Expression

@@ -32,6 +32,8 @@ mod execution;
 mod expressions;
 #[path = "spec_cases/extra_flags.rs"]
 mod extra_flags;
+#[path = "spec_cases/ffi.rs"]
+mod ffi;
 #[path = "spec_cases/float_logs.rs"]
 mod float_logs;
 #[path = "spec_cases/floats.rs"]

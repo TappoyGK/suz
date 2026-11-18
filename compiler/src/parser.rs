@@ -9,6 +9,7 @@ mod closures;
 mod enums;
 mod errors;
 mod expressions;
+mod ffi;
 mod function_types;
 mod functions;
 mod logs;
@@ -162,12 +163,14 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
         depth: 0,
         limit_location: None,
     };
+    let mut externs = Vec::new();
     let mut bindings = Vec::new();
     let mut functions = Vec::new();
     let mut main = false;
     p.newlines();
     while p.token().kind != Kind::End {
         match p.token().kind {
+            Kind::Keyword("extern") => externs.extend(p.extern_block()?),
             Kind::Keyword("fix" | "var") => bindings.push(p.top_level_binding()?),
             Kind::Keyword("fnshape") => {
                 p.cursor = fnshapes.iter().find(|d| d.start == p.cursor).unwrap().end;
@@ -225,6 +228,7 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
         ));
     }
     Ok(Program {
+        externs,
         allows: p.allows,
         fnshapes,
         function_types,

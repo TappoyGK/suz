@@ -341,6 +341,11 @@ fn expression_inner(
     widen: Widening,
     argument: Option<super::generic::Family>,
 ) -> Result<CheckedExpression, Diagnostic> {
+    if let Some(Type::CInteger(_)) = required
+        && let Some(value) = super::ffi::literal(expr, required.unwrap(), bindings)?
+    {
+        return Ok(value);
+    }
     // 互換性のない数値の種類は独立して推論する。入れ子の汎用呼び出しでも、
     // 変換の診断は外側の仮引数に対して報告する。
     let inference_hint = if argument == Some(super::generic::Family::Int)

@@ -10,6 +10,7 @@ mod closures;
 mod errors;
 mod exact;
 mod expressions;
+mod ffi;
 mod functions;
 mod helpers;
 mod logs;
@@ -92,6 +93,7 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
 
 "#,
     );
+    ffi::declarations(&mut c, program);
     let mut context = ExpressionContext {
         log_level,
         log_ignore,

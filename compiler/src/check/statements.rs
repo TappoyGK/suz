@@ -265,6 +265,16 @@ fn check_statement(
                 otherwise,
             });
         }
+        Statement::Unsafe(inner) => {
+            let mut scope = context.bindings.clone();
+            scope.unsafe_block = true;
+            context.output.push(CheckedStatement::Block(block(
+                inner,
+                &mut scope,
+                context.next_id,
+                context.loop_depth,
+            )?));
+        }
         Statement::Block(inner) => {
             context.output.push(CheckedStatement::Block(block(
                 inner,

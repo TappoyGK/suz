@@ -306,6 +306,9 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             result
         }
         Value::Truncate(ref inner) => {
+            if matches!(expr.ty, crate::ast::Type::CInteger(_)) {
+                return super::ffi::truncate(inner, expr.ty, context);
+            }
             let crate::ast::Type::Integer(ty) = expr.ty else {
                 unreachable!()
             };
