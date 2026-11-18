@@ -45,6 +45,7 @@ pub fn text(command: Option<Command>) -> String {
     if command.is_none() || command == Some(Command::Build) {
         text.push_str("  --force                        Replace an existing regular output file\n");
     }
+    text.push_str("  --log-level LEVEL              Minimum log level: debug/info/warn/error/off (default: info)\n");
     text.push_str("  --deny-global-var              Reject global variable declarations\n  --log-allow                    Show suppressed warnings and their reasons\n  --warn-unhandled-arithmetic     Warn about integer arithmetic without an or handler\n  --deny-unhandled-arithmetic     Reject integer arithmetic without an or handler\n  --help                         Display help\n  --                             Treat remaining arguments as filenames\n\nArithmetic diagnostics are disabled by default.\n");
     if command.is_none() {
         text.push_str("  --version                      Display the version\n  --licenses                     Display copyright and license notices\n");

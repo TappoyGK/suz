@@ -133,7 +133,7 @@ _Noreturn void suz_env_panic(void);
 
 ## 5. ログの評価と出力
 
-**[runtime.log-evaluation]** 1つの `log debug`・`log info`・`log warn`・`log error` では、最初にすべての埋め込み式を左から右に1回ずつ評価し、それぞれの値を保持する。すべての評価が成功してから、そのログ文の出力を始める。
+**[runtime.log-evaluation]** [log.filter]で生成対象となった1つの `log debug`・`log info`・`log warn`・`log error` では、最初にすべての埋め込み式を左から右に1回ずつ評価し、それぞれの値を保持する。すべての評価が成功してから、そのログ文の出力を始める。
 
 埋め込みには言語仕様の [output.embed-value] を適用し、名前とそのフィールド参照から値を読む。計算が必要な場合はログ文の前で行う。
 

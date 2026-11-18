@@ -52,6 +52,8 @@ mod globals;
 mod integer_bounds;
 #[path = "spec_cases/invalid_inputs.rs"]
 mod invalid_inputs;
+#[path = "spec_cases/log_filter.rs"]
+mod log_filter;
 #[path = "spec_cases/logs.rs"]
 mod logs;
 #[path = "spec_cases/matches.rs"]

@@ -133,8 +133,36 @@ impl Warning {
     }
 }
 
+/// 生成する通常ログの最低レベル。panicの生成には影響しない。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LogLevel {
+    Debug,
+    #[default]
+    Info,
+    Warn,
+    Error,
+    Off,
+}
+
+impl LogLevel {
+    pub(crate) fn includes(self, level: ast::LogLevel) -> bool {
+        use ast::LogLevel as Output;
+        if matches!(level, Output::Panic) {
+            return true;
+        }
+        match self {
+            Self::Debug => true,
+            Self::Info => !matches!(level, Output::Debug),
+            Self::Warn => matches!(level, Output::Warn | Output::Error),
+            Self::Error => matches!(level, Output::Error),
+            Self::Off => false,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CompilationOptions {
+    pub log_level: LogLevel,
     pub log_allow: bool,
     pub deny_global_var: bool,
     pub arithmetic_mode: ArithmeticMode,
@@ -188,7 +216,12 @@ pub fn compile_with_options(
 ) -> Result<Compilation, Diagnostic> {
     let (checked, warnings) = analyze(bytes, options)?;
     Ok(Compilation {
-        c: codegen::generate(&checked, source_name, options.text_pool_limit),
+        c: codegen::generate(
+            &checked,
+            source_name,
+            options.text_pool_limit,
+            options.log_level,
+        ),
         warnings,
     })
 }

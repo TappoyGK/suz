@@ -373,12 +373,11 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | 正常終了 | 7 | 0 |
 
-errorレベルの出力後もreturnへ進む。errorは既存の予約語であり、変数名には使わない。
+既定の最低レベルはinfoなのでdebugの行は出力しない。errorレベルの出力後もreturnへ進む。errorは既存の予約語であり、変数名には使わない。
 
 **標準エラー：**
 
 ```text
-debug log-012.suz:5: 1
 info log-012.suz:6: 2
 warn log-012.suz:7: 3
 error log-012.suz:8: failed

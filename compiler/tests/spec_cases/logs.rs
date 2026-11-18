@@ -180,7 +180,23 @@ fn main() -> u8 {
     return 0
 }
 "#;
-    let output = crate::test_util::compile_and_run_c23(source, "levels.suz");
+    let directory = TemporaryDirectory::new();
+    let path = directory.0.join("levels.c");
+    let options = suz::CompilationOptions {
+        log_level: suz::LogLevel::Debug,
+        ..suz::CompilationOptions::default()
+    };
+    fs::write(
+        &path,
+        suz::compile_with_options(source.as_bytes(), "levels.suz", &options)
+            .unwrap()
+            .c,
+    )
+    .unwrap();
+    let output = Batch::build(&directory.0, &[(0, path)], 1)
+        .unwrap()
+        .run(0)
+        .unwrap();
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(

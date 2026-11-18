@@ -97,6 +97,7 @@ cd generated
 | `--env FILE` | 可 | 可 | | 可 | 標準環境層を置き換えるCソース |
 | `--text-pool-limit SIZE` | 可 | 可 | | 可 | テキストプールの上限。既定は `1G` |
 | `--force` | 可 | | | | 既存の通常ファイルを出力先として置き換える |
+| `--log-level LEVEL` | 可 | 可 | 可 | 可 | 生成するログの最低レベル。既定はinfo |
 | `--log-allow` | 可 | 可 | 可 | 可 | 抑えた警告と理由を表示する |
 | `--deny-global-var` | 可 | 可 | 可 | 可 | 大域変数の宣言を禁止する。`allow` でも除外しない |
 | `--warn-unhandled-arithmetic` | 可 | 可 | 可 | 可 | 整数演算の失敗処理がない箇所を警告する |
@@ -155,6 +156,10 @@ suz emit-c program.suz -o generated --text-pool-limit unlimited
 **[tool.temporary]** C、同梱ソースの展開物、中間成果物、`run` の実行ファイルには、呼び出しごとに独立した一時領域を使う。正常終了と処理可能なエラーでは一時領域を削除する。`run` では子プロセスの終了後に削除する。一時領域の名前を診断のSuzソース名として使わず、利用者が指定した入力パスを保持する。
 
 ## 5. メッセージと終了
+
+**[tool.log-level]** `--log-level LEVEL`は、[log.filter]に従って生成するログの最低レベルを指定する。値は小文字の`debug`・`info`・`warn`・`error`・`off`のいずれかとし、省略時は`info`とする。値の欠落・空文字・その他の値・オプションの重複はCLIエラー（終了コード2）とする。後勝ちにはしない。
+
+`check`も同じ引数を受け付けるが、ログの検査を省略しない。`emit-c`は設定を適用済みのCを出力するため、そのCをビルドする際に同じオプションを渡す必要はない。コンパイラAPIでは`CompilationOptions.log_level`に`LogLevel`列挙型を指定する。既定値と設定を省略するAPIは`Info`を使う。
 
 **[tool.log-allow]** `--log-allow` は [allow.log] に従い、その設定で警告になる箇所のうち `allow` で抑えたものを理由とともに標準エラーへ書く。
 
