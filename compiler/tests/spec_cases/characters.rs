@@ -87,9 +87,9 @@ fn main() -> u8 {
         0, 0x7f, 0x80, 0x7ff, 0x800, 0xd7ff, 0xe000, 0xffff, 0x10000, 0x10ffff,
     ] {
         constants.push_str(&format!(
-            r#"const CH{value} = '\u{{{value:X}}}'
-const PARSED{value} = `${{CH{value}}}` as char or '?'
-const ITEM{value} = `Item {{ ch: '\\u{{{value:x}}}' }}` as Item or Item {{ ch: '?' }}
+            r#"fix CH{value} = '\u{{{value:X}}}'
+fix PARSED{value} = `${{CH{value}}}` as char or '?'
+fix ITEM{value} = `Item {{ ch: '\\u{{{value:x}}}' }}` as Item or Item {{ ch: '?' }}
 "#
         ));
         source.push_str(&format!(
@@ -170,8 +170,8 @@ continue }
     for ch in 'z'..<'a' { return 101 }
     return count
 }
-const SAMPLE = `aあ😀\0`
-const EMPTY = ``
+fix SAMPLE = `aあ😀\0`
+fix EMPTY = ``
 fn main() -> u8 { return 0 }
 "#;
     let driver = r#"

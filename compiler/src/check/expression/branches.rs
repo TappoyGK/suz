@@ -18,6 +18,9 @@ pub(super) fn check(
     expected: Option<Type>,
     bindings: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
+    if expected.is_none() {
+        super::super::function_values::require_context(expr, bindings)?;
+    }
     Ok(match &expr.kind {
         ExpressionKind::Match { target, arms } => {
             let target = crate::check::exact::use_value(target, bindings)?;

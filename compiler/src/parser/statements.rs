@@ -11,6 +11,45 @@ use crate::{
 };
 
 impl Parser<'_, '_> {
+    // 文頭のfnは、宣言なら従来の位置のエラー、値なら式の規則で診断する。
+    // fn pick(1)を宣言と取り違えないよう、仮引数の型・戻り値・本体を確認する。
+    fn starts_function_declaration(&self) -> bool {
+        let tail = &self.tokens[self.cursor + 1..];
+        if tail.first().map(|t| t.kind) == Some(Kind::Symbol("[")) {
+            return false;
+        }
+        if !matches!(tail.first().map(|t| t.kind), Some(Kind::Ident(_))) {
+            return true;
+        }
+        if tail.get(1).map(|t| t.kind) != Some(Kind::Symbol("(")) {
+            // 仮引数の括弧を欠く宣言も、関数値の式とは区別する。
+            return matches!(tail.get(1).map(|t| t.kind), Some(Kind::Symbol("->" | "{")));
+        }
+        if matches!(tail.get(2).map(|t| t.kind), Some(Kind::Ident(_)))
+            && tail.get(3).map(|t| t.kind) == Some(Kind::Symbol(":"))
+        {
+            return true;
+        }
+        let mut depth = 0usize;
+        for (i, token) in tail.iter().enumerate().skip(1) {
+            match token.kind {
+                Kind::Symbol("(") => depth += 1,
+                Kind::Symbol(")") => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return matches!(
+                            tail.get(i + 1).map(|t| t.kind),
+                            Some(Kind::Symbol("->" | "{"))
+                        );
+                    }
+                }
+                Kind::End => break,
+                _ => {}
+            }
+        }
+        false
+    }
+
     fn assignment_operator(&self) -> Option<Option<BinaryOperator>> {
         let mut cursor = self.cursor + 1;
         while self
@@ -126,17 +165,24 @@ impl Parser<'_, '_> {
                     name,
                     location,
                     start,
-                    end,
+                    end: end.map(Box::new),
                     inclusive,
                     reverse,
                     body,
                 })
             }
-            Kind::Keyword("const" | "fn" | "enum" | "struct") => Err(self.error(
+            Kind::Keyword("fn") if self.starts_function_declaration() => Err(self.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(
                     "decl.location",
-                    "constants and functions must be declared at top level"
+                    "functions and types must be declared at top level"
+                ),
+            )),
+            Kind::Keyword("enum" | "struct" | "fnshape") => Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "decl.location",
+                    "functions and types must be declared at top level"
                 ),
             )),
             Kind::Keyword("while" | "loop") => {
@@ -241,6 +287,7 @@ impl Parser<'_, '_> {
                 let mut target = Expression {
                     kind: ExpressionKind::Name(name.clone()),
                     location,
+                    height: 1,
                 };
                 while self.token().kind == Kind::Symbol(".") {
                     self.cursor += 1;
@@ -248,7 +295,10 @@ impl Parser<'_, '_> {
                         unreachable!()
                     };
                     fields.push(field.to_owned());
+                    let height = target.height + 1;
+                    self.check_height(height, self.location())?;
                     target = Expression {
+                        height,
                         kind: ExpressionKind::Field {
                             target: Box::new(target),
                             name: field.to_owned(),
@@ -263,6 +313,7 @@ impl Parser<'_, '_> {
                 // 二項演算への変換では、右辺を評価する前に現在の代入先の値を読む。
                 let value = if let Some(operator) = operator {
                     Expression {
+                        height: 1 + target.height.max(right.height),
                         kind: ExpressionKind::Binary {
                             operator,
                             left: Box::new(target),
@@ -289,6 +340,7 @@ impl Parser<'_, '_> {
                 ) {
                     return Ok(Statement::Return(Expression {
                         kind: ExpressionKind::Void,
+                        height: 0,
                         location: self.location(),
                     }));
                 }
@@ -299,6 +351,10 @@ impl Parser<'_, '_> {
     }
 
     pub(super) fn block(&mut self) -> Result<(Vec<Statement>, Location), Diagnostic> {
+        self.nested(self.location(), Self::block_inner)
+    }
+
+    fn block_inner(&mut self) -> Result<(Vec<Statement>, Location), Diagnostic> {
         self.expect(FixedToken::Symbol("{"))?;
         self.newlines();
         let mut statements = Vec::new();

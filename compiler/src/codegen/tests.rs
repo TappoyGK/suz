@@ -43,6 +43,9 @@ fn generated_bool_values_preserve_negation_and_copies() {
     .enumerate()
     {
         let program = CheckedProgram {
+            function_types: Vec::new(),
+            globals: Vec::new(),
+            global_warnings: Vec::new(),
             constant_texts: Default::default(),
             main_location: crate::ast::Location { line: 1, column: 1 },
             enums: Vec::new(),
@@ -69,6 +72,7 @@ fn generated_bool_values_preserve_negation_and_copies() {
                         initializer: boolean(Value::Local(0)),
                     },
                     CheckedStatement::Assign {
+                        global: false,
                         fields: Vec::new(),
                         id: 0,
                         ty: Type::Bool,
@@ -215,6 +219,9 @@ fn comparison_codegen_sequences_and_reuses_operands() {
             });
         }
         let program = CheckedProgram {
+            function_types: Vec::new(),
+            globals: Vec::new(),
+            global_warnings: Vec::new(),
             constant_texts: Default::default(),
             main_location: crate::ast::Location { line: 1, column: 1 },
             enums: Vec::new(),

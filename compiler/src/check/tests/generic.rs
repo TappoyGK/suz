@@ -70,7 +70,8 @@ fn generic_calls_inside_deep_value_blocks_are_checked_once() {
     std::thread::Builder::new().stack_size(64 * 1024 * 1024).spawn(|| {
         for generic_body in [false, true] {
             let mut value = "x +% 300".to_owned();
-            for i in 0..320 {
+            // 呼び出し・expr・値ブロックの3段ずつを重ね、構文の上限256以内にする。
+            for i in 0..80 {
                 value = format!("f(expr {{ fix t_{i} = {value}\nt_{i} }})");
             }
             let source = if generic_body {
@@ -78,7 +79,7 @@ fn generic_calls_inside_deep_value_blocks_are_checked_once() {
             } else {
                 format!("fn f(y: int) -> int {{ return y }}\nfn main() -> u8 {{ fix x: i64 = 1\nfix r = {value}\nreturn 0 }}")
             };
-            super::generic::with_work_budget(20_000, || {
+            super::generic::with_work_budget(5_000, || {
                 let tokens = crate::lexer::lex(&source).unwrap();
                 let parsed = crate::parser::parse(&tokens).unwrap();
                 check(&parsed).unwrap();

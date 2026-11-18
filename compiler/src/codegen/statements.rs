@@ -235,6 +235,7 @@ pub(super) fn emit_block(
                 writeln!(c, "{indent}(void)suz_local_{id};").unwrap();
             }
             CheckedStatement::Assign {
+                global,
                 id,
                 fields,
                 ty,
@@ -249,7 +250,11 @@ pub(super) fn emit_block(
                     expression(value, context)
                 )
                 .unwrap();
-                let mut local = context.local(*id);
+                let mut local = if *global {
+                    format!("suz_global_{id}")
+                } else {
+                    context.local(*id)
+                };
                 for index in fields {
                     write!(local, ".suz_field_{index}").unwrap();
                 }

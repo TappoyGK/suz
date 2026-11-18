@@ -18,6 +18,7 @@ use crate::{
 pub(super) struct Binding {
     pub(super) constant: Option<CheckedExpression>,
     pub(super) id: usize,
+    pub(super) global: bool,
     pub(super) ty: Type,
     pub(super) mutable: bool,
     pub(super) parameter: bool,
@@ -34,6 +35,7 @@ impl Binding {
 
     fn local(id: usize, ty: Type, mutable: bool, loop_variable: bool, location: Location) -> Self {
         Self {
+            global: false,
             constant: None,
             id,
             ty,
@@ -287,7 +289,7 @@ fn check_for(statement: &Statement, context: &mut StatementContext<'_>) -> Resul
     context.output.push(CheckedStatement::For {
         id,
         start,
-        end,
+        end: end.map(Box::new),
         inclusive: *inclusive,
         reverse: *reverse,
         body,
@@ -396,7 +398,12 @@ fn check_assign(
     if !binding.mutable {
         return Err(location.error(
             ErrorKind::InvalidSource,
-            if binding.parameter {
+            if context.bindings.value_captures.contains(name) {
+                crate::diagnostic!(
+                    "closure.capture-value",
+                    "cannot assign to a value capture '{name}'"
+                )
+            } else if binding.parameter {
                 crate::diagnostic!("fn.parameter", "cannot assign to parameter '{name}'")
             } else if binding.loop_variable {
                 crate::diagnostic!("for.variable", "cannot assign to loop variable '{name}'")
@@ -405,8 +412,8 @@ fn check_assign(
             },
         ));
     }
-    super::writes::check(value, name, fields)?;
-    let (id, mut ty) = (binding.id, binding.ty);
+    super::writes::check(value, name, fields, binding.global)?;
+    let (id, global, mut ty) = (binding.id, binding.global, binding.ty);
     let mut indices = Vec::new();
     for name in fields {
         let (index, field_type) =
@@ -418,6 +425,7 @@ fn check_assign(
     lower_return_handler(&mut value, &mut context.output, context.next_id);
     context.bindings[name].assigned.set(true);
     context.output.push(CheckedStatement::Assign {
+        global,
         id,
         fields: indices,
         ty,
@@ -450,7 +458,7 @@ pub(super) fn finish_scope(bindings: &mut Scope, declared: Vec<String>) -> Resul
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(
                     "var.never-reassigned",
-                    "var binding '{name}' is never reassigned"
+                    "var binding '{name}' is never reassigned; declare it with fix"
                 ),
             );
             return Err(error);

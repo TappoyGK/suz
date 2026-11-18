@@ -21,9 +21,10 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     let mut signatures = BTreeMap::new();
     for (id, function) in program.functions.iter().enumerate() {
         if signatures.contains_key(&function.name)
-            || program.constants.iter().any(|c| c.name == function.name)
+            || program.bindings.iter().any(|c| c.name == function.name)
             || program.enums.iter().any(|e| e.name == function.name)
             || program.structs.iter().any(|s| s.name == function.name)
+            || program.fnshapes.iter().any(|s| s.name == function.name)
         {
             return Err(function.location.error(
                 ErrorKind::InvalidSource,
@@ -41,11 +42,19 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     }
     let main_id = signatures["main"].id;
     let signatures = Rc::new(signatures);
-    let (mut globals, mut warnings) =
-        declarations::resolve(&program.constants, &program.enums, &program.structs)?;
-    globals.functions = signatures;
-    *globals.instances.borrow_mut() = super::generic::Instances::new(program.functions.len());
+    let scope = Scope {
+        functions: signatures,
+        fnshapes: Rc::new(program.fnshapes.clone()),
+        function_types: Rc::new(std::cell::RefCell::new(program.function_types.clone())),
+        instances: Rc::new(std::cell::RefCell::new(super::generic::Instances::new(
+            program.functions.len(),
+        ))),
+        ..Scope::default()
+    };
+    let (globals, mut warnings, initializers) =
+        declarations::resolve(&program.bindings, &program.enums, &program.structs, scope)?;
     let mut functions = Vec::new();
+    check_instances(program, &globals, &mut functions, &mut warnings)?;
     for (id, function) in program.functions.iter().enumerate() {
         if globals.functions[&function.name].is_generic() {
             match &analyze_once(function, id, &globals).result {
@@ -62,11 +71,32 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
         functions.push(checked);
         warnings.extend(found);
     }
+    // 全関数（未使用の汎用関数を含む）の検査後に、大域変数への構文上の代入を確認する。
+    for declaration in program.bindings.iter().filter(|d| d.mutable) {
+        if !globals.globals[&declaration.name].assigned.get() {
+            return Err(declaration.location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "var.never-reassigned",
+                    "global var '{}' is never reassigned; declare it with fix",
+                    declaration.name
+                ),
+            ));
+        }
+    }
     warnings.sort_by_key(|l| (l.line, l.column));
     // 整数演算の箇所は汎用検査と具体化の両方で集まるため、ソースの演算ごとに一度だけ報告する。
     // 比較・除算の候補は汎用検査からだけ集まる。
     warnings.dedup_by_key(|l| (l.line, l.column));
     Ok(CheckedProgram {
+        function_types: globals.function_types.borrow().clone(),
+        globals: initializers,
+        global_warnings: program
+            .bindings
+            .iter()
+            .filter(|d| d.mutable)
+            .map(|d| d.location)
+            .collect(),
         division_warnings: globals
             .outputs
             .divisions
@@ -186,6 +216,7 @@ fn check_instances(
                     function,
                     types,
                     location,
+                    function_value,
                 } => {
                     if let Some(types) = types[instance.types.index()] {
                         globals.instances.borrow_mut().request(
@@ -193,6 +224,7 @@ fn check_instances(
                             types,
                             &Some(instance.calls.clone()),
                             *location,
+                            *function_value,
                         );
                         tasks.extend(
                             globals
@@ -223,28 +255,62 @@ fn instance_error(
     error: Diagnostic,
 ) -> Diagnostic {
     let calls = instance.calls.locations();
-    let mut diagnostic = calls[0].error(
+    let mut diagnostic = calls[0].0.error(
         error.kind,
         crate::diagnostic!(
-            "num.fn-body",
-            "generic call to '{}' is invalid for these concrete types",
+            if calls[0].1 {
+                "fn.value-generic-check"
+            } else {
+                "num.fn-body"
+            },
+            "{} '{}' is invalid for these concrete types",
+            if calls[0].1 {
+                "generic function value for"
+            } else {
+                "generic call to"
+            },
             program.functions[instance.function].name
         ),
     );
-    diagnostic.related.extend(calls.iter().skip(1).map(|site| {
-        site.error(
-            ErrorKind::InvalidSource,
-            crate::diagnostic!("num.fn-body", "instantiated through this call"),
-        )
-    }));
+    diagnostic
+        .related
+        .extend(calls.iter().skip(1).map(|(site, function_value)| {
+            site.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    if *function_value {
+                        "fn.value-generic-check"
+                    } else {
+                        "num.fn-body"
+                    },
+                    "{}",
+                    if *function_value {
+                        "instantiated through this function value"
+                    } else {
+                        "instantiated through this call"
+                    }
+                ),
+            )
+        }));
     diagnostic.related.push(error);
     diagnostic
 }
 
 pub(super) fn check_function(
     function: &crate::ast::Function,
+    scope: Scope,
+    id: usize,
+) -> Result<(CheckedFunction, Vec<crate::ast::Location>), Diagnostic> {
+    check_with_captures(function, scope, id, &BTreeMap::new())
+}
+
+// 参照キャプチャーは外側の束縛への別名。未代入の判定は外側のスコープで行い、
+// 本体内の代入状態を呼び出し元へ返す。通常の仮引数と値キャプチャーは従来どおり不変。
+pub(super) fn check_with_captures(
+    function: &crate::ast::Function,
     mut scope: Scope,
     id: usize,
+    references: &BTreeMap<String, Binding>,
 ) -> Result<(CheckedFunction, Vec<crate::ast::Location>), Diagnostic> {
     control::validate_return_positions(&function.statements)?;
     let mut warnings = Vec::new();
@@ -272,12 +338,20 @@ pub(super) fn check_function(
                 crate::diagnostic!("decl.shadowing", "parameter shadows a top-level name"),
             ));
         }
-        declared.push(parameter.name.clone());
         let parameter_type = scope.resolve_type(parameter.ty);
+        if let Some(binding) = references.get(&parameter.name) {
+            let mut binding = binding.clone();
+            binding.id = parameter_id;
+            binding.ty = parameter_type;
+            scope.locals.insert(parameter.name.clone(), binding);
+            continue;
+        }
+        declared.push(parameter.name.clone());
         scope.locals.insert(
             parameter.name.clone(),
             Binding {
                 id: parameter_id,
+                global: false,
                 ty: parameter_type,
                 mutable: false,
                 parameter: true,
@@ -296,6 +370,11 @@ pub(super) fn check_function(
         0,
         declared,
     )?;
+    for (name, binding) in references {
+        if scope.locals[name].assigned.get() {
+            binding.assigned.set(true);
+        }
+    }
     control::check_return_shape(function)?;
     warnings.extend(diagnostics::unhandled_arithmetic(&statements));
     Ok((
@@ -320,10 +399,25 @@ pub(super) fn call(
     expected: Option<Type>,
     scope: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
+    if scope.contains_key(name) {
+        let target = Expression {
+            kind: ExpressionKind::Name(name.into()),
+            location: expr.location,
+            height: 1,
+        };
+        return super::function_values::invoke(expr, &target, arguments, scope);
+    }
     let signature = scope.functions.get(name).ok_or_else(|| {
         expr.location.error(
             ErrorKind::InvalidSource,
-            crate::diagnostic!("fn.call", "unknown function"),
+            if scope.uncaptured.contains(name) {
+                crate::diagnostic!(
+                    "closure.scope",
+                    "outer binding '{name}' must be listed in the capture list"
+                )
+            } else {
+                crate::diagnostic!("fn.call", "unknown function")
+            },
         )
     })?;
     if arguments.len() != signature.parameters.len() {
@@ -345,12 +439,12 @@ pub(super) fn call(
             if let Some(family) = super::generic::Family::of(*ty) {
                 super::expression::generic_argument(argument, concrete(*ty), family, scope)
             } else {
-                expression(argument, Some(concrete(*ty)), scope)
+                super::function_values::argument(argument, concrete(*ty), scope)
             }
         })
         .collect::<Result<_, _>>()?;
     if generic && scope.generic_check() {
-        scope.defer_call(signature.id, types.int, types.float, expr.location);
+        scope.defer_call(signature.id, types.int, types.float, expr.location, false);
     }
     let id = if generic && !scope.generic_check() {
         scope.instances.borrow_mut().request(
@@ -358,6 +452,7 @@ pub(super) fn call(
             types.concrete(),
             &scope.generic_calls,
             expr.location,
+            false,
         )
     } else {
         signature.id

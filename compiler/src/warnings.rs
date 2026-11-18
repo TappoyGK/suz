@@ -28,13 +28,12 @@ impl AllowScope {
 }
 
 pub(crate) fn collect(
-    locations: &[Location],
-    comparisons: &[(Location, bool)],
-    divisions: &[Location],
+    checked: &crate::check::CheckedProgram,
     scopes: &[AllowScope],
-    mode: ArithmeticMode,
-    log_allow: bool,
+    options: &crate::CompilationOptions,
 ) -> Result<Vec<Warning>, Diagnostic> {
+    let mode = options.arithmetic_mode;
+    let locations = &checked.unhandled_arithmetic;
     let mut candidates: Vec<_> = locations
         .iter()
         .map(|&location| {
@@ -46,19 +45,32 @@ pub(crate) fn collect(
             )
         })
         .collect();
-    candidates.extend(comparisons.iter().map(|&(location, value)| {
-        (
-            location,
-            "diagnostic.constant-comparison",
-            format!("comparison is always {value}"),
-            true,
-        )
-    }));
-    candidates.extend(divisions.iter().map(|&location| {
+    candidates.extend(
+        checked
+            .comparison_warnings
+            .iter()
+            .map(|&(location, value)| {
+                (
+                    location,
+                    "diagnostic.constant-comparison",
+                    format!("comparison is always {value}"),
+                    true,
+                )
+            }),
+    );
+    candidates.extend(checked.division_warnings.iter().map(|&location| {
         (
             location,
             "diagnostic.integer-division-to-float",
             "integer division truncates before floating-point arithmetic".to_string(),
+            true,
+        )
+    }));
+    candidates.extend(checked.global_warnings.iter().map(|&location| {
+        (
+            location,
+            "diagnostic.global-var",
+            "global mutable state creates dependencies between functions".to_owned(),
             true,
         )
     }));
@@ -100,6 +112,17 @@ pub(crate) fn collect(
             ),
         ));
     }
+    if options.deny_global_var
+        && let Some(location) = checked.global_warnings.first()
+    {
+        return Err(location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "diagnostic.global-var-deny",
+                "global variables are forbidden by --deny-global-var"
+            ),
+        ));
+    }
     Ok(candidates
         .into_iter()
         .filter_map(|(location, rule, message, enabled)| {
@@ -112,7 +135,7 @@ pub(crate) fn collect(
                 .flat_map(|scope| &scope.items)
                 .find(|item| item.rule == rule)
                 .map(|item| item.reason.clone());
-            if reason.is_some() && !log_allow {
+            if reason.is_some() && !options.log_allow {
                 return None;
             }
             Some(Warning {

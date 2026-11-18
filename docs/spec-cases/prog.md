@@ -110,8 +110,8 @@ fn main() -> u8 {
     return calculate()
 }
 
-const ANSWER: u8 = BASE + 1
-const BASE: u8 = 2
+fix ANSWER: u8 = BASE + 1
+fix BASE: u8 = 2
 
 fn calculate() -> u8 {
     return ANSWER
@@ -130,39 +130,33 @@ mainは後にある関数を、定数ANSWERは後にある定数BASEを参照で
 
 主根拠：`[decl.location]`。
 
-補助根拠：`[decl.top-level]`。
+補助根拠：`[const.decl]`。
 
 **ソース：**
 
 ```suz
-fix value: u8 = 1
+fix VALUE: u8 = 1
 
-fn main() -> u8 { return 0 }
+fn main() -> u8 { return VALUE }
 ```
 
 **期待結果：**
 
 | 設定 | 結果 | 終了コード | 警告数 |
 |---|---|---:|---:|
-| 通常 | コンパイルエラー | — | 0 |
+| 通常 | 正常終了 | 1 | 0 |
 
-fixはブロック内で宣言する。
+トップレベルのfixで定数を宣言できる。
 
-**コンパイル診断：**
+### prog-007 ブロック内のfixに大文字の名前を付ける
 
-| 設定 | 規則 | 行 | 列 |
-|---|---|---:|---:|
-| 通常 | `[decl.location]` | 1 | 1 |
-
-### prog-007 関数内にconstを宣言する
-
-主根拠：`[decl.location]`。
+主根拠：`[name.value]`。
 
 **ソース：**
 
 ```suz
 fn main() -> u8 {
-    const VALUE: u8 = 1
+    fix VALUE: u8 = 1
     return 0
 }
 ```
@@ -173,13 +167,13 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | コンパイルエラー | — | 0 |
 
-constはトップレベルで宣言する。
+ブロック内のfixの名前は小文字で始める。
 
 **コンパイル診断：**
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[decl.location]` | 2 | 5 |
+| 通常 | `[name.value]` | 2 | 9 |
 
 ### prog-008 構造体と列挙型に同じ名前を付ける
 
@@ -359,12 +353,12 @@ valueのスコープは内側のブロックの終わりまで。
 
 ### prog-014 定数名に小文字を使う
 
-主根拠：`[name.constant]`。
+主根拠：`[name.top-level-binding]`。
 
 **ソース：**
 
 ```suz
-const max_count: u8 = 3
+fix max_count: u8 = 3
 fn main() -> u8 { return max_count }
 ```
 
@@ -378,7 +372,7 @@ fn main() -> u8 { return max_count }
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[name.constant]` | 1 | 7 |
+| 通常 | `[name.top-level-binding]` | 1 | 5 |
 
 ### prog-015 関数名に大文字を混ぜる
 
@@ -456,7 +450,7 @@ fn main() -> u8 { return 0 }
 **ソース：**
 
 ```suz
-const MAX_COUNT: u8 = 3
+fix MAX_COUNT: u8 = 3
 enum Key: u8 { A, F1, ESC }
 struct Vec2D { x2: u8, key: Key }
 fn read_count(input_value: Vec2D) -> u8 { return input_value.x2 }

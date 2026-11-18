@@ -8,6 +8,8 @@ use crate::ast::Location;
 
 pub(super) fn collect(expr: &CheckedExpression, locations: &mut Vec<Location>) {
     match &expr.value {
+        Value::Closure(closure) => collect_statements(&closure.function.statements, locations),
+        Value::FunctionBorrow(inner) => collect(inner, locations),
         Value::Exact(e) => {
             if e.arithmetic {
                 locations.push(e.location);
@@ -37,12 +39,24 @@ pub(super) fn collect(expr: &CheckedExpression, locations: &mut Vec<Location>) {
                 }
             }
         }
+        Value::With { target, fields } => {
+            collect(target, locations);
+            for (_, field) in fields {
+                collect(field, locations);
+            }
+        }
         Value::Struct { fields } => {
             for (_, field) in fields {
                 collect(field, locations);
             }
         }
         Value::Field { target, .. } => collect(target, locations),
+        Value::Invoke { target, arguments } => {
+            collect(target, locations);
+            for argument in arguments {
+                collect(argument, locations);
+            }
+        }
         Value::Call { arguments, .. } => {
             for argument in arguments {
                 collect(argument, locations);

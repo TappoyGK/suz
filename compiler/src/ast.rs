@@ -154,7 +154,7 @@ pub(crate) const NUMERIC_COMBINATIONS: usize = 18;
 
 /// ASTと意味検査で共有する型表現。
 /// 具体的な型に加え、汎用のint・float、型の組み合わせごとの結果、内部の正確な整数を表す。
-/// Structの番号は構造体宣言を参照する。汎用の型はC生成までに具体化する。
+/// Structの番号は構造体宣言、Functionの番号は共通化した関数値の型を参照する。汎用の型はC生成までに具体化する。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Type {
     GenericInt,
@@ -162,6 +162,8 @@ pub(crate) enum Type {
     Numeric([Option<ScalarType>; NUMERIC_COMBINATIONS]), // intとfloatの内部の型関数。
     Exact, // 内部の数学的な整数。ソースで指定する格納型ではない。
     Struct(usize),
+    StaticFunction(usize), // 保存・返却できるトップレベルの関数値。
+    Function(usize),       // 呼び出しと転送だけができる仮引数。
     Enum(EnumType),
     Void,
     Float(FloatType),
@@ -268,6 +270,7 @@ impl Type {
             Self::Void => "void",
             Self::Enum(_) => "enum",
             Self::Struct(_) => "struct",
+            Self::StaticFunction(_) | Self::Function(_) => "function",
         }
     }
     pub fn c_name(self) -> String {
@@ -277,6 +280,8 @@ impl Type {
                 unreachable!("generic types are resolved before code generation")
             }
             Self::Struct(id) => format!("suz_struct_{id}"),
+            Self::StaticFunction(id) => format!("suz_fntype_{id}"),
+            Self::Function(id) => format!("suz_callback_{id}"),
             Self::Integer(ty) => ty.c_name().into(),
             Self::Float(ty) => ty.c_name().into(),
             Self::Char => "uint32_t".into(),
@@ -315,25 +320,46 @@ pub(crate) struct FieldInitializer {
     pub location: Location,
 }
 
-/// トップレベル定数の宣言。省略可能な型注釈と、まだ評価していない初期化式。
-pub(crate) struct ConstDeclaration {
+/// トップレベルのfix・varの宣言。省略可能な型注釈と、まだ評価していない初期化式。
+pub(crate) struct TopLevelBinding {
+    pub mutable: bool,
     pub name: String,
     pub location: Location,
     pub annotation: Option<Type>,
     pub initializer: Expression,
 }
 
-/// 構文解析の結果全体。allowの範囲と型・定数・関数の宣言を保持する。
+/// 関数値の型。同じ仮引数・戻り値の組を一つの番号へまとめる。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct FunctionType {
+    pub parameters: Vec<Type>,
+    pub result: Type,
+}
+
+/// fnshapeの名前と宣言位置。型の同一性は名前ではなく仮引数と戻り値の型で決まる。
+#[derive(Clone)]
+pub(crate) struct FnShapeDeclaration {
+    pub name: String,
+    pub location: Location,
+    pub start: usize,
+    pub end: usize,
+    pub type_id: usize,
+}
+
+/// 構文解析の結果全体。型宣言・トップレベル束縛・関数とallowの範囲を保持する。
 /// [`crate::check`] が検査して [`crate::check::ir::CheckedProgram`] へ変換する。
 pub(crate) struct Program {
+    pub fnshapes: Vec<FnShapeDeclaration>,
+    pub function_types: Vec<FunctionType>,
     pub allows: Vec<crate::warnings::AllowScope>,
     pub structs: Vec<StructDeclaration>,
     pub enums: Vec<EnumDeclaration>,
-    pub constants: Vec<ConstDeclaration>,
+    pub bindings: Vec<TopLevelBinding>,
     pub functions: Vec<Function>,
 }
 
 /// 関数の仮引数。ソース上の名前・型注釈・位置を保持する。
+#[derive(Clone)]
 pub(crate) struct Parameter {
     pub name: String,
     pub ty: Type,
@@ -341,6 +367,7 @@ pub(crate) struct Parameter {
 }
 
 /// 関数の構文。仮引数・戻り値型・本体の文と、宣言の開始・終了位置を保持する。
+#[derive(Clone)]
 pub(crate) struct Function {
     pub keyword_location: Location,
     pub name: String,
@@ -391,7 +418,8 @@ pub(crate) enum Statement {
         name: String,
         location: Location,
         start: Expression,
-        end: Option<Expression>,
+        // メモリ効率を高めるため、終了式をBoxに置き、Forを含まない文の格納サイズも抑える。
+        end: Option<Box<Expression>>,
         inclusive: bool,
         reverse: bool,
         body: Vec<Statement>,
@@ -429,6 +457,8 @@ pub(crate) enum Statement {
 pub(crate) struct Expression {
     pub kind: ExpressionKind,
     pub location: Location,
+    /// 構文上の高さ。後置・左結合の演算を追加する前の上限検査に使う。
+    pub height: usize,
 }
 
 /// 文字列テンプレートの文字列部分、または補間する値。
@@ -588,9 +618,30 @@ pub(crate) enum FailureHandler {
     },
 }
 
+/// 明示した値・参照のキャプチャーと、独立した仮引数・戻り先を持つクロージャ。
+#[derive(Clone)]
+pub(crate) struct Closure {
+    pub captures: Vec<Capture>,
+    pub function: Function,
+}
+
+/// キャプチャー一覧の名前と診断位置。型と参照先は外側のスコープで解決する。
+#[derive(Clone)]
+pub(crate) struct Capture {
+    pub by_reference: bool,
+    pub name: String,
+    pub location: Location,
+}
+
 /// 式の構文ごとの内容。名前・リテラルの綴り・子の式を保持し、意味検査で [`crate::check::ir::Value`] へ変換する。
 #[derive(Clone)]
 pub(crate) enum ExpressionKind {
+    Closure(Box<Closure>),
+    FunctionValue(String),
+    Invoke {
+        target: Box<Expression>,
+        arguments: Vec<Expression>,
+    },
     Slice {
         target: Box<Expression>,
         start: Option<Box<Expression>>,
@@ -602,6 +653,10 @@ pub(crate) enum ExpressionKind {
     Template(Vec<TemplatePart<Expression>>),
     Struct {
         id: usize,
+        fields: Vec<FieldInitializer>,
+    },
+    With {
+        target: Box<Expression>,
         fields: Vec<FieldInitializer>,
     },
     Field {

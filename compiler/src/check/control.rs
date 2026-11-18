@@ -68,12 +68,24 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
                     }
                 }
             }
+            ExpressionKind::With { target, fields } => {
+                visit(target, false, in_value)?;
+                for field in fields {
+                    visit(&field.value, false, in_value)?;
+                }
+            }
             ExpressionKind::Struct { fields, .. } => {
                 for field in fields {
                     visit(&field.value, false, in_value)?;
                 }
             }
             ExpressionKind::Field { target, .. } => visit(target, false, in_value)?,
+            ExpressionKind::Invoke { target, arguments } => {
+                visit(target, false, in_value)?;
+                for argument in arguments {
+                    visit(argument, false, in_value)?;
+                }
+            }
             ExpressionKind::Call { arguments, .. } => {
                 for argument in arguments {
                     visit(argument, false, in_value)?;
@@ -243,13 +255,13 @@ pub(super) fn lower_return_handler(
             CheckedStatement::SliceReturn {
                 id,
                 operation,
-                return_value: *return_value,
+                return_value,
             }
         } else {
             CheckedStatement::ArithmeticReturn {
                 id,
                 operation,
-                return_value: *return_value,
+                return_value,
             }
         });
         return true;
@@ -333,8 +345,8 @@ pub(super) fn lower_return_handler(
         wrap,
         id,
         ty: expr.ty,
-        operand: *operand,
-        return_value: *return_value,
+        operand,
+        return_value,
     });
     true
 }
@@ -388,6 +400,9 @@ pub(super) fn check_return_shape(function: &crate::ast::Function) -> Result<(), 
             visit::walk_statement(self, statement)
         }
         fn expression(&mut self, expr: &Expression) -> Result<(), Diagnostic> {
+            if matches!(expr.kind, ExpressionKind::Closure(_)) {
+                return Ok(()); // 内側のreturnを外側の関数のreturnとして数えない。
+            }
             if let ExpressionKind::Cast { fallback, .. }
             | ExpressionKind::ArithmeticHandler { fallback, .. }
             | ExpressionKind::Slice { fallback, .. } = &expr.kind

@@ -2,6 +2,16 @@
 
 利用者に関わる変更をバージョンごとに記載する。
 
+## v0.3.4
+
+- `const`を廃止し、トップレベルの`fix`・`var`を追加した。大域変数への警告と、大域変数を禁止する`--deny-global-var`を追加した。（[#44](https://github.com/TappoyGK/suz/issues/44)・[#67](https://github.com/TappoyGK/suz/pull/67)）
+- 構造体リテラルで、フィールド名と同じ名前の値を使う場合に`: 値`を省略できるようにした。（[#45](https://github.com/TappoyGK/suz/issues/45)・[#69](https://github.com/TappoyGK/suz/pull/69)）
+- 構造体の一部のフィールドを変えた値を作る`with`式を追加した。（[#46](https://github.com/TappoyGK/suz/issues/46)・[#71](https://github.com/TappoyGK/suz/pull/71)）
+- 関数を値として渡せるようにし、関数の形に名前を付ける`fnshape`を追加した。汎用関数も、要求される型に具体化して渡せるようにした。（[#66](https://github.com/TappoyGK/suz/issues/66)・[#75](https://github.com/TappoyGK/suz/pull/75)・[#78](https://github.com/TappoyGK/suz/pull/78)）
+- 保存できる`static fn`と、呼び出し中だけ使える`fn`を追加した。クロージャで外側の値を保持したり、外側の変数を参照して書き換えたりできるようにした。（[#77](https://github.com/TappoyGK/suz/issues/77)・[#78](https://github.com/TappoyGK/suz/pull/78)）
+- 構文の入れ子を256段までとし、超過時はコンパイルエラーにした。（[#72](https://github.com/TappoyGK/suz/issues/72)・[#73](https://github.com/TappoyGK/suz/pull/73)）
+- コンパイラのメモリ使用量を削減した。（[#74](https://github.com/TappoyGK/suz/issues/74)・[#76](https://github.com/TappoyGK/suz/pull/76)）
+
 ## v0.3.3
 
 - 要素数・位置の整数型 `len_t` と、Unicodeスカラー値の個数を返す `len` を追加し、両方を予約語にした。（[#39](https://github.com/TappoyGK/suz/issues/39)・[#63](https://github.com/TappoyGK/suz/pull/63)）

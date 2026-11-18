@@ -6,30 +6,30 @@ use std::fs;
 #[ignore = "release check: run scripts/test-release.sh"]
 fn constants_resolve_forward_references_and_evaluate_typed_values() {
     let mut source = String::from(
-        r#"const ANSWER: u8 = LATER
-const WRAPPED: u8 = 255 +% 1
-const BITS = (-1 as i8) as% u8
-const FRACTIONAL = 255.75 as u8
-const NEAR_MAX: f64 = 3.4028235e38
-const ROUNDED = NEAR_MAX as f32
-const ZERO: f64 = -0.0
-const TINY: f32 = 1.401298464324817e-45
-const CONVERTED = nan as u8 or 7
-const EQUAL = 1 < 2 == 2 < 3
-const ORDERED = 3 >= 3 > 1
-const TRUTH = not false && EQUAL && ORDERED && (false == false)
-const INVALID = nan
-const UNEQUAL = INVALID != INVALID
-const UNORDERED = INVALID < 0.0
-const SHORTCUT = true || ((300 as u8 or 0) == 0)
-const SCALED: f32 = (16777216.0 + 1.0) * 0.5
-const ROUNDED_INTEGER = (((9007199791611905 as f32) as u64) -% 9007200328482816) as u8
+        r#"fix ANSWER: u8 = LATER
+fix WRAPPED: u8 = 255 +% 1
+fix BITS = (-1 as i8) as% u8
+fix FRACTIONAL = 255.75 as u8
+fix NEAR_MAX: f64 = 3.4028235e38
+fix ROUNDED = NEAR_MAX as f32
+fix ZERO: f64 = -0.0
+fix TINY: f32 = 1.401298464324817e-45
+fix CONVERTED = nan as u8 or 7
+fix EQUAL = 1 < 2 == 2 < 3
+fix ORDERED = 3 >= 3 > 1
+fix TRUTH = not false && EQUAL && ORDERED && (false == false)
+fix INVALID = nan
+fix UNEQUAL = INVALID != INVALID
+fix UNORDERED = INVALID < 0.0
+fix SHORTCUT = true || ((300 as u8 or 0) == 0)
+fix SCALED: f32 = (16777216.0 + 1.0) * 0.5
+fix ROUNDED_INTEGER = (((9007199791611905 as f32) as u64) -% 9007200328482816) as u8
 "#,
     );
     for (ty, min, max) in INTEGER_BOUNDS {
         let suffix = ty.to_ascii_uppercase();
         source.push_str(&format!(
-            "const MIN_{suffix}: {ty} = {min}\nconst MAX_{suffix}: {ty} = {max}\n"
+            "fix MIN_{suffix}: {ty} = {min}\nfix MAX_{suffix}: {ty} = {max}\n"
         ));
     }
     source.push_str("fn main() -> u8 {\n");
@@ -49,8 +49,8 @@ const ROUNDED_INTEGER = (((9007199791611905 as f32) as u64) -% 9007200328482816)
     if proven != 7 { return 7 }
     return 0
 }
-const SMALL: i64 = 7
-const LATER: u8 = SMALL as u8
+fix SMALL: i64 = 7
+fix LATER: u8 = SMALL as u8
 "#,
     );
     let directory = TemporaryDirectory::new();
@@ -65,94 +65,88 @@ const LATER: u8 = SMALL as u8
 fn constant_declarations_check_cycles_names_scope_and_unevaluated_expressions() {
     for (source, rule) in [
         (
-            "const A = A\nfn main() -> u8 { return 0 }",
+            "fix A = A\nfn main() -> u8 { return 0 }",
             "const.initializer",
         ),
         (
-            "const A = B\nconst B = A\nfn main() -> u8 { return 0 }",
+            "fix A = B\nfix B = A\nfn main() -> u8 { return 0 }",
             "const.initializer",
         ),
         (
-            "const A = true || B\nconst B = A\nfn main() -> u8 { return 0 }",
+            "fix A = true || B\nfix B = A\nfn main() -> u8 { return 0 }",
             "const.initializer",
         ),
         (
-            "const A = missing\nfn main() -> u8 { return 0 }",
+            "fix A = missing\nfn main() -> u8 { return 0 }",
             "const.expression",
         ),
         (
-            "const A = main\nfn main() -> u8 { return 0 }",
+            "fix A = main\nfn main() -> u8 { return 0 }",
             "const.expression",
         ),
         (
-            "const A = 1\nconst A = true\nfn main() -> u8 { return 0 }",
+            "fix A = 1\nfix A = true\nfn main() -> u8 { return 0 }",
             "decl.duplicate",
         ),
         (
-            "const main = 1\nfn main() -> u8 { return 0 }",
-            "name.constant",
+            "fix main = 1\nfn main() -> u8 { return 0 }",
+            "name.top-level-binding",
         ),
         (
             "fn value() -> u8 { return 1 }\nfn main() -> u8 { fix value = 2\nreturn 0 }",
             "decl.shadowing",
         ),
-        (
-            "fn main() -> u8 { const VALUE = 1\nreturn 0 }",
-            "decl.location",
-        ),
+        ("fn main() -> u8 { fix VALUE = 1\nreturn 0 }", "name.value"),
         (
             "fix value = 1\nfn main() -> u8 { return 0 }",
-            "decl.location",
+            "name.top-level-binding",
         ),
         (
-            "const VALUE = 1\nfn main() -> u8 { VALUE = 2\nreturn 0 }",
+            "fix VALUE = 1\nfn main() -> u8 { VALUE = 2\nreturn 0 }",
             "const.decl",
         ),
         (
-            "const VALUE = 1\nfn main() -> u8 { VALUE +%= 2\nreturn 0 }",
+            "fix VALUE = 1\nfn main() -> u8 { VALUE +%= 2\nreturn 0 }",
             "const.decl",
         ),
+        ("fix VALUE: u8\nfn main() -> u8 { return 0 }", "const.decl"),
         (
-            "const VALUE: u8\nfn main() -> u8 { return 0 }",
-            "const.decl",
-        ),
-        (
-            "const VALUE = ifexpr true { 1 } else { 2 }\nfn main() -> u8 { return 0 }",
+            "fix VALUE = ifexpr true { 1 } else { 2 }\nfn main() -> u8 { return 0 }",
             "const.expression",
         ),
         (
-            "const VALUE = true || expr { false }\nfn main() -> u8 { return 0 }",
+            "fix VALUE = true || expr { false }\nfn main() -> u8 { return 0 }",
             "const.expression",
         ),
         (
-            "const VALUE = true || unknown()\nfn main() -> u8 { return 0 }",
+            "fix VALUE = true || unknown()\nfn main() -> u8 { return 0 }",
             "const.expression",
         ),
         (
-            "const VALUE = 1 as u8 or return 0\nfn main() -> u8 { return 0 }",
+            "fix VALUE = 1 as u8 or return 0\nfn main() -> u8 { return 0 }",
             "const.expression",
         ),
         (
-            "const VALUE = true || ((300 as u8) == 0)\nfn main() -> u8 { return 0 }",
+            "fix VALUE = true || ((300 as u8) == 0)\nfn main() -> u8 { return 0 }",
             "const.cast-check",
         ),
         (
-            "const VALUE: u8 = false\nfn main() -> u8 { return 0 }",
+            "fix VALUE: u8 = false\nfn main() -> u8 { return 0 }",
             "type.expected",
         ),
         (
-            "const VALUE = true || (false == 1)\nfn main() -> u8 { return 0 }",
+            "fix VALUE = true || (false == 1)\nfn main() -> u8 { return 0 }",
             "type.expected",
         ),
         (
-            "const VALUE = 1\nfn main() -> u8 { return VALUE }",
+            "fix VALUE = 1\nfn main() -> u8 { return VALUE }",
             "type.expected",
         ),
         (
-            "const VALUE = 1 fn main() -> u8 { return 0 }",
+            "fix VALUE = 1 fn main() -> u8 { return 0 }",
             "src.statement-end",
         ),
-        ("const VALUE = 1", "prog.main"),
+        ("fix VALUE = 1", "prog.main"),
         (
             "fn main() -> u8 { return 0 }\nfn main() -> u8 { return 1 }",
             "prog.main",
@@ -170,16 +164,16 @@ fn constant_declarations_check_cycles_names_scope_and_unevaluated_expressions() 
 
 #[test]
 fn constant_arithmetic_diagnostics_are_reported_once_at_the_declaration() {
-    let source = b"const ALIAS = NEGATIVE\nconst NEGATIVE = -1\nfn main() -> u8 {\nfix first = ALIAS as f32\nfix second = NEGATIVE as f64\nreturn 0\n}";
+    let source = b"fix ALIAS = NEGATIVE\nfix NEGATIVE = -1\nfn main() -> u8 {\nfix first = ALIAS as f32\nfix second = NEGATIVE as f64\nreturn 0\n}";
     let result = suz::compile_with_mode(source, suz::ArithmeticMode::Warn).unwrap();
     assert_eq!(result.warnings.len(), 1);
     assert_eq!(
         (result.warnings[0].line, result.warnings[0].column),
-        (2, 18)
+        (2, 16)
     );
     let error = suz::compile_with_mode(source, suz::ArithmeticMode::Deny)
         .err()
         .unwrap();
-    assert_eq!((error.line, error.column), (2, 18));
+    assert_eq!((error.line, error.column), (2, 16));
     assert!(error.message().contains("diagnostic.arithmetic"));
 }

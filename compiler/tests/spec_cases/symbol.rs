@@ -2,13 +2,13 @@ use crate::test_util::compile_and_run_c23;
 
 #[test]
 fn templates_preserve_constant_dependencies_and_nested_value_scopes() {
-    let source = r#"const LABEL = `${PRODUCT} ${COUNT} ${READY}`
-const PRODUCT = `Suz`
-const COUNT: u8 = 3
-const READY = true
+    let source = r#"fix LABEL = `${PRODUCT} ${COUNT} ${READY}`
+fix PRODUCT = `Suz`
+fix COUNT: u8 = 3
+fix READY = true
 struct Label { value: symbol }
-const ITEM = Label { value: LABEL }
-const SAME = ITEM == Label { value: `Suz 3 true` }
+fix ITEM = Label { value: LABEL }
+fix SAME = ITEM == Label { value: `Suz 3 true` }
 fn main() -> u8 {
     if not SAME { return 1 }
     fix count: u8 = 2
@@ -31,7 +31,7 @@ fn main() -> u8 {
 fn template_contents_keep_diagnostics_and_scope_checks() {
     for (source, rule) in [
         (
-            "const A = `${B}`\nconst B = `${A}`\nfn main() -> u8 { return 0 }",
+            "fix A = `${B}`\nfix B = `${A}`\nfn main() -> u8 { return 0 }",
             "const.initializer",
         ),
         ("fn main() -> u8 { fix text = 1\nreturn 0 }", "src.ident"),
@@ -44,7 +44,7 @@ fn template_contents_keep_diagnostics_and_scope_checks() {
             "for.bound-reference",
         ),
         (
-            "const VALUE = `${1 / 0}`\nfn main() -> u8 { return 0 }",
+            "fix VALUE = `${1 / 0}`\nfn main() -> u8 { return 0 }",
             "arith.div-zero-always",
         ),
     ] {
@@ -75,7 +75,7 @@ fn float_templates(values: impl IntoIterator<Item = (String, &'static str)>) {
             literal
         };
         source.push_str(&format!(
-            "const VALUE_{index}: {ty} = {literal}\nconst SAVED_{index} = `${{VALUE_{index}}}`\n"
+            "fix VALUE_{index}: {ty} = {literal}\nfix SAVED_{index} = `${{VALUE_{index}}}`\n"
         ));
         body.push_str(&format!("{{\nfix dynamic = VALUE_{index}\nif SAVED_{index} != `${{dynamic}}` {{ log info `mismatch {index}: ${{SAVED_{index}}} ${{dynamic}}`\nreturn 1 }}\n}}\n"));
     }

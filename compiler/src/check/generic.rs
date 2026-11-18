@@ -61,13 +61,14 @@ impl Family {
 pub(super) struct CallTrace {
     pub parent: Option<std::rc::Rc<CallTrace>>,
     pub location: Location,
+    pub function_value: bool,
 }
 impl CallTrace {
-    pub fn locations(&self) -> Vec<Location> {
+    pub fn locations(&self) -> Vec<(Location, bool)> {
         let mut result = Vec::new();
         let mut trace = Some(self);
         while let Some(node) = trace {
-            result.push(node.location);
+            result.push((node.location, node.function_value));
             trace = node.parent.as_deref();
         }
         result.reverse();
@@ -105,6 +106,7 @@ impl Instances {
         types: GenericTypes,
         parent: &Option<std::rc::Rc<CallTrace>>,
         call: Location,
+        function_value: bool,
     ) -> usize {
         let key = (function, types);
         let id = if let Some(id) = self.ids.get(&key) {
@@ -120,6 +122,7 @@ impl Instances {
         let calls = std::rc::Rc::new(CallTrace {
             parent: parent.clone(),
             location: call,
+            function_value,
         });
         self.queue.push_back(Instance {
             function,
@@ -268,6 +271,13 @@ pub(super) fn call_operand_type(
     arguments: &[Expression],
     scope: &Scope,
 ) -> Option<Type> {
+    if let Some(binding) = scope.get(name) {
+        return if let Type::StaticFunction(id) | Type::Function(id) = binding.ty {
+            Some(scope.function_types.borrow()[id].result)
+        } else {
+            None
+        };
+    }
     let signature = scope.functions.get(name)?;
     let Some(family) = Family::of(signature.result) else {
         return Some(signature.result);

@@ -19,6 +19,7 @@ pub(in crate::check) enum Deferred {
         function: usize,
         types: Box<[Option<GenericTypes>; domain::NUMERIC_COMBINATIONS]>,
         location: Location,
+        function_value: bool,
     },
 }
 
@@ -89,6 +90,7 @@ impl Scope {
         int: Option<Type>,
         float: Option<Type>,
         location: Location,
+        function_value: bool,
     ) {
         let Some(log) = &self.deferred else {
             return;
@@ -111,6 +113,7 @@ impl Scope {
             function,
             types: Box::new(types),
             location,
+            function_value,
         });
     }
 }

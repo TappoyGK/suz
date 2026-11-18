@@ -10,10 +10,11 @@ use std::ops::Range;
 
 const KEYWORDS: &[&str] = &[
     "allow",
-    "const",
     "fix",
     "var",
     "fn",
+    "fnshape",
+    "static",
     "struct",
     "enum",
     "if",
@@ -36,6 +37,7 @@ const KEYWORDS: &[&str] = &[
     "len",
     "log",
     "expr",
+    "with",
     "true",
     "false",
     "nan",

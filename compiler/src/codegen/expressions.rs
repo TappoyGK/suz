@@ -30,6 +30,13 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
         return super::exact::stored(expr, context);
     }
     match expr.value {
+        Value::Closure(ref closure) => super::closures::emit(closure, expr.ty, context),
+        Value::Function(id) => format!("suz_fn_{id}"),
+        Value::FunctionBorrow(ref value) => super::functions::borrow(value, context),
+        Value::Invoke {
+            ref target,
+            ref arguments,
+        } => super::functions::invoke(target, arguments, context),
         Value::GenericNumericLiteral { .. } => {
             unreachable!("generic values are substituted before code generation")
         }
@@ -96,6 +103,10 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             Some(text) => super::text::constant(text, context),
             None => super::text::template(parts, location, context),
         },
+        Value::With {
+            ref target,
+            ref fields,
+        } => super::structs::with(target, fields, context),
         Value::Struct { ref fields } => {
             let crate::ast::Type::Struct(id) = expr.ty else {
                 unreachable!()
@@ -500,6 +511,7 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             result
         }
         Value::Local(id) => context.local(id),
+        Value::Global(id) => format!("suz_global_{id}"),
         Value::Integer { value, .. } if value == i64::MIN as i128 => {
             "(-INT64_C(9223372036854775807) - INT64_C(1))".into()
         }

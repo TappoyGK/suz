@@ -14,11 +14,11 @@ use crate::{
 // ここでは汎用型名を記述できる場所だけを検査する。
 // 名前・スコープ・制御・変換の意味は通常の検査が担当する。
 pub(crate) fn validate(program: &Program) -> Result<(), Diagnostic> {
-    for declaration in &program.constants {
+    for declaration in &program.bindings {
         if declaration.annotation.is_some_and(Type::generic) {
             return Err(place_error(
                 declaration.location,
-                "constant annotations cannot use int or float; use a concrete type or omit the annotation",
+                "top-level annotations cannot use int or float; use a concrete type or omit the annotation",
             ));
         }
         Places {

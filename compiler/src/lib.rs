@@ -136,6 +136,7 @@ impl Warning {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CompilationOptions {
     pub log_allow: bool,
+    pub deny_global_var: bool,
     pub arithmetic_mode: ArithmeticMode,
     pub text_pool_limit: TextPoolLimit,
 }
@@ -185,7 +186,7 @@ pub fn compile_with_options(
     source_name: &str,
     options: &CompilationOptions,
 ) -> Result<Compilation, Diagnostic> {
-    let (checked, warnings) = analyze(bytes, options.arithmetic_mode, options.log_allow)?;
+    let (checked, warnings) = analyze(bytes, options)?;
     Ok(Compilation {
         c: codegen::generate(&checked, source_name, options.text_pool_limit),
         warnings,
@@ -207,13 +208,12 @@ pub fn check_source_with_options(
     bytes: &[u8],
     options: &CompilationOptions,
 ) -> Result<Vec<Warning>, Diagnostic> {
-    analyze(bytes, options.arithmetic_mode, options.log_allow).map(|(_, warnings)| warnings)
+    analyze(bytes, options).map(|(_, warnings)| warnings)
 }
 
 fn analyze(
     bytes: &[u8],
-    mode: ArithmeticMode,
-    log_allow: bool,
+    options: &CompilationOptions,
 ) -> Result<(check::CheckedProgram, Vec<Warning>), Diagnostic> {
     let source = std::str::from_utf8(bytes).map_err(|error| {
         let prefix = std::str::from_utf8(&bytes[..error.valid_up_to()]).unwrap();
@@ -241,21 +241,24 @@ fn analyze(
     let source = source.replace("\r\n", "\n");
     let tokens = lexer::lex(&source)?;
     let program = parser::parse(&tokens)?;
+    // ASTは必要な名前や値を所有している。検査中にトークン列を保持しない。
+    drop(tokens);
     let checked = check::check(&program)?;
-    let warnings = warnings::collect(
-        &checked.unhandled_arithmetic,
-        &checked.comparison_warnings,
-        &checked.division_warnings,
-        &program.allows,
-        mode,
-        log_allow,
-    )?;
+    let warnings = warnings::collect(&checked, &program.allows, options)?;
     Ok((checked, warnings))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn statement_storage_stays_within_budget() {
+        // メモリ効率を維持するため、全ての文の格納サイズが再び肥大化する変更を検出する。
+        assert!(std::mem::size_of::<ast::Statement>() <= 200);
+        assert!(std::mem::size_of::<check::ir::CheckedStatement>() <= 208);
+    }
 
     #[test]
     fn accepts_comments_crlf_and_decimal_separators() {

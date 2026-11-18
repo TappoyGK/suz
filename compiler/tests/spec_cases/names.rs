@@ -13,10 +13,10 @@ fn declarations_reject_invalid_name_shapes_at_the_name() {
     let variants = ["ready", "Ready_Now", "_Ready", "Ready_"];
     for (prefix, suffix, names, rule) in [
         (
-            "const ",
+            "fix ",
             " = 1\nfn main() -> u8 { return 0 }",
             constants.as_slice(),
-            "name.constant",
+            "name.top-level-binding",
         ),
         (
             "fn ",
@@ -98,7 +98,7 @@ fn declarations_reject_invalid_name_shapes_at_the_name() {
 #[test]
 fn valid_name_boundaries_and_exact_references_are_preserved() {
     for source in [
-        "const N: u8 = 1\nconst N_2 = N\nfn main() -> u8 { return N_2 }",
+        "fix N: u8 = 1\nfix N_2 = N\nfn main() -> u8 { return N_2 }",
         "struct Vec2D { x2: u8 }\nfn main() -> u8 { fix v = Vec2D { x2: 0 }\nreturn v.x2 }",
         "enum Key: u8 { A, F1, ESC, PageUp }\nfn main() -> u8 { match Key.ESC { Key.A => {}\nKey.F1 => {}\nKey.ESC => {}\nKey.PageUp => {} }\nreturn 0 }",
         "fn main() -> u8 { fix value: u8 = matchexpr 1 { _ => 0 }\nreturn value }",
@@ -107,7 +107,7 @@ fn valid_name_boundaries_and_exact_references_are_preserved() {
     }
     for (source, rule) in [
         (
-            "const COUNT: u8 = 0\nfn main() -> u8 { return count }",
+            "fix COUNT: u8 = 0\nfn main() -> u8 { return count }",
             "decl.local-scope",
         ),
         (

@@ -6,14 +6,78 @@
 use super::{FixedToken, Parser};
 use crate::{
     Diagnostic, ErrorKind,
-    ast::{EnumDeclaration, Expression, FieldInitializer, StructDeclaration, StructField, Type},
+    ast::{
+        EnumDeclaration, Expression, ExpressionKind, FieldInitializer, StructDeclaration,
+        StructField, Type,
+    },
     lexer::{Kind, Token},
 };
 use std::collections::BTreeSet;
 
 impl Parser<'_, '_> {
+    // with固有の解析を分離し、再帰する式解析のスタック使用量を増やさない。
+    pub(super) fn with_expression(&mut self, target: Expression) -> Result<Expression, Diagnostic> {
+        let location = self.location();
+        // 丸括弧内では字句解析が改行トークンを省くため、物理行も確認する。
+        if self.tokens[self.cursor - 1].line != location.line {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "struct.with-line",
+                    "with must follow its target on the same line"
+                ),
+            ));
+        }
+        if self.restricted_condition {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "expr.struct-in-cond",
+                    "with expressions in conditions require parentheses"
+                ),
+            ));
+        }
+        self.cursor += 1;
+        self.check_height(target.height, location)?;
+        let previous_limit = self.limit_location.replace(location);
+        let fields = self.delimited_list("{", "}", Self::with_field_initializer);
+        self.limit_location = previous_limit;
+        let fields = fields?;
+        if fields.is_empty() {
+            return Err(location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("struct.with-fields", "with requires at least one field"),
+            ));
+        }
+        self.primary_node(
+            ExpressionKind::With {
+                target: Box::new(target),
+                fields,
+            },
+            location,
+        )
+    }
+
     pub(super) fn condition(&mut self) -> Result<Expression, Diagnostic> {
         self.restricted_expression(true)
+    }
+
+    fn with_field_initializer(&mut self) -> Result<FieldInitializer, Diagnostic> {
+        // pos.x: 式は受け付けず、内側のwith式で更新するよう案内する。
+        if self
+            .tokens
+            .get(self.cursor + 1)
+            .is_some_and(|token| token.kind == Kind::Symbol("."))
+        {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "struct.with-nested",
+                    "with accepts direct fields only; use a nested with expression"
+                ),
+            ));
+        }
+        self.field_initializer()
     }
 
     pub(super) fn parenthesized_expression(&mut self) -> Result<Expression, Diagnostic> {
@@ -64,17 +128,17 @@ impl Parser<'_, '_> {
         };
         let name = name.to_owned();
         self.cursor += 1;
-        if self.token().kind != Kind::Symbol(":") {
-            return Err(self.error(
-                ErrorKind::InvalidSource,
-                crate::diagnostic!("struct.literal", "field initializer requires ':'"),
-            ));
-        }
-        self.cursor += 1;
+        let value = if self.token().kind == Kind::Symbol(":") {
+            self.cursor += 1;
+            self.expression()?
+        } else {
+            // 省略形も通常の名前参照にして、名前解決・型変換・評価順序を共通にする。
+            self.node(ExpressionKind::Name(name.clone()), location)?
+        };
         Ok(FieldInitializer {
             name,
             location,
-            value: self.expression()?,
+            value,
         })
     }
 }
@@ -82,16 +146,20 @@ impl Parser<'_, '_> {
 pub(super) fn collect(
     tokens: &[Token<'_>],
     enums: &[EnumDeclaration],
+    fnshapes: &[crate::ast::FnShapeDeclaration],
 ) -> Result<Vec<StructDeclaration>, Diagnostic> {
     let mut p = Parser {
         allows: Vec::new(),
         tokens,
         enums,
         structs: &[],
+        fnshapes,
         restricted_condition: false,
         cursor: 0,
         constant_expression: false,
         in_value: false,
+        depth: 0,
+        limit_location: None,
     };
     let mut headers = Vec::<StructDeclaration>::new();
     let mut depth = 0usize;
@@ -108,7 +176,9 @@ pub(super) fn collect(
             };
             super::names::check(super::names::Shape::Type, name, location)?;
             let name = name.to_owned();
-            if enums.iter().any(|decl| decl.name == name)
+            // 列挙型との重複と同じく、構造体の名前の位置で報告する。
+            if fnshapes.iter().any(|decl| decl.name == name)
+                || enums.iter().any(|decl| decl.name == name)
                 || headers.iter().any(|decl| decl.name == name)
             {
                 return Err(location.error(

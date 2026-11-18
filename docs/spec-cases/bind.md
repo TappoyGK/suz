@@ -12,7 +12,7 @@
 
 ```suz
 struct Point { x: i32 }
-const ORIGIN = Point { x: 1 }
+fix ORIGIN = Point { x: 1 }
 
 fn main() -> u8 {
     ORIGIN.x = 2
@@ -41,8 +41,8 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
-const FIRST: u8 = SECOND
-const SECOND: u8 = FIRST
+fix FIRST: u8 = SECOND
+fix SECOND: u8 = FIRST
 
 fn main() -> u8 {
     return FIRST
@@ -61,7 +61,7 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[const.initializer]` | 2 | 20 |
+| 通常 | `[const.initializer]` | 2 | 18 |
 
 ### bind-003 構造体の定数とフィールド参照を定数式に使う
 
@@ -73,8 +73,8 @@ fn main() -> u8 {
 
 ```suz
 struct Point { x: i32, y: i32 }
-const ORIGIN = Point { x: 1, y: 2 }
-const TOTAL = ORIGIN.x + ORIGIN.y
+fix ORIGIN = Point { x: 1, y: 2 }
+fix TOTAL = ORIGIN.x + ORIGIN.y
 
 fn main() -> u8 {
     return TOTAL as u8
@@ -102,7 +102,7 @@ fn ready() -> bool {
     return true
 }
 
-const RESULT = true || ready()
+fix RESULT = true || ready()
 
 fn main() -> u8 {
     return ifexpr RESULT { 0 } else { 1 }
@@ -121,7 +121,7 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[const.expression]` | 5 | 24 |
+| 通常 | `[const.expression]` | 5 | 22 |
 
 ### bind-005 exprブロックを定数の初期値にする
 
@@ -132,7 +132,7 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
-const RESULT: u8 = expr { 3 }
+fix RESULT: u8 = expr { 3 }
 
 fn main() -> u8 {
     return RESULT
@@ -151,7 +151,7 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[const.expression]` | 1 | 20 |
+| 通常 | `[const.expression]` | 1 | 18 |
 
 ### bind-006 定数式の成功時は代替値を評価しない
 
@@ -160,7 +160,7 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
-const RESULT: u8 = (1 + 2) or (1 / (0 as u8))
+fix RESULT: u8 = (1 + 2) or (1 / (0 as u8))
 
 fn main() -> u8 {
     return RESULT
@@ -184,7 +184,7 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
-const RESULT: u8 = (255 + 1) or 7
+fix RESULT: u8 = (255 + 1) or 7
 
 fn main() -> u8 {
     return RESULT
@@ -197,14 +197,14 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | 正常終了 | 7 | 0 |
 
-### bind-008 constのオーバーフロー
+### bind-008 定数のオーバーフロー
 
 主根拠：`[const.evaluation]`。
 
 **ソース：**
 
 ```suz
-const VALUE: u8 = 255 + 1
+fix VALUE: u8 = 255 + 1
 fn main() -> u8 { return 0 }
 ```
 
@@ -220,7 +220,7 @@ fn main() -> u8 { return 0 }
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[const.evaluation]` | 1 | 23 |
+| 通常 | `[const.evaluation]` | 1 | 21 |
 
 ### bind-009 実行しない代替値にも型検査を適用
 
@@ -231,7 +231,7 @@ fn main() -> u8 { return 0 }
 **ソース：**
 
 ```suz
-const VALUE: u8 = (1 + 2) or false
+fix VALUE: u8 = (1 + 2) or false
 fn main() -> u8 { return 0 }
 ```
 
@@ -247,7 +247,7 @@ fn main() -> u8 { return 0 }
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[type.expected]` | 1 | 30 |
+| 通常 | `[type.expected]` | 1 | 28 |
 
 ### bind-010 定数変換の失敗
 
@@ -285,7 +285,7 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
-const RESULT = true || ((300 as u8 or 0) == 0)
+fix RESULT = true || ((300 as u8 or 0) == 0)
 
 fn main() -> u8 {
     return ifexpr RESULT { 0 } else { 1 }
@@ -309,7 +309,7 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
-const RESULT = true || ((300 as u8) == 0)
+fix RESULT = true || ((300 as u8) == 0)
 
 fn main() -> u8 {
     return ifexpr RESULT { 0 } else { 1 }
@@ -328,7 +328,7 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[const.cast-check]` | 1 | 30 |
+| 通常 | `[const.cast-check]` | 1 | 28 |
 
 ### bind-013 varの初期値を省略する
 
@@ -821,3 +821,82 @@ fn main() -> u8 {
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
 | 通常 | `[assign.statement]` | 3 | 25 |
+
+### bind-030 大域変数を関数から書き換え、コピーした値は保持する
+
+主根拠：`[top.var-use]`。
+
+補助根拠：`[top.var]`、`[value.copy-equivalent]`、`[allow.clause]`。
+
+**ソース：**
+
+```suz
+var COUNT: u8 = INITIAL allow [diagnostic.global-var: program counter]
+fix INITIAL: u8 = 1
+fn update() -> void { COUNT += 1 }
+fn main() -> u8 {
+    fix before = COUNT
+    update()
+    if before != 1 || COUNT != 2 { return 1 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### bind-031 大域変数の名前は定数式に使えない
+
+主根拠：`[top.var]`。
+
+補助根拠：`[const.expression]`。
+
+**ソース：**
+
+```suz
+var FIRST: u8 = SECOND
+var SECOND: u8 = 1
+fn main() -> u8 {
+    FIRST = 2
+    SECOND = 3
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[const.expression]` | 1 | 17 |
+
+### bind-032 代入されない大域変数を拒否する
+
+主根拠：`[var.never-reassigned]`。
+
+**ソース：**
+
+```suz
+var COUNT: u8 = 1
+fn main() -> u8 { return COUNT }
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[var.never-reassigned]` | 1 | 5 |

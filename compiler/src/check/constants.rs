@@ -334,6 +334,7 @@ fn constant_bool_raw(expr: &CheckedExpression) -> Option<bool> {
                     }
                 } else {
                     match left.ty {
+                        Type::StaticFunction(_) | Type::Function(_) => return None,
                         Type::GenericInt | Type::GenericFloat | Type::Numeric(_) => return None,
                         Type::Symbol | Type::Text => {
                             let (Value::Text { text: a, .. }, Value::Text { text: b, .. }) =
@@ -420,6 +421,18 @@ fn equal_structs(left: &CheckedExpression, right: &CheckedExpression) -> Option<
 }
 
 fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
+    if let Value::With { target, fields } = &expr.value {
+        let mut result = evaluate_raw(target)?;
+        let Value::Struct { fields: saved } = &mut result.value else {
+            return None;
+        };
+        // 差し替え前の値も含めて左辺を評価した後、記述順に初期値を評価する。
+        for (index, value) in fields {
+            let value = evaluate_raw(value)?;
+            saved.iter_mut().find(|(field, _)| field == index)?.1 = value;
+        }
+        return Some(result);
+    }
     if let Value::Field { target, index } = &expr.value {
         return constant_field(target, *index);
     }
@@ -432,6 +445,10 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
         return slice_value(expr);
     }
     let value = match expr.ty {
+        Type::StaticFunction(_) | Type::Function(_) => match expr.value {
+            Value::Function(_) => expr.value.clone(),
+            _ => return None,
+        },
         Type::GenericInt | Type::GenericFloat | Type::Numeric(_) => return None,
         Type::Symbol | Type::Text => match &expr.value {
             Value::Text { .. } => expr.value.clone(),
@@ -648,6 +665,12 @@ fn validate_evaluation(expr: &CheckedExpression) -> Result<(), Diagnostic> {
                 if let crate::ast::TemplatePart::Value(value) = part {
                     validate_evaluation(value)?;
                 }
+            }
+        }
+        Value::With { target, fields } => {
+            validate_evaluation(target)?;
+            for (_, value) in fields {
+                validate_evaluation(value)?;
             }
         }
         Value::Struct { fields } => {

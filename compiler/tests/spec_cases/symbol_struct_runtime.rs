@@ -114,7 +114,7 @@ fn constant_struct_symbol_results_keep_static_payloads_in_bindings_and_constants
     let content = "x".repeat(1000);
     let source = format!(
         r#"struct Label {{ name: symbol }}
-const ITEM = `Label {{ name: \`{content}\` }}` as Label or Label {{ name: `` }}
+fix ITEM = `Label {{ name: \`{content}\` }}` as Label or Label {{ name: `` }}
 fn from_const() -> symbol {{ return ITEM.name }}
 fn from_expression() -> symbol {{
     fix item = `Label {{ name: \`{content}\` }}` as Label or Label {{ name: `` }}

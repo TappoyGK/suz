@@ -94,7 +94,7 @@ pub(in crate::check) fn check(
                             | Type::Struct(_)
                     )
                 };
-                if !valid {
+                if !valid || bindings.contains_function(target) {
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
                         if *wrap {

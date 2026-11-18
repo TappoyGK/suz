@@ -25,6 +25,7 @@ impl Parser<'_, '_> {
         };
         Ok((
             Expression {
+                height: super::nesting::block_height(&statements).max(1 + value.height),
                 kind: ExpressionKind::Block {
                     statements,
                     value: Box::new(value),
@@ -175,7 +176,9 @@ impl Parser<'_, '_> {
         if self.token().kind == Kind::Symbol("{") {
             Ok(self.block()?.0)
         } else {
-            Ok(vec![Statement::Expression(self.expression()?)])
+            Ok(vec![Statement::Expression(
+                self.nested(self.location(), Self::expression)?,
+            )])
         }
     }
 
@@ -195,7 +198,9 @@ impl Parser<'_, '_> {
                     ),
                 ));
             }
-            self.expression()
+            let mut value = self.nested(self.location(), Self::expression)?;
+            value.height += 1;
+            Ok(value)
         }
     }
 }

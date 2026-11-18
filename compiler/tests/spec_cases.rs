@@ -16,6 +16,8 @@ mod casts;
 mod characters;
 #[path = "spec_cases/cli.rs"]
 mod cli;
+#[path = "spec_cases/closures.rs"]
+mod closures;
 #[path = "spec_cases/constants.rs"]
 mod constants;
 #[path = "spec_cases/diagnostics.rs"]
@@ -36,12 +38,16 @@ mod float_logs;
 mod floats;
 #[path = "spec_cases/format.rs"]
 mod format;
+#[path = "spec_cases/function_values.rs"]
+mod function_values;
 #[path = "spec_cases/functions.rs"]
 mod functions;
 #[path = "spec_cases/generic_numeric.rs"]
 mod generic_numeric;
 #[path = "spec_cases/generic_properties.rs"]
 mod generic_properties;
+#[path = "spec_cases/globals.rs"]
+mod globals;
 #[path = "support/integer_bounds.rs"]
 mod integer_bounds;
 #[path = "spec_cases/invalid_inputs.rs"]
@@ -54,6 +60,8 @@ mod matches;
 mod names;
 #[path = "spec_cases/native_cli.rs"]
 mod native_cli;
+#[path = "spec_cases/nesting.rs"]
+mod nesting;
 #[path = "spec_cases/numeric.rs"]
 mod numeric;
 #[path = "spec_cases/panics.rs"]

@@ -214,13 +214,13 @@ fn constant_views_preserve_diagnostics_and_lazy_failure_evaluation() {
     let function = compiled.c.split("int main(void)").next().unwrap();
     assert!(!function.contains("suz_text_intern("));
     for source in [
-        "const PART = `abc`[:1] or (`x`[1 / (0 as u8):] or ``)\nfn main() -> u8 { return 0 }",
-        "const PART = `abc`[-1:] or `fallback`\nfn main() -> u8 { return 0 }",
+        "fix PART = `abc`[:1] or (`x`[1 / (0 as u8):] or ``)\nfn main() -> u8 { return 0 }",
+        "fix PART = `abc`[-1:] or `fallback`\nfn main() -> u8 { return 0 }",
     ] {
         suz::compile(source.as_bytes()).unwrap();
     }
     let error = suz::compile(
-        b"const PART = `abc`[-1:] or (`x`[1 / (0 as u8):] or ``)\nfn main() -> u8 { return 0 }",
+        b"fix PART = `abc`[-1:] or (`x`[1 / (0 as u8):] or ``)\nfn main() -> u8 { return 0 }",
     )
     .unwrap_err();
     assert!(error.message().contains("[const.evaluation]"));

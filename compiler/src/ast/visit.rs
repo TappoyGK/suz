@@ -56,12 +56,26 @@ pub(crate) fn walk_expression<V: Visitor + ?Sized>(
                 }
             }
         }
+        ExpressionKind::With { target, fields } => {
+            visitor.expression(target)?;
+            for field in fields {
+                visitor.expression(&field.value)?;
+            }
+        }
         ExpressionKind::Struct { fields, .. } => {
             for field in fields {
                 visitor.expression(&field.value)?;
             }
         }
         ExpressionKind::Field { target, .. } => visitor.expression(target)?,
+        ExpressionKind::Closure(closure) => visitor.scope(&closure.function.statements, None)?,
+        ExpressionKind::FunctionValue(_) => {}
+        ExpressionKind::Invoke { target, arguments } => {
+            visitor.expression(target)?;
+            for argument in arguments {
+                visitor.expression(argument)?;
+            }
+        }
         ExpressionKind::Call { arguments, .. } => {
             for argument in arguments {
                 visitor.expression(argument)?;

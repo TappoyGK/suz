@@ -30,6 +30,7 @@ pub(super) fn emit(
         captures.iter().map(|(id, _, _)| *id).collect(),
     );
     let saved_temporaries = std::mem::take(&mut context.temporaries);
+    let saved_environments = std::mem::take(&mut context.closure_environments);
     let mut body = String::new();
     emit_block(&mut body, statements, 1, &mut 0, context);
     writeln!(body, "    return {};", expression(value, context)).unwrap();
@@ -56,11 +57,15 @@ pub(super) fn emit(
     for (index, ty) in context.temporaries.iter().enumerate() {
         writeln!(function, "    {} suz_cmp_{index};", ty.c_name()).unwrap();
     }
+    for declaration in &context.closure_environments {
+        writeln!(function, "    {declaration}").unwrap();
+    }
     function.push_str(&body);
     function.push_str("}\n\n");
     // 入れ子の補助関数は、呼び出す側より前に出力済み。
     context.functions.push_str(&function);
     context.temporaries = saved_temporaries;
+    context.closure_environments = saved_environments;
     context.references = saved_references;
     format!("suz_block_{id}({arguments})")
 }

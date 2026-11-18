@@ -5,10 +5,10 @@ use std::fs;
 fn length_values_casts_and_mixed_positions_execute() {
     let source = r#"
 struct Size { count: len_t }
-const PARSED = `2147483647` as len_t or 0
-const REJECTED = `2147483648` as len_t or 7
-const COUNT = len `あ😀x`
-const VIEW = len (`あ😀x`[1:] or ``)
+fix PARSED = `2147483647` as len_t or 0
+fix REJECTED = `2147483648` as len_t or 7
+fix COUNT = len `あ😀x`
+fix VIEW = len (`あ😀x`[1:] or ``)
 fn identity(x: int) -> int { return x }
 fn size(t: text) -> len_t { return len t }
 fn parse(t: text) -> len_t { return t as len_t or 7 }

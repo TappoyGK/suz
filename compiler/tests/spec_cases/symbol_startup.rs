@@ -3,8 +3,8 @@ use std::process::Command;
 
 #[test]
 fn startup_registers_unused_folded_and_pattern_symbols_before_direct_access() {
-    let source = r#"const UNUSED = `unused`
-const FOLDED = `${`fold`}${`ed`}`
+    let source = r#"fix UNUSED = `unused`
+fix FOLDED = `${`fold`}${`ed`}`
 fn unused() -> symbol { return `not called` }
 fn compare(t: symbol) -> u8 {
     var count: u8 = 0
@@ -67,7 +67,7 @@ int main(void) {
 #[test]
 fn startup_failure_points_to_main_keyword_before_main_body_runs() {
     let source =
-        "const UNUSED = `not used`\n  fn    main() -> u8 { log info `main entered`\nreturn 0 }";
+        "fix UNUSED = `not used`\n  fn    main() -> u8 { log info `main entered`\nreturn 0 }";
     let driver = "int main(void) { text_fail_after = 0; text_expected_panic_calls = 1; return suz_program(); }";
     let (_directory, executable) = build_with_environment(source, driver);
     let result = Command::new(executable).output().unwrap();

@@ -74,7 +74,7 @@ fn generic_numeric_types_reject_invalid_places_names_and_instantiations() {
     // @は診断の期待位置を示し、構文解析の前に取り除く。
     for (marked, rule) in [
         (
-            "const @N: int = 1\nfn main() -> u8 { return 0 }",
+            "fix @N: int = 1\nfn main() -> u8 { return 0 }",
             "num.places",
         ),
         (

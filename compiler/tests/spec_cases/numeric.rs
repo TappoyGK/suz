@@ -40,7 +40,7 @@ fn main() -> u8 {
 
 #[test]
 fn numeric_comparisons_keep_integer_precision_and_ieee_special_values() {
-    let source = r#"const EXACT = 18_446_744_073_709_551_615 * 18_446_744_073_709_551_615 > 9_007_199_254_740_992.0
+    let source = r#"fix EXACT = 18_446_744_073_709_551_615 * 18_446_744_073_709_551_615 > 9_007_199_254_740_992.0
 fn main() -> u8 {
     fix i: u64 = 9_007_199_254_740_993
     fix f: f64 = 9_007_199_254_740_992.0
@@ -89,7 +89,7 @@ fn exact_width_and_storage_rules_reject_invalid_programs() {
             "expr.cast-handler",
         ),
     ] {
-        let source = format!("const SMALL: u8 = 1\nfn main() -> u8 {{\n{body}\nreturn 0\n}}");
+        let source = format!("fix SMALL: u8 = 1\nfn main() -> u8 {{\n{body}\nreturn 0\n}}");
         let err = suz::compile(source.as_bytes()).unwrap_err();
         assert!(
             err.message().contains(&format!("[{rule}]")),
@@ -150,12 +150,12 @@ fn widening_and_exact_comparisons_accept_previously_rejected_programs() {
 #[test]
 fn constant_exact_operations_check_storage_after_the_whole_expression() {
     for source in [
-        "const LO: i8 = -128\nconst BAD = -(-LO) or 7\nfn main() -> u8 { return 0 }",
-        "const BAD: i8 = -128 % -1\nfn main() -> u8 { return 0 }",
-        "const BAD: u8 = (1 / 0) + 1 or 7\nfn main() -> u8 { return 0 }",
-        "const BAD: u8 = ((255 + 1) * 0) or 7\nfn main() -> u8 { return 0 }",
-        "const MAX: u8 = 255\nconst BAD = false || (MAX + 1 == 0)\nfn main() -> u8 { return 0 }",
-        "const MAX: u8 = 255\nconst BAD = (MAX + 1) as u16\nfn main() -> u8 { return 0 }",
+        "fix LO: i8 = -128\nfix BAD = -(-LO) or 7\nfn main() -> u8 { return 0 }",
+        "fix BAD: i8 = -128 % -1\nfn main() -> u8 { return 0 }",
+        "fix BAD: u8 = (1 / 0) + 1 or 7\nfn main() -> u8 { return 0 }",
+        "fix BAD: u8 = ((255 + 1) * 0) or 7\nfn main() -> u8 { return 0 }",
+        "fix MAX: u8 = 255\nfix BAD = false || (MAX + 1 == 0)\nfn main() -> u8 { return 0 }",
+        "fix MAX: u8 = 255\nfix BAD = (MAX + 1) as u16\nfn main() -> u8 { return 0 }",
     ] {
         suz::compile(source.as_bytes()).unwrap();
     }
@@ -163,7 +163,7 @@ fn constant_exact_operations_check_storage_after_the_whole_expression() {
 
 #[test]
 fn mixed_arithmetic_preserves_integer_subtrees_and_warns_at_each_division() {
-    let source = r#"const WIDTH: i32 = 10
+    let source = r#"fix WIDTH: i32 = 10
 fn main() -> u8 {
     fix frame: i32 = 3
     fix frames: i32 = 10
@@ -208,8 +208,8 @@ fn main() -> u8 {
 
 #[test]
 fn exact_boundaries_agree_in_constants_and_runtime_conversions() {
-    let source = r#"const MAX: u64 = 18_446_744_073_709_551_615
-const EXPECTED = `${MAX * MAX},${(MAX * MAX) as% u8},${(MAX * MAX) as f32},${(MAX * MAX) as f64 or 0.0}`
+    let source = r#"fix MAX: u64 = 18_446_744_073_709_551_615
+fix EXPECTED = `${MAX * MAX},${(MAX * MAX) as% u8},${(MAX * MAX) as f32},${(MAX * MAX) as f64 or 0.0}`
 fn main() -> u8 {
     fix max: u64 = MAX
     fix min: i64 = -9_223_372_036_854_775_808
@@ -277,7 +277,7 @@ fn widening_is_not_applied_to_loop_bounds_or_match_patterns() {
         "fix x: u16 = 1\nmatch x { SMALL => {}\n_ => {} }",
         "fix x: u16 = 1\nfix result = matchexpr x { SMALL => 1\n_ => 2 }",
     ] {
-        let source = format!("const SMALL: u8 = 1\nfn main() -> u8 {{\n{body}\nreturn 0\n}}");
+        let source = format!("fix SMALL: u8 = 1\nfn main() -> u8 {{\n{body}\nreturn 0\n}}");
         let err = suz::compile(source.as_bytes()).unwrap_err();
         assert!(
             err.message().contains("[type.expected]"),

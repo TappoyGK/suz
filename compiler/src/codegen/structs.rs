@@ -27,10 +27,30 @@ pub(super) fn literal(
     format!("({})", setup.join(", "))
 }
 
+pub(super) fn with(
+    target: &CheckedExpression,
+    fields: &[(usize, CheckedExpression)],
+    context: &mut ExpressionContext,
+) -> String {
+    let index = context.temporaries.len();
+    context.temporaries.push(target.ty);
+    // 初期値の呼び出しがコピー元を書き換える前に、構造体全体を保存する。
+    let mut setup = vec![format!("suz_cmp_{index} = {}", expression(target, context))];
+    for (field, value) in fields {
+        setup.push(format!(
+            "suz_cmp_{index}.suz_field_{field} = {}",
+            expression(value, context)
+        ));
+    }
+    setup.push(format!("suz_cmp_{index}"));
+    format!("({})", setup.join(", "))
+}
+
 pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
     for id in 0..context.structs.len() {
         writeln!(c, "typedef struct suz_struct_{id} suz_struct_{id};").unwrap();
     }
+    super::functions::type_declarations(c, context);
     fn declaration(
         c: &mut String,
         id: usize,

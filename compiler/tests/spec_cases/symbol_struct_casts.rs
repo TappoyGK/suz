@@ -4,11 +4,11 @@ use crate::test_util::compile_and_run_c23;
 fn struct_symbol_casts_preserve_constants_scalar_types_and_lazy_evaluation() {
     let source = r#"enum Mode: u8 { First, Last }
 struct Values { low: i8, high: u64, small: f32, wide: f64, flag: bool, mode: Mode, label: symbol }
-const INPUT = `Values { low: -128, high: 18446744073709551615, small: 1.0000000596046447753906250000000001, wide: -0, flag: true, mode: Mode.Last, label: \`a\\0b\` }`
-const FALLBACK = Values { low: 0, high: 0, small: 0.0, wide: 0.0, flag: false, mode: Mode.First, label: `` }
-const SAVED = INPUT as Values or FALLBACK
-const FAILED = `bad` as Values or SAVED
-const SHORT = false && ((`bad` as Values or Values { low: 1 / (0 as u8), high: 0, small: 0.0, wide: 0.0, flag: false, mode: Mode.First, label: `` }).flag)
+fix INPUT = `Values { low: -128, high: 18446744073709551615, small: 1.0000000596046447753906250000000001, wide: -0, flag: true, mode: Mode.Last, label: \`a\\0b\` }`
+fix FALLBACK = Values { low: 0, high: 0, small: 0.0, wide: 0.0, flag: false, mode: Mode.First, label: `` }
+fix SAVED = INPUT as Values or FALLBACK
+fix FAILED = `bad` as Values or SAVED
+fix SHORT = false && ((`bad` as Values or Values { low: 1 / (0 as u8), high: 0, small: 0.0, wide: 0.0, flag: false, mode: Mode.First, label: `` }).flag)
 fn source(value: symbol) -> symbol { log info `source`
     return value
 }
@@ -39,10 +39,10 @@ fn main() -> u8 {
 fn struct_symbol_casts_check_whole_input_layout_and_all_escape_forms() {
     let source = r#"enum Mode: u8 { First, Last }
 struct Label { name: symbol, mode: Mode }
-const DEFAULT = Label { name: `fallback`, mode: Mode.First }
+fix DEFAULT = Label { name: `fallback`, mode: Mode.First }
 struct Pair { left: Label, right: Label }
-const PAIR_INPUT = `Pair { right: Label { mode: Mode.Last, name: \`right\` }, left: Label { name: \`left\`, mode: Mode.First } }`
-const PAIR = PAIR_INPUT as Pair or Pair { left: DEFAULT, right: DEFAULT }
+fix PAIR_INPUT = `Pair { right: Label { mode: Mode.Last, name: \`right\` }, left: Label { name: \`left\`, mode: Mode.First } }`
+fix PAIR = PAIR_INPUT as Pair or Pair { left: DEFAULT, right: DEFAULT }
 fn invalid(value: symbol) -> bool {
     return (value as Label or DEFAULT) == DEFAULT
 }
@@ -81,7 +81,7 @@ fn main() -> u8 {
 fn struct_symbol_casts_require_handlers_and_validate_constant_fallbacks() {
     for (body, rule) in [
         (
-            "const V = `Item { value: 1 }` as Item\nfn main() -> u8 { return 0 }",
+            "fix V = `Item { value: 1 }` as Item\nfn main() -> u8 { return 0 }",
             "symbol.cast-handler",
         ),
         (
@@ -93,7 +93,7 @@ fn struct_symbol_casts_require_handlers_and_validate_constant_fallbacks() {
             "type.expected",
         ),
         (
-            "const V = `bad` as Item or Item { value: 1 / 0 }\nfn main() -> u8 { return 0 }",
+            "fix V = `bad` as Item or Item { value: 1 / 0 }\nfn main() -> u8 { return 0 }",
             "arith.div-zero-always",
         ),
         (
