@@ -181,15 +181,15 @@ pub(super) fn checks(c: &mut String, program: &CheckedProgram, context: &Express
         c.push_str("_Static_assert(sizeof(long) <= 8 && sizeof(size_t) <= 8, \"Suz FFI requires C integers of at most 64 bits\");\n");
     }
     if context.uses_c_byte_len {
-        // 64ビットsize_tでは検査自体を残さず、狭い対象だけで切り詰めを防ぐ。
-        c.push_str(r#"static inline size_t suz_ffi_byte_len(uint64_t length, const char *source, size_t line, size_t column) {
-#if SIZE_MAX < UINT64_MAX
+        // 64ビットsize_tでは最適化なしでも呼び出しを残さず、狭い対象だけで切り詰めを防ぐ。
+        c.push_str(r#"#if SIZE_MAX < UINT64_MAX
+static inline size_t suz_ffi_byte_len(uint64_t length, const char *source, size_t line, size_t column) {
     if (length > SIZE_MAX) suz_panic(source, line, column, "byte length exceeds size_t [rt.ffi-byte-len]");
-#else
-    (void)source; (void)line; (void)column;
-#endif
     return (size_t)length;
 }
+#else
+#define suz_ffi_byte_len(length, source, line, column) ((size_t)(length))
+#endif
 "#);
     }
     for check in &context.c_literal_checks {

@@ -243,3 +243,14 @@ pub(super) fn bytes(
         }
     })
 }
+
+/// Cの対象環境で値が決まる部分式は、Suz側で評価する定数初期値に含めない。
+pub(super) fn uses_c_environment(expr: &CheckedExpression) -> bool {
+    if matches!(expr.ty, Type::CInteger(_)) {
+        return true;
+    }
+    let mut found = false;
+    expr.value
+        .visit_constant_children(&mut |child| found |= uses_c_environment(child));
+    found
+}
