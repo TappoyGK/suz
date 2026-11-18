@@ -201,7 +201,7 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
                     ErrorKind::InvalidSource,
                     crate::diagnostic!(
                         "decl.top-level",
-                        "expected a fix, var, fn, struct or enum declaration"
+                        "expected a fix, var, fn, fnshape, struct or enum declaration"
                     ),
                 ));
             }
