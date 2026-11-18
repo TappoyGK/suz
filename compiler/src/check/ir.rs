@@ -196,6 +196,11 @@ impl IntegerOperation {
 /// 値ブロックには捕捉した変数を、汎用リテラルには具体化まで必要な綴りを残す。
 #[derive(Clone)]
 pub(crate) enum Value {
+    /// 値は既知だが対象C環境の範囲は未確定。生成Cで静的に検査する。
+    CIntegerLiteral {
+        value: crate::numeric::Int,
+        location: Location,
+    },
     Panic {
         parts: Vec<crate::ast::TemplatePart<CheckedExpression>>,
         location: Location,
@@ -390,7 +395,7 @@ macro_rules! constant_children_visitor {
                     }
                     return handler(h, visit);
                 }
-                Self::GenericNumericLiteral { .. } | Self::Integer { .. } | Self::Float(_)
+                Self::CIntegerLiteral { .. } | Self::GenericNumericLiteral { .. } | Self::Integer { .. } | Self::Float(_)
                 | Self::Function(_) | Self::Bool(_) | Self::Text { .. } => {}
                 Self::Panic { .. } | Self::HandledCall { .. } | Self::Closure(_) | Self::Local(_) | Self::Global(_) | Self::Void | Self::Invoke { .. } | Self::Call { .. } | Self::Block { .. }
                 | Self::Match { .. } | Self::If { .. } | Self::CastReturn { .. } => return false,

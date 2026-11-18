@@ -266,14 +266,13 @@ fn check_statement(
             });
         }
         Statement::Unsafe(inner) => {
-            let mut scope = context.bindings.clone();
-            scope.unsafe_block = true;
-            context.output.push(CheckedStatement::Block(block(
-                inner,
-                &mut scope,
-                context.next_id,
-                context.loop_depth,
-            )?));
+            // スコープを複製すると、外側の変数への再代入の記録まで分離される。
+            // 通常のブロックと同じ束縛を使い、unsafeの状態だけを一時的に切り替える。
+            let previous = context.bindings.unsafe_block;
+            context.bindings.unsafe_block = true;
+            let checked = block(inner, context.bindings, context.next_id, context.loop_depth);
+            context.bindings.unsafe_block = previous;
+            context.output.push(CheckedStatement::Block(checked?));
         }
         Statement::Block(inner) => {
             context.output.push(CheckedStatement::Block(block(

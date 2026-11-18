@@ -33,6 +33,8 @@ struct RecoveryTarget {
 
 #[derive(Default)]
 struct ExpressionContext {
+    uses_c_integer: bool,
+    c_literal_checks: BTreeSet<String>,
     log_level: crate::LogLevel,
     log_ignore: bool,
     function_result: Option<crate::ast::Type>,
@@ -137,6 +139,7 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
         .iter()
         .map(|function| functions::emit(function, &mut context))
         .collect();
+    ffi::checks(&mut c, program, &context);
     text_structure::prepare(&mut context);
     helpers::emit(&mut c, &context);
     structs::emit(&mut c, &context);

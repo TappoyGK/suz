@@ -62,7 +62,7 @@ use super::{
     ir::{CheckedExpression, Value},
     scope::Scope,
 };
-use crate::ast::{Expression, ExpressionKind, FailureHandler, Location, TemplatePart, Type};
+use crate::ast::{Expression, ExpressionKind, FailureHandler, Location, Type};
 
 /// C固有型は文字列パーサーのスキーマに含めない。構造体内でも同じ制約を適用する。
 pub(super) fn contains_c_type(ty: Type, scope: &Scope) -> bool {
@@ -80,31 +80,37 @@ pub(super) fn contains_c_type(ty: Type, scope: &Scope) -> bool {
 pub(super) fn literal(
     expr: &Expression,
     target: Type,
-    scope: &Scope,
 ) -> Result<Option<CheckedExpression>, Diagnostic> {
-    match &expr.kind {
-        ExpressionKind::Group(inner) => return literal(inner, target, scope),
-        ExpressionKind::Integer { .. } => {}
-        ExpressionKind::Negate(inner) if matches!(inner.kind, ExpressionKind::Integer { .. }) => {}
+    let value = match &expr.kind {
+        ExpressionKind::Group(inner) => return literal(inner, target),
+        ExpressionKind::Integer { digits, negative } => crate::numeric::Int::new(
+            *negative,
+            digits.parse().map_err(|_| {
+                expr.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "ffi.literal-range",
+                        "integer literal exceeds every supported C integer range"
+                    ),
+                )
+            })?,
+        ),
+        ExpressionKind::Negate(inner) if matches!(inner.kind, ExpressionKind::Integer { .. }) => {
+            let Some(inner) = literal(inner, target)? else {
+                unreachable!()
+            };
+            let Value::CIntegerLiteral { value, .. } = inner.value else {
+                unreachable!()
+            };
+            value.neg()
+        }
         _ => return Ok(None),
-    }
-    let operand = super::exact::comparison_value(expr, scope)?;
+    };
     Ok(Some(CheckedExpression {
         ty: target,
-        value: Value::CheckedCast {
+        value: Value::CIntegerLiteral {
+            value,
             location: expr.location,
-            constant_struct: None,
-            wrap: false,
-            operand: Box::new(operand),
-            fallback: Box::new(CheckedExpression {
-                ty: target,
-                value: Value::Panic {
-                    location: expr.location,
-                    parts: vec![TemplatePart::Text(
-                        "[ffi.literal-range] integer literal is outside the C type range".into(),
-                    )],
-                },
-            }),
         },
     }))
 }

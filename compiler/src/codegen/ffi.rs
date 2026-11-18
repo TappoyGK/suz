@@ -1,13 +1,12 @@
 //! Cヘッダーとの型照合と、C環境の整数範囲に依存する変換を生成する。
 use super::{ExpressionContext, expressions::expression};
 use crate::{
-    ast::{IntegerType, Type},
+    ast::{IntegerType, Location, Type},
     check::{CheckedExpression, ir::CheckedProgram},
 };
 use std::fmt::Write;
 
 pub(super) fn declarations(c: &mut String, program: &CheckedProgram) {
-    c.push_str("_Static_assert(sizeof(long) <= 8 && sizeof(size_t) <= 8, \"Suz FFI requires C integers of at most 64 bits\");\n");
     if program.externs.is_empty() {
         return;
     }
@@ -31,11 +30,11 @@ pub(super) fn declarations(c: &mut String, program: &CheckedProgram) {
         };
         writeln!(
             c,
-            "#ifdef {}\n#error \"[ffi.header-type] function macros are not supported\"\n#endif",
+            "#ifdef {}\n#error \"[tool.ffi-header] function macros are not supported\"\n#endif",
             f.c_name
         )
         .unwrap();
-        writeln!(c, "_Static_assert(__builtin_types_compatible_p(__typeof__(&{}), {} (*)({types})), \"[ffi.header-type] incompatible C function: {}\");", f.c_name, f.result.c_name(), f.c_name).unwrap();
+        writeln!(c, "_Static_assert(__builtin_types_compatible_p(__typeof__(&{}), {} (*)({types})), \"[tool.ffi-header] incompatible C function: {}\");", f.c_name, f.result.c_name(), f.c_name).unwrap();
         let args = f
             .parameters
             .iter()
@@ -151,4 +150,60 @@ pub(super) fn truncate(
         "({name} = {value} & {mask}, ({}){converted})",
         target.c_name()
     )
+}
+
+/// 宣言だけのC型も含めて検出し、FFIを使わないプログラムには制約を追加しない。
+pub(super) fn checks(c: &mut String, program: &CheckedProgram, context: &ExpressionContext) {
+    let c_integer = |ty: &Type| matches!(ty, Type::CInteger(_));
+    let uses_c_integer = context.uses_c_integer
+        || program
+            .functions
+            .iter()
+            .any(|f| c_integer(&f.result) || f.parameters.iter().any(c_integer))
+        || program
+            .function_types
+            .iter()
+            .any(|f| c_integer(&f.result) || f.parameters.iter().any(c_integer))
+        || program
+            .structs
+            .iter()
+            .any(|s| s.fields.iter().any(|f| c_integer(&f.ty)));
+    if uses_c_integer || !program.externs.is_empty() {
+        c.push_str("_Static_assert(sizeof(long) <= 8 && sizeof(size_t) <= 8, \"Suz FFI requires C integers of at most 64 bits\");\n");
+    }
+    for check in &context.c_literal_checks {
+        c.push_str(check);
+    }
+}
+
+/// 対象C環境が分かる段でリテラルを検査し、実行時の関数呼び出しや分岐を作らない。
+pub(super) fn literal(
+    value: crate::numeric::Int,
+    ty: Type,
+    location: Location,
+    context: &mut ExpressionContext,
+) -> String {
+    let (lo, hi) = bounds(ty);
+    let (condition, number) = if value.magnitude > u64::MAX as u128 {
+        // どの対応C型にも収まらない。C自身の整数リテラルの桁数制限には依存しない。
+        ("0".to_owned(), "0".to_owned())
+    } else {
+        let sign = if value.negative { "-" } else { "" };
+        let number = format!("({sign}(_BitInt(128))UINT64_C({}))", value.magnitude);
+        (
+            format!("{number} >= (_BitInt(128))({lo}) && {number} <= (_BitInt(128))({hi})"),
+            number,
+        )
+    };
+    let message = super::expressions::c_string(&format!(
+        "{}:{}:{}: integer literal is outside {} [ffi.literal-range]",
+        context.source_name,
+        location.line,
+        location.column,
+        ty.name()
+    ));
+    context
+        .c_literal_checks
+        .insert(format!("_Static_assert({condition}, {message});\n"));
+    format!("({}){number}", ty.c_name())
 }

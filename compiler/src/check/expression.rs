@@ -342,7 +342,7 @@ fn expression_inner(
     argument: Option<super::generic::Family>,
 ) -> Result<CheckedExpression, Diagnostic> {
     if let Some(Type::CInteger(_)) = required
-        && let Some(value) = super::ffi::literal(expr, required.unwrap(), bindings)?
+        && let Some(value) = super::ffi::literal(expr, required.unwrap())?
     {
         return Ok(value);
     }

@@ -21,6 +21,7 @@ pub(super) fn c_string(text: &str) -> String {
 }
 
 pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionContext) -> String {
+    context.uses_c_integer |= matches!(expr.ty, crate::ast::Type::CInteger(_));
     if matches!(
         expr.value,
         Value::IntegerArithmetic {
@@ -31,6 +32,9 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
         return super::exact::stored(expr, context);
     }
     match expr.value {
+        Value::CIntegerLiteral { value, location } => {
+            super::ffi::literal(value, expr.ty, location, context)
+        }
         Value::Panic {
             ref parts,
             location,
@@ -423,7 +427,10 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             if !floating
                 && !text
                 && structure.is_none()
-                && !matches!(operands[0].ty, Type::Integer(_) | Type::Exact)
+                && !matches!(
+                    operands[0].ty,
+                    Type::Integer(_) | Type::Exact | Type::CInteger(_)
+                )
             {
                 context.helpers.insert(unsigned);
             }
@@ -491,6 +498,16 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                         operands[index + 1].ty,
                         &names[index + 1],
                         operators[index],
+                    );
+                }
+                if matches!(operands[index].ty, Type::CInteger(_)) {
+                    // 同じC型同士なので、その型の符号と幅のまま比較する。
+                    // int64_tの比較ヘルパーへ渡すとsize_tなどの上半分を負数にしてしまう。
+                    return format!(
+                        "{} {} {}",
+                        names[index],
+                        operators[index].symbol(),
+                        names[index + 1]
                     );
                 }
                 format!(

@@ -65,6 +65,14 @@ fn ffi_rejects_unsafe_escape_and_unsupported_operations() {
         "unsafe { }\nfix x = abs(-1)",
         "fix x: _int = 1\nfix y = x + 1",
         "fix x: _int = 1\nfix y = x & x",
+        "fix x: _int = 1\nfix y = -x",
+        "fix x: _int = 1\nfix y = ~x",
+        "var x: _int = 1\nx += 1",
+        "var x: _int = 1\nx &= x",
+        "fix x: _int = 1\nfix y = `${x}`",
+        "fix x = ifexpr true { abs(-1) } else { abs(-2) }",
+        "fix x = expr { abs(-1) }",
+        "fix x = 1.0e20 as _int or abs(-1)",
         "fix x: _int = 1\nlog info `${x}`",
         "fix x: _int = 1\nfix y: _long = 1\nfix z = x == y",
         "fix x: _char = 'a'",
@@ -111,6 +119,7 @@ fn ffi_rejects_invalid_declarations() {
         "extern \"stdlib.h\" { fn abs(value: _int) -> _int }\nextern \"other.h\" { fn abs as other(value: _int) -> _int }",
         "extern \"stdlib.h\" { fn abs(value: _int) -> _int }\nfn abs(value: _int) -> _int { return value }",
         "extern \"stdlib.h\" { fn abs(value: _int) -> _int }\nimpl fn abs { return value }",
+        "extern \"stdlib.h\" { fn abs as labs(value: _int) -> _int\nfn labs(value: _long) -> _long }",
     ] {
         let source = format!("{declaration}\nfn main() -> u8 {{ return 0 }}");
         assert!(
@@ -156,7 +165,7 @@ fn ffi_header_checks_exact_types_even_for_unused_declarations() {
         assert_eq!(output.status.success(), success, "{signature}: {output:?}");
         if !success {
             assert!(
-                String::from_utf8_lossy(&output.stderr).contains("ffi.header-type"),
+                String::from_utf8_lossy(&output.stderr).contains("tool.ffi-header"),
                 "{output:?}"
             );
         }
@@ -219,16 +228,166 @@ fn ffi_scalar_abi_and_argument_evaluation() {
 }
 
 #[test]
-fn ffi_literals_check_the_target_c_range() {
-    // Cのcharは符号にかかわらず8ビット、unsigned intに負数は入らない。
-    // 値を切り詰めてCへ渡す実装を検出する。
-    for (ty, value) in [("_char", "256"), ("_uint", "-1")] {
-        let source = format!("fn main() -> u8 {{\nfix x: {ty} = {value}\nreturn 0\n}}");
-        let result = compile_and_run_c23(&source, "ffi-range.suz");
-        assert_eq!(result.status.code(), Some(101), "{result:?}");
+fn ffi_literals_check_the_target_c_range_at_c_compile_time() {
+    let directory = TemporaryDirectory::new();
+    let path = directory.0.join("range.c");
+    // 呼ばれない関数・評価されない分岐のリテラルも、Cコンパイル時に拒否する。
+    for source in [
+        "fn main() -> u8 { fix x: _char = 256\nreturn 0 }",
+        "fn main() -> u8 { fix x: _uint = -1\nreturn 0 }",
+        "fn unused() -> _uint { return -1 }\nfn main() -> u8 { return 0 }",
+        "fn main() -> u8 { if false { fix x: _size_t = 18446744073709551616 }\nreturn 0 }",
+        "extern \"stdlib.h\" { fn abs(value: _int) -> _int }\nfn main() -> u8 { unsafe { if abs(-7) > 18446744073709551615 { return 1 } }\nreturn 0 }",
+    ] {
+        // Suz側だけでは対象環境のC型の範囲を判定しない。
+        fs::write(&path, suz::compile(source.as_bytes()).unwrap()).unwrap();
+        let result = c_syntax(&path);
+        assert!(!result.status.success(), "accepted: {source}");
         assert!(
             String::from_utf8_lossy(&result.stderr).contains("ffi.literal-range"),
             "{result:?}"
         );
     }
+}
+
+fn c_syntax(path: &std::path::Path) -> std::process::Output {
+    Command::new(std::env::var_os("CC").unwrap_or_else(|| "clang".into()))
+        .args([
+            "-std=c23",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-fsyntax-only",
+            "-I",
+        ])
+        .arg(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime"))
+        .arg(path)
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn ffi_checks_are_conditional_and_literals_need_no_runtime_call() {
+    let plain = suz::compile(b"fn main() -> u8 { return 0 }").unwrap();
+    assert!(!plain.contains("sizeof(long)"));
+    for source in [
+        "fn main() -> u8 { fix n: _int = 5\nreturn n as u8 or 0 }",
+        "fn identity(n: _long) -> _long { return n }\nfn main() -> u8 { return 0 }",
+        "struct Boxed { value: _char }\nfn main() -> u8 { return 0 }",
+        "fnshape Transform(_int) -> _uint\nfn main() -> u8 { return 0 }",
+        "extern \"math.h\" { fn sqrt(value: f64) -> f64 }\nfn main() -> u8 { return 0 }",
+    ] {
+        let c = suz::compile(source.as_bytes()).unwrap();
+        assert!(c.contains("sizeof(long)"), "{source}");
+        assert!(!c.contains("suz_exact_require("), "{source}");
+    }
+    let result = compile_and_run_c23(
+        "fn main() -> u8 { fix n: _size_t = 18446744073709551615\nreturn ifexpr n > 0 { 0 } else { 1 } }",
+        "ffi-limit.suz",
+    );
+    assert_eq!(result.status.code(), Some(0), "{result:?}");
+}
+
+#[test]
+fn ffi_unsafe_preserves_assignments_and_expression_contexts() {
+    let result = compile_and_run_c23(
+        r#"
+extern "stdlib.h" { fn abs(value: _int) -> _int }
+fn main() -> u8 {
+    var assigned: i64 = 0
+    var incremented: i64 = 0
+    unsafe {
+        assigned = 4
+        unsafe { incremented += 1 }
+        fix a = ifexpr true { abs(-2) } else { abs(-3) }
+        fix b = expr { abs(-4) }
+        fix c = 1.0e20 as _long or 7
+        if a != 2 || b != 4 || c != 7 { return 1 }
+        fix d = 1.0e20 as _int or abs(-5)
+        if d != 5 { return 2 }
+        fix u: _uint = 4294967295
+        fix signed = u as% _int
+        fix byte = signed as% _char
+        if (byte as% u8) != 255 { return 3 }
+    }
+    if assigned != 4 || incremented != 1 { return 4 }
+    return 0
+}
+"#,
+        "ffi-scope.suz",
+    );
+    assert_eq!(result.status.code(), Some(0), "{result:?}");
+    let error = suz::compile(
+        b"fn main() -> u8 {\nextern \"stdlib.h\" { fn abs(value: _int) -> _int }\nreturn 0 }",
+    )
+    .unwrap_err();
+    assert!(error.message().contains("decl.location"), "{error:?}");
+}
+
+#[test]
+fn ffi_rejects_function_values_in_all_storage_and_call_positions() {
+    for statement in [
+        "fix x = accept(fn abs)",
+        "fix x = Boxed { callback: fn abs }",
+        "fix x = generic(fn abs, 1 as i32)",
+    ] {
+        for unsafe_scope in [false, true] {
+            let body = if unsafe_scope {
+                format!("unsafe {{ {statement} }}")
+            } else {
+                statement.into()
+            };
+            let source = format!(
+                r#"
+extern "stdlib.h" {{ fn abs(value: _int) -> _int }}
+fnshape Transform(_int) -> _int
+struct Boxed {{ callback: static fn Transform }}
+fn accept(callback: static fn Transform) -> _int {{ return callback(1) }}
+fn generic(callback: static fn Transform, n: int) -> int {{ return n }}
+fn main() -> u8 {{
+{body}
+return 0
+}}
+"#
+            );
+            let error = suz::compile(source.as_bytes()).unwrap_err();
+            assert!(error.message().contains("ffi.function-value"), "{error:?}");
+        }
+    }
+    let error = suz::compile(
+        br#"
+extern "stdlib.h" { fn abs(value: _int) -> _int }
+fnshape Transform(_int) -> _int
+fn expose() -> static fn Transform { unsafe { return fn abs } }
+fn main() -> u8 { return 0 }
+"#,
+    )
+    .unwrap_err();
+    assert!(error.message().contains("ffi.function-value"), "{error:?}");
+}
+
+#[test]
+fn ffi_runtime_internals_and_void_values_are_rejected() {
+    for declaration in [
+        "extern \"suz_text.h\" { fn suz_text_pool_init(limit: u64) -> void }",
+        "extern \"nested/suz_runtime.h\" { fn other() -> void }",
+        "extern \"stdlib.h\" { fn suz_text_pool_init as initialize(limit: u64) -> void }",
+    ] {
+        let error =
+            suz::compile(format!("{declaration}\nfn main() -> u8 {{ return 0 }}").as_bytes())
+                .unwrap_err();
+        assert!(
+            error.message().contains("ffi.header") || error.message().contains("ffi.name"),
+            "{error:?}"
+        );
+    }
+    let error = suz::compile(
+        br#"
+extern "stdlib.h" { fn srand(seed: _uint) -> void }
+fn main() -> u8 { unsafe { fix x = srand(0) }
+return 0 }
+"#,
+    )
+    .unwrap_err();
+    assert!(error.message().contains("void"), "{error:?}");
 }
