@@ -15,17 +15,6 @@ impl Parser<'_, '_> {
                 crate::diagnostic!("ffi.header", "extern requires a quoted C header name"),
             ));
         };
-        // C側の別名を指定しても、ランタイムの内部APIを公開する入口にはしない。
-        if header
-            .rsplit('/')
-            .next()
-            .is_some_and(|name| name.starts_with("suz_"))
-        {
-            return Err(self.error(
-                ErrorKind::InvalidSource,
-                crate::diagnostic!("ffi.header", "Suz runtime headers are reserved"),
-            ));
-        }
         let header = header.to_owned();
         self.cursor += 1;
         self.expect(FixedToken::Symbol("{"))?;

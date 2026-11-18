@@ -26,6 +26,9 @@ fn main() -> u8 {
         if natural_log(1.0) != 0.0 { return 4 }
         { if abs(-2) != 2 { return 5 } }
     }
+    fix parenthesized: _int = -(5)
+    fix nested: _int = -(((7)))
+    if parenthesized != -5 || nested != -7 || parenthesized != (-5) { return 19 }
     fix small: _char = 65
     if small != 65 { return 6 }
     fix unsigned = -1 as% _uint
@@ -66,6 +69,8 @@ fn ffi_rejects_unsafe_escape_and_unsupported_operations() {
         "fix x: _int = 1\nfix y = x + 1",
         "fix x: _int = 1\nfix y = x & x",
         "fix x: _int = 1\nfix y = -x",
+        "fix x: _int = 1\nfix y: _int = -(x)",
+        "fix x: _int = -(2 + 3)",
         "fix x: _int = 1\nfix y = ~x",
         "var x: _int = 1\nx += 1",
         "var x: _int = 1\nx &= x",
@@ -235,6 +240,7 @@ fn ffi_literals_check_the_target_c_range_at_c_compile_time() {
     for source in [
         "fn main() -> u8 { fix x: _char = 256\nreturn 0 }",
         "fn main() -> u8 { fix x: _uint = -1\nreturn 0 }",
+        "fn main() -> u8 { fix x: _uint = -(1)\nreturn 0 }",
         "fn unused() -> _uint { return -1 }\nfn main() -> u8 { return 0 }",
         "fn main() -> u8 { if false { fix x: _size_t = 18446744073709551616 }\nreturn 0 }",
         "extern \"stdlib.h\" { fn abs(value: _int) -> _int }\nfn main() -> u8 { unsafe { if abs(-7) > 18446744073709551615 { return 1 } }\nreturn 0 }",
@@ -370,7 +376,6 @@ fn main() -> u8 { return 0 }
 fn ffi_runtime_internals_and_void_values_are_rejected() {
     for declaration in [
         "extern \"suz_text.h\" { fn suz_text_pool_init(limit: u64) -> void }",
-        "extern \"nested/suz_runtime.h\" { fn other() -> void }",
         "extern \"stdlib.h\" { fn suz_text_pool_init as initialize(limit: u64) -> void }",
     ] {
         let error =

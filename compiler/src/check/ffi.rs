@@ -95,9 +95,9 @@ pub(super) fn literal(
                 )
             })?,
         ),
-        ExpressionKind::Negate(inner) if matches!(inner.kind, ExpressionKind::Integer { .. }) => {
+        ExpressionKind::Negate(inner) => {
             let Some(inner) = literal(inner, target)? else {
-                unreachable!()
+                return Ok(None);
             };
             let Value::CIntegerLiteral { value, .. } = inner.value else {
                 unreachable!()

@@ -4,7 +4,7 @@ pub fn compiler() -> Command {
     let mut command = Command::new(std::env::var_os("CC").unwrap_or_else(|| "clang".into()));
     let runtime = Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime");
     command
-        .arg("-I")
+        .arg("-iquote")
         .arg(&runtime)
         .arg(runtime.join("suz_runtime.c"))
         .arg(runtime.join("suz_text.c"))

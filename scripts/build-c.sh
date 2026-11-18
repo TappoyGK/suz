@@ -70,10 +70,11 @@ done <<< "${SUZ_CFLAGS:-}"
 [[ "$environment_file" == /* ]] || environment_file="./$environment_file"
 [[ "$output_file" == /* ]] || output_file="./$output_file"
 runtime="$repo_dir/runtime"
+# externの<...>には内部ヘッダーを公開せず、引用符のincludeだけで探索する。
 exec "${CC:-clang}" "${extra_flags[@]+"${extra_flags[@]}"}" -std=c23 -Wall -Wextra -Werror "$optimization" \
     -fhonor-nans -fhonor-infinities -ffp-contract=off \
     -fdenormal-fp-math=ieee \
-    -I "$runtime" -I "$runtime/third_party/ryu" \
+    -iquote "$runtime" -iquote "$runtime/third_party/ryu" \
     "$source_file" "$runtime/suz_runtime.c" "$runtime/suz_text.c" "$runtime/suz_parse.c" "$runtime/suz_parse_float.c" "$runtime/suz_parse_struct.c" "$environment_file" "$runtime/suz_float.c" "$runtime/suz_format_float.c" \
     "$runtime/third_party/ryu/ryu/f2s.c" "$runtime/third_party/ryu/ryu/d2s.c" \
     -lm -o "$output_file"

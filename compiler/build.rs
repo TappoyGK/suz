@@ -36,9 +36,9 @@ fn main() {
                 "-ffp-contract=off",
                 "-fdenormal-fp-math=ieee",
             ])
-            .arg("-I")
+            .arg("-iquote")
             .arg(&runtime)
-            .arg("-I")
+            .arg("-iquote")
             .arg(runtime.join("third_party/ryu"))
             .arg("-c")
             .arg(runtime.join(source))

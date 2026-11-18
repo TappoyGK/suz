@@ -54,7 +54,7 @@ pub(crate) fn compile_and_run_c23(source: &str, source_name: &str) -> std::proce
                 "-Wextra",
                 "-Werror",
                 "-fsyntax-only",
-                "-I",
+                "-iquote",
             ])
             .arg(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime"))
             .arg(&path)

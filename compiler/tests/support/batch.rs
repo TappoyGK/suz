@@ -64,7 +64,7 @@ impl Batch {
                 .args(extra_flags)
                 .arg(format!("-Dmain=suz_case_{index}"));
             if needs_runtime {
-                command.arg("-I").arg(&runtime);
+                command.arg("-iquote").arg(&runtime);
             }
             compile_c(command.arg("-c").arg(source).arg("-o").arg(&object))?;
             Ok((
