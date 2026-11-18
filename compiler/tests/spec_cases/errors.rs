@@ -159,11 +159,165 @@ fnshape Once() -> void
 fn run(f: fn Once) -> i32 { f()
     return 7 }
 fn main() -> u8 {
-    log info `${run(fn []() -> void { send() or ignore: ` { ' \ })}`
+    log info `${run(fn []() -> void { send() or ignore: // ` { ' \ })}`
     return 0
 }
 "#;
     let output = compile_and_run_c23(source, "ignore.suz");
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     assert_eq!(output.stderr, b"info ignore.suz:7: 7\n");
+}
+
+#[test]
+fn void_call_statements_propagate_or_return_only_on_failure() {
+    let source = r#"
+error Err { Bad }
+error Mapped { Other }
+fnshape Action(bool) -> void or Err
+fn send(ok: bool) -> void or Err { if not ok { fail Err.Bad } }
+fn relay(ok: bool) -> void or Err {
+    (send(ok) or fail)
+    log info `sent`
+}
+fn mapped() -> void or Mapped {
+    send(false) or fail Mapped.Other
+    log info `unexpected`
+}
+fn direct() -> void {
+    send(false) or return
+    log info `unexpected`
+}
+fn indirect(f: fn Action, ok: bool) -> u8 {
+    f(ok) or return 3
+    return 4
+}
+fn main() -> u8 {
+    relay(true) or return 1
+    relay(false) or ignore: 外への伝播を確認 // ここも理由
+    mapped() or ignore: 変換後の伝播を確認
+    direct()
+    fix f: static fn Action = fn send
+    f(false) or ignore: 関数値からの失敗
+    log info `${indirect(fn send, false)} ${indirect(fn send, true)}`
+    log info `${indirect(fn [](ok: bool) -> void or Err { send(ok) or fail }, false)}`
+    send(false) or return 7
+    return 8
+}
+"#;
+    let output = compile_and_run_c23(source, "void-errors.suz");
+    assert_eq!(output.status.code(), Some(7), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(stderr.matches(": sent\n").count(), 1, "{stderr}");
+    assert!(stderr.contains(": 3 4\n"), "{stderr}");
+    assert!(stderr.contains(": 3\n"), "{stderr}");
+    assert!(!stderr.contains("unexpected"), "{stderr}");
+}
+
+#[test]
+fn error_diagnostics_distinguish_type_context_and_declared_set() {
+    let prefix = "error Err { Bad, Other }\nenum Choice: u8 { Bad }\n";
+    for (declaration, rule, message) in [
+        (
+            "var X: u8 or Err = 1",
+            "err.no-first-class",
+            "only allowed on",
+        ),
+        (
+            "fn bad() -> void { var x: u8 or Err = 1 }",
+            "err.no-first-class",
+            "only allowed on",
+        ),
+        (
+            "fn bad(a: u8 or Err) -> void {}",
+            "err.no-first-class",
+            "only allowed on",
+        ),
+        (
+            "struct Record { a: u8 or Err }",
+            "err.no-first-class",
+            "only allowed on",
+        ),
+        (
+            "fnshape Shape(u8 or Err) -> void",
+            "err.no-first-class",
+            "only allowed on",
+        ),
+        (
+            "fnshape Shape() -> void\nfn bad(a: fn Shape or Err) -> void {}",
+            "err.no-first-class",
+            "only allowed on",
+        ),
+        (
+            "fn bad() -> u8 or Err { fail 3 }",
+            "err.fail",
+            "requires an error value, found",
+        ),
+        (
+            "fn bad() -> u8 or Err { fail true }",
+            "err.fail",
+            "requires an error value, found bool",
+        ),
+        (
+            "fn bad() -> u8 or Err { fail Choice.Bad }",
+            "err.fail",
+            "requires an error value, found Choice",
+        ),
+        (
+            "fn bad() -> u8 { fail Err.Bad }",
+            "err.fail",
+            "requires an enclosing function with declared errors",
+        ),
+        (
+            "fn bad() -> u8 or Err.Bad { fail Err.Other }",
+            "err.fail",
+            "not included",
+        ),
+        (
+            "fn bad() -> u8 or Err { fix n = 1 }",
+            "fn.value-return-required",
+            "or fail statement",
+        ),
+    ] {
+        let source = format!("{prefix}{declaration}\nfn main() -> u8 {{ return 0 }}");
+        let error = suz::compile(source.as_bytes()).unwrap_err().to_string();
+        assert!(
+            error.contains(&format!("[{rule}]")) && error.contains(message),
+            "{source}\n{error}"
+        );
+    }
+    let error = suz::compile(b"fn main() -> u8 { fix n = 1 }")
+        .unwrap_err()
+        .to_string();
+    assert!(!error.contains("fail statement"), "{error}");
+}
+
+#[test]
+fn void_statement_exception_does_not_allow_nested_or_value_call_jumps() {
+    let prefix = "error Err { Bad }\nfn send() -> void or Err { fail Err.Bad }\nfn read() -> u8 or Err { fail Err.Bad }\n";
+    for (body, rule) in [
+        ("read() or return 1\nreturn 0", "expr.or-return-position"),
+        ("read() or fail\nreturn 0", "expr.or-return-position"),
+        (
+            "fix n = expr { send() or return 1\n0 }\nreturn n",
+            "expr.jump-prohibited",
+        ),
+        (
+            "fix n = expr { send() or fail\n0 }\nreturn n",
+            "expr.jump-prohibited",
+        ),
+        (
+            "fix n = ifexpr true { send() or return 1 } else { 0 }\nreturn 0",
+            "expr.jump-prohibited",
+        ),
+        ("return read() or fail", "expr.or-return-position"),
+        (
+            "fix n = 1 + (read() or return 1)\nreturn 0",
+            "expr.or-return-position",
+        ),
+    ] {
+        let source =
+            format!("{prefix}fn bad() -> u8 or Err {{ {body} }}\nfn main() -> u8 {{ return 0 }}");
+        let error = suz::compile(source.as_bytes()).unwrap_err().to_string();
+        assert!(error.contains(&format!("[{rule}]")), "{source}\n{error}");
+    }
 }

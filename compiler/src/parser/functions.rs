@@ -108,7 +108,7 @@ impl Parser<'_, '_> {
 
     pub(super) fn parse_type(&mut self) -> Result<Type, Diagnostic> {
         let location = self.location();
-        let ty = self.function_parameter_type()?;
+        let ty = self.type_atom()?;
         if matches!(ty, Type::Function(_)) {
             return Err(location.error(
                 ErrorKind::InvalidSource,
@@ -121,7 +121,34 @@ impl Parser<'_, '_> {
         Ok(ty)
     }
 
+    /// 束縛とフィールドの型にはエラー集合を保存できない。
+    pub(super) fn stored_type(&mut self) -> Result<Type, Diagnostic> {
+        let ty = self.parse_type()?;
+        self.reject_error_spec()?;
+        Ok(ty)
+    }
+
     pub(super) fn function_parameter_type(&mut self) -> Result<Type, Diagnostic> {
+        let ty = self.type_atom()?;
+        self.reject_error_spec()?;
+        Ok(ty)
+    }
+
+    fn reject_error_spec(&self) -> Result<(), Diagnostic> {
+        if self.token().kind == Kind::Keyword("or") {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "err.no-first-class",
+                    "error specifications are only allowed on function and fnshape return types"
+                ),
+            ));
+        }
+        Ok(())
+    }
+
+    // 戻り値に続くエラー指定と、変換に続くorハンドラーは呼び出し側で解析する。
+    fn type_atom(&mut self) -> Result<Type, Diagnostic> {
         let persistent = self.token().kind == Kind::Keyword("static");
         if persistent {
             self.cursor += 1;

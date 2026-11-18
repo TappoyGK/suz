@@ -152,3 +152,31 @@ fn main() -> u8 { return 0 }
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
 | 通常 | `[err.fn-return]` | 2 | 31 |
+
+### err-007 値を返さない呼び出しの失敗を伝播する
+
+主根拠：`[err.or-fail]`。
+
+補助根拠：`[err.or-return]`・`[expr.or-return-position]`。
+
+成功型がvoidなら、呼び出し全体を文として書いて失敗を伝播できる。mainは伝播された失敗を処理し、成功時の後続処理には進まない。
+
+**ソース：**
+
+```suz
+error SendError { Offline }
+fn send() -> void or SendError { fail SendError.Offline }
+fn notify() -> void or SendError {
+    send() or fail
+}
+fn main() -> u8 {
+    notify() or return 7
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 7 | 0 |

@@ -109,7 +109,7 @@ impl Parser<'_, '_> {
             ));
         }
         self.cursor += 1;
-        let ty = self.parse_type()?;
+        let ty = self.stored_type()?;
         if ty == Type::Void {
             return Err(location.error(
                 ErrorKind::InvalidSource,

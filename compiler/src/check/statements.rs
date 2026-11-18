@@ -123,11 +123,26 @@ fn check_statement(
             });
         }
         Statement::Expression(value) => {
-            context.output.push(CheckedStatement::Expression(expression(
-                value,
-                None,
-                context.bindings,
-            )?));
+            let mut checked = expression(value, None, context.bindings)?;
+            if let super::ir::Value::HandledCall { handler, .. } = &checked.value
+                && matches!(
+                    handler.as_ref(),
+                    super::ir::CallHandler::Return(_) | super::ir::CallHandler::Fail(_)
+                )
+                && checked.ty != Type::Void
+            {
+                return Err(value.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "expr.or-return-position",
+                        "a call statement with or return or or fail must have success type void"
+                    ),
+                ));
+            }
+            // void呼び出しを文へ移した場合、評価すべき値の式は残らない。
+            if !lower_return_handler(&mut checked, &mut context.output, context.next_id) {
+                context.output.push(CheckedStatement::Expression(checked));
+            }
         }
         Statement::Match {
             target,

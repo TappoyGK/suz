@@ -34,7 +34,7 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
                         } else {
                             crate::diagnostic!(
                                 "expr.or-return-position",
-                                "or return must apply to the entire initializer or assignment RHS"
+                                "or return requires an entire initializer, assignment RHS, or void call statement"
                             )
                         },
                     ));
@@ -45,10 +45,17 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
                 if in_value || !allowed {
                     return Err(location.error(
                         ErrorKind::InvalidSource,
-                        crate::diagnostic!(
-                            "expr.or-return-position",
-                            "or fail must apply to an entire initializer or assignment RHS"
-                        ),
+                        if in_value {
+                            crate::diagnostic!(
+                                "expr.jump-prohibited",
+                                "control transfers are forbidden inside value expressions"
+                            )
+                        } else {
+                            crate::diagnostic!(
+                                "expr.or-return-position",
+                                "or fail requires an entire initializer, assignment RHS, or void call statement"
+                            )
+                        },
                     ));
                 }
                 if let Some(value) = value {
@@ -160,7 +167,8 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
                     }
                 }
             }
-            Statement::Expression(value) => visit(value, false, in_value)?,
+            // ここでは呼び出し全体という構文だけを許可し、成功型voidは文の型検査で確認する。
+            Statement::Expression(value) => visit(value, call_statement(value), in_value)?,
             Statement::Match { target, arms, .. } => {
                 visit(target, false, in_value)?;
                 for arm in arms {
@@ -217,6 +225,17 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
         }
     }
     Ok(())
+}
+
+fn call_statement(expr: &Expression) -> bool {
+    fn ungroup(mut expr: &Expression) -> &Expression {
+        while let ExpressionKind::Group(inner) = &expr.kind {
+            expr = inner;
+        }
+        expr
+    }
+    matches!(&ungroup(expr).kind, ExpressionKind::ArithmeticHandler { operand, .. }
+        if matches!(ungroup(operand).kind, ExpressionKind::Call { .. } | ExpressionKind::Invoke { .. }))
 }
 
 fn has_return_handler(expr: &CheckedExpression) -> bool {
@@ -468,12 +487,14 @@ pub(super) fn check_return_shape(function: &crate::ast::Function) -> Result<(), 
     let mut returns = Returns(false);
     returns.scope(&function.statements, None)?;
     if !returns.0 {
+        let message = if function.errors.is_empty() {
+            "a value-returning function requires a return expression or panic statement"
+        } else {
+            "a value-returning function with declared errors requires a return expression, panic statement, or fail statement"
+        };
         return Err(function.end.error(
             ErrorKind::InvalidSource,
-            crate::diagnostic!(
-                "fn.value-return-required",
-                "a value-returning function requires a return expression or panic statement"
-            ),
+            crate::diagnostic!("fn.value-return-required", "{message}"),
         ));
     }
     if !stops(&function.statements) {

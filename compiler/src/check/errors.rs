@@ -10,6 +10,15 @@ use crate::{
 };
 
 pub(super) fn fail(value: &Expression, scope: &Scope) -> Result<CheckedExpression, Diagnostic> {
+    if scope.errors.is_empty() {
+        return Err(value.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "err.fail",
+                "fail requires an enclosing function with declared errors"
+            ),
+        ));
+    }
     let checked = expression::coerced(value, None, scope)?;
     let invalid = || {
         value.location.error(
@@ -20,12 +29,19 @@ pub(super) fn fail(value: &Expression, scope: &Scope) -> Result<CheckedExpressio
             ),
         )
     };
-    let Type::Enum(ty) = checked.ty else {
-        return Err(invalid());
+    let ty = match checked.ty {
+        Type::Enum(ty) if ty.is_error => ty,
+        _ => {
+            return Err(value.location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "err.fail",
+                    "fail requires an error value, found {}",
+                    scope.type_name(checked.ty)
+                ),
+            ));
+        }
     };
-    if !ty.is_error || scope.errors.is_empty() {
-        return Err(invalid());
-    }
     let constant = super::constants::constant_integer(&checked)?;
     let variants = match constant {
         Some(v) => v as usize..v as usize + 1,

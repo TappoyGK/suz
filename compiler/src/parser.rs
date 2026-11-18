@@ -108,7 +108,7 @@ impl<'a, 's> Parser<'a, 's> {
         self.cursor += 1;
         let annotation = if self.token().kind == Kind::Symbol(":") {
             self.cursor += 1;
-            let ty = self.parse_type()?;
+            let ty = self.stored_type()?;
             if ty == Type::Void {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
