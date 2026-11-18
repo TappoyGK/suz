@@ -2,6 +2,7 @@
 //!
 //! 利用元: [`crate::analyze`]。
 
+mod closures;
 mod constants;
 mod control;
 mod declarations;

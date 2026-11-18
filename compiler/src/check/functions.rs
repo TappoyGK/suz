@@ -24,7 +24,7 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
             || program.bindings.iter().any(|c| c.name == function.name)
             || program.enums.iter().any(|e| e.name == function.name)
             || program.structs.iter().any(|s| s.name == function.name)
-            || program.fntypes.iter().any(|s| s.name == function.name)
+            || program.fnshapes.iter().any(|s| s.name == function.name)
         {
             return Err(function.location.error(
                 ErrorKind::InvalidSource,
@@ -44,7 +44,7 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     let signatures = Rc::new(signatures);
     let scope = Scope {
         functions: signatures,
-        fntypes: Rc::new(program.fntypes.clone()),
+        fnshapes: Rc::new(program.fnshapes.clone()),
         function_types: Rc::new(std::cell::RefCell::new(program.function_types.clone())),
         instances: Rc::new(std::cell::RefCell::new(super::generic::Instances::new(
             program.functions.len(),
@@ -298,8 +298,19 @@ fn instance_error(
 
 pub(super) fn check_function(
     function: &crate::ast::Function,
+    scope: Scope,
+    id: usize,
+) -> Result<(CheckedFunction, Vec<crate::ast::Location>), Diagnostic> {
+    check_with_captures(function, scope, id, &BTreeMap::new())
+}
+
+// 参照キャプチャーは外側の束縛への別名。未代入の判定は外側のスコープで行い、
+// 本体内の代入状態を呼び出し元へ返す。通常の仮引数と値キャプチャーは従来どおり不変。
+pub(super) fn check_with_captures(
+    function: &crate::ast::Function,
     mut scope: Scope,
     id: usize,
+    references: &BTreeMap<String, Binding>,
 ) -> Result<(CheckedFunction, Vec<crate::ast::Location>), Diagnostic> {
     control::validate_return_positions(&function.statements)?;
     let mut warnings = Vec::new();
@@ -327,8 +338,15 @@ pub(super) fn check_function(
                 crate::diagnostic!("decl.shadowing", "parameter shadows a top-level name"),
             ));
         }
-        declared.push(parameter.name.clone());
         let parameter_type = scope.resolve_type(parameter.ty);
+        if let Some(binding) = references.get(&parameter.name) {
+            let mut binding = binding.clone();
+            binding.id = parameter_id;
+            binding.ty = parameter_type;
+            scope.locals.insert(parameter.name.clone(), binding);
+            continue;
+        }
+        declared.push(parameter.name.clone());
         scope.locals.insert(
             parameter.name.clone(),
             Binding {
@@ -352,6 +370,11 @@ pub(super) fn check_function(
         0,
         declared,
     )?;
+    for (name, binding) in references {
+        if scope.locals[name].assigned.get() {
+            binding.assigned.set(true);
+        }
+    }
     control::check_return_shape(function)?;
     warnings.extend(diagnostics::unhandled_arithmetic(&statements));
     Ok((
@@ -387,7 +410,14 @@ pub(super) fn call(
     let signature = scope.functions.get(name).ok_or_else(|| {
         expr.location.error(
             ErrorKind::InvalidSource,
-            crate::diagnostic!("fn.call", "unknown function"),
+            if scope.uncaptured.contains(name) {
+                crate::diagnostic!(
+                    "closure.scope",
+                    "outer binding '{name}' must be listed in the capture list"
+                )
+            } else {
+                crate::diagnostic!("fn.call", "unknown function")
+            },
         )
     })?;
     if arguments.len() != signature.parameters.len() {
@@ -409,7 +439,7 @@ pub(super) fn call(
             if let Some(family) = super::generic::Family::of(*ty) {
                 super::expression::generic_argument(argument, concrete(*ty), family, scope)
             } else {
-                expression(argument, Some(concrete(*ty)), scope)
+                super::function_values::argument(argument, concrete(*ty), scope)
             }
         })
         .collect::<Result<_, _>>()?;

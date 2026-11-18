@@ -69,7 +69,7 @@ Suzは次のものを含む。
 **[src.keywords]** 次の語はキーワードである。
 
 ```text
-fix var fn fntype struct enum
+fix var fn fnshape static struct enum
 if ifexpr elif else while loop for rev in break continue return match matchexpr
 as or not len log allow expr with
 true false nan inf
@@ -173,6 +173,7 @@ fix lower = -inf      // f64 の負の無限大
 - `if`・`elif`・`else`・`while`・`loop`・`for`・`rev`の本体、`match`の腕、ブロック文、`allow`のブロックは、それぞれ1つのブロックとして数える。腕の本体を式だけで書く場合も、その式を含むブロックを1段として数える。
 - リテラル、名前、丸括弧、単項・二項演算子、`len`、`as`・`as%`、`or`、関数呼び出し、構造体リテラル、テンプレート、フィールド参照、切り出し・添字、`with`を、それぞれ1つの式として数える。各オペランド、実引数、初期値、添字・切り出しの境界、テンプレートの埋め込みの式は、その式より1段深い。`with`のコピー元と初期値も、その`with`より1段深い。
 - `fn 関数名` は1つの式として数える。名前で呼ぶ `f(x)` の名前は別の段として数えない。それ以外の呼び出しでは、呼び出し対象の式も呼び出しより1段深い。
+- クロージャは1つの式として数える。本体のブロックはその式より1段深く、本体の文の式はさらにその下とする。本体で数え直さない。キャプチャー一覧の名前と仮引数は数えない。
 - 左結合の並びは演算ごとに1段を数える。比較の連鎖は全体で1つの式とし、各オペランドはその1段下とする。
 - `ifexpr`・`matchexpr`・`expr`もそれぞれ1つの式である。条件・対象と値のブロックはその1段下、値のブロック内の式はさらに1段下となる。値のブロックで数え直さない。
 
@@ -210,9 +211,9 @@ fn main() -> u8 {
 
 ### 4.1 宣言とスコープ
 
-**[decl.top-level]** トップレベルには、`fix`・`var`・関数・構造体・列挙型・`fntype` の宣言だけを書ける。これらの名前は、ファイル内の宣言順序によらず参照できる。
+**[decl.top-level]** トップレベルには、`fix`・`var`・関数・構造体・列挙型・`fnshape` の宣言だけを書ける。これらの名前は、ファイル内の宣言順序によらず参照できる。
 
-**[decl.location]** `fix` と `var` はトップレベルとブロック内で宣言できる。関数、構造体、列挙型、`fntype` はトップレベルで宣言する。それぞれの宣言をこれらの場所以外に書くとコンパイルエラーである。
+**[decl.location]** `fix` と `var` はトップレベルとブロック内で宣言できる。関数、構造体、列挙型、`fnshape` はトップレベルで宣言する。それぞれの宣言をこれらの場所以外に書くとコンパイルエラーである。
 
 **[decl.duplicate]** 同じスコープで同じ名前を宣言するとコンパイルエラーである。定数、変数、仮引数、関数、型など、宣言の種類が違っても同じである。
 
@@ -226,7 +227,7 @@ fn main() -> u8 {
 
 **[name.value]** 関数、ブロック内の `fix`・`var`、仮引数、構造体のフィールド、`for` と `rev` のループ変数の名前はASCIIの小文字で始まり、小文字・数字・`_` だけからなる。`_` は末尾に置かず、連続させない。例は `read_count`、`count`、`x2` である。
 
-**[name.type]** 構造体・列挙型・`fntype` の名前はASCIIの大文字で始まり、英字と数字だけからなる。小文字を1文字以上含み、大文字を連続させない。例は `Vec2`、`IoError` である。`IOError`、`T`、`Load_Error` は認めない。
+**[name.type]** 構造体・列挙型・`fnshape` の名前はASCIIの大文字で始まり、英字と数字だけからなる。小文字を1文字以上含み、大文字を連続させない。例は `Vec2`、`IoError` である。`IOError`、`T`、`Load_Error` は認めない。
 
 **[name.variant]** 列挙子の名前はASCIIの大文字で始まり、英字と数字だけからなる。例は `Ready`、`A`、`F1`、`ESC` である。
 
@@ -234,7 +235,7 @@ fn main() -> u8 {
 
 ## 5. 型
 
-**[type.name]** 型として使う名前は、組み込み型名、またはファイル内で宣言された構造体・列挙型の名前でなければならない。関数値の型は [fn.type-mark] に従い `fn` と `fntype` の名前で書く。該当する型がない場合はコンパイルエラーである。
+**[type.name]** 型として使う名前は、組み込み型名、またはファイル内で宣言された構造体・列挙型の名前でなければならない。関数値の型は [fn.type-mark] に従い `static fn` または `fn` と `fnshape` の名前で書く。該当する型がない場合はコンパイルエラーである。
 
 ### 5.1 組み込み型
 
@@ -553,7 +554,7 @@ fix COUNT: u8 = `256` as u8 or 10
 
 **[var.fix-assign]** ブロック内の `fix` で宣言した変数や、そのフィールドへの代入はコンパイルエラーである。入れ子の構造体のフィールドも同じである。
 
-**[var.never-reassigned]** ブロック内の `var` は、宣言後の同じスコープ内に、その変数またはそのフィールドへの代入が構文上1つ以上必要である。トップレベルの `var` は、いずれかの関数の本体に同じ対象への代入が構文上1つ以上必要である。複合代入と、条件分岐内の代入も数える。初期化は数えない。実行時にその代入を通るかどうかは問わない。該当する代入がなければコンパイルエラーとし、`fix` で宣言するよう案内する。
+**[var.never-reassigned]** ブロック内の `var` は、宣言後の同じスコープ内に、その変数またはそのフィールドへの代入が構文上1つ以上必要である。トップレベルの `var` は、いずれかの関数の本体に同じ対象への代入が構文上1つ以上必要である。複合代入と、条件分岐内の代入も数える。ブロック内の `var` を参照でキャプチャーしたクロージャの本体で、その変数またはそのフィールドに行う代入・複合代入も数える。初期化は数えない。実行時にその代入を通るかどうかは問わない。該当する代入がなければコンパイルエラーとし、`fix` で宣言するよう案内する。
 
 ```suz
 fix rate: i32 = 48_000
@@ -577,7 +578,7 @@ count += 1
 
 **[assign.eval-order]** 通常の代入では、代入先を決定してから右辺を評価し、その値を代入する。複合代入では、代入先を決定し、その現在値を読み取り、右辺を評価し、演算結果を代入する。代入先と右辺の評価は、それぞれ 1 回である。
 
-**[assign.rhs-write]** 通常の代入と複合代入では、その右辺の内部に、外側の代入先と重なる対象への代入・複合代入を書くとコンパイルエラーである。代入先を変数名とフィールド名の列として比較し、同じ変数を根とする列が一致する場合、または一方が他方の先頭部分である場合に重なると判定する。たとえば、`point.x` は `point`、`point.x`、`point.x.y` と重なり、`point.y` とは重ならない。
+**[assign.rhs-write]** 通常の代入と複合代入では、その右辺の内部に、外側の代入先と重なる対象への代入・複合代入を書くとコンパイルエラーである。代入先を変数名とフィールド名の列として比較し、同じ変数を根とする列が一致する場合、または一方が他方の先頭部分である場合に重なると判定する。たとえば、`point.x` は `point`、`point.x`、`point.x.y` と重なり、`point.y` とは重ならない。右辺に書いたクロージャの本体も検査し、外側の代入先を参照でキャプチャーして重なる対象を書き換えるとエラーにする。
 
 この検査は、右辺に書かれたブロック、分岐、ループ、`or` の失敗処理の内部にも適用し、実行されるかどうかを問わない。代入先の値の読み取りや、重ならない対象への代入は認める。
 
@@ -1388,29 +1389,39 @@ fn convert(value: u16) -> int {
 
 ### 8.8 関数値
 
-**[fntype.decl]** `fntype 名前(T1, T2, ...) -> R` は、仮引数の型の並びと戻り値の型に名前を付ける。仮引数は0個以上で、型だけを書く。この型を関数値の型と呼ぶ。仮引数・戻り値に `int`・`float` は書けず、`void` は戻り値だけに使える。
+**[fnshape.decl]** `fnshape 名前(T1, T2, ...) -> R` は、仮引数の型の並びと戻り値の型で決まる「関数の形」に名前を付ける。構造体や列挙型の宣言とは異なり、名前で区別する新しい型は作らない。仮引数は0個以上で、型だけを書く。この形を持つ関数値の型は [fn.type-mark] に従って書く。仮引数・戻り値に `int`・`float` は書けず、`void` は戻り値だけに使える。
 
-**[fntype.same]** 仮引数の型の並びと戻り値の型が同じ関数値の型は、名前が違っても同じ型である。関数の宣言から推論した関数値の型にも、同じ規則を適用する。
+**[fnshape.same]** 同じ種別（`static fn` か `fn`）で、仮引数の型の並びと戻り値の型が同じ関数値の型は、名前が違っても同じ型である。関数の宣言から推論した関数値の型にも、同じ規則を適用する。
 
-**[fntype.recursion]** 関数値の型は、仮引数と戻り値を直接・間接にたどって自分自身を含むことはできない。循環する宣言はコンパイルエラーである。構造体を通して含む場合は認める。たとえば、`struct Node { visit: fn Visit }` と `fntype Visit(Node) -> void` は宣言できる。
+**[fnshape.recursion]** 関数値の型は、仮引数と戻り値を直接・間接にたどって自分自身を含むことはできない。循環する宣言はコンパイルエラーである。構造体を通して含む場合は認める。たとえば、`struct Node { visit: static fn Visit }` と `fnshape Visit(Node) -> void` は宣言できる。
 
-**[fn.type-mark]** 関数値の型を明記するときは、すべての場所で `fn Shape` のように `fn` を付ける。関数値の型の名前に `fn` を付けないこと、関数値の型でない型に `fn` を付けることはコンパイルエラーである。`fntype` の宣言で付ける名前には `fn` を付けない。
+**[fn.type-mark]** 関数値の型は `static fn 名前` または `fn 名前` と書く。名前は `fnshape` で宣言した名前である。`fn` を付けないこと、`fnshape` でない型に `fn` を付けること、`fn` 以外の型に `static` を付けることはコンパイルエラーである。`fnshape` の宣言で付ける名前には `fn` を付けない。
 
-**[fn.value-from-name]** `fn saw` は、トップレベルの関数 `saw` を指す値を作る。汎用でない関数では、関数の仮引数と戻り値の型から関数値の型が決まり、同じ形の `fntype` の宣言や型注釈は必要ない。型が要求される場所では、その型と同じでなければコンパイルエラーである。汎用関数には [fn.value-generic] を適用する。`main` は値にできない。
+**[fn.type-static]** `static fn Shape` は、トップレベルの関数を指す値の型である。指している関数は、その値を渡した呼び出しが終わった後も有効である。どの関数を指すかは実行時に選べる。[value.copy-equivalent] に従い、仮引数・戻り値、トップレベルとブロック内の `fix`・`var`、構造体のフィールドに使える。`fnshape` の宣言の仮引数と戻り値にも使える。
+
+**[fn.type-call]** `fn Shape` は、トップレベルの関数またはクロージャを指し、受け取った呼び出しの間だけ使える関数値の型である。関数の仮引数と、`fnshape` の宣言の仮引数の型にだけ書ける。戻り値、`fix`・`var` の型注釈、構造体のフィールド、`fnshape` の宣言の戻り値に書くとコンパイルエラーである。例えば、`fnshape Runner(fn Tr) -> i32` は、`fn r(f: fn Tr) -> i32` から推論する関数値と同じ形を表す。
+
+**[fn.call-only]** `fn Shape` の仮引数は、呼び出すことと、別の関数の `fn Shape` の仮引数へ名前をそのまま書いて渡すことだけができる。値でキャプチャーすることもでき、キャプチャー後も同じ制限を適用する（[closure.capture-list]）。それ以外の使い方はコンパイルエラーである。初期値・代入の右辺・`return`・フィールドの初期値・値ブロックの値には書けない。転送する実引数を丸括弧や値ブロックで包むこともできない。
+
+**[fn.type-convert]** `static fn Shape` の値は、同じ形の `fn Shape` の仮引数へ渡せる。逆の変換はない。
+
+**[fn.value-sharing]** `fn Shape` は [value.sharing] の型とする。クロージャが参照でキャプチャーした変数や、書き換え可能な実体を指す値を環境に保持する場合、呼び出しを通して外側から見える書き換えが起きうるためである。`static` のない型の書き方で、この性質を示す（[value.sharing-explicit]）。`static fn Shape` は [value.copy-equivalent] に従う。
+
+**[fn.value-from-name]** `fn saw` は、トップレベルの関数 `saw` を指す値を作る。汎用でない関数では、関数の仮引数と戻り値の型から `static fn` の型が決まり、同じ形の `fnshape` の宣言や型注釈は必要ない。型が要求される場所では、その型と同じでなければコンパイルエラーである。汎用関数には [fn.value-generic] を適用する。`main` は値にできない。
 
 **[fn.value-mark]** 関数名を値として使うときは `fn` を付ける。関数値を保持する変数・フィールド・呼び出しなどの式には付けない。これらに反するとコンパイルエラーである。名前で直接呼ぶ `saw(p)` には `fn` を付けない。`fn pick(i)` は認めず、関数値を返す関数の呼び出しは `pick(i)` と書く。関数名から作った値をその場で呼ぶ場合は `(fn saw)(p)` と書く。
 
-**[fn.value-places]** 関数値は [value.copy-equivalent] に従う。コピーした関数値は元の値と同じ関数を指す。仮引数・戻り値、トップレベルとブロック内の `fix`・`var`、構造体のフィールドに使える。`var` には同じ型の別の関数値を代入できる。クロージャは導入しない。
+**[fn.value-places]** `static fn` の値には [fn.type-static]、`fn` の値には [fn.type-call] と [fn.call-only] を適用する。コピーした `static fn` の値は同じ関数を指し、`var` には同じ型の別の関数値を代入できる。
 
-**[fn.value-const]** `fn 関数名` は定数式であり、トップレベルの `fix`・`var` の初期値に書ける。汎用関数を具体化した関数値も同じである。
+**[fn.value-const]** `fn 関数名` は定数式であり、トップレベルの `fix`・`var` の初期値に書ける。汎用関数を具体化した関数値も同じである。クロージャの式は定数式ではない。
 
 **[fn.value-call]** 関数値は `f(x)` で呼ぶ。関数値の型の式なら、名前に限らず後ろに `(実引数)` を付けられる。フィールドは `node.visit(n)`、関数値を返す呼び出しの結果は `pick(i)(p)` と書く。関数値の型でない式を呼ぶとコンパイルエラーである。実引数の個数・型・暗黙変換・値の受け渡しには [fn.call] を適用する。
 
 **[fn.value-evaluation]** 呼び出し対象の式を最初に1回評価し、得られた関数値を保持する。その後、実引数を左から右へそれぞれ1回評価し、保持した関数を呼ぶ。実引数の評価中に元の変数やフィールドが書き換わっても、今回呼び出す関数は変わらない。途中でパニックした場合は、残りの評価と呼び出しを行わない。
 
-**[fn.value-compare]** 関数値には比較・算術・テンプレートの埋め込みを使えない。関数値をフィールドに含む構造体も、入れ子を含めて比較できない。
+**[fn.value-compare]** `static fn Shape` と `fn Shape` のどちらの値にも、比較・算術・テンプレートの埋め込みを使えない。関数値をフィールドに含む構造体も、入れ子を含めて比較できない。
 
-**[fn.value-generic]** `fn 関数名` が汎用関数を指す場合は、その式に要求される関数値の型から具体型を決める。
+**[fn.value-generic]** `fn 関数名` が汎用関数を指す場合は、その式に要求される関数値の型から具体型を決める。要求される型は `static fn Shape` と `fn Shape` のどちらでもよい。
 
 - 型の要求は型注釈、実引数、`return`・`or return` の値、代入先、構造体のフィールドから来る。`ifexpr`・`matchexpr`・`expr`・丸括弧は外側からの要求を内側へ伝える。分岐の一方の型をもう一方の要求にはしない。
 - 宣言中のすべての `int` を同じ整数の具体型、すべての `float` を同じ浮動小数点の具体型に置き換える。両者は独立に決める。置き換え後の仮引数の型の並びと戻り値の型は、要求される型と完全に一致しなければならない。戻り値にだけ汎用型がある場合も、その戻り値の要求から具体型を決める。
@@ -1419,18 +1430,48 @@ fn convert(value: u16) -> int {
 **[fn.value-generic-check]** 具体型が決まった時点で、汎用検査で保留した判定をその組み合わせについて行う。その関数値を呼ばない場合も検査する。違反する場合は `fn 関数名` を主診断とし、本体に至る呼び出し・関数値の参照の連鎖と、本体の違反を関連診断として示す。
 
 ```suz
-fntype Transform(i32) -> i32
+fnshape Transform(i32) -> i32
 fn identity(x: int) -> int { return x }
 fn twice(x: i32) -> i32 { return x * 2 }
 fn apply(action: fn Transform, n: i32) -> i32 { return action(n) }
 fn main() -> u8 {
-    fix action: fn Transform = fn identity
+    fix action: static fn Transform = fn identity
     fix other = fn twice
     return ifexpr apply(action, 3) == 3 && other(3) == 6 { 0 } else { 1 }
 }
 ```
 
-**[rt.fn-value]** 関数値は、生成するCでは関数ポインタ1つで表す。呼び出し対象と実引数の評価順序は [fn.value-evaluation] に従い、Cの関数呼び出し式の評価順序には依存しない。
+**[rt.fn-value]** `static fn Shape` の値は、生成するCでは関数ポインタ1つで表す。呼び出し対象と実引数の評価順序は [fn.value-evaluation] に従い、Cの関数呼び出し式の評価順序には依存しない。
+
+**[rt.closure-call]** `fn Shape` の値は、環境へのポインタを先頭の引数に取る関数ポインタと、環境へのポインタの組で表す。クロージャの本体は環境を先頭の引数に取るC関数とし、キャプチャーした値と、参照でキャプチャーした変数へのポインタを保持する環境を呼び出し側のスタックに置く。`static fn Shape` から変換するときは、評価して得た関数ポインタの値を呼び出し側のスタックに保持する。元の変数やフィールドへのポインタは保持しない。形ごとに生成する包み関数が、その環境から関数ポインタを読み出して呼ぶ。環境は実引数を受け取る呼び出しが終わるまで有効で、転送先でも同じ環境を使う。環境のためのヒープ確保は行わない。名前による直接の呼び出しと `static fn Shape` を通した呼び出しは、従来の表現を使う。
+
+**[rt.closure-order]** `static fn Shape` から `fn Shape` への変換は、その実引数の評価位置で元の関数値を1回評価し、環境に保持する。後続の実引数の評価で元の変数やフィールドが書き換わっても、保持した関数ポインタは変わらない。クロージャの式では、その評価位置で一覧の順に、値キャプチャーでは値を読み取り、参照キャプチャーでは変数の位置を記録する。実引数の評価順は [fn.call] と [fn.value-evaluation] に従う。
+
+### 8.9 クロージャ
+
+**[closure.expression]** `fn [キャプチャー, ...](仮引数, ...) -> 戻り値型 { 本体 }` は、クロージャを作る式である。キャプチャーがなくても `[]` を書く。仮引数と戻り値の型は明記する。本体の型検査・`return`・末尾到達判定には通常の関数の規則を適用し、作成時には本体を実行しない。
+
+**[closure.place]** クロージャの式は、関数の呼び出しの実引数で、仮引数が `fn Shape` の位置に直接書く。丸括弧や値ブロックで包むことはできない。仮引数の型の並びと戻り値の型は、要求される形と一致しなければならない。それ以外の位置に書くとコンパイルエラーである。
+
+**[closure.capture-list]** 値のキャプチャーは名前だけ、参照のキャプチャーは `var 名前` と書く。値のキャプチャーには、その位置で参照できるブロック内の `fix`・`var`、仮引数、ループ変数、外側のクロージャがキャプチャーした名前を指定できる。参照のキャプチャーには、ブロック内の `var` または外側のクロージャが参照でキャプチャーした名前だけを指定できる。`fix`、仮引数、ループ変数、外側のクロージャが値でキャプチャーした名前は指定できない。式・フィールド参照は書けない。同じ名前の重複（値と参照の組み合わせを含む）、未定義名、型名、関数名、トップレベルの `fix`・`var` の名前、クロージャの仮引数名との重複はコンパイルエラーである。`fn Shape` の仮引数も値でキャプチャーでき、キャプチャーした値にも [fn.call-only] を適用する。
+
+**[closure.scope]** 本体から外側の変数・仮引数・ループ変数を使うには、キャプチャー一覧への記載を必須とする。入れ子でも暗黙のキャプチャーは加えず、各クロージャの一覧に明記する。トップレベルの宣言は通常の関数と同じく、一覧に書かずに使える。トップレベルの `var` は呼び出した時点の値を読み、本体から書き換えられる。`return` は最も内側のクロージャ本体から戻る。外側のループを対象とした `break`・`continue` は書けない。
+
+**[closure.capture-value]** クロージャを作る式の評価時に、一覧の順に各値を1回読み取り、その値を保持する。以後、外側の変数への再代入は保持した値に影響しない。値の保持には [value.sharing] と [value.copy-equivalent] を適用する。値でキャプチャーした束縛、および保持した構造体のフィールドは、入れ子を含めて代入・複合代入できない。
+
+**[closure.capture-reference]** 参照のキャプチャーは、外側の変数そのものを指す。本体でその名前を読むと、その時点の外側の変数の値を得る。名前とそのフィールドへの代入・複合代入は外側の変数に行われ、呼び出しから戻った後も結果を読める。[assign.target] ではブロック内の `var` と同じに扱う。同じ変数を複数のクロージャで参照キャプチャーすると、どの本体も同じ変数を読み書きする。作成時には値を写さず、変数の位置だけを記録する。[assign.rhs-write] と [for.bound-reference] の制限も適用する。
+
+**[closure.generic]** クロージャ自身の仮引数・戻り値には `int`・`float` を書けない。汎用関数の本体で外側の汎用型の値をキャプチャーする場合は、外側の具体化ごとに本体を検査する。
+
+```suz
+fnshape Calc(i32) -> i32
+fn apply(f: fn Calc, n: i32) -> i32 { return f(n) }
+fn main() -> u8 {
+    fix scale: i32 = 2
+    fix result = apply(fn [scale](n: i32) -> i32 { return n * scale }, 3)
+    return ifexpr result == 6 { 0 } else { 1 }
+}
+```
 
 ## 9. 実行時の検査
 
@@ -1673,14 +1714,14 @@ CharEscape ::= "\" ( "0" | "n" | "r" | "t" | "\" | "'"
 ```ebnf
 Program          ::= NL* ( Declaration NL+ )* Declaration? EOF
 Declaration      ::= TopLevelBinding | FunctionDeclaration
-                   | StructDeclaration | EnumDeclaration | FnTypeDeclaration
+                   | StructDeclaration | EnumDeclaration | FnShapeDeclaration
 
 TopLevelBinding  ::= ( "fix" | "var" ) IDENT TypeAnnotation? "=" ConstExpression AllowClause?
 TypeAnnotation   ::= ":" Type
 
 FunctionDeclaration ::= "fn" IDENT "(" Parameters? ")" "->" Type Block
-FnTypeDeclaration ::= "fntype" IDENT "(" FnTypeParameters? ")" "->" Type
-FnTypeParameters ::= Type ( "," Type )* ","?
+FnShapeDeclaration ::= "fnshape" IDENT "(" FnShapeParameters? ")" "->" Type
+FnShapeParameters ::= Type ( "," Type )* ","?
 Parameters       ::= Parameter ( "," Parameter )* ","?
 Parameter        ::= IDENT ":" Type
 
@@ -1693,7 +1734,7 @@ EnumDeclaration  ::= "enum" IDENT ":" IntegerType
 Variants         ::= IDENT ( "," NL* IDENT )* ","? NL*
 
 Type             ::= IntegerType | "len_t" | "f32" | "f64" | "bool" | "char" | "symbol" | "text" | "void"
-                   | "int" | "float" | IDENT | "fn" IDENT
+                   | "int" | "float" | IDENT | "static" "fn" IDENT | "fn" IDENT
 IntegerType      ::= "i8" | "i16" | "i32" | "i64"
                    | "u8" | "u16" | "u32" | "u64"
 ```
@@ -1771,7 +1812,11 @@ Primary          ::= Literal | IDENT | FunctionCall | StructLiteral | TEMPLATE
 Literal          ::= INTEGER | FLOAT | CHAR | "true" | "false" | "nan" | "inf"
 
 FunctionCall     ::= IDENT "(" Arguments? ")"
-Arguments        ::= Expression ( "," Expression )* ","?
+Arguments        ::= Argument ( "," Argument )* ","?
+Argument         ::= Expression | ClosureExpression
+ClosureExpression ::= "fn" "[" Captures? "]" "(" Parameters? ")" "->" Type Block
+Captures         ::= Capture ( "," Capture )* ","?
+Capture          ::= "var"? IDENT
 StructLiteral    ::= IDENT "{" NL* Initializers? "}"
 Initializers     ::= Initializer ( "," NL* Initializer )* ","? NL*
 Initializer      ::= IDENT ":" Expression | IDENT

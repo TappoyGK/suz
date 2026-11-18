@@ -78,7 +78,7 @@ impl Parser<'_, '_> {
         }
     }
 
-    fn parameter(&mut self) -> Result<Parameter, Diagnostic> {
+    pub(super) fn parameter(&mut self) -> Result<Parameter, Diagnostic> {
         let location = self.location();
         let Kind::Ident(name) = self.token().kind else {
             return Err(self.error(
@@ -96,7 +96,7 @@ impl Parser<'_, '_> {
             ));
         }
         self.cursor += 1;
-        let ty = self.parse_type()?;
+        let ty = self.function_parameter_type()?;
         if ty == Type::Void {
             return Err(location.error(
                 ErrorKind::InvalidSource,
@@ -107,12 +107,40 @@ impl Parser<'_, '_> {
     }
 
     pub(super) fn parse_type(&mut self) -> Result<Type, Diagnostic> {
+        let location = self.location();
+        let ty = self.function_parameter_type()?;
+        if matches!(ty, Type::Function(_)) {
+            return Err(location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "fn.type-call",
+                    "fn types are only allowed on function parameters and fnshape parameters; use static fn here"
+                ),
+            ));
+        }
+        Ok(ty)
+    }
+
+    pub(super) fn function_parameter_type(&mut self) -> Result<Type, Diagnostic> {
+        let persistent = self.token().kind == Kind::Keyword("static");
+        if persistent {
+            self.cursor += 1;
+            if self.token().kind != Kind::Keyword("fn") {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "fn.type-mark",
+                        "static must be followed by fn and a declared fnshape name"
+                    ),
+                ));
+            }
+        }
         let marked = self.token().kind == Kind::Keyword("fn");
         if marked {
             self.cursor += 1;
         }
         if let Kind::Ident(name) = self.token().kind
-            && let Some(decl) = self.fntypes.iter().find(|d| d.name == name)
+            && let Some(decl) = self.fnshapes.iter().find(|d| d.name == name)
         {
             if !marked {
                 return Err(self.error(
@@ -124,12 +152,16 @@ impl Parser<'_, '_> {
                 ));
             }
             self.cursor += 1;
-            return Ok(Type::Function(decl.type_id));
+            return Ok(if persistent {
+                Type::StaticFunction(decl.type_id)
+            } else {
+                Type::Function(decl.type_id)
+            });
         }
         if marked {
             return Err(self.error(
                 ErrorKind::InvalidSource,
-                crate::diagnostic!("fn.type-mark", "fn requires a declared fntype name"),
+                crate::diagnostic!("fn.type-mark", "fn requires a declared fnshape name"),
             ));
         }
         let ty = match self.token().kind {

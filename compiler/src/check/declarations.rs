@@ -19,6 +19,12 @@ pub(super) fn dependencies(
     names: &mut Vec<(String, Location)>,
 ) -> Result<(), Diagnostic> {
     match &expr.kind {
+        ExpressionKind::Closure(_) => {
+            return Err(expr.location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("fn.value-const", "closures are not constant expressions"),
+            ));
+        }
         ExpressionKind::Slice {
             target,
             start,
@@ -214,7 +220,7 @@ pub(super) fn resolve(
     for declaration in declarations {
         if resolver
             .bindings
-            .fntypes
+            .fnshapes
             .iter()
             .any(|d| d.name == declaration.name)
             || structs.iter().any(|s| s.name == declaration.name)

@@ -1,19 +1,19 @@
-//! fntypeの前方参照を解決し、同じ形の関数値の型を一つにまとめる。
+//! fnshapeの前方参照を解決し、同じ形の関数値の型を一つにまとめる。
 //! 構造体は名前で区別するため、関数値の型の循環検査は構造体の内部へ進まない。
 
 use super::{FixedToken, Parser};
 use crate::{
     Diagnostic, ErrorKind,
-    ast::{EnumDeclaration, FnTypeDeclaration, FunctionType, StructDeclaration, Type},
+    ast::{EnumDeclaration, FnShapeDeclaration, FunctionType, StructDeclaration, Type},
     lexer::{Kind, Token},
 };
 
-pub(super) fn headers(tokens: &[Token<'_>]) -> Result<Vec<FnTypeDeclaration>, Diagnostic> {
+pub(super) fn headers(tokens: &[Token<'_>]) -> Result<Vec<FnShapeDeclaration>, Diagnostic> {
     let mut result = Vec::new();
     let mut depth = 0usize;
     let mut cursor = 0;
     while tokens[cursor].kind != Kind::End {
-        if depth == 0 && tokens[cursor].kind == Kind::Keyword("fntype") {
+        if depth == 0 && tokens[cursor].kind == Kind::Keyword("fnshape") {
             let start = cursor;
             cursor += 1;
             let location = crate::ast::Location {
@@ -23,12 +23,12 @@ pub(super) fn headers(tokens: &[Token<'_>]) -> Result<Vec<FnTypeDeclaration>, Di
             let Kind::Ident(name) = tokens[cursor].kind else {
                 return Err(location.error(
                     ErrorKind::InvalidSource,
-                    crate::diagnostic!("fntype.decl", "expected a function type name"),
+                    crate::diagnostic!("fnshape.decl", "expected a function type name"),
                 ));
             };
             super::names::check(super::names::Shape::Type, name, location)?;
             let type_id = result.len();
-            result.push(FnTypeDeclaration {
+            result.push(FnShapeDeclaration {
                 name: name.into(),
                 location,
                 start,
@@ -50,7 +50,7 @@ pub(super) fn resolve(
     tokens: &[Token<'_>],
     enums: &[EnumDeclaration],
     structs: &mut [StructDeclaration],
-    declarations: &mut [FnTypeDeclaration],
+    declarations: &mut [FnShapeDeclaration],
 ) -> Result<Vec<FunctionType>, Diagnostic> {
     let mut names = std::collections::BTreeSet::new();
     for d in declarations.iter() {
@@ -69,7 +69,7 @@ pub(super) fn resolve(
         tokens,
         enums,
         structs,
-        fntypes: declarations,
+        fnshapes: declarations,
         restricted_condition: false,
         cursor: 0,
         constant_expression: false,
@@ -81,7 +81,7 @@ pub(super) fn resolve(
     let mut ends = Vec::new();
     for d in declarations.iter() {
         p.cursor = d.start + 2;
-        let parameters = p.list(Parser::parse_type)?;
+        let parameters = p.list(Parser::function_parameter_type)?;
         p.expect(FixedToken::Symbol("->"))?;
         let result = p.parse_type()?;
         for ty in parameters.iter().chain([&result]) {
@@ -90,7 +90,7 @@ pub(super) fn resolve(
                     ErrorKind::InvalidSource,
                     crate::diagnostic!(
                         "num.places",
-                        "fntype requires concrete types; int and float are not allowed"
+                        "fnshape requires concrete types; int and float are not allowed"
                     ),
                 ));
             }
@@ -109,7 +109,7 @@ pub(super) fn resolve(
     let mut parents = vec![Vec::new(); raw.len()];
     for (id, signature) in raw.iter().enumerate() {
         for ty in signature.parameters.iter().chain([&signature.result]) {
-            if let Type::Function(child) = ty {
+            if let Type::StaticFunction(child) | Type::Function(child) = ty {
                 pending[id] += 1;
                 parents[*child].push(id);
             }
@@ -120,12 +120,10 @@ pub(super) fn resolve(
     let mut ids = vec![None; raw.len()];
     let mut types = Vec::new();
     while let Some(id) = ready.pop_front() {
-        let remap = |ty| {
-            if let Type::Function(child) = ty {
-                Type::Function(ids[child].unwrap())
-            } else {
-                ty
-            }
+        let remap = |ty| match ty {
+            Type::StaticFunction(child) => Type::StaticFunction(ids[child].unwrap()),
+            Type::Function(child) => Type::Function(ids[child].unwrap()),
+            _ => ty,
         };
         let signature = FunctionType {
             parameters: raw[id].parameters.iter().copied().map(remap).collect(),
@@ -150,7 +148,7 @@ pub(super) fn resolve(
         return Err(declarations[id].location.error(
             ErrorKind::InvalidSource,
             crate::diagnostic!(
-                "fntype.recursion",
+                "fnshape.recursion",
                 "function value type contains itself without passing through a struct"
             ),
         ));
@@ -160,8 +158,8 @@ pub(super) fn resolve(
         d.end = ends[id];
     }
     for field in structs.iter_mut().flat_map(|s| &mut s.fields) {
-        if let Type::Function(id) = field.ty {
-            field.ty = Type::Function(ids[id].unwrap());
+        if let Type::StaticFunction(id) = field.ty {
+            field.ty = Type::StaticFunction(ids[id].unwrap());
         }
     }
     Ok(types)

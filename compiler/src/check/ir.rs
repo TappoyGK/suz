@@ -29,6 +29,7 @@ pub(crate) struct CheckedProgram {
 }
 /// [`crate::ast::Function`] を検査・具体化した関数。
 /// 名前を関数番号へ置き換え、仮引数と戻り値の型、本体のIRを保持する。
+#[derive(Clone)]
 pub(crate) struct CheckedFunction {
     pub id: usize,
     pub parameters: Vec<Type>,
@@ -120,6 +121,21 @@ pub(crate) enum CheckedHandler {
     Value(Box<CheckedExpression>),
     Return(Box<CheckedExpression>),
 }
+/// クロージャ本体と、評価位置で順に保持する値・参照。
+/// functionの仮引数列の末尾にキャプチャーを並べ、本体で使うローカル番号を割り当てる。
+#[derive(Clone)]
+pub(crate) struct CheckedClosure {
+    pub function: CheckedFunction,
+    pub captures: Vec<CheckedCapture>,
+}
+
+/// 環境へ保持する値。参照キャプチャーではvalueが外側のローカル変数を指す。
+#[derive(Clone)]
+pub(crate) struct CheckedCapture {
+    pub value: CheckedExpression,
+    pub by_reference: bool,
+}
+
 /// [`crate::ast::ExpressionKind`] の整数演算を検査した表現。
 /// 正確な整数式、型付きの二項演算・符号反転、範囲を確認済みの負のリテラルを区別する。
 #[derive(Clone)]
@@ -160,6 +176,8 @@ impl IntegerOperation {
 #[derive(Clone)]
 pub(crate) enum Value {
     Function(usize),
+    FunctionBorrow(Box<CheckedExpression>),
+    Closure(Box<CheckedClosure>),
     Invoke {
         target: Box<CheckedExpression>,
         arguments: Vec<CheckedExpression>,
@@ -300,7 +318,7 @@ macro_rules! constant_children_visitor {
                     }
                     return handler(h, visit);
                 }
-                Self::Len(v) | Self::Cast(v) | Self::Negate(v) | Self::Truncate(v) | Self::BitNot(v)
+                Self::FunctionBorrow(v) | Self::Len(v) | Self::Cast(v) | Self::Negate(v) | Self::Truncate(v) | Self::BitNot(v)
                 | Self::Not(v) | Self::TextView(v) | Self::Intern { operand: v, .. }
                 | Self::Field { target: v, .. } => visit(v),
                 // constant_structはオペランドの解析から得た具体的なキャッシュであり、ソースのオペランドではない。
@@ -345,7 +363,7 @@ macro_rules! constant_children_visitor {
                 }
                 Self::GenericNumericLiteral { .. } | Self::Integer { .. } | Self::Float(_)
                 | Self::Function(_) | Self::Bool(_) | Self::Text { .. } => {}
-                Self::Local(_) | Self::Global(_) | Self::Void | Self::Invoke { .. } | Self::Call { .. } | Self::Block { .. }
+                Self::Closure(_) | Self::Local(_) | Self::Global(_) | Self::Void | Self::Invoke { .. } | Self::Call { .. } | Self::Block { .. }
                 | Self::Match { .. } | Self::If { .. } | Self::CastReturn { .. } => return false,
             }
             true

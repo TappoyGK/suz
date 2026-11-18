@@ -162,7 +162,8 @@ pub(crate) enum Type {
     Numeric([Option<ScalarType>; NUMERIC_COMBINATIONS]), // intとfloatの内部の型関数。
     Exact, // 内部の数学的な整数。ソースで指定する格納型ではない。
     Struct(usize),
-    Function(usize),
+    StaticFunction(usize), // 保存・返却できるトップレベルの関数値。
+    Function(usize),       // 呼び出しと転送だけができる仮引数。
     Enum(EnumType),
     Void,
     Float(FloatType),
@@ -269,7 +270,7 @@ impl Type {
             Self::Void => "void",
             Self::Enum(_) => "enum",
             Self::Struct(_) => "struct",
-            Self::Function(_) => "function",
+            Self::StaticFunction(_) | Self::Function(_) => "function",
         }
     }
     pub fn c_name(self) -> String {
@@ -279,7 +280,8 @@ impl Type {
                 unreachable!("generic types are resolved before code generation")
             }
             Self::Struct(id) => format!("suz_struct_{id}"),
-            Self::Function(id) => format!("suz_fntype_{id}"),
+            Self::StaticFunction(id) => format!("suz_fntype_{id}"),
+            Self::Function(id) => format!("suz_callback_{id}"),
             Self::Integer(ty) => ty.c_name().into(),
             Self::Float(ty) => ty.c_name().into(),
             Self::Char => "uint32_t".into(),
@@ -334,9 +336,9 @@ pub(crate) struct FunctionType {
     pub result: Type,
 }
 
-/// fntypeの名前と宣言位置。型の同一性は名前ではなく仮引数と戻り値の型で決まる。
+/// fnshapeの名前と宣言位置。型の同一性は名前ではなく仮引数と戻り値の型で決まる。
 #[derive(Clone)]
-pub(crate) struct FnTypeDeclaration {
+pub(crate) struct FnShapeDeclaration {
     pub name: String,
     pub location: Location,
     pub start: usize,
@@ -347,7 +349,7 @@ pub(crate) struct FnTypeDeclaration {
 /// 構文解析の結果全体。型宣言・トップレベル束縛・関数とallowの範囲を保持する。
 /// [`crate::check`] が検査して [`crate::check::ir::CheckedProgram`] へ変換する。
 pub(crate) struct Program {
-    pub fntypes: Vec<FnTypeDeclaration>,
+    pub fnshapes: Vec<FnShapeDeclaration>,
     pub function_types: Vec<FunctionType>,
     pub allows: Vec<crate::warnings::AllowScope>,
     pub structs: Vec<StructDeclaration>,
@@ -357,6 +359,7 @@ pub(crate) struct Program {
 }
 
 /// 関数の仮引数。ソース上の名前・型注釈・位置を保持する。
+#[derive(Clone)]
 pub(crate) struct Parameter {
     pub name: String,
     pub ty: Type,
@@ -364,6 +367,7 @@ pub(crate) struct Parameter {
 }
 
 /// 関数の構文。仮引数・戻り値型・本体の文と、宣言の開始・終了位置を保持する。
+#[derive(Clone)]
 pub(crate) struct Function {
     pub keyword_location: Location,
     pub name: String,
@@ -614,9 +618,25 @@ pub(crate) enum FailureHandler {
     },
 }
 
+/// 明示した値・参照のキャプチャーと、独立した仮引数・戻り先を持つクロージャ。
+#[derive(Clone)]
+pub(crate) struct Closure {
+    pub captures: Vec<Capture>,
+    pub function: Function,
+}
+
+/// キャプチャー一覧の名前と診断位置。型と参照先は外側のスコープで解決する。
+#[derive(Clone)]
+pub(crate) struct Capture {
+    pub by_reference: bool,
+    pub name: String,
+    pub location: Location,
+}
+
 /// 式の構文ごとの内容。名前・リテラルの綴り・子の式を保持し、意味検査で [`crate::check::ir::Value`] へ変換する。
 #[derive(Clone)]
 pub(crate) enum ExpressionKind {
+    Closure(Box<Closure>),
     FunctionValue(String),
     Invoke {
         target: Box<Expression>,

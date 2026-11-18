@@ -30,7 +30,9 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
         return super::exact::stored(expr, context);
     }
     match expr.value {
+        Value::Closure(ref closure) => super::closures::emit(closure, expr.ty, context),
         Value::Function(id) => format!("suz_fn_{id}"),
+        Value::FunctionBorrow(ref value) => super::functions::borrow(value, context),
         Value::Invoke {
             ref target,
             ref arguments,

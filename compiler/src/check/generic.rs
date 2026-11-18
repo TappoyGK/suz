@@ -272,7 +272,7 @@ pub(super) fn call_operand_type(
     scope: &Scope,
 ) -> Option<Type> {
     if let Some(binding) = scope.get(name) {
-        return if let Type::Function(id) = binding.ty {
+        return if let Type::StaticFunction(id) | Type::Function(id) = binding.ty {
             Some(scope.function_types.borrow()[id].result)
         } else {
             None

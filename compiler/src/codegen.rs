@@ -6,6 +6,7 @@ mod arithmetic;
 mod blocks;
 mod casts;
 mod characters;
+mod closures;
 mod exact;
 mod expressions;
 mod functions;
@@ -28,12 +29,16 @@ struct ExpressionContext {
     uses_text: bool,
     structs: Vec<crate::ast::StructDeclaration>,
     function_types: Vec<crate::ast::FunctionType>,
+    call_only_types: BTreeSet<usize>,
+    function_adapters: BTreeSet<usize>,
     struct_equals: BTreeSet<usize>,
     struct_parsers: BTreeSet<usize>,
     enums: Vec<crate::ast::EnumDeclaration>,
     enum_logs: BTreeSet<usize>,
     functions: String,
     next_block: usize,
+    next_closure: usize,
+    closure_environments: Vec<String>,
     references: BTreeSet<usize>,
     helpers: BTreeSet<bool>,
     source_name: String,
@@ -78,6 +83,16 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
         enums: program.enums.clone(),
         structs: program.structs.clone(),
         function_types: program.function_types.clone(),
+        // 未使用のfnshapeもCへ宣言するため、その仮引数が参照する組の型も用意する。
+        call_only_types: program
+            .function_types
+            .iter()
+            .flat_map(|ty| &ty.parameters)
+            .filter_map(|ty| match ty {
+                crate::ast::Type::Function(id) => Some(*id),
+                _ => None,
+            })
+            .collect(),
         ..ExpressionContext::default()
     };
     for value in &program.constant_texts {
@@ -105,6 +120,7 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
     text_structure::prepare(&mut context);
     helpers::emit(&mut c, &context);
     structs::emit(&mut c, &context);
+    functions::call_only_declarations(&mut c, &context);
     text_structure::emit(&mut c, &context);
     for function in &program.functions {
         writeln!(c, "{};", functions::declaration(function)).unwrap();

@@ -50,7 +50,7 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
     for id in 0..context.structs.len() {
         writeln!(c, "typedef struct suz_struct_{id} suz_struct_{id};").unwrap();
     }
-    super::functions::type_declarations(c, &context.function_types);
+    super::functions::type_declarations(c, context);
     fn declaration(
         c: &mut String,
         id: usize,

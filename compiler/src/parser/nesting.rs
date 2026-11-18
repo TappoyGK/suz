@@ -177,6 +177,7 @@ fn kind_height(kind: &ExpressionKind) -> usize {
         Invoke { target, arguments } => target
             .height
             .max(arguments.iter().map(|v| v.height).max().unwrap_or(0)),
+        Closure(closure) => block_height(&closure.function.statements),
         FunctionValue(_) => 0,
         Call { arguments, .. } => arguments.iter().map(|v| v.height).max().unwrap_or(0),
         Block { statements, value } => block_height(statements).max(1 + value.height),
@@ -226,6 +227,7 @@ mod tests {
             ("`n=${a + 1}`", 4),
             ("ifexpr a == 0 { a } else { 0 }", 4),
             ("expr { 1 }", 4),
+            ("run(fn []() -> i32 { return 1 })", 5),
             ("matchexpr a { _ => 1 }", 4),
             ("x as u8 or 0", 4),
             ("s[0] or 'a'", 4),

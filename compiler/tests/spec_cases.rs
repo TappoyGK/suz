@@ -16,6 +16,8 @@ mod casts;
 mod characters;
 #[path = "spec_cases/cli.rs"]
 mod cli;
+#[path = "spec_cases/closures.rs"]
+mod closures;
 #[path = "spec_cases/constants.rs"]
 mod constants;
 #[path = "spec_cases/diagnostics.rs"]
