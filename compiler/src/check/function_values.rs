@@ -41,6 +41,15 @@ pub(super) fn value(
         .get(name)
         .filter(|_| name != "main")
         .ok_or_else(error)?;
+    if signature.external {
+        return Err(expr.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "ffi.function-value",
+                "C functions cannot be used as Suz function values"
+            ),
+        ));
+    }
     let mut types = GenericTypes::default();
     if signature.is_generic() {
         let Some(Type::StaticFunction(id)) = expected else {

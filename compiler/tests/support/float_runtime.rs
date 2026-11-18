@@ -12,7 +12,7 @@ pub fn required(source: &str) -> bool {
 }
 
 pub fn link(command: &mut Command, runtime: &Path) {
-    command.arg("-I").arg(runtime.join("third_party/ryu"));
+    command.arg("-iquote").arg(runtime.join("third_party/ryu"));
     for source in [
         "suz_float.c",
         "suz_format_float.c",

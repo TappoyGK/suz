@@ -42,6 +42,22 @@ pub(in crate::check) fn check(
                 }
             }
             let operand = super::super::exact::use_value(operand, bindings)?;
+            if operand.ty == Type::CPointer || target == Type::CPointer {
+                return Err(expr.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("ffi.pointer-operations", "pointer values cannot be cast"),
+                ));
+            }
+            if matches!(operand.ty, Type::CInteger(_)) || matches!(target, Type::CInteger(_)) {
+                return crate::check::ffi::cast(
+                    operand,
+                    target,
+                    *wrap,
+                    fallback,
+                    expr.location,
+                    bindings,
+                );
+            }
             if operand.ty == Type::Exact {
                 return super::super::exact::cast(
                     operand,
@@ -94,7 +110,10 @@ pub(in crate::check) fn check(
                             | Type::Struct(_)
                     )
                 };
-                if !valid || bindings.contains_function(target) {
+                if !valid
+                    || bindings.contains_function(target)
+                    || crate::check::ffi::contains_c_type(target, bindings)
+                {
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
                         if *wrap {

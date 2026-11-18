@@ -107,6 +107,8 @@ pub(crate) fn walk_expression<V: Visitor + ?Sized>(
         }
         ExpressionKind::Group(inner)
         | ExpressionKind::Negate(inner)
+        | ExpressionKind::CBytes(inner)
+        | ExpressionKind::CByteLen(inner)
         | ExpressionKind::Len(inner)
         | ExpressionKind::Not(inner)
         | ExpressionKind::BitNot(inner) => visitor.expression(inner)?,
@@ -147,7 +149,7 @@ pub(crate) fn walk_statement<V: Visitor + ?Sized>(
                 }
             }
         }
-        Statement::Block(body) => visitor.scope(body, None)?,
+        Statement::Block(body) | Statement::Unsafe(body) => visitor.scope(body, None)?,
         Statement::Loop { condition, body } => {
             if let Some(condition) = condition {
                 visitor.expression(condition)?;

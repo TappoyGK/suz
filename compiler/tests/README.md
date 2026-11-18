@@ -84,6 +84,9 @@ SUZ_TIMINGS=1 ./scripts/test-spec-cases.sh
 - `compiler/tests/spec_cases/function_values.rs`：関数値の型・受け渡し・評価順序、汎用関数の具体化と診断の検査。
 - `compiler/tests/spec_cases/closures.rs`：明示的な値・参照キャプチャー、環境の寿命・評価順、入れ子のスコープと深さ、保存・値の書き換え・代入先と重なる右辺の書き換えの禁止を検査する。
 - `compiler/tests/spec_cases/panic.rs`：panic文の断片出力・評価順・終了判定・構文の深さと、クロージャの終了範囲を検査する。
+- `compiler/tests/spec_cases/ffi_bytes.rs`：UTF-8バイト列・NUL・切り出し、実体の同一性と寿命、評価回数、ポインタ操作の制限、バイト数の範囲検査を確認する。
+- `compiler/tests/spec_cases/ffi_link.rs`：外部ヘッダー・オブジェクト・ライブラリ、リンクの順序と失敗、emit-cのパス引き継ぎを実際のCLIで検査する。
+- `compiler/tests/spec_cases/ffi.rs`：Cヘッダーとの関数型照合、全スカラー型のABI、引数の評価順、C固有型の変換、unsafeの境界を検査する。
 - `compiler/tests/spec_cases/functions.rs`：関数の引数・戻り値、評価順序、再帰、仮引数の制約、voidのテスト。
 - `compiler/tests/spec_cases/value_blocks.rs`：値ブロックのスコープ、外側の変数の更新、評価順序、制御移動と代入先の制約のテスト。
 - `compiler/tests/spec_cases/arithmetic.rs`：整数の算術、境界値、パニック、定数評価のテスト。

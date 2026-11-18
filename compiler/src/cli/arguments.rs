@@ -33,6 +33,7 @@ pub enum Action {
 }
 
 pub struct Options {
+    pub foreign: super::foreign::ForeignOptions,
     pub command: Command,
     pub input: PathBuf,
     pub output: Option<PathBuf>,
@@ -76,6 +77,7 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
         Some("emit-c") => Command::EmitC,
         _ => return Err(invalid(format!("unknown command: {}", first.display()))),
     };
+    let mut foreign = super::foreign::ForeignOptions::default();
     let mut input = None;
     let mut output = None;
     let mut optimization = None;
@@ -94,6 +96,20 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
         let native = matches!(command, Command::Build | Command::Run);
         if !paths_only {
             match arg.to_str() {
+                Some(
+                    option @ ("--include-dir" | "--library-dir" | "--link-library"
+                    | "--link-object"),
+                ) => {
+                    let value = args.next().ok_or_else(|| {
+                        Failure::tool(
+                            2,
+                            "tool.ffi-options",
+                            format!("expected a value after {option}"),
+                        )
+                    })?;
+                    foreign.push(option, value)?;
+                    continue;
+                }
                 Some("--") => {
                     paths_only = true;
                     continue;
@@ -209,6 +225,7 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
         return Err(invalid("missing output path; use -o PATH"));
     }
     Ok(Action::Execute(Options {
+        foreign,
         command,
         input,
         output,

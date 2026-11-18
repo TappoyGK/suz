@@ -173,11 +173,12 @@ _BitInt(128) suz_compiler_probe;
         emit::unpack(c, root, environment.as_deref()).map_err(|e| error("tool.temporary", e))?;
         let executable = root.join("program");
         let mut command = self.command(&self.extra_flags);
+        // 内部ヘッダーは引用符のincludeだけに公開し、externの<...>からは探索させない。
         command
             .arg(&options.optimization)
-            .arg("-I")
+            .arg("-iquote")
             .arg(root.join("runtime"))
-            .arg("-I")
+            .arg("-iquote")
             .arg(root.join("runtime/third_party/ryu"));
         for path in [
             "program.c",
@@ -195,6 +196,7 @@ _BitInt(128) suz_compiler_probe;
             command.arg(root.join(path));
         }
         let result = command
+            .args(&options.foreign.args)
             .args(["-lm", "-o"])
             .arg(&executable)
             .output()

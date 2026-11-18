@@ -10,6 +10,7 @@ mod closures;
 mod errors;
 mod exact;
 mod expressions;
+mod ffi;
 mod functions;
 mod helpers;
 mod logs;
@@ -32,6 +33,10 @@ struct RecoveryTarget {
 
 #[derive(Default)]
 struct ExpressionContext {
+    uses_c_byte_len: bool,
+    uses_c_integer: bool,
+    uses_c_pointer: bool,
+    c_literal_checks: BTreeSet<String>,
     log_level: crate::LogLevel,
     log_ignore: bool,
     function_result: Option<crate::ast::Type>,
@@ -135,6 +140,8 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
         .iter()
         .map(|function| functions::emit(function, &mut context))
         .collect();
+    ffi::checks(&mut c, program, &context);
+    ffi::declarations(&mut c, program);
     text_structure::prepare(&mut context);
     helpers::emit(&mut c, &context);
     structs::emit(&mut c, &context);

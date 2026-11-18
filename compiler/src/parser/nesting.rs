@@ -131,7 +131,7 @@ fn statement_height(statement: &Statement) -> usize {
                 .max()
                 .unwrap_or(0)
         }
-        Statement::Block(body) => block_height(body),
+        Statement::Block(body) | Statement::Unsafe(body) => block_height(body),
         Statement::Loop { condition, body } => condition
             .as_ref()
             .map_or(0, |v| v.height)
@@ -215,7 +215,7 @@ fn kind_height(kind: &ExpressionKind) -> usize {
         Cast {
             operand, fallback, ..
         } => (operand.height + usize::from(fallback.is_some())).max(handler_height(fallback)),
-        Len(v) | Negate(v) | BitNot(v) | Not(v) | Group(v) => v.height,
+        CBytes(v) | CByteLen(v) | Len(v) | Negate(v) | BitNot(v) | Not(v) | Group(v) => v.height,
         If {
             branches,
             otherwise,

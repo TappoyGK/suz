@@ -3,7 +3,7 @@ set -euo pipefail
 
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 fail() { printf '%s\n' "$1" >&2; exit 2; }
-usage='Usage: build-c.sh INPUT.c -o OUTPUT [-O0|-O2] [--env ENV.c]'
+usage='Usage: build-c.sh INPUT.c -o OUTPUT [-O0|-O2] [--env ENV.c] [--include-dir DIR] [--library-dir DIR] [--link-library NAME] [--link-object FILE]'
 [[ $# -ge 1 ]] || fail "$usage"
 source_file="$1"
 shift
@@ -13,6 +13,8 @@ optimization='-O0'
 optimization_set=false
 environment_file="$repo_dir/runtime/suz_env.c"
 environment_set=false
+# emit-cはこの配列へ絶対パス化した引数を保存する。追加指定はその後ろへ連結する。
+ffi_args=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -o)
@@ -25,6 +27,23 @@ while [[ $# -gt 0 ]]; do
             optimization="$1"
             optimization_set=true
             shift
+            ;;
+        --include-dir|--library-dir|--link-library|--link-object)
+            option="$1"
+            [[ $# -ge 2 && -n "$2" && "$2" != -* ]] || fail "Expected a value after $option [tool.ffi-options]"
+            value="$2"
+            if [[ "$option" == --link-library ]]; then
+                [[ "$value" =~ ^[a-zA-Z0-9_+.][-a-zA-Z0-9_+.]*$ ]] || fail 'Invalid library name [tool.ffi-options]'
+                ffi_args+=("-l$value")
+            else
+                [[ "$value" == /* ]] || value="./$value"
+                case "$option" in
+                    --include-dir) ffi_args+=(-I "$value") ;;
+                    --library-dir) ffi_args+=(-L "$value") ;;
+                    --link-object) ffi_args+=(-Xlinker "$value") ;;
+                esac
+            fi
+            shift 2
             ;;
         --env)
             [[ $# -ge 2 && "$environment_set" == false ]] || fail "$usage"
@@ -70,10 +89,11 @@ done <<< "${SUZ_CFLAGS:-}"
 [[ "$environment_file" == /* ]] || environment_file="./$environment_file"
 [[ "$output_file" == /* ]] || output_file="./$output_file"
 runtime="$repo_dir/runtime"
+# externの<...>には内部ヘッダーを公開せず、引用符のincludeだけで探索する。
 exec "${CC:-clang}" "${extra_flags[@]+"${extra_flags[@]}"}" -std=c23 -Wall -Wextra -Werror "$optimization" \
     -fhonor-nans -fhonor-infinities -ffp-contract=off \
     -fdenormal-fp-math=ieee \
-    -I "$runtime" -I "$runtime/third_party/ryu" \
+    -iquote "$runtime" -iquote "$runtime/third_party/ryu" \
     "$source_file" "$runtime/suz_runtime.c" "$runtime/suz_text.c" "$runtime/suz_parse.c" "$runtime/suz_parse_float.c" "$runtime/suz_parse_struct.c" "$environment_file" "$runtime/suz_float.c" "$runtime/suz_format_float.c" \
     "$runtime/third_party/ryu/ryu/f2s.c" "$runtime/third_party/ryu/ryu/d2s.c" \
-    -lm -o "$output_file"
+    "${ffi_args[@]+"${ffi_args[@]}"}" -lm -o "$output_file"

@@ -72,6 +72,8 @@ pub(super) fn dependencies(
         | ExpressionKind::Variant { .. } => {}
         ExpressionKind::Group(inner)
         | ExpressionKind::Negate(inner)
+        | ExpressionKind::CBytes(inner)
+        | ExpressionKind::CByteLen(inner)
         | ExpressionKind::Len(inner)
         | ExpressionKind::Not(inner)
         | ExpressionKind::BitNot(inner) => dependencies(inner, names)?,
@@ -208,6 +210,15 @@ impl Resolver<'_> {
             declaration.annotation,
             &self.bindings,
         )?;
+        if super::ffi::uses_c_environment(&checked) {
+            return Err(declaration.initializer.location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "const.expression",
+                    "C-dependent values are not constant expressions"
+                ),
+            ));
+        }
         diagnostics::collect(&checked, &mut self.warnings);
         let value = constants::evaluate(&checked)?.ok_or_else(|| {
             declaration.location.error(

@@ -205,7 +205,7 @@ impl Parser<'_, '_> {
                     "functions and types must be declared at top level"
                 ),
             )),
-            Kind::Keyword("enum" | "error" | "struct" | "fnshape") => Err(self.error(
+            Kind::Keyword("enum" | "error" | "struct" | "fnshape" | "extern") => Err(self.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(
                     "decl.location",
@@ -372,6 +372,13 @@ impl Parser<'_, '_> {
                     }));
                 }
                 Ok(Statement::Return(self.expression()?))
+            }
+            Kind::Keyword("unsafe") => {
+                self.cursor += 1;
+                self.nested(self.location(), |p| {
+                    let (body, _) = p.block()?;
+                    Ok(Statement::Unsafe(body))
+                })
             }
             _ => Ok(Statement::Expression(self.expression()?)),
         }

@@ -149,6 +149,25 @@ impl Parser<'_, '_> {
 
     // 戻り値に続くエラー指定と、変換に続くorハンドラーは呼び出し側で解析する。
     fn type_atom(&mut self) -> Result<Type, Diagnostic> {
+        if self.token().kind == Kind::Symbol("*") {
+            self.cursor += 1;
+            if self.token().kind != Kind::Ident("const") {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("ffi.pointer-type", "only *const void is supported"),
+                ));
+            }
+            self.cursor += 1;
+            if self.token().kind != Kind::TypeName("void") {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("ffi.pointer-type", "only *const void is supported"),
+                ));
+            }
+            self.cursor += 1;
+            return Ok(Type::CPointer);
+        }
+
         let persistent = self.token().kind == Kind::Keyword("static");
         if persistent {
             self.cursor += 1;

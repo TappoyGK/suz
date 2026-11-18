@@ -6,6 +6,7 @@
 mod arguments;
 mod assets;
 mod emit;
+mod foreign;
 mod help;
 mod native;
 mod output;
@@ -131,7 +132,7 @@ pub fn run() -> Result<Outcome> {
                     }
                 } else {
                     let destination = options.output.as_deref().expect("validated output");
-                    emit::emit(&c, destination, options.environment.as_deref())?;
+                    emit::emit(&c, destination, options.environment.as_deref(), &options.foreign)?;
                 }
             }
             Ok(Outcome::Code(0))

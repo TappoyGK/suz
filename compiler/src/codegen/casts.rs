@@ -13,6 +13,11 @@ pub(super) fn cast_parts(
     location: crate::ast::Location,
     context: &mut ExpressionContext,
 ) -> (String, String, String) {
+    if matches!(operand.ty, crate::ast::Type::CInteger(_))
+        || matches!(target, crate::ast::Type::CInteger(_))
+    {
+        return super::ffi::cast_parts(operand, target, context);
+    }
     if operand.ty == crate::ast::Type::Exact {
         let id = context.temporaries.len();
         context.temporaries.push(crate::ast::Type::Exact);

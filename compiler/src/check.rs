@@ -10,6 +10,7 @@ mod diagnostics;
 mod errors;
 pub(crate) mod exact;
 mod expression;
+mod ffi;
 mod function_values;
 mod functions;
 mod generic;

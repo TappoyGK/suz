@@ -8,6 +8,8 @@ use crate::ast::{BinaryOperator, ComparisonOperator, Location, LogicalOperator, 
 /// 型・名前を解決した関数、入口の関数番号、文字列定数と診断候補を保持する。
 /// 型宣言はASTの表現を共有し、関数は必要な汎用型の具体化も含めてC生成へ渡す。
 pub(crate) struct CheckedProgram {
+    pub external_base: usize,
+    pub externs: Vec<crate::ast::ExternFunction>,
     pub function_types: Vec<crate::ast::FunctionType>,
     /// 整数除算を含む浮動小数点演算の警告候補。
     pub division_warnings: Vec<Location>,
@@ -194,6 +196,16 @@ impl IntegerOperation {
 /// 値ブロックには捕捉した変数を、汎用リテラルには具体化まで必要な綴りを残す。
 #[derive(Clone)]
 pub(crate) enum Value {
+    CBytes(Box<CheckedExpression>),
+    CByteLen {
+        operand: Box<CheckedExpression>,
+        location: Location,
+    },
+    /// 値は既知だが対象C環境の範囲は未確定。生成Cで静的に検査する。
+    CIntegerLiteral {
+        value: crate::numeric::Int,
+        location: Location,
+    },
     Panic {
         parts: Vec<crate::ast::TemplatePart<CheckedExpression>>,
         location: Location,
@@ -345,7 +357,7 @@ macro_rules! constant_children_visitor {
                     }
                     return handler(h, visit);
                 }
-                Self::FunctionBorrow(v) | Self::Len(v) | Self::Cast(v) | Self::Negate(v) | Self::Truncate(v) | Self::BitNot(v)
+                Self::CBytes(v) | Self::CByteLen { operand: v, .. } | Self::FunctionBorrow(v) | Self::Len(v) | Self::Cast(v) | Self::Negate(v) | Self::Truncate(v) | Self::BitNot(v)
                 | Self::Not(v) | Self::TextView(v) | Self::Intern { operand: v, .. }
                 | Self::Field { target: v, .. } => visit(v),
                 // constant_structはオペランドの解析から得た具体的なキャッシュであり、ソースのオペランドではない。
@@ -388,7 +400,7 @@ macro_rules! constant_children_visitor {
                     }
                     return handler(h, visit);
                 }
-                Self::GenericNumericLiteral { .. } | Self::Integer { .. } | Self::Float(_)
+                Self::CIntegerLiteral { .. } | Self::GenericNumericLiteral { .. } | Self::Integer { .. } | Self::Float(_)
                 | Self::Function(_) | Self::Bool(_) | Self::Text { .. } => {}
                 Self::Panic { .. } | Self::HandledCall { .. } | Self::Closure(_) | Self::Local(_) | Self::Global(_) | Self::Void | Self::Invoke { .. } | Self::Call { .. } | Self::Block { .. }
                 | Self::Match { .. } | Self::If { .. } | Self::CastReturn { .. } => return false,

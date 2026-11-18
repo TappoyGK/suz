@@ -159,6 +159,8 @@ pub(crate) const NUMERIC_COMBINATIONS: usize = 18;
 /// Structの番号は構造体宣言、Functionの番号は共通化した関数値の型を参照する。汎用の型はC生成までに具体化する。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Type {
+    CPointer,
+    CInteger(CIntegerType),
     GenericInt,
     GenericFloat,
     Numeric([Option<ScalarType>; NUMERIC_COMBINATIONS]), // intとfloatの内部の型関数。
@@ -229,7 +231,9 @@ impl Type {
         }
     }
     pub fn from_name(name: &str) -> Option<Self> {
-        if name == "int" {
+        if let Some(ty) = CIntegerType::from_name(name) {
+            Some(Self::CInteger(ty))
+        } else if name == "int" {
             Some(Self::GenericInt)
         } else if name == "float" {
             Some(Self::GenericFloat)
@@ -253,6 +257,8 @@ impl Type {
     }
     pub fn name(self) -> &'static str {
         match self {
+            Self::CPointer => "*const void",
+            Self::CInteger(ty) => ty.name(),
             Self::Exact => "exact integer",
             Self::GenericInt => "int",
             Self::GenericFloat => "float",
@@ -277,6 +283,8 @@ impl Type {
     }
     pub fn c_name(self) -> String {
         match self {
+            Self::CPointer => "suz_ffi_bytes".into(),
+            Self::CInteger(ty) => ty.c_name().into(),
             Self::Exact => "suz_exact".into(),
             Self::GenericInt | Self::GenericFloat | Self::Numeric(_) => {
                 unreachable!("generic types are resolved before code generation")
@@ -359,6 +367,7 @@ pub(crate) struct FnShapeDeclaration {
 /// 構文解析の結果全体。型宣言・トップレベル束縛・関数とallowの範囲を保持する。
 /// [`crate::check`] が検査して [`crate::check::ir::CheckedProgram`] へ変換する。
 pub(crate) struct Program {
+    pub externs: Vec<ExternFunction>,
     pub fnshapes: Vec<FnShapeDeclaration>,
     pub function_types: Vec<FunctionType>,
     pub allows: Vec<crate::warnings::AllowScope>,
@@ -417,6 +426,7 @@ pub(crate) enum LogLevel {
 /// 構文解析済みの文。束縛やフィールドの参照はまだソース上の名前で保持する。
 #[derive(Clone)]
 pub(crate) enum Statement {
+    Unsafe(Vec<Statement>),
     Log {
         level: LogLevel,
         parts: Vec<TemplatePart<Expression>>,
@@ -729,6 +739,8 @@ pub(crate) enum ExpressionKind {
         target: Type,
         fallback: Option<FailureHandler>,
     },
+    CBytes(Box<Expression>),
+    CByteLen(Box<Expression>),
     Len(Box<Expression>),
     Negate(Box<Expression>),
     Float(String),
@@ -767,4 +779,68 @@ pub(crate) enum ExpressionKind {
 pub(crate) struct Ignore {
     pub location: Location,
     pub reason: String,
+}
+
+/// C環境で幅や符号が決まる整数型。Suzの演算型と分けて保持する。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CIntegerType {
+    Int,
+    Uint,
+    Long,
+    Ulong,
+    Size,
+    Char,
+}
+impl CIntegerType {
+    pub fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "_int" => Self::Int,
+            "_uint" => Self::Uint,
+            "_long" => Self::Long,
+            "_ulong" => Self::Ulong,
+            "_size_t" => Self::Size,
+            "_char" => Self::Char,
+            _ => return None,
+        })
+    }
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Int => "_int",
+            Self::Uint => "_uint",
+            Self::Long => "_long",
+            Self::Ulong => "_ulong",
+            Self::Size => "_size_t",
+            Self::Char => "_char",
+        }
+    }
+    pub fn c_name(self) -> &'static str {
+        match self {
+            Self::Int => "int",
+            Self::Uint => "unsigned int",
+            Self::Long => "long",
+            Self::Ulong => "unsigned long",
+            Self::Size => "size_t",
+            Self::Char => "char",
+        }
+    }
+    pub fn limits(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Int => ("INT_MIN", "INT_MAX"),
+            Self::Uint => ("0", "UINT_MAX"),
+            Self::Long => ("LONG_MIN", "LONG_MAX"),
+            Self::Ulong => ("0", "ULONG_MAX"),
+            Self::Size => ("0", "SIZE_MAX"),
+            Self::Char => ("CHAR_MIN", "CHAR_MAX"),
+        }
+    }
+}
+/// 本体をCヘッダーとリンカーから得る、ファイル内の関数宣言。
+#[derive(Clone)]
+pub(crate) struct ExternFunction {
+    pub header: String,
+    pub c_name: String,
+    pub name: String,
+    pub parameters: Vec<Parameter>,
+    pub result: Type,
+    pub location: Location,
 }

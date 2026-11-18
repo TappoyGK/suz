@@ -168,6 +168,8 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
                 visit(otherwise, false, true)?;
             }
             ExpressionKind::Negate(inner)
+            | ExpressionKind::CBytes(inner)
+            | ExpressionKind::CByteLen(inner)
             | ExpressionKind::Len(inner)
             | ExpressionKind::BitNot(inner)
             | ExpressionKind::Not(inner) => visit(inner, false, in_value)?,
@@ -249,7 +251,9 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
                     validate_statements(body, in_value)?;
                 }
             }
-            Statement::Block(body) => validate_statements(body, in_value)?,
+            Statement::Block(body) | Statement::Unsafe(body) => {
+                validate_statements(body, in_value)?
+            }
             _ => {}
         }
     }
@@ -479,7 +483,7 @@ pub(super) fn stops(statements: &[Statement]) -> bool {
                 .is_none_or(|e| matches!(e.kind, ExpressionKind::Bool(true)))
                 && !contains_break(body)
         }
-        Statement::Block(inner) => stops(inner),
+        Statement::Block(inner) | Statement::Unsafe(inner) => stops(inner),
         Statement::If {
             branches,
             otherwise,
