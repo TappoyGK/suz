@@ -124,6 +124,15 @@ impl TextPoolLimit {
     }
 }
 
+/// 作業領域の固定容量。0と無制限は認めず、既定値は1 GiBとする。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ArenaLimit(pub NonZeroU64);
+impl Default for ArenaLimit {
+    fn default() -> Self {
+        Self(NonZeroU64::new(1_073_741_824).unwrap())
+    }
+}
+
 impl Warning {
     pub fn rule(&self) -> &str {
         &self.rule_id
@@ -169,6 +178,7 @@ pub struct CompilationOptions {
     pub deny_global_var: bool,
     pub arithmetic_mode: ArithmeticMode,
     pub text_pool_limit: TextPoolLimit,
+    pub arena_limit: ArenaLimit,
 }
 
 #[derive(Debug)]
@@ -222,6 +232,7 @@ pub fn compile_with_options(
             &checked,
             source_name,
             options.text_pool_limit,
+            options.arena_limit,
             options.log_level,
             options.log_ignore,
         ),

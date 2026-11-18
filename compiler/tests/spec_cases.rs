@@ -1,5 +1,7 @@
 #[path = "spec_cases/allows.rs"]
 mod allows;
+#[path = "spec_cases/arena.rs"]
+mod arena;
 #[path = "spec_cases/arithmetic.rs"]
 mod arithmetic;
 #[path = "spec_cases/arithmetic_handlers.rs"]

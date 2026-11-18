@@ -99,6 +99,7 @@ cd generated
 | `--library-dir DIR` | 可 | 可 | 可 | 可 | ライブラリの探索先を追加。複数指定可 |
 | `--link-library NAME` | 可 | 可 | 可 | 可 | Cライブラリ名を指定。複数指定可 |
 | `--link-object FILE` | 可 | 可 | 可 | 可 | オブジェクトまたはアーカイブを指定。複数指定可 |
+| `--arena-limit SIZE` | 可 | 可 | | 可 | 作業領域の固定容量。既定は `1G` |
 | `--text-pool-limit SIZE` | 可 | 可 | | 可 | テキストプールの上限。既定は `1G` |
 | `--force` | 可 | | | | 既存の通常ファイルを出力先として置き換える |
 | `--log-ignore` | 可 | 可 | 可 | 可 | 実行されたignoreの位置と理由を記録する。既定は無効 |
@@ -151,6 +152,12 @@ suz build program.suz -o program --text-pool-limit 256M
 suz run program.suz --text-pool-limit 2G
 suz emit-c program.suz -o generated --text-pool-limit unlimited
 ```
+
+### 3.2 作業領域の容量
+
+**[tool.arena-capacity]** `--arena-limit SIZE` は作業領域arenaの固定容量を指定する。`build`・`run`・`emit-c`で受け付け、省略時は `1G`（1,073,741,824バイト）とする。数値部分はASCIIの正の10進整数とし、単位なしはバイト、大文字の `K`・`M`・`G` はそれぞれ1024の1・2・3乗を掛ける。0、負数、不正な表記、換算後の64ビット符号なし整数の範囲超過、値の省略、重複指定は終了コード2のツールエラーとする。`unlimited`は受け付けない。
+
+設定を生成Cへ埋め込み、入れ子を含む全作業領域で容量を共有する。`emit-c`後も同じ容量を使う。arena未使用なら、この設定によるメモリ確保は行わない。`check`はこのオプションを受け付けない。確保時の失敗は [rt.arena-storage]・[rt.arena-allocation] に従う。
 
 ## 4. 出力と一時ファイル
 

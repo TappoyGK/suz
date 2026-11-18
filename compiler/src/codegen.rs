@@ -81,6 +81,7 @@ pub(crate) fn generate(
     program: &CheckedProgram,
     source_name: &str,
     text_pool_limit: crate::TextPoolLimit,
+    arena_limit: crate::ArenaLimit,
     log_level: crate::LogLevel,
     log_ignore: bool,
 ) -> String {
@@ -97,6 +98,12 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
 
 "#,
     );
+    writeln!(
+        c,
+        "#define SUZ_ARENA_LIMIT UINT64_C({})",
+        arena_limit.0.get()
+    )
+    .unwrap();
     let mut context = ExpressionContext {
         log_level,
         log_ignore,
