@@ -26,6 +26,7 @@ pub(super) fn check(
         .collect::<Vec<_>>()
         != signature.parameters
         || closure.function.result != signature.result
+        || closure.function.errors != signature.errors
     {
         return Err(closure.function.location.error(
             ErrorKind::InvalidSource,

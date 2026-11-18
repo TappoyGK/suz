@@ -466,6 +466,12 @@ pub(super) fn cast(
     bindings: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
     use crate::ast::FailureHandler;
+    if matches!(target, Type::Enum(e) if e.is_error) {
+        return Err(location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!("error.ops", "integers cannot be converted to errors"),
+        ));
+    }
     if wrap {
         if fallback.is_some() {
             return Err(location.error(
@@ -509,6 +515,9 @@ pub(super) fn cast(
     let safe = value_range(&operand).is_some_and(fits);
     if let Some(handler) = fallback {
         let value = match handler {
+            FailureHandler::Fail { location, .. } | FailureHandler::Ignore(location) => {
+                return Err(super::errors::invalid_handler(*location));
+            }
             FailureHandler::Value(v) => Value::CheckedCast {
                 location,
                 constant_struct: None,

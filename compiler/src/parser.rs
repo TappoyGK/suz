@@ -178,7 +178,7 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
                     .unwrap()
                     .end;
             }
-            Kind::Keyword("enum") => {
+            Kind::Keyword("enum" | "error") => {
                 p.cursor = enums
                     .iter()
                     .find(|decl| decl.start == p.cursor)

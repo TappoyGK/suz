@@ -7,6 +7,7 @@ mod blocks;
 mod casts;
 mod characters;
 mod closures;
+mod errors;
 mod exact;
 mod expressions;
 mod functions;
@@ -25,6 +26,7 @@ use std::{collections::BTreeSet, fmt::Write};
 
 #[derive(Default)]
 struct ExpressionContext {
+    function_result: Option<crate::ast::Type>,
     text_literals: std::collections::BTreeMap<String, usize>,
     uses_text: bool,
     structs: Vec<crate::ast::StructDeclaration>,

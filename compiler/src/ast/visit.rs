@@ -43,13 +43,18 @@ pub(crate) fn walk_expression<V: Visitor + ?Sized>(
             for bound in [start, end].into_iter().flatten() {
                 visitor.expression(bound)?;
             }
-            if let Some(FailureHandler::Value(value) | FailureHandler::Return { value, .. }) =
-                fallback
+            if let Some(
+                FailureHandler::Value(value)
+                | FailureHandler::Return { value, .. }
+                | FailureHandler::Fail {
+                    value: Some(value), ..
+                },
+            ) = fallback
             {
                 visitor.expression(value)?;
             }
         }
-        ExpressionKind::Template(parts) => {
+        ExpressionKind::Template(parts) | ExpressionKind::Panic(parts) => {
             for part in parts {
                 if let TemplatePart::Value(value) = part {
                     visitor.expression(value)?;
@@ -107,8 +112,13 @@ pub(crate) fn walk_expression<V: Visitor + ?Sized>(
             operand, fallback, ..
         } => {
             visitor.expression(operand)?;
-            if let Some(FailureHandler::Value(value) | FailureHandler::Return { value, .. }) =
-                fallback
+            if let Some(
+                FailureHandler::Value(value)
+                | FailureHandler::Return { value, .. }
+                | FailureHandler::Fail {
+                    value: Some(value), ..
+                },
+            ) = fallback
             {
                 visitor.expression(value)?;
             }
@@ -145,6 +155,7 @@ pub(crate) fn walk_statement<V: Visitor + ?Sized>(
         Statement::Binding { initializer, .. } => visitor.expression(initializer)?,
         Statement::Assign { value, .. }
         | Statement::Return(value)
+        | Statement::Fail(value)
         | Statement::Expression(value) => visitor.expression(value)?,
         Statement::Log { parts, .. } => {
             for part in parts {

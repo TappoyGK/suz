@@ -33,6 +33,42 @@ impl Parser<'_, '_> {
     }
 
     fn failure_handler(&mut self) -> Result<FailureHandler, Diagnostic> {
+        if self.token().kind == Kind::Keyword("panic") {
+            let crate::ast::Statement::Log {
+                parts, location, ..
+            } = self.panic()?
+            else {
+                unreachable!()
+            };
+            return Ok(FailureHandler::Value(Box::new(
+                self.node(ExpressionKind::Panic(parts), location)?,
+            )));
+        }
+        if self.token().kind == Kind::Keyword("ignore") {
+            let location = self.location();
+            self.cursor += 1;
+            if !matches!(self.token().kind, Kind::IgnoreReason(_)) {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("err.or-ignore", "ignore requires ': reason'"),
+                ));
+            }
+            self.cursor += 1;
+            return Ok(FailureHandler::Ignore(location));
+        }
+        if self.token().kind == Kind::Keyword("fail") {
+            let location = self.location();
+            self.cursor += 1;
+            let value = if matches!(
+                self.token().kind,
+                Kind::Newline | Kind::Symbol("}" | ")" | ",") | Kind::End
+            ) {
+                None
+            } else {
+                Some(Box::new(self.expression()?))
+            };
+            return Ok(FailureHandler::Fail { value, location });
+        }
         if self.token().kind == Kind::Keyword("return") {
             if self.constant_expression {
                 return Err(self.error(
@@ -242,8 +278,7 @@ impl Parser<'_, '_> {
             Kind::Keyword("fn") => {
                 self.cursor += 1;
                 if self.token().kind == Kind::Symbol("[") {
-                    let closure = self.closure(location)?;
-                    return self.primary_node(ExpressionKind::Closure(Box::new(closure)), location);
+                    return self.closure_node(location);
                 }
                 let Kind::Ident(name) = self.token().kind else {
                     return Err(self.error(

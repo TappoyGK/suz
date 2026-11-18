@@ -11,6 +11,7 @@ pub(super) struct Signature {
     pub id: usize,
     pub parameters: Vec<Type>,
     pub result: Type,
+    pub errors: Vec<crate::ast::ErrorVariant>,
 }
 
 impl Signature {
@@ -66,6 +67,7 @@ pub(super) struct Scope {
     pub structs: Rc<Vec<crate::ast::StructDeclaration>>,
     pub functions: Rc<BTreeMap<String, Signature>>,
     pub result: Type,
+    pub errors: Rc<Vec<crate::ast::ErrorVariant>>,
 }
 impl Scope {
     pub fn contains_function(&self, ty: Type) -> bool {
@@ -169,6 +171,7 @@ impl Default for Scope {
             structs: Rc::default(),
             functions: Rc::default(),
             result: Type::Integer(IntegerType::U8),
+            errors: Rc::default(),
         }
     }
 }

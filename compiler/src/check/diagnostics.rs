@@ -8,6 +8,10 @@ use crate::ast::Location;
 
 pub(super) fn collect(expr: &CheckedExpression, locations: &mut Vec<Location>) {
     match &expr.value {
+        Value::HandledCall { call, handler } => {
+            collect(call, locations);
+            collect_handler(handler, locations);
+        }
         Value::Closure(closure) => collect_statements(&closure.function.statements, locations),
         Value::FunctionBorrow(inner) => collect(inner, locations),
         Value::Exact(e) => {
@@ -32,7 +36,7 @@ pub(super) fn collect(expr: &CheckedExpression, locations: &mut Vec<Location>) {
                 collect(value, locations);
             }
         }
-        Value::Template { parts, .. } => {
+        Value::Template { parts, .. } | Value::Panic { parts, .. } => {
             for part in parts {
                 if let crate::ast::TemplatePart::Value(value) = part {
                     collect(value, locations);
@@ -144,6 +148,11 @@ pub(super) fn collect(expr: &CheckedExpression, locations: &mut Vec<Location>) {
 fn collect_statements(statements: &[CheckedStatement], locations: &mut Vec<Location>) {
     for statement in statements {
         match statement {
+            CheckedStatement::HandleCall { call, handler, .. } => {
+                collect(call, locations);
+                collect_handler(handler, locations);
+            }
+            CheckedStatement::Fail(value) => collect(value, locations),
             CheckedStatement::SliceReturn {
                 operation,
                 return_value,
@@ -239,4 +248,13 @@ pub(super) fn unhandled_arithmetic(statements: &[CheckedStatement]) -> Vec<Locat
     let mut locations = Vec::new();
     collect_statements(statements, &mut locations);
     locations
+}
+
+fn collect_handler(handler: &super::ir::CallHandler, locations: &mut Vec<Location>) {
+    match handler {
+        super::ir::CallHandler::Value(v)
+        | super::ir::CallHandler::Return(v)
+        | super::ir::CallHandler::Fail(Some(v)) => collect(v, locations),
+        _ => {}
+    }
 }

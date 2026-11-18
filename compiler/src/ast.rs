@@ -129,6 +129,8 @@ pub(crate) struct EnumType {
     pub id: usize,
     pub base: IntegerType,
     pub count: usize,
+    /// error宣言は整数との変換を持たない。
+    pub is_error: bool,
 }
 
 /// 列挙型の宣言。列挙子の名前と、宣言を読み飛ばすためのトークン範囲を保持する。
@@ -329,11 +331,19 @@ pub(crate) struct TopLevelBinding {
     pub initializer: Expression,
 }
 
+/// エラー集合の要素。型番号とバリアント番号をソートして関数の形を比較する。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct ErrorVariant {
+    pub type_id: usize,
+    pub variant: usize,
+}
+
 /// 関数値の型。同じ仮引数・戻り値の組を一つの番号へまとめる。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct FunctionType {
     pub parameters: Vec<Type>,
     pub result: Type,
+    pub errors: Vec<ErrorVariant>,
 }
 
 /// fnshapeの名前と宣言位置。型の同一性は名前ではなく仮引数と戻り値の型で決まる。
@@ -374,6 +384,7 @@ pub(crate) struct Function {
     pub location: Location,
     pub parameters: Vec<Parameter>,
     pub result: Type,
+    pub errors: Vec<ErrorVariant>,
     pub statements: Vec<Statement>,
     pub end: Location,
 }
@@ -451,6 +462,7 @@ pub(crate) enum Statement {
         value: Expression,
     },
     Return(Expression),
+    Fail(Expression),
 }
 
 /// 構文解析済みの式とソース位置。型は意味検査で決定する。
@@ -612,6 +624,11 @@ impl BinaryOperator {
 /// 失敗時に値を返す処理、または関数からreturnする処理の構文。
 #[derive(Clone)]
 pub(crate) enum FailureHandler {
+    Fail {
+        value: Option<Box<Expression>>,
+        location: Location,
+    },
+    Ignore(Location),
     Value(Box<Expression>),
     Return {
         value: Box<Expression>,
@@ -637,6 +654,8 @@ pub(crate) struct Capture {
 /// 式の構文ごとの内容。名前・リテラルの綴り・子の式を保持し、意味検査で [`crate::check::ir::Value`] へ変換する。
 #[derive(Clone)]
 pub(crate) enum ExpressionKind {
+    /// or panicの内部表現。通常の値式としては構文から作らない。
+    Panic(Vec<TemplatePart<Expression>>),
     Closure(Box<Closure>),
     FunctionValue(String),
     Invoke {

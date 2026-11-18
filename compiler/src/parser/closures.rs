@@ -9,11 +9,24 @@ use crate::{
 };
 
 impl Parser<'_, '_> {
+    // クロージャの構築を単項式の再帰フレームから分離し、深い通常式のスタックを増やさない。
+    pub(super) fn closure_node(
+        &mut self,
+        location: Location,
+    ) -> Result<crate::ast::Expression, Diagnostic> {
+        let closure = self.closure(location)?;
+        self.primary_node(
+            crate::ast::ExpressionKind::Closure(Box::new(closure)),
+            location,
+        )
+    }
+
     pub(super) fn closure(&mut self, location: Location) -> Result<Closure, Diagnostic> {
         let captures = self.delimited_list("[", "]", Self::capture)?;
         let parameters = self.list(Self::parameter)?;
         self.expect(FixedToken::Symbol("->"))?;
         let result = self.parse_type()?;
+        let errors = self.error_spec()?;
         if result.generic() || parameters.iter().any(|p| p.ty.generic()) {
             return Err(location.error(
                 ErrorKind::InvalidSource,
@@ -42,6 +55,7 @@ impl Parser<'_, '_> {
                 location,
                 parameters,
                 result,
+                errors,
                 statements,
                 end,
             },

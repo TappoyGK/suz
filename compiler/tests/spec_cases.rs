@@ -264,3 +264,6 @@ fn run_spec_cases(optimized: bool) {
 
 #[path = "spec_cases/length.rs"]
 mod length;
+
+#[path = "spec_cases/errors.rs"]
+mod errors;

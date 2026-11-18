@@ -104,6 +104,12 @@ fn check_statement(
     #[cfg(test)]
     super::generic::work();
     match statement {
+        Statement::Fail(value) => context
+            .output
+            .push(CheckedStatement::Fail(super::errors::fail(
+                value,
+                context.bindings,
+            )?)),
         Statement::Log {
             parts,
             location,

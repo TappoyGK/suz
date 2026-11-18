@@ -243,6 +243,13 @@ impl Parser<'_, '_> {
             self.cursor += 1;
             (parameters, self.parse_type()?)
         };
+        let errors = self.error_spec()?;
+        if name == "main" && !errors.is_empty() {
+            return Err(location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("prog.main", "main cannot return errors"),
+            ));
+        }
         let (statements, end) = self.block()?;
         Ok(Function {
             keyword_location,
@@ -250,8 +257,79 @@ impl Parser<'_, '_> {
             location,
             parameters,
             result,
+            errors,
             statements,
             end,
         })
+    }
+}
+
+impl Parser<'_, '_> {
+    /// 型全体の指定を展開し、重複を拒否してから順序に依存しない集合にする。
+    pub(super) fn error_spec(&mut self) -> Result<Vec<crate::ast::ErrorVariant>, Diagnostic> {
+        let mut errors = std::collections::BTreeSet::new();
+        if self.token().kind != Kind::Keyword("or") {
+            return Ok(Vec::new());
+        }
+        self.cursor += 1;
+        loop {
+            let location = self.location();
+            let Kind::Ident(name) = self.token().kind else {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("err.fn-return", "expected an error type"),
+                ));
+            };
+            let declaration = self
+                .enums
+                .iter()
+                .find(|d| d.name == name && d.ty.is_error)
+                .ok_or_else(|| {
+                    self.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!("err.fn-return", "expected an error type"),
+                    )
+                })?;
+            self.cursor += 1;
+            let variants = if self.token().kind == Kind::Symbol(".") {
+                self.cursor += 1;
+                let Kind::Ident(name) = self.token().kind else {
+                    return Err(self.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!("err.fn-return", "expected an error variant"),
+                    ));
+                };
+                let index = declaration
+                    .variants
+                    .iter()
+                    .position(|v| v == name)
+                    .ok_or_else(|| {
+                        self.error(
+                            ErrorKind::InvalidSource,
+                            crate::diagnostic!("err.fn-return", "unknown error variant"),
+                        )
+                    })?;
+                self.cursor += 1;
+                index..index + 1
+            } else {
+                0..declaration.ty.count
+            };
+            for variant in variants {
+                if !errors.insert(crate::ast::ErrorVariant {
+                    type_id: declaration.ty.id,
+                    variant,
+                }) {
+                    return Err(location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!("err.fn-return", "duplicate error variant"),
+                    ));
+                }
+            }
+            if self.token().kind != Kind::Symbol(",") {
+                break;
+            }
+            self.cursor += 1;
+        }
+        Ok(errors.into_iter().collect())
     }
 }

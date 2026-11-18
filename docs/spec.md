@@ -69,9 +69,9 @@ Suzは次のものを含む。
 **[src.keywords]** 次の語はキーワードである。
 
 ```text
-fix var fn fnshape static struct enum
+fix var fn fnshape static struct enum error
 if ifexpr elif else while loop for rev in break continue return match matchexpr
-as or not len log panic allow expr with
+as or not len log panic fail ignore recover allow expr with
 true false nan inf
 ```
 
@@ -211,9 +211,9 @@ fn main() -> u8 {
 
 ### 4.1 宣言とスコープ
 
-**[decl.top-level]** トップレベルには、`fix`・`var`・関数・構造体・列挙型・`fnshape` の宣言だけを書ける。これらの名前は、ファイル内の宣言順序によらず参照できる。
+**[decl.top-level]** トップレベルには、`fix`・`var`・関数・構造体・列挙型・エラー型・`fnshape` の宣言だけを書ける。これらの名前は、ファイル内の宣言順序によらず参照できる。
 
-**[decl.location]** `fix` と `var` はトップレベルとブロック内で宣言できる。関数、構造体、列挙型、`fnshape` はトップレベルで宣言する。それぞれの宣言をこれらの場所以外に書くとコンパイルエラーである。
+**[decl.location]** `fix` と `var` はトップレベルとブロック内で宣言できる。関数、構造体、列挙型、エラー型、`fnshape` はトップレベルで宣言する。それぞれの宣言をこれらの場所以外に書くとコンパイルエラーである。
 
 **[decl.duplicate]** 同じスコープで同じ名前を宣言するとコンパイルエラーである。定数、変数、仮引数、関数、型など、宣言の種類が違っても同じである。
 
@@ -227,7 +227,7 @@ fn main() -> u8 {
 
 **[name.value]** 関数、ブロック内の `fix`・`var`、仮引数、構造体のフィールド、`for` と `rev` のループ変数の名前はASCIIの小文字で始まり、小文字・数字・`_` だけからなる。`_` は末尾に置かず、連続させない。例は `read_count`、`count`、`x2` である。
 
-**[name.type]** 構造体・列挙型・`fnshape` の名前はASCIIの大文字で始まり、英字と数字だけからなる。小文字を1文字以上含み、大文字を連続させない。例は `Vec2`、`IoError` である。`IOError`、`T`、`Load_Error` は認めない。
+**[name.type]** 構造体・列挙型・エラー型・`fnshape` の名前はASCIIの大文字で始まり、英字と数字だけからなる。小文字を1文字以上含み、大文字を連続させない。例は `Vec2`、`IoError` である。`IOError`、`T`、`Load_Error` は認めない。
 
 **[name.variant]** 列挙子の名前はASCIIの大文字で始まり、英字と数字だけからなる。例は `Ready`、`A`、`F1`、`ESC` である。
 
@@ -235,7 +235,7 @@ fn main() -> u8 {
 
 ## 5. 型
 
-**[type.name]** 型として使う名前は、組み込み型名、またはファイル内で宣言された構造体・列挙型の名前でなければならない。関数値の型は [fn.type-mark] に従い `static fn` または `fn` と `fnshape` の名前で書く。該当する型がない場合はコンパイルエラーである。
+**[type.name]** 型として使う名前は、組み込み型名、またはファイル内で宣言された構造体・列挙型・エラー型の名前でなければならない。関数値の型は [fn.type-mark] に従い `static fn` または `fn` と `fnshape` の名前で書く。該当する型がない場合はコンパイルエラーである。
 
 ### 5.1 組み込み型
 
@@ -767,7 +767,7 @@ if not ready {
 
 **[expr.cast-return]** `値 as 型 or return 式` は、変換に失敗した場合だけ `return` の式を評価し、その値を返して関数から戻る。この式には関数の戻り値型を要求する。戻り値型が `void` の関数では `or return` と書く。成功した場合は変換後の値を結果として処理を続ける。複数の文で戻り値を作る場合は `or return expr { ... }` と書く。
 
-**[expr.or-return-position]** `or return` は、`fix`・`var` の初期値、または代入・複合代入の右辺全体をなす変換、整数演算、textの切り出し・添字による読み取りに付ける。この右辺全体を囲む丸括弧は、この位置の判定に影響しない。演算のオペランド、関数の実引数、構造体のフィールドの初期値、条件、`or` の代替値など、式の一部分に埋め込むとコンパイルエラーである。`return` に渡す式の内部にも `or return` を書けない。`ifexpr`・`matchexpr`・`expr` 内部では、右辺全体であっても [expr.jump-prohibited] を適用する。
+**[expr.or-return-position]** `or return` は、`fix`・`var` の初期値、または代入・複合代入の右辺全体をなす変換、整数演算、textの切り出し・添字による読み取り、失敗する関数の呼び出しに付ける。この右辺全体を囲む丸括弧は、この位置の判定に影響しない。演算のオペランド、関数の実引数、構造体のフィールドの初期値、条件、`or` の代替値など、式の一部分に埋め込むとコンパイルエラーである。`return` に渡す式の内部にも `or return` を書けない。`ifexpr`・`matchexpr`・`expr` 内部では、右辺全体であっても [expr.jump-prohibited] を適用する。
 
 ```suz
 fix x = a as u8 or return 1
@@ -797,7 +797,7 @@ fix wave = code as Wave or Wave.Sine
 
 ### 7.12 整数演算の失敗処理
 
-**[expr.arithmetic-handler]** 整数の算術式とシフトには、`式 or 代替値` または `式 or return` による失敗処理を付けられる。算術式では [arith.handler] に従い、式全体のゼロ除算と格納時の範囲超過を処理する。シフトでは、その `<<` または `>>` の失敗を処理する。`or` を省略した場合は9.2節のパニックの規則に従う。
+**[expr.arithmetic-handler]** 整数の算術式とシフトには、`式 or 代替値`、`式 or return`、`式 or panic テンプレート` による失敗処理を付けられる。算術式では [arith.handler] に従い、式全体のゼロ除算と格納時の範囲超過を処理する。シフトでは、その `<<` または `>>` の失敗を処理する。`or` を省略した場合は9.2節のパニックの規則に従う。
 
 **[expr.arithmetic-fallback]** 演算に成功した場合はその結果を使い、失敗した場合だけ代替値を評価する。代替値には演算結果の型を要求する。`or return` は、失敗した場合に関数から戻り、その戻り値の型と書き方は [expr.cast-return] に従う。`expr` 系内部での制御移動には [expr.jump-prohibited] を適用する。
 
@@ -1021,7 +1021,7 @@ fn main() -> u8 {
 
 **[text.index]** `[位置]` は、その位置のUnicodeスカラー値を `char` で返す。位置には整数型を要求する。対象と位置を順に1回ずつ評価する。位置が負、または対象のスカラー値の個数以上なら失敗する。
 
-**[text.slice-handler]** 切り出しと添字による読み取りには `or 式` または `or return` を必須とする。代替値には、切り出しでは `text`、読み取りでは `char` を要求し、失敗したときだけ評価する。`[:]` は失敗しないため `or` を付けない。定数式にもこの規則を適用する。`or` の結合と脱出の記述位置には [expr.cast-binding]、[expr.cast-return]、[expr.or-return-position]、[expr.jump-prohibited] を適用する。
+**[text.slice-handler]** 切り出しと添字による読み取りには `or 式`、`or return`、`or panic テンプレート` のいずれかを必須とする。代替値には、切り出しでは `text`、読み取りでは `char` を要求し、失敗したときだけ評価する。`[:]` は失敗しないため `or` を付けない。定数式にもこの規則を適用する。`or` の結合と脱出の記述位置には [expr.cast-binding]、[expr.cast-return]、[expr.or-return-position]、[expr.jump-prohibited] を適用する。
 
 ```suz
 fix tail = line[5:] or return 1
@@ -1151,13 +1151,13 @@ fix narrow: u8 = a + b or 0 // 格納に失敗し、代替値0を使う
 
 **[fn.return]** 値を返す関数は、`return 式` で値を返す。式には関数の戻り値型を要求し、[conv.widen] の拡大変換を認める。関数の最後の式を暗黙に戻り値にはしない。`void` の関数は、式を付けない `return` で戻れる。これらに反する `return` や、関数の外の `return` はコンパイルエラーである。
 
-**[fn.value-return-required]** 戻り値型が `void` 以外の関数には、`return 式` または `panic` 文が構文上少なくとも1つ必要である。内側のクロージャ本体にある文は数えない。どちらもなければコンパイルエラーである。
+**[fn.value-return-required]** 成功時の戻り値型が `void` 以外の関数には、`return 式` または `panic` 文が構文上少なくとも1つ必要である。エラー指定のある関数では `fail` 文でもこの条件を満たす。内側のクロージャ本体にある文は数えない。いずれもなければコンパイルエラーである。
 
 **[fn.fallthrough]** `void` の関数は、末尾に到達したときも呼び出し元に戻る。値を返す関数は、[fn.flow-analysis] の規則で関数末尾へ進みうると判定される場合、コンパイルエラーである。[fn.value-return-required] とこの条件の両方を満たさなければならない。
 
 **[fn.flow-analysis]** 関数末尾への到達は、次の構文上の規則で判定する。
 
-- `return` と `panic` は、その先へ進まない。`break` と `continue` は、対象のループへ制御を移す。
+- `return`・`panic`・`fail` は、その先へ進まない。`break` と `continue` は、対象のループへ制御を移す。
 - ブロックは文を順にたどる。途中で先へ進まない文に達した場合、ブロック末尾へ進まない。
 - `if` は、最後の `else` があり、`elif` を含むすべての分岐が先へ進まない場合、全体も先へ進まない。それ以外は先へ進みうる。
 - `match` は、すべての腕が先へ進まない場合、全体も先へ進まない。それ以外は先へ進みうる。
@@ -1391,7 +1391,7 @@ fn convert(value: u16) -> int {
 
 **[fnshape.decl]** `fnshape 名前(T1, T2, ...) -> R` は、仮引数の型の並びと戻り値の型で決まる「関数の形」に名前を付ける。構造体や列挙型の宣言とは異なり、名前で区別する新しい型は作らない。仮引数は0個以上で、型だけを書く。この形を持つ関数値の型は [fn.type-mark] に従って書く。仮引数・戻り値に `int`・`float` は書けず、`void` は戻り値だけに使える。
 
-**[fnshape.same]** 同じ種別（`static fn` か `fn`）で、仮引数の型の並びと戻り値の型が同じ関数値の型は、名前が違っても同じ型である。関数の宣言から推論した関数値の型にも、同じ規則を適用する。
+**[fnshape.same]** 同じ種別（`static fn` か `fn`）で、仮引数の型の並び、成功時の戻り値の型、展開後のエラー集合が同じ関数値の型は、名前が違っても同じ型である。関数の宣言から推論した関数値の型にも、同じ規則を適用する。
 
 **[fnshape.recursion]** 関数値の型は、仮引数と戻り値を直接・間接にたどって自分自身を含むことはできない。循環する宣言はコンパイルエラーである。構造体を通して含む場合は認める。たとえば、`struct Node { visit: static fn Visit }` と `fnshape Visit(Node) -> void` は宣言できる。
 
@@ -1472,6 +1472,30 @@ fn main() -> u8 {
     return ifexpr result == 6 { 0 } else { 1 }
 }
 ```
+
+### 8.10 エラー型と失敗する関数
+
+**[error.decl]** トップレベルで `error ReadError { Missing, Denied }` と書くと、エラー専用の列挙型を宣言する。型名は [name.type]、バリアント名は [name.variant] に従う。バリアントは1つ以上必要で、同じ型の中で重複できない。整数の基底型やバリアントの整数値は指定しない。異なる宣言のエラー型は別の型である。
+
+**[error.ops]** `ReadError.Missing` のように値を表す。変数・仮引数・通常の戻り値・構造体フィールド・関数の形の型として使え、`==`・`!=`、`match`・`matchexpr`、テンプレートへの埋め込みができる。分岐は全バリアントを網羅し、`_` は使えない。テンプレートにはバリアント名を表示する。整数との型変換、算術・ビット演算、順序比較はできない。
+
+**[err.fn-return]** 関数・クロージャ・`fnshape` の戻り値に `成功型 or エラー指定` と書くと、失敗する関数の形になる。エラー指定は1つ以上のエラー型名またはバリアント名をカンマで区切る。型名は全バリアントへ展開する。同じバリアントを重複して指定するとコンパイルエラーである。`void or ReadError` も使えるが、`main` にエラー指定は付けられない。関数の形ではエラー集合の列挙順は区別せず、集合の大小による暗黙変換は行わない。
+
+**[err.fail]** `fail 式` はエラーを返して関数を終了する。式にはエラー型を要求する。定数式ではその値が、定数式でなければその型の全バリアントが、関数のエラー指定に含まれていなければならない。失敗しない関数には書けない。`return` は成功を表し、成功型が `void` なら裸の `return` または末尾到達で成功する。値ブロック内の `fail` には [expr.jump-prohibited] を適用する。
+
+**[err.must-handle]** 失敗する関数の呼び出しには `or` が必要である。戻り値を捨てる呼び出しや、関数値を通した呼び出しにも適用する。
+
+**[err.no-first-class]** `T or エラー指定` は関数・クロージャ・`fnshape` の戻り値にだけ書ける。変数・仮引数・構造体フィールドの型には書けない。
+
+**[err.or-fallback]** `呼び出し or 代替式` は成功時に成功値を、失敗時にだけ評価した代替式の値を返す。代替式には成功型を要求し、成功型が `void` の場合は使えない。結合は [expr.or-binding] に従う。
+
+**[err.or-return]** `呼び出し or return 式?` は失敗時に外側の関数から成功として戻る。戻り値の型と裸の `return` の条件には [expr.cast-return]、書ける位置には [expr.or-return-position]・[expr.jump-prohibited] を適用する。
+
+**[err.or-fail]** `呼び出し or fail` は呼び出し先のエラーをそのまま返す。呼び出し先の全エラーが外側の関数のエラー指定に含まれている必要がある。`呼び出し or fail 式` は失敗時だけ式を評価してエラーを返し、その式には [err.fail] を適用する。どちらも [expr.or-return-position]・[expr.jump-prohibited] の位置の制約に従う。`return read() or fail` は禁止であり、`fix value = read() or fail` で受けてから `return value` と書く。
+
+**[err.or-panic]** `式 or panic テンプレート` は失敗時だけ理由を評価し、[panic.stmt]・[rt.panic] に従って出力して終了する。丸括弧と空テンプレートは禁止する。失敗する関数の呼び出しに加え、`or` を付けられる型変換、textの切り出し・添字、整数演算でも使える。成功時には理由を評価しない。
+
+**[err.or-ignore]** `呼び出し or ignore: 理由` は成功型が `void` の呼び出しの失敗を無視して続行する。理由は実行しない説明であり、評価も出力も行わない。`:` の後から改行または最初の `}` の手前までを読み、前後のスペースを除く。空または制御文字を含む理由はコンパイルエラーとし、閉じ `}` はブロックの終端として残す。成功型が `void` 以外の呼び出しや、型変換・整数演算には使えない。
 
 ## 9. 実行時の検査
 
@@ -1732,13 +1756,13 @@ CharEscape ::= "\" ( "0" | "n" | "r" | "t" | "\" | "'"
 ```ebnf
 Program          ::= NL* ( Declaration NL+ )* Declaration? EOF
 Declaration      ::= TopLevelBinding | FunctionDeclaration
-                   | StructDeclaration | EnumDeclaration | FnShapeDeclaration
+                   | StructDeclaration | EnumDeclaration | ErrorDeclaration | FnShapeDeclaration
 
 TopLevelBinding  ::= ( "fix" | "var" ) IDENT TypeAnnotation? "=" ConstExpression AllowClause?
 TypeAnnotation   ::= ":" Type
 
-FunctionDeclaration ::= "fn" IDENT "(" Parameters? ")" "->" Type Block
-FnShapeDeclaration ::= "fnshape" IDENT "(" FnShapeParameters? ")" "->" Type
+FunctionDeclaration ::= "fn" IDENT "(" Parameters? ")" "->" ReturnType Block
+FnShapeDeclaration ::= "fnshape" IDENT "(" FnShapeParameters? ")" "->" ReturnType
 FnShapeParameters ::= Type ( "," Type )* ","?
 Parameters       ::= Parameter ( "," Parameter )* ","?
 Parameter        ::= IDENT ":" Type
@@ -1749,6 +1773,10 @@ Field            ::= IDENT ":" Type
 
 EnumDeclaration  ::= "enum" IDENT ":" IntegerType
                      "{" NL* Variants "}"
+ErrorDeclaration ::= "error" IDENT "{" NL* Variants "}"
+ReturnType       ::= Type ( "or" ErrorSpec )?
+ErrorSpec        ::= ErrorSpecItem ( "," ErrorSpecItem )*
+ErrorSpecItem    ::= IDENT ( "." IDENT )?
 Variants         ::= IDENT ( "," NL* IDENT )* ","? NL*
 
 Type             ::= IntegerType | "len_t" | "f32" | "f64" | "bool" | "char" | "symbol" | "text" | "void"
@@ -1770,7 +1798,7 @@ Block            ::= "{" NL* ( Statement NL+ )* Statement? "}"
 Statement        ::= ( VariableDeclaration | Assignment | ReturnStatement
                      | "break" | "continue" | LogStatement | Expression ) AllowClause?
                    | WhileStatement | LoopStatement | ForStatement | RevStatement
-                   | IfStatement | MatchStatement | Block | AllowStatement | PanicStatement
+                   | IfStatement | MatchStatement | Block | AllowStatement | PanicStatement | FailStatement
 
 VariableDeclaration ::= ( "fix" | "var" ) IDENT TypeAnnotation?
                         "=" Expression
@@ -1780,6 +1808,7 @@ AssignmentOperator ::= "=" | "+=" | "-=" | "*=" | "/=" | "%="
                      | "+%=" | "-%=" | "*%=" | "&=" | "|=" | "^="
                      | "<<=" | ">>="
 ReturnStatement  ::= "return" Expression?
+FailStatement    ::= "fail" Expression
 WhileStatement   ::= "while" Condition Block
 LoopStatement    ::= "loop" Block
 ForStatement     ::= "for" IDENT "in" Condition ( RangeOperator Condition )? Block
@@ -1795,6 +1824,8 @@ AllowItem        ::= ALLOW_ITEM
 
 `VariableDeclaration` はブロック内の宣言を表す。トップレベルの宣言は A.3 の `TopLevelBinding` で表す。`AssignmentTarget` の先頭の `IDENT` は、[assign.target] に従い、ブロック内またはトップレベルの `var` の名前として解決する。
 
+`IGNORE_REASON` は [err.or-ignore] のコロンと理由を表す。`recover` は予約語であり、この版では使える構文はない。
+
 `ALLOW_ITEM` は [allow.item] に従って読む1つのトークンである。`AllowClause` には [allow.clause] と [allow.contains-block]、`AllowStatement` には [allow.block]、`AllowItem` には [allow.item]・[allow.reason]・[allow.rule-check] を適用する。`LogLevel` の `"info"` と `"warn"` は、そのつづりの `IDENT` に一致する。
 
 `RangeOperator` は [for.range-spacing] に従い、左右の式の境界に隣接する。`Assignment` の右辺には [assign.rhs-write] の代入先の制約を適用する。`ForStatement` と `RevStatement` のすべての `Condition` には [for.bound-reference] の参照の制約も適用する。範囲演算子のない形は [char.for-type] と [char.for] に従う。`Condition` の扱いは A.6 に定める。
@@ -1803,7 +1834,8 @@ AllowItem        ::= ALLOW_ITEM
 
 ```ebnf
 Expression       ::= LogicalOr ArithmeticHandler?
-ArithmeticHandler ::= "or" ( Expression | "return" Expression? )
+ArithmeticHandler ::= "or" ( Expression | "return" Expression? | "fail" Expression?
+                            | "panic" TEMPLATE | "ignore" IGNORE_REASON )
 LogicalOr        ::= LogicalAnd ( "||" LogicalAnd )*
 LogicalAnd       ::= Comparison ( "&&" Comparison )*
 Comparison       ::= BitOr ( "!=" BitOr
@@ -1819,13 +1851,13 @@ Shift            ::= Sum ( ( "<<" | ">>" ) Sum )*
 Sum              ::= Product ( ( "+" | "-" | "+%" | "-%" ) Product )*
 Product          ::= Cast ( ( "*" | "/" | "%" | "*%" ) Cast )*
 Cast             ::= Unary ( "as%" Type CastHandler? | "as" Type CastHandler? )*
-CastHandler      ::= "or" ( Expression | "return" Expression? )
+CastHandler      ::= "or" ( Expression | "return" Expression? | "panic" TEMPLATE )
 Unary            ::= ( "-" | "not" | "~" | "len" ) Unary | "fn" IDENT | Postfix
 Postfix          ::= Primary ( "." IDENT | "[" Index "]" IndexHandler?
                              | "(" Arguments? ")"
                              | "with" "{" NL* Initializers "}" )*
 Index            ::= Expression | Expression? ":" Expression?
-IndexHandler     ::= "or" ( Expression | "return" Expression? )
+IndexHandler     ::= "or" ( Expression | "return" Expression? | "panic" TEMPLATE )
 Primary          ::= Literal | IDENT | FunctionCall | StructLiteral | TEMPLATE
                    | "(" Expression ")" | IfExpression | MatchExpression | BlockExpression
 Literal          ::= INTEGER | FLOAT | CHAR | "true" | "false" | "nan" | "inf"
@@ -1833,7 +1865,7 @@ Literal          ::= INTEGER | FLOAT | CHAR | "true" | "false" | "nan" | "inf"
 FunctionCall     ::= IDENT "(" Arguments? ")"
 Arguments        ::= Argument ( "," Argument )* ","?
 Argument         ::= Expression | ClosureExpression
-ClosureExpression ::= "fn" "[" Captures? "]" "(" Parameters? ")" "->" Type Block
+ClosureExpression ::= "fn" "[" Captures? "]" "(" Parameters? ")" "->" ReturnType Block
 Captures         ::= Capture ( "," Capture )* ","?
 Capture          ::= "var"? IDENT
 StructLiteral    ::= IDENT "{" NL* Initializers? "}"
@@ -1875,7 +1907,7 @@ Pattern          ::= "_" | ConstExpression
 | 構文 | 適用する規則 |
 |---|---|
 | `CastHandler` | [expr.cast-binding] の結合規則 |
-| `ArithmeticHandler` | [expr.or-binding] の結合規則。左側は [arith.handler] の整数算術式、または [expr.arithmetic-handler] のシフトとする |
+| `ArithmeticHandler` | [expr.or-binding] の結合規則。左側は [arith.handler] の整数算術式、[expr.arithmetic-handler] のシフト、または失敗する関数の呼び出しとする |
 | 両ハンドラーの `or return` | [expr.or-return-position] の位置の制約 |
 | `elif` と `else` | [expr.else-line] の改行規則 |
 | `Pattern` | [match.pattern] の型と値の重複の規則 |

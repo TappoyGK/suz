@@ -78,9 +78,27 @@ impl Parser<'_, '_> {
 
     fn statement(&mut self) -> Result<Statement, Diagnostic> {
         let start = self.location();
-        let statement = self.statement_inner()?;
+        let statement = if self.token().kind == Kind::Keyword("fail") {
+            self.fail_statement()?
+        } else {
+            self.statement_inner()?
+        };
         self.allow_clause(start, super::allows::statement_contains_block(&statement))?;
         Ok(statement)
+    }
+
+    fn fail_statement(&mut self) -> Result<Statement, Diagnostic> {
+        if self.in_value {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "expr.jump-prohibited",
+                    "fail is forbidden inside value expressions"
+                ),
+            ));
+        }
+        self.cursor += 1;
+        Ok(Statement::Fail(self.expression()?))
     }
 
     fn statement_inner(&mut self) -> Result<Statement, Diagnostic> {
@@ -179,7 +197,7 @@ impl Parser<'_, '_> {
                     "functions and types must be declared at top level"
                 ),
             )),
-            Kind::Keyword("enum" | "struct" | "fnshape") => Err(self.error(
+            Kind::Keyword("enum" | "error" | "struct" | "fnshape") => Err(self.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(
                     "decl.location",

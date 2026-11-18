@@ -34,6 +34,7 @@ pub(crate) struct CheckedFunction {
     pub id: usize,
     pub parameters: Vec<Type>,
     pub result: Type,
+    pub fallible: bool,
     pub statements: Vec<CheckedStatement>,
 }
 /// [`crate::ast::Statement`] の検査結果。
@@ -43,6 +44,12 @@ pub(crate) struct CheckedFunction {
 /// 失敗時returnの式は、検査中に作ったBoxをそのまま使う。
 #[derive(Clone)]
 pub(crate) enum CheckedStatement {
+    Fail(CheckedExpression),
+    HandleCall {
+        id: usize,
+        call: Box<CheckedExpression>,
+        handler: Box<CallHandler>,
+    },
     SliceReturn {
         id: usize,
         operation: CheckedExpression,
@@ -121,6 +128,15 @@ pub(crate) enum CheckedHandler {
     Value(Box<CheckedExpression>),
     Return(Box<CheckedExpression>),
 }
+/// 呼び出しの失敗処理。脱出するものはC生成前に文へ持ち上げる。
+#[derive(Clone)]
+pub(crate) enum CallHandler {
+    Value(CheckedExpression),
+    Return(CheckedExpression),
+    Fail(Option<CheckedExpression>),
+    Ignore,
+}
+
 /// クロージャ本体と、評価位置で順に保持する値・参照。
 /// functionの仮引数列の末尾にキャプチャーを並べ、本体で使うローカル番号を割り当てる。
 #[derive(Clone)]
@@ -175,6 +191,14 @@ impl IntegerOperation {
 /// 値ブロックには捕捉した変数を、汎用リテラルには具体化まで必要な綴りを残す。
 #[derive(Clone)]
 pub(crate) enum Value {
+    Panic {
+        parts: Vec<crate::ast::TemplatePart<CheckedExpression>>,
+        location: Location,
+    },
+    HandledCall {
+        call: Box<CheckedExpression>,
+        handler: Box<CallHandler>,
+    },
     Function(usize),
     FunctionBorrow(Box<CheckedExpression>),
     Closure(Box<CheckedClosure>),
@@ -363,7 +387,7 @@ macro_rules! constant_children_visitor {
                 }
                 Self::GenericNumericLiteral { .. } | Self::Integer { .. } | Self::Float(_)
                 | Self::Function(_) | Self::Bool(_) | Self::Text { .. } => {}
-                Self::Closure(_) | Self::Local(_) | Self::Global(_) | Self::Void | Self::Invoke { .. } | Self::Call { .. } | Self::Block { .. }
+                Self::Panic { .. } | Self::HandledCall { .. } | Self::Closure(_) | Self::Local(_) | Self::Global(_) | Self::Void | Self::Invoke { .. } | Self::Call { .. } | Self::Block { .. }
                 | Self::Match { .. } | Self::If { .. } | Self::CastReturn { .. } => return false,
             }
             true

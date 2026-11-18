@@ -41,6 +41,21 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
                 }
                 visit(value, false, in_value)?;
             }
+            Some(FailureHandler::Fail { value, location }) => {
+                if in_value || !allowed {
+                    return Err(location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "expr.or-return-position",
+                            "or fail must apply to an entire initializer or assignment RHS"
+                        ),
+                    ));
+                }
+                if let Some(value) = value {
+                    visit(value, false, in_value)?;
+                }
+            }
+            Some(FailureHandler::Ignore(_)) => {}
             Some(FailureHandler::Value(value)) => visit(value, false, in_value)?,
             None => {}
         }
@@ -61,7 +76,7 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
                 }
                 visit_handler(fallback, allowed, in_value)?;
             }
-            ExpressionKind::Template(parts) => {
+            ExpressionKind::Template(parts) | ExpressionKind::Panic(parts) => {
                 for part in parts {
                     if let crate::ast::TemplatePart::Value(value) = part {
                         visit(value, false, in_value)?;
@@ -178,7 +193,7 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
                     visit(value, true, in_value)?;
                 }
             }
-            Statement::Return(value) => visit(value, false, in_value)?,
+            Statement::Return(value) | Statement::Fail(value) => visit(value, false, in_value)?,
             Statement::Loop { condition, body } => {
                 if let Some(condition) = condition {
                     visit(condition, false, in_value)?;
@@ -207,6 +222,10 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
 fn has_return_handler(expr: &CheckedExpression) -> bool {
     match &expr.value {
         Value::Cast(inner) | Value::TextView(inner) => has_return_handler(inner),
+        Value::HandledCall { handler, .. } => matches!(
+            handler.as_ref(),
+            super::ir::CallHandler::Return(_) | super::ir::CallHandler::Fail(_)
+        ),
         Value::CastReturn { .. }
         | Value::Slice {
             handler: Some(CheckedHandler::Return(_)),
@@ -226,6 +245,22 @@ pub(super) fn lower_return_handler(
     statements: &mut Vec<CheckedStatement>,
     next_id: &mut usize,
 ) -> bool {
+    if matches!(&expr.value, Value::HandledCall { handler, .. } if matches!(handler.as_ref(), super::ir::CallHandler::Return(_) | super::ir::CallHandler::Fail(_)))
+    {
+        let id = *next_id;
+        *next_id += 1;
+        let replacement = if expr.ty == crate::ast::Type::Void {
+            Value::Void
+        } else {
+            Value::Local(id)
+        };
+        let Value::HandledCall { call, handler } = std::mem::replace(&mut expr.value, replacement)
+        else {
+            unreachable!()
+        };
+        statements.push(CheckedStatement::HandleCall { id, call, handler });
+        return true;
+    }
     if let Value::Cast(inner) | Value::TextView(inner) = &mut expr.value {
         return lower_return_handler(inner, statements, next_id);
     }
@@ -371,6 +406,7 @@ fn stops(statements: &[Statement]) -> bool {
     statements.iter().any(|statement| match statement {
         Statement::Match { arms, .. } => arms.iter().all(|arm| stops(&arm.body)),
         Statement::Return(_)
+        | Statement::Fail(_)
         | Statement::Break(_)
         | Statement::Continue(_)
         | Statement::Log {
@@ -405,6 +441,7 @@ pub(super) fn check_return_shape(function: &crate::ast::Function) -> Result<(), 
             self.0 |= matches!(
                 statement,
                 Statement::Return(_)
+                    | Statement::Fail(_)
                     | Statement::Log {
                         level: crate::ast::LogLevel::Panic,
                         ..
@@ -420,7 +457,10 @@ pub(super) fn check_return_shape(function: &crate::ast::Function) -> Result<(), 
             | ExpressionKind::ArithmeticHandler { fallback, .. }
             | ExpressionKind::Slice { fallback, .. } = &expr.kind
             {
-                self.0 |= matches!(fallback, Some(FailureHandler::Return { .. }));
+                self.0 |= matches!(
+                    fallback,
+                    Some(FailureHandler::Return { .. } | FailureHandler::Fail { .. })
+                );
             }
             visit::walk_expression(self, expr)
         }

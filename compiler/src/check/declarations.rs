@@ -19,6 +19,12 @@ pub(super) fn dependencies(
     names: &mut Vec<(String, Location)>,
 ) -> Result<(), Diagnostic> {
     match &expr.kind {
+        ExpressionKind::Panic(_) => {
+            return Err(expr.location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("const.expression", "panic is not constant"),
+            ));
+        }
         ExpressionKind::Closure(_) => {
             return Err(expr.location.error(
                 ErrorKind::InvalidSource,
@@ -110,7 +116,11 @@ fn handler_dependencies(
 ) -> Result<(), Diagnostic> {
     match fallback {
         Some(FailureHandler::Value(value)) => dependencies(value, names),
-        Some(FailureHandler::Return { location, .. }) => Err(location.error(
+        Some(
+            FailureHandler::Return { location, .. }
+            | FailureHandler::Fail { location, .. }
+            | FailureHandler::Ignore(location),
+        ) => Err(location.error(
             ErrorKind::InvalidSource,
             crate::diagnostic!(
                 "const.expression",

@@ -30,13 +30,21 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
         return super::exact::stored(expr, context);
     }
     match expr.value {
+        Value::Panic {
+            ref parts,
+            location,
+        } => super::logs::panic_expression(parts, location, expr.ty, context),
+        Value::HandledCall {
+            ref call,
+            ref handler,
+        } => super::errors::expression(call, handler, context),
         Value::Closure(ref closure) => super::closures::emit(closure, expr.ty, context),
         Value::Function(id) => format!("suz_fn_{id}"),
         Value::FunctionBorrow(ref value) => super::functions::borrow(value, context),
         Value::Invoke {
             ref target,
             ref arguments,
-        } => super::functions::invoke(target, arguments, context),
+        } => super::functions::invoke(target, arguments, context, None),
         Value::GenericNumericLiteral { .. } => {
             unreachable!("generic values are substituted before code generation")
         }
@@ -117,7 +125,7 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             format!("({}).suz_field_{index}", expression(target, context))
         }
         Value::Void => String::new(),
-        Value::Call { id, ref arguments } => super::functions::call(id, arguments, context),
+        Value::Call { id, ref arguments } => super::functions::call(id, arguments, context, None),
         Value::Block {
             ref statements,
             ref value,

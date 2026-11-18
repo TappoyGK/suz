@@ -18,6 +18,13 @@ pub(super) fn emit_block(
     let indent = "    ".repeat(depth);
     for statement in statements {
         match statement {
+            CheckedStatement::Fail(value) => {
+                let failure = super::errors::fail(Some(value), "", context);
+                writeln!(c, "{indent}{failure}").unwrap();
+            }
+            CheckedStatement::HandleCall { id, call, handler } => {
+                super::errors::statement(c, *id, call, handler, &indent, context)
+            }
             CheckedStatement::Log {
                 parts,
                 location,

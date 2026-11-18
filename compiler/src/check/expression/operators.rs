@@ -22,6 +22,32 @@ pub(super) fn check(
 ) -> Result<CheckedExpression, Diagnostic> {
     Ok(match &expr.kind {
         ExpressionKind::ArithmeticHandler { operand, fallback } => {
+            let mut call = operand.as_ref();
+            while let ExpressionKind::Group(inner) = &call.kind {
+                call = inner;
+            }
+            match &call.kind {
+                ExpressionKind::Call { name, arguments } => {
+                    return super::super::functions::call(
+                        call,
+                        name,
+                        arguments,
+                        expected,
+                        bindings,
+                        fallback.as_ref(),
+                    );
+                }
+                ExpressionKind::Invoke { target, arguments } => {
+                    return super::super::function_values::invoke(
+                        call,
+                        target,
+                        arguments,
+                        bindings,
+                        fallback.as_ref(),
+                    );
+                }
+                _ => {}
+            }
             let mut checked = if super::super::exact::is_operator(operand)
                 && super::super::exact::integer(operand, bindings)
             {
@@ -60,6 +86,9 @@ pub(super) fn check(
             }
             *handler =
                 Some(match fallback.as_ref().unwrap() {
+                    FailureHandler::Fail { location, .. } | FailureHandler::Ignore(location) => {
+                        return Err(super::super::errors::invalid_handler(*location));
+                    }
                     FailureHandler::Value(value) => CheckedHandler::Value(Box::new(
                         super::coerced(value, Some(checked.ty), bindings)?,
                     )),
