@@ -95,6 +95,21 @@ pub(crate) fn scan(
                     {
                         cursor += 1;
                     }
+                    if &source[word_start..cursor] == "ignore" {
+                        while matches!(bytes.get(cursor), Some(b' ' | b'\t')) {
+                            cursor += 1;
+                        }
+                        if bytes.get(cursor) == Some(&b':') {
+                            // 理由中のバッククォートや開き括弧は構文ではない。
+                            // 閉じ括弧は次の反復で通常どおりブロック終端として処理する。
+                            while bytes
+                                .get(cursor)
+                                .is_some_and(|ch| !matches!(ch, b'\n' | b'}'))
+                            {
+                                cursor += 1;
+                            }
+                        }
+                    }
                     if &source[word_start..cursor] == "allow" {
                         loop {
                             while matches!(bytes.get(cursor), Some(b' ' | b'\t')) {

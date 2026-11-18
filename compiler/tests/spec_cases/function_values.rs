@@ -273,16 +273,16 @@ fn target(a: u8, b: u8) -> u8 { log info `body`
 return a }
 fn pick() -> static fn Action { log info `target`
 return fn target }
-fn fail() -> u8 { log info `fail`
+fn stop_now() -> u8 { log info `fail`
 fix n: u8 = 255
 return n + 1 }
 fn later() -> u8 { log info `later`
 return 1 }
-fn bad_pick() -> static fn Action { fix n = fail()
+fn bad_pick() -> static fn Action { fix n = stop_now()
 return fn target }
 "#;
     for (call, expected) in [
-        ("pick()(fail(), later())", "target"),
+        ("pick()(stop_now(), later())", "target"),
         ("bad_pick()(later(), later())", "fail"),
     ] {
         let source = format!("{prelude}\nfn main() -> u8 {{ return {call} }}");

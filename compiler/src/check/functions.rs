@@ -37,6 +37,7 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
                 id,
                 parameters: function.parameters.iter().map(|p| p.ty).collect(),
                 result: function.result,
+                errors: function.errors.clone(),
             },
         );
     }
@@ -313,6 +314,8 @@ pub(super) fn check_with_captures(
     references: &BTreeMap<String, Binding>,
 ) -> Result<(CheckedFunction, Vec<crate::ast::Location>), Diagnostic> {
     control::validate_return_positions(&function.statements)?;
+    scope.recovery = None;
+    scope.loop_depth = 0;
     let mut warnings = Vec::new();
     // [num.fn-same]、[num.fn-body-type]、[num.fn-recursion]: 関数の具体化内の全型注釈に同じ代入を適用する。
     // 汎用の診断は記号的な型で一度収集済み。具体化では定数登録を残すが、型ごとの警告は追加しない。
@@ -320,6 +323,7 @@ pub(super) fn check_with_captures(
         scope.outputs.comparisons = Default::default();
         scope.outputs.divisions = Default::default();
     }
+    scope.errors = Rc::new(function.errors.clone());
     scope.result = scope.resolve_type(function.result);
     let mut declared = Vec::new();
     for (parameter_id, parameter) in function.parameters.iter().enumerate() {
@@ -386,6 +390,7 @@ pub(super) fn check_with_captures(
                 .map(|p| scope.resolve_type(p.ty))
                 .collect(),
             result: scope.result,
+            fallible: !function.errors.is_empty(),
             statements,
         },
         warnings,
@@ -398,6 +403,7 @@ pub(super) fn call(
     arguments: &[Expression],
     expected: Option<Type>,
     scope: &Scope,
+    handler: Option<&crate::ast::FailureHandler>,
 ) -> Result<CheckedExpression, Diagnostic> {
     if scope.contains_key(name) {
         let target = Expression {
@@ -405,7 +411,7 @@ pub(super) fn call(
             location: expr.location,
             height: 1,
         };
-        return super::function_values::invoke(expr, &target, arguments, scope);
+        return super::function_values::invoke(expr, &target, arguments, scope, handler);
     }
     let signature = scope.functions.get(name).ok_or_else(|| {
         expr.location.error(
@@ -457,10 +463,16 @@ pub(super) fn call(
     } else {
         signature.id
     };
-    Ok(CheckedExpression {
-        ty: concrete(signature.result),
-        value: Value::Call { id, arguments },
-    })
+    super::errors::finish(
+        CheckedExpression {
+            ty: concrete(signature.result),
+            value: Value::Call { id, arguments },
+        },
+        &signature.errors,
+        handler,
+        expr,
+        scope,
+    )
 }
 
 pub(super) fn return_value(

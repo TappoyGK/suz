@@ -83,9 +83,13 @@ pub(super) fn check_statements(
         declared,
         output: Vec::new(),
     };
-    for statement in input {
-        check_statement(statement, &mut context)?;
-    }
+    let saved_loop = context.bindings.loop_depth;
+    context.bindings.loop_depth = loop_depth;
+    let result = input
+        .iter()
+        .try_for_each(|statement| check_statement(statement, &mut context));
+    context.bindings.loop_depth = saved_loop;
+    result?;
     Ok(context.output)
 }
 
@@ -104,6 +108,37 @@ fn check_statement(
     #[cfg(test)]
     super::generic::work();
     match statement {
+        Statement::Recover(value) => {
+            let Some(ty) = context.bindings.recovery.filter(|ty| *ty != Type::Void) else {
+                return Err(value.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "err.recover",
+                        "recover requires a non-void error block arm"
+                    ),
+                ));
+            };
+            let value = super::expression::coerced(value, Some(ty), context.bindings)?;
+            context.output.push(CheckedStatement::Recover(value));
+        }
+        Statement::Ignore(location) => {
+            if context.bindings.recovery != Some(Type::Void) {
+                return Err(location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "err.or-ignore",
+                        "ignore statements require a void error arm"
+                    ),
+                ));
+            }
+        }
+
+        Statement::Fail(value) => context
+            .output
+            .push(CheckedStatement::Fail(super::errors::fail(
+                value,
+                context.bindings,
+            )?)),
         Statement::Log {
             parts,
             location,
@@ -117,11 +152,26 @@ fn check_statement(
             });
         }
         Statement::Expression(value) => {
-            context.output.push(CheckedStatement::Expression(expression(
-                value,
-                None,
-                context.bindings,
-            )?));
+            let mut checked = expression(value, None, context.bindings)?;
+            if let super::ir::Value::HandledCall { handler, .. } = &checked.value
+                && matches!(
+                    handler.as_ref(),
+                    super::ir::CallHandler::Return(_) | super::ir::CallHandler::Fail(_)
+                )
+                && checked.ty != Type::Void
+            {
+                return Err(value.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "expr.or-return-position",
+                        "a call statement with or return or or fail must have success type void"
+                    ),
+                ));
+            }
+            // void呼び出しを文へ移した場合、評価すべき値の式は残らない。
+            if !lower_return_handler(&mut checked, &mut context.output, context.next_id) {
+                context.output.push(CheckedStatement::Expression(checked));
+            }
         }
         Statement::Match {
             target,

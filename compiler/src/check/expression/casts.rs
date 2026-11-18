@@ -188,6 +188,12 @@ pub(in crate::check) fn check(
                 return Ok(checked);
             }
             let fallback = match fallback {
+                Some(FailureHandler::Errors(handler)) => {
+                    return Err(crate::check::errors::invalid_handler(handler.location));
+                }
+                Some(FailureHandler::Fail { location, .. } | FailureHandler::Ignore(location)) => {
+                    return Err(crate::check::errors::invalid_handler(*location));
+                }
                 Some(FailureHandler::Value(value)) => {
                     Some(super::coerced(value, Some(target), bindings)?)
                 }
@@ -249,6 +255,9 @@ pub(in crate::check) fn check(
 // [expr.cast-risk]、[arith.cast]、[const.cast-check]。通常検査と汎用検査で同じ分類を使い、Scopeは変更しない。
 // スカラー変換の規則は通常の検査と記号的な検査で共有する。
 fn conversion_safety(from: Type, to: Type) -> Option<bool> {
+    if matches!(from, Type::Enum(e) if e.is_error) || matches!(to, Type::Enum(e) if e.is_error) {
+        return None;
+    }
     Some(match (from, to) {
         (Type::Symbol | Type::Text, _) => false,
         (Type::Char, Type::Integer(_)) | (Type::Integer(_), Type::Char) => {

@@ -7,6 +7,7 @@ mod allows;
 mod branches;
 mod closures;
 mod enums;
+mod errors;
 mod expressions;
 mod function_types;
 mod functions;
@@ -108,7 +109,7 @@ impl<'a, 's> Parser<'a, 's> {
         self.cursor += 1;
         let annotation = if self.token().kind == Kind::Symbol(":") {
             self.cursor += 1;
-            let ty = self.parse_type()?;
+            let ty = self.stored_type()?;
             if ty == Type::Void {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
@@ -178,7 +179,7 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
                     .unwrap()
                     .end;
             }
-            Kind::Keyword("enum") => {
+            Kind::Keyword("enum" | "error") => {
                 p.cursor = enums
                     .iter()
                     .find(|decl| decl.start == p.cursor)

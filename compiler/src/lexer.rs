@@ -17,6 +17,10 @@ const KEYWORDS: &[&str] = &[
     "static",
     "struct",
     "enum",
+    "error",
+    "fail",
+    "ignore",
+    "recover",
     "if",
     "ifexpr",
     "elif",
@@ -56,6 +60,7 @@ const SYMBOLS: &[&str] = &[
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Kind<'a> {
+    IgnoreReason(&'a str),
     AllowItem(&'a str),
     Char(u32),
     Template(&'a str),
@@ -265,6 +270,32 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
                 offset += 1;
                 line += 1;
                 column = 1;
+                continue;
+            }
+            ':' if matches!(tokens.last().map(|t| t.kind), Some(Kind::Keyword("ignore"))) => {
+                let length = rest.find(['\n', '}']).unwrap_or(rest.len());
+                let raw = &rest[1..length];
+                let reason = raw.trim_matches(' ');
+                if reason.is_empty() || raw.chars().any(char::is_control) {
+                    return Err(error(
+                        line,
+                        column,
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "err.or-ignore",
+                            "ignore requires a non-empty reason without control characters"
+                        ),
+                    ));
+                }
+                tokens.push(Token {
+                    kind: Kind::IgnoreReason(reason),
+                    line,
+                    column,
+                    span: offset..offset + length,
+                });
+                column += rest[..length].chars().count();
+                offset += length;
+                continuation = false;
                 continue;
             }
             '[' if matches!(tokens.last().map(|t| t.kind), Some(Kind::Keyword("allow")))

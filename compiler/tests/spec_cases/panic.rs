@@ -15,10 +15,10 @@ fn panic_evaluates_before_output_and_preserves_bytes() {
     );
 
     // 先に評価する式のパニックだけを出す。外側の接頭辞と後続の式は実行しない。
-    let source = "fn fail() -> i32 { panic `inner` }\nfn later() -> i32 { log info `unexpected`\nreturn 1 }\nfn main() -> u8 { panic `outer ${fail()} ${later()}` }";
+    let source = "fn stop_now() -> i32 { panic `inner` }\nfn later() -> i32 { log info `unexpected`\nreturn 1 }\nfn main() -> u8 { panic `outer ${stop_now()} ${later()}` }";
     let output = compile_and_run_c23(source, "nested.suz");
     assert_eq!(output.status.code(), Some(101));
-    assert_eq!(output.stderr, b"panic nested.suz:1:20: inner\n");
+    assert_eq!(output.stderr, b"panic nested.suz:1:24: inner\n");
 }
 
 #[test]

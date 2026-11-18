@@ -7,7 +7,7 @@ use super::{FixedToken, Parser};
 use crate::{
     Diagnostic, ErrorKind,
     ast::{
-        Expression, ExpressionKind, Location, Statement,
+        Expression, ExpressionKind, FailureHandler, Location, Statement,
         visit::{self, Visitor},
     },
     lexer::Kind,
@@ -23,7 +23,13 @@ impl Visitor for ContainsBlock {
     fn expression(&mut self, expression: &Expression) -> Result<(), Diagnostic> {
         if matches!(
             expression.kind,
-            ExpressionKind::If { .. } | ExpressionKind::Match { .. } | ExpressionKind::Block { .. }
+            ExpressionKind::If { .. }
+                | ExpressionKind::Match { .. }
+                | ExpressionKind::Block { .. }
+                | ExpressionKind::ArithmeticHandler {
+                    fallback: Some(FailureHandler::Errors(_)),
+                    ..
+                }
         ) {
             self.0 = true;
         }

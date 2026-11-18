@@ -5,7 +5,7 @@
 
 use crate::check::generic::domain;
 use crate::check::scope::Scope;
-mod blocks;
+pub(super) mod blocks;
 mod branches;
 pub(in crate::check) mod casts;
 mod operators;
@@ -38,7 +38,7 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
     #[cfg(test)]
     super::generic::work();
     match &expr.kind {
-        ExpressionKind::Closure(_) => None,
+        ExpressionKind::Closure(_) | ExpressionKind::Panic(_) => None,
         ExpressionKind::FunctionValue(name) => {
             let signature = bindings.functions.get(name)?;
             if signature.is_generic() || name == "main" {
@@ -47,6 +47,7 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
             Some(bindings.intern_function(crate::ast::FunctionType {
                 parameters: signature.parameters.clone(),
                 result: signature.result,
+                errors: signature.errors.clone(),
             }))
         }
         ExpressionKind::Invoke { target, .. } => {
@@ -354,6 +355,12 @@ fn expression_inner(
         super::exact::check(expr, inference_hint, bindings, false)?
     } else {
         match &expr.kind {
+            ExpressionKind::Panic(parts) => super::errors::panic(
+                parts,
+                expr.location,
+                required.unwrap_or(Type::Void),
+                bindings,
+            )?,
             ExpressionKind::Closure(_) => {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
@@ -367,7 +374,7 @@ fn expression_inner(
                 super::function_values::value(expr, name, required, bindings)?
             }
             ExpressionKind::Invoke { target, arguments } => {
-                super::function_values::invoke(expr, target, arguments, bindings)?
+                super::function_values::invoke(expr, target, arguments, bindings, None)?
             }
             ExpressionKind::Slice { .. } => slices::check(expr, bindings)?,
             ExpressionKind::Template(parts) => {
@@ -410,7 +417,7 @@ fn expression_inner(
                 value: Value::Void,
             },
             ExpressionKind::Call { name, arguments } => {
-                super::functions::call(expr, name, arguments, inference_hint, bindings)?
+                super::functions::call(expr, name, arguments, inference_hint, bindings, None)?
             }
             ExpressionKind::Block { statements, value } => {
                 blocks::check(statements, value, inference_hint, bindings)?

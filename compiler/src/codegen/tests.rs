@@ -55,6 +55,7 @@ fn generated_bool_values_preserve_negation_and_copies() {
             division_warnings: Vec::new(),
             main_id: 0,
             functions: vec![crate::check::ir::CheckedFunction {
+                fallible: false,
                 id: 0,
                 parameters: Vec::new(),
                 result: Type::Bool,
@@ -231,6 +232,7 @@ fn comparison_codegen_sequences_and_reuses_operands() {
             division_warnings: Vec::new(),
             main_id: 0,
             functions: vec![crate::check::ir::CheckedFunction {
+                fallible: false,
                 id: 0,
                 parameters: Vec::new(),
                 result: Type::Bool,

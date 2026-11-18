@@ -84,6 +84,7 @@ pub(super) fn resolve(
         let parameters = p.list(Parser::function_parameter_type)?;
         p.expect(FixedToken::Symbol("->"))?;
         let result = p.parse_type()?;
+        let errors = p.error_spec()?;
         for ty in parameters.iter().chain([&result]) {
             if ty.generic() {
                 return Err(d.location.error(
@@ -101,7 +102,11 @@ pub(super) fn resolve(
                 crate::diagnostic!("type.void", "parameters cannot have type void"),
             ));
         }
-        raw.push(FunctionType { parameters, result });
+        raw.push(FunctionType {
+            parameters,
+            result,
+            errors,
+        });
         ends.push(p.cursor);
     }
     // 依存先から順に解決する。長い前方参照の連鎖でもRustの再帰スタックを使わない。
@@ -128,6 +133,7 @@ pub(super) fn resolve(
         let signature = FunctionType {
             parameters: raw[id].parameters.iter().copied().map(remap).collect(),
             result: remap(raw[id].result),
+            errors: raw[id].errors.clone(),
         };
         let canonical = types
             .iter()

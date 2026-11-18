@@ -96,6 +96,7 @@ pub(super) fn value(
             .map(|&ty| types.resolve(ty))
             .collect(),
         result: types.resolve(signature.result),
+        errors: signature.errors.clone(),
     });
     if expected.is_some_and(|expected| expected != ty) {
         return Err(expr.location.error(
@@ -139,6 +140,7 @@ pub(super) fn invoke(
     target: &Expression,
     arguments: &[Expression],
     scope: &Scope,
+    handler: Option<&crate::ast::FailureHandler>,
 ) -> Result<CheckedExpression, Diagnostic> {
     let target = call_target(target, scope)?;
     let (Type::StaticFunction(id) | Type::Function(id)) = target.ty else {
@@ -162,13 +164,19 @@ pub(super) fn invoke(
         .zip(signature.parameters)
         .map(|(a, ty)| argument(a, ty, scope))
         .collect::<Result<_, _>>()?;
-    Ok(CheckedExpression {
-        ty: signature.result,
-        value: Value::Invoke {
-            target: Box::new(target),
-            arguments,
+    super::errors::finish(
+        CheckedExpression {
+            ty: signature.result,
+            value: Value::Invoke {
+                target: Box::new(target),
+                arguments,
+            },
         },
-    })
+        &signature.errors,
+        handler,
+        expr,
+        scope,
+    )
 }
 
 /// 外側の型要求がない分岐から、兄弟の型を使って汎用関数を具体化しない。

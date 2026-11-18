@@ -85,8 +85,25 @@ impl Parser<'_, '_> {
 
 fn handler_height(handler: &Option<FailureHandler>) -> usize {
     match handler {
-        Some(FailureHandler::Value(value) | FailureHandler::Return { value, .. }) => value.height,
-        None => 0,
+        Some(FailureHandler::Errors(handler)) => {
+            let arms = &handler.arms;
+            1 + arms
+                .iter()
+                .map(|arm| match &arm.body {
+                    crate::ast::ErrorArmBody::Value(value) => value.height,
+                    crate::ast::ErrorArmBody::Statements { body, .. } => block_height(body),
+                })
+                .max()
+                .unwrap_or(0)
+        }
+        Some(
+            FailureHandler::Value(value)
+            | FailureHandler::Return { value, .. }
+            | FailureHandler::Fail {
+                value: Some(value), ..
+            },
+        ) => value.height,
+        None | Some(FailureHandler::Fail { value: None, .. } | FailureHandler::Ignore(_)) => 0,
     }
 }
 
@@ -100,7 +117,10 @@ fn statement_height(statement: &Statement) -> usize {
         Statement::Assign {
             value, compound, ..
         } => value.height - usize::from(*compound),
-        Statement::Return(value) | Statement::Expression(value) => value.height,
+        Statement::Return(value)
+        | Statement::Fail(value)
+        | Statement::Recover(value)
+        | Statement::Expression(value) => value.height,
         Statement::Log { parts, .. } => {
             1 + parts
                 .iter()
@@ -142,7 +162,7 @@ fn statement_height(statement: &Statement) -> usize {
                 .max()
                 .unwrap_or(0),
         ),
-        Statement::Break(_) | Statement::Continue(_) => 0,
+        Statement::Break(_) | Statement::Continue(_) | Statement::Ignore(_) => 0,
     }
 }
 
@@ -161,7 +181,7 @@ fn kind_height(kind: &ExpressionKind) -> usize {
             .max(end.as_ref().map_or(0, |v| v.height))
             + usize::from(fallback.is_some()))
         .max(handler_height(fallback)),
-        Template(parts) => parts
+        Template(parts) | Panic(parts) => parts
             .iter()
             .filter_map(|p| match p {
                 TemplatePart::Value(v) => Some(v.height),

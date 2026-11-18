@@ -76,11 +76,37 @@ impl Parser<'_, '_> {
         }
     }
 
-    fn statement(&mut self) -> Result<Statement, Diagnostic> {
+    pub(super) fn statement(&mut self) -> Result<Statement, Diagnostic> {
         let start = self.location();
-        let statement = self.statement_inner()?;
+        let statement = if matches!(self.token().kind, Kind::Keyword("fail" | "recover")) {
+            self.error_value_statement()?
+        } else if self.token().kind == Kind::Keyword("ignore") {
+            Statement::Ignore(self.ignore_reason()?)
+        } else {
+            self.statement_inner()?
+        };
         self.allow_clause(start, super::allows::statement_contains_block(&statement))?;
         Ok(statement)
+    }
+
+    fn error_value_statement(&mut self) -> Result<Statement, Diagnostic> {
+        if self.in_value {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "expr.jump-prohibited",
+                    "fail and recover are forbidden inside value expressions"
+                ),
+            ));
+        }
+        let recover = self.token().kind == Kind::Keyword("recover");
+        self.cursor += 1;
+        let value = self.expression()?;
+        Ok(if recover {
+            Statement::Recover(value)
+        } else {
+            Statement::Fail(value)
+        })
     }
 
     fn statement_inner(&mut self) -> Result<Statement, Diagnostic> {
@@ -179,7 +205,7 @@ impl Parser<'_, '_> {
                     "functions and types must be declared at top level"
                 ),
             )),
-            Kind::Keyword("enum" | "struct" | "fnshape") => Err(self.error(
+            Kind::Keyword("enum" | "error" | "struct" | "fnshape") => Err(self.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(
                     "decl.location",
@@ -252,7 +278,7 @@ impl Parser<'_, '_> {
                 super::names::check(super::names::Shape::Value, &name, location)?;
                 let annotation = if self.token().kind == Kind::Symbol(":") {
                     self.cursor += 1;
-                    let ty = self.parse_type()?;
+                    let ty = self.stored_type()?;
                     if ty == Type::Void {
                         return Err(self.error(
                             ErrorKind::InvalidSource,

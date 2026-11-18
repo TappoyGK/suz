@@ -7,6 +7,7 @@ mod blocks;
 mod casts;
 mod characters;
 mod closures;
+mod errors;
 mod exact;
 mod expressions;
 mod functions;
@@ -23,8 +24,15 @@ mod text_structure;
 use crate::check::CheckedProgram;
 use std::{collections::BTreeSet, fmt::Write};
 
+struct RecoveryTarget {
+    result: Option<String>,
+    label: String,
+    used: bool,
+}
+
 #[derive(Default)]
 struct ExpressionContext {
+    function_result: Option<crate::ast::Type>,
     text_literals: std::collections::BTreeMap<String, usize>,
     uses_text: bool,
     structs: Vec<crate::ast::StructDeclaration>,
@@ -37,6 +45,8 @@ struct ExpressionContext {
     enum_logs: BTreeSet<usize>,
     functions: String,
     next_block: usize,
+    next_recovery: usize,
+    recovery: Option<RecoveryTarget>,
     next_closure: usize,
     closure_environments: Vec<String>,
     references: BTreeSet<usize>,

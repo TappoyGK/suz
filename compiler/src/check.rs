@@ -7,6 +7,7 @@ mod constants;
 mod control;
 mod declarations;
 mod diagnostics;
+mod errors;
 pub(crate) mod exact;
 mod expression;
 mod function_values;
