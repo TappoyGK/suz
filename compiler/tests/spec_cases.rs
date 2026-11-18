@@ -64,6 +64,8 @@ mod native_cli;
 mod nesting;
 #[path = "spec_cases/numeric.rs"]
 mod numeric;
+#[path = "spec_cases/panic.rs"]
+mod panic;
 #[path = "spec_cases/panics.rs"]
 mod panics;
 #[path = "spec_cases/ranges.rs"]

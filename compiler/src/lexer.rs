@@ -36,6 +36,7 @@ const KEYWORDS: &[&str] = &[
     "not",
     "len",
     "log",
+    "panic",
     "expr",
     "with",
     "true",

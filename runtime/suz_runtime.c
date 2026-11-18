@@ -183,7 +183,7 @@ void suz_log_end(void) {
     atomic_flag_clear_explicit(&output_lock, memory_order_release);
 }
 
-_Noreturn void suz_panic(const char *source, size_t line, size_t column, const char *reason) {
+void suz_panic_begin(const char *source, size_t line, size_t column) {
     lock_output();
     output_level = SUZ_LOG_PANIC;
     write_text("panic ");
@@ -193,9 +193,18 @@ _Noreturn void suz_panic(const char *source, size_t line, size_t column, const c
     write_text(":");
     write_position(column);
     write_text(": ");
-    write_text(reason);
+}
+
+_Noreturn void suz_panic_end(void) {
+    // 終了までロックを保持し、パニック診断の間に別の出力を挟まない。
     write_text("\n");
     suz_env_panic();
+}
+
+_Noreturn void suz_panic(const char *source, size_t line, size_t column, const char *reason) {
+    suz_panic_begin(source, line, column);
+    write_text(reason);
+    suz_panic_end();
 }
 
 int suz_exact_compare_float(suz_exact a, double b) {

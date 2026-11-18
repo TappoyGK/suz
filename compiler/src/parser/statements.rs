@@ -108,6 +108,7 @@ impl Parser<'_, '_> {
                 ),
             )),
             Kind::Keyword("log") => self.log(),
+            Kind::Keyword("panic") => self.panic(),
             Kind::Keyword("match") => {
                 let location = self.location();
                 self.cursor += 1;
@@ -371,8 +372,8 @@ impl Parser<'_, '_> {
                 Kind::Symbol("}") => {}
                 Kind::Keyword(
                     "fix" | "var" | "return" | "if" | "while" | "loop" | "for" | "rev" | "break"
-                    | "continue" | "log" | "match" | "matchexpr" | "ifexpr" | "true" | "false"
-                    | "not" | "nan" | "inf" | "expr",
+                    | "continue" | "log" | "panic" | "match" | "matchexpr" | "ifexpr" | "true"
+                    | "false" | "not" | "nan" | "inf" | "expr",
                 )
                 | Kind::Ident(_)
                 | Kind::Template(_)

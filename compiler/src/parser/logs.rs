@@ -1,4 +1,4 @@
-//! ログレベルとテンプレートの構文を解析し、ログ文のASTを作る。
+//! log文とpanic文のテンプレートを解析し、出力文のASTを作る。
 //!
 //! 利用元: [`crate::parser::statements`]。
 //! 主な対象規則: `[log.level]`、`[log.syntax]`、`[symbol.interpolation]`。
@@ -39,6 +39,27 @@ impl Parser<'_, '_> {
             parts,
             location,
             level,
+        })
+    }
+
+    pub(super) fn panic(&mut self) -> Result<Statement, Diagnostic> {
+        let location = self.location();
+        self.cursor += 1;
+        let Kind::Template(raw) = self.token().kind else {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "panic.stmt",
+                    "expected a panic template without parentheses"
+                ),
+            ));
+        };
+        let parts = self.nested(self.location(), |p| p.template(raw))?;
+        // テンプレートの検査・走査はlogと共通。Panicレベルが終了する文であることを表す。
+        Ok(Statement::Log {
+            parts,
+            location,
+            level: crate::ast::LogLevel::Panic,
         })
     }
 

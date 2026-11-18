@@ -71,7 +71,7 @@ Suzは次のものを含む。
 ```text
 fix var fn fnshape static struct enum
 if ifexpr elif else while loop for rev in break continue return match matchexpr
-as or not len log allow expr with
+as or not len log panic allow expr with
 true false nan inf
 ```
 
@@ -1151,13 +1151,13 @@ fix narrow: u8 = a + b or 0 // 格納に失敗し、代替値0を使う
 
 **[fn.return]** 値を返す関数は、`return 式` で値を返す。式には関数の戻り値型を要求し、[conv.widen] の拡大変換を認める。関数の最後の式を暗黙に戻り値にはしない。`void` の関数は、式を付けない `return` で戻れる。これらに反する `return` や、関数の外の `return` はコンパイルエラーである。
 
-**[fn.value-return-required]** 戻り値型が `void` 以外の関数には、`return 式` が構文上少なくとも 1 つ必要である。該当する `return` がなければコンパイルエラーである。
+**[fn.value-return-required]** 戻り値型が `void` 以外の関数には、`return 式` または `panic` 文が構文上少なくとも1つ必要である。内側のクロージャ本体にある文は数えない。どちらもなければコンパイルエラーである。
 
 **[fn.fallthrough]** `void` の関数は、末尾に到達したときも呼び出し元に戻る。値を返す関数は、[fn.flow-analysis] の規則で関数末尾へ進みうると判定される場合、コンパイルエラーである。[fn.value-return-required] とこの条件の両方を満たさなければならない。
 
 **[fn.flow-analysis]** 関数末尾への到達は、次の構文上の規則で判定する。
 
-- `return` は、その先へ進まない。`break` と `continue` は、対象のループへ制御を移す。
+- `return` と `panic` は、その先へ進まない。`break` と `continue` は、対象のループへ制御を移す。
 - ブロックは文を順にたどる。途中で先へ進まない文に達した場合、ブロック末尾へ進まない。
 - `if` は、最後の `else` があり、`elif` を含むすべての分岐が先へ進まない場合、全体も先へ進まない。それ以外は先へ進みうる。
 - `match` は、すべての腕が先へ進まない場合、全体も先へ進まない。それ以外は先へ進みうる。
@@ -1479,6 +1479,24 @@ fn main() -> u8 {
 
 **[rt.panic]** パニックしたプログラムは、パニックした位置（ファイル、行、列）と理由を標準エラー出力に書き、終了コード 101 で終わる。
 
+**[panic.stmt]** `panic` の後ろにテンプレートを1つ書くと、理由を出力してプログラムを終了する文になる。丸括弧は付けない。空テンプレートも許可する。式としては使えない。テンプレートの記法と値の表示は [symbol.template-line]、[symbol.template-text]、[symbol.escape]、[symbol.interpolation]、[symbol.value-format]、[symbol.float-format] に従う。
+
+**[panic.runtime]** 埋め込み式を左から右へ1回ずつ評価して値を保持した後、`panic ファイル名:行:列: 理由` と末尾の改行を標準エラーへ出力し、終了コード101で終了する。位置は `panic` キーワードを指す。空テンプレートでは理由が空になり、接頭辞と改行だけを出力する。埋め込み式の評価中に別のパニックが起きた場合、この文の出力は開始せず、その失敗の位置と理由を出力する。
+
+理由は [log.fragments] と同じ断片方式で出力し、本文の整形・出力のための動的メモリ確保とテキストプール登録は行わない。埋め込み式自身の確保は、その式の通常の規則に従う。改行やNULを含む理由も、バイト列をそのまま出力する。
+
+**[panic.flow]** `panic` 文は [fn.flow-analysis] で先へ進まない文として扱い、[fn.value-return-required] の条件も満たす。各関数・クロージャの本体で独立に判定し、内側のクロージャの `panic` を外側の終了条件に数えない。後続の到達不能な文も通常どおり型検査する。入れ子の深さは [src.nesting-depth] に従い、テンプレートが文を含むブロックの1段下、埋め込み式がさらに1段下となる。
+
+```suz
+fn get_mode(code: u8) -> symbol {
+    match code {
+        0 => { return `idle` }
+        1 => { return `active` }
+        _ => { panic `unexpected mode: ${code}` }
+    }
+}
+```
+
 ### 9.2 整数の演算
 
 算術式の失敗処理は [arith.handler]、シフトの失敗処理は [expr.arithmetic-handler] に従う。対応する `or` がある場合は、パニックの代わりにその失敗処理を行う。
@@ -1752,7 +1770,7 @@ Block            ::= "{" NL* ( Statement NL+ )* Statement? "}"
 Statement        ::= ( VariableDeclaration | Assignment | ReturnStatement
                      | "break" | "continue" | LogStatement | Expression ) AllowClause?
                    | WhileStatement | LoopStatement | ForStatement | RevStatement
-                   | IfStatement | MatchStatement | Block | AllowStatement
+                   | IfStatement | MatchStatement | Block | AllowStatement | PanicStatement
 
 VariableDeclaration ::= ( "fix" | "var" ) IDENT TypeAnnotation?
                         "=" Expression
@@ -1767,6 +1785,7 @@ LoopStatement    ::= "loop" Block
 ForStatement     ::= "for" IDENT "in" Condition ( RangeOperator Condition )? Block
 RevStatement     ::= "rev" IDENT "in" Condition ( RangeOperator Condition )? Block
 RangeOperator    ::= "..<" | "..="
+PanicStatement   ::= "panic" TEMPLATE
 LogStatement     ::= "log" LogLevel TEMPLATE
 LogLevel         ::= "info" | "warn"
 AllowStatement   ::= "allow" AllowItem ( "," AllowItem )* Block
