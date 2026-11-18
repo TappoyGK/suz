@@ -46,6 +46,18 @@ pub(crate) struct CheckedFunction {
 /// 失敗時returnの式は、検査中に作ったBoxをそのまま使う。
 #[derive(Clone)]
 pub(crate) enum CheckedStatement {
+    Arena {
+        body: Vec<CheckedStatement>,
+        end: Location,
+    },
+    Store {
+        target: Box<CheckedExpression>,
+        id: usize,
+        value: Box<CheckedExpression>,
+        body: Vec<CheckedStatement>,
+        location: Location,
+    },
+
     Ignore(Box<crate::ast::Ignore>),
     Recover(CheckedExpression),
     Fail(CheckedExpression),
@@ -104,17 +116,20 @@ pub(crate) enum CheckedStatement {
     },
     Block(Vec<CheckedStatement>),
     Binding {
+        location: Location,
         mutable: bool,
         id: usize,
         ty: Type,
-        initializer: CheckedExpression,
+        // 型とソース位置の追加で全ての文が肥大化しないよう、初期値を別に保持する。
+        initializer: Box<CheckedExpression>,
     },
     Assign {
+        location: Location,
         global: bool,
         fields: Vec<usize>,
         id: usize,
         ty: Type,
-        value: CheckedExpression,
+        value: Box<CheckedExpression>,
     },
     Return(CheckedExpression),
 }
@@ -196,6 +211,14 @@ impl IntegerOperation {
 /// 値ブロックには捕捉した変数を、汎用リテラルには具体化まで必要な綴りを残す。
 #[derive(Clone)]
 pub(crate) enum Value {
+    New {
+        value: Box<CheckedExpression>,
+        location: Location,
+    },
+    Deref(Box<CheckedExpression>),
+    NonNull(Box<CheckedExpression>),
+    Null,
+
     CBytes(Box<CheckedExpression>),
     CByteLen {
         operand: Box<CheckedExpression>,
@@ -357,7 +380,7 @@ macro_rules! constant_children_visitor {
                     }
                     return handler(h, visit);
                 }
-                Self::CBytes(v) | Self::CByteLen { operand: v, .. } | Self::FunctionBorrow(v) | Self::Len(v) | Self::Cast(v) | Self::Negate(v) | Self::Truncate(v) | Self::BitNot(v)
+                Self::New { value: v, .. } | Self::Deref(v) | Self::NonNull(v) | Self::CBytes(v) | Self::CByteLen { operand: v, .. } | Self::FunctionBorrow(v) | Self::Len(v) | Self::Cast(v) | Self::Negate(v) | Self::Truncate(v) | Self::BitNot(v)
                 | Self::Not(v) | Self::TextView(v) | Self::Intern { operand: v, .. }
                 | Self::Field { target: v, .. } => visit(v),
                 // constant_structはオペランドの解析から得た具体的なキャッシュであり、ソースのオペランドではない。
@@ -400,7 +423,7 @@ macro_rules! constant_children_visitor {
                     }
                     return handler(h, visit);
                 }
-                Self::CIntegerLiteral { .. } | Self::GenericNumericLiteral { .. } | Self::Integer { .. } | Self::Float(_)
+                Self::Null | Self::CIntegerLiteral { .. } | Self::GenericNumericLiteral { .. } | Self::Integer { .. } | Self::Float(_)
                 | Self::Function(_) | Self::Bool(_) | Self::Text { .. } => {}
                 Self::Panic { .. } | Self::HandledCall { .. } | Self::Closure(_) | Self::Local(_) | Self::Global(_) | Self::Void | Self::Invoke { .. } | Self::Call { .. } | Self::Block { .. }
                 | Self::Match { .. } | Self::If { .. } | Self::CastReturn { .. } => return false,

@@ -23,4 +23,11 @@ void suz_arena_init(uint64_t capacity, const char *source, size_t line, size_t c
    max_align_t以下とする。初期値は呼び出し前に評価し、成功後に格納する。 */
 void *suz_arena_alloc(size_t size, size_t alignment, const char *source, size_t line, size_t column);
 
+/* Clangのcleanupは通常終了・return・break・continue・外向きgotoで働く。
+   戻り値を評価してから回収し、パニックによるプロセス終了には回収を要求しない。
+   最適化なしでも復帰だけの関数呼び出しを残さない。 */
+static inline __attribute__((always_inline)) void suz_arena_restore(size_t *mark) {
+    suz_arena.used = *mark;
+}
+
 #endif

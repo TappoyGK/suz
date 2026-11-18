@@ -9,6 +9,11 @@ pub(crate) mod templates;
 use std::ops::Range;
 
 const KEYWORDS: &[&str] = &[
+    "arena",
+    "new",
+    "ptr",
+    "null",
+    "let",
     "extern",
     "c_bytes",
     "c_byte_len",

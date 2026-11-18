@@ -4,6 +4,7 @@
 //! 主な対象規則: `[const.decl]`、`[decl.location]`、`[decl.top-level]`、`[fn.return]`、`[for.range]`、`[prog.main]`。
 
 mod allows;
+mod arena;
 mod branches;
 mod closures;
 mod enums;

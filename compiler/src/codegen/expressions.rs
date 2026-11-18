@@ -33,6 +33,13 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
         return super::exact::stored(expr, context);
     }
     match expr.value {
+        Value::New {
+            ref value,
+            location,
+        } => super::arena::allocate(value, expr.ty, location, context),
+        Value::Deref(ref value) => format!("(*({}))", expression(value, context)),
+        Value::NonNull(ref value) => format!("({} != NULL)", expression(value, context)),
+        Value::Null => "NULL".into(),
         Value::CBytes(ref operand) => super::ffi::bytes(operand, context),
         Value::CByteLen {
             ref operand,

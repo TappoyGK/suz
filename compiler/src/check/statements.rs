@@ -33,7 +33,13 @@ impl Binding {
         Self::local(0, ty, false, false, location)
     }
 
-    fn local(id: usize, ty: Type, mutable: bool, loop_variable: bool, location: Location) -> Self {
+    pub(super) fn local(
+        id: usize,
+        ty: Type,
+        mutable: bool,
+        loop_variable: bool,
+        location: Location,
+    ) -> Self {
         Self {
             global: false,
             constant: None,
@@ -93,12 +99,12 @@ pub(super) fn check_statements(
     Ok(context.output)
 }
 
-struct StatementContext<'a> {
-    bindings: &'a mut Scope,
-    next_id: &'a mut usize,
-    loop_depth: usize,
-    declared: &'a mut Vec<String>,
-    output: Vec<CheckedStatement>,
+pub(super) struct StatementContext<'a> {
+    pub(super) bindings: &'a mut Scope,
+    pub(super) next_id: &'a mut usize,
+    pub(super) loop_depth: usize,
+    pub(super) declared: &'a mut Vec<String>,
+    pub(super) output: Vec<CheckedStatement>,
 }
 
 fn check_statement(
@@ -108,6 +114,9 @@ fn check_statement(
     #[cfg(test)]
     super::generic::work();
     match statement {
+        Statement::Arena { .. } | Statement::IfLet { .. } | Statement::Store { .. } => {
+            super::arena::statement(statement, context)?
+        }
         Statement::Recover(value) => {
             let Some(ty) = context.bindings.recovery.filter(|ty| *ty != Type::Void) else {
                 return Err(value.location.error(
@@ -173,7 +182,12 @@ fn check_statement(
                 ));
             }
             // void呼び出しを文へ移した場合、評価すべき値の式は残らない。
-            if !lower_return_handler(&mut checked, &mut context.output, context.next_id) {
+            if !lower_return_handler(
+                &mut checked,
+                &mut context.output,
+                context.next_id,
+                value.location,
+            ) {
                 context.output.push(CheckedStatement::Expression(checked));
             }
         }
@@ -366,6 +380,7 @@ fn check_binding(
     context: &mut StatementContext<'_>,
 ) -> Result<(), Diagnostic> {
     let Statement::Binding {
+        pointer,
         mutable,
         name,
         location,
@@ -406,26 +421,44 @@ fn check_binding(
         annotation.map(|t| context.bindings.resolve_type(t)),
         context.bindings,
     )?;
+    if initializer.ty.pointee().is_some() != *pointer {
+        return Err(location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "arena.ptr-decl",
+                "pointer bindings require fix ptr or var ptr"
+            ),
+        ));
+    }
     if initializer.ty == Type::Void {
         return Err(location.error(
             ErrorKind::InvalidSource,
             crate::diagnostic!("type.void", "bindings cannot have type void"),
         ));
     }
-    lower_return_handler(&mut initializer, &mut context.output, context.next_id);
+    lower_return_handler(
+        &mut initializer,
+        &mut context.output,
+        context.next_id,
+        *location,
+    );
     let id = *context.next_id;
     *context.next_id += 1;
     context.declared.push(name.clone());
     let ty = initializer.ty;
+    if !*mutable && super::arena::nonnull(&initializer, context.bindings) {
+        context.bindings.nonnull.insert(id);
+    }
     context.bindings.locals.insert(
         name.clone(),
         Binding::local(id, ty, *mutable, false, *location),
     );
     context.output.push(CheckedStatement::Binding {
+        location: *location,
         mutable: *mutable,
         id,
         ty,
-        initializer,
+        initializer: Box::new(initializer),
     });
 
     Ok(())
@@ -452,6 +485,9 @@ fn check_assign(
             crate::diagnostic!("decl.local-scope", "binding '{name}' is not in scope"),
         )
     })?;
+    if super::arena::indirect_path(binding.ty, fields, context.bindings) {
+        return super::arena::named_store(statement, context);
+    }
     if binding.constant.is_some() {
         return Err(location.error(
             ErrorKind::InvalidSource,
@@ -485,14 +521,15 @@ fn check_assign(
         ty = field_type;
     }
     let mut value = super::expression::coerced(value, Some(ty), context.bindings)?;
-    lower_return_handler(&mut value, &mut context.output, context.next_id);
+    lower_return_handler(&mut value, &mut context.output, context.next_id, *location);
     context.bindings[name].assigned.set(true);
     context.output.push(CheckedStatement::Assign {
+        location: *location,
         global,
         id,
         fields: indices,
         ty,
-        value,
+        value: Box::new(value),
     });
 
     Ok(())
@@ -516,6 +553,7 @@ fn condition_value(
 pub(super) fn finish_scope(bindings: &mut Scope, declared: Vec<String>) -> Result<(), Diagnostic> {
     for name in declared {
         let binding = bindings.locals.remove(&name).unwrap();
+        bindings.nonnull.remove(&binding.id);
         if binding.mutable && !binding.assigned.get() {
             let error = binding.location.error(
                 ErrorKind::InvalidSource,

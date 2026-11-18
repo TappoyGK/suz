@@ -29,6 +29,7 @@ pub(super) struct GenericTypes {
 impl GenericTypes {
     pub fn resolve(self, ty: Type) -> Type {
         match ty {
+            Type::Pointer { .. } => self.resolve(ty.pointee().unwrap()).pointer(),
             Type::GenericInt => Type::Integer(self.int.expect("int declared in signature")),
             Type::GenericFloat => Type::Float(self.float.expect("float declared in signature")),
             _ => ty,

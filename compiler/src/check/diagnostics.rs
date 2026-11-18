@@ -238,11 +238,22 @@ fn collect_statements(statements: &[CheckedStatement], locations: &mut Vec<Locat
                 collect_statements(body, locations);
             }
             CheckedStatement::Break | CheckedStatement::Continue => {}
-            CheckedStatement::Block(inner) => collect_statements(inner, locations),
-            CheckedStatement::Binding { initializer, .. } => collect(initializer, locations),
-            CheckedStatement::Return(value) | CheckedStatement::Assign { value, .. } => {
-                collect(value, locations)
+            CheckedStatement::Arena { body: inner, .. } | CheckedStatement::Block(inner) => {
+                collect_statements(inner, locations)
             }
+            CheckedStatement::Store {
+                target,
+                value,
+                body,
+                ..
+            } => {
+                collect(target, locations);
+                collect_statements(body, locations);
+                collect(value, locations);
+            }
+            CheckedStatement::Binding { initializer, .. } => collect(initializer, locations),
+            CheckedStatement::Assign { value, .. } => collect(value, locations),
+            CheckedStatement::Return(value) => collect(value, locations),
         }
     }
 }

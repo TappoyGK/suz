@@ -42,10 +42,21 @@ pub(in crate::check) fn check(
                 }
             }
             let operand = super::super::exact::use_value(operand, bindings)?;
-            if operand.ty == Type::CPointer || target == Type::CPointer {
+            if operand.ty.pointee().is_some()
+                || target.pointee().is_some()
+                || operand.ty == Type::CPointer
+                || target == Type::CPointer
+            {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
-                    crate::diagnostic!("ffi.pointer-operations", "pointer values cannot be cast"),
+                    if operand.ty.pointee().is_some() || target.pointee().is_some() {
+                        crate::diagnostic!("arena.ptr-operations", "pointer values cannot be cast")
+                    } else {
+                        crate::diagnostic!(
+                            "ffi.pointer-operations",
+                            "pointer values cannot be cast"
+                        )
+                    },
                 ));
             }
             if matches!(operand.ty, Type::CInteger(_)) || matches!(target, Type::CInteger(_)) {
@@ -113,6 +124,7 @@ pub(in crate::check) fn check(
                 if !valid
                     || bindings.contains_function(target)
                     || crate::check::ffi::contains_c_type(target, bindings)
+                    || crate::check::arena::contains(target, bindings)
                 {
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,

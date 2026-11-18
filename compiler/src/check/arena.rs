@@ -1,0 +1,340 @@
+//! arena内の確保・参照解除・更新を型検査する。寿命の候補伝播はlifetimesが担当する。
+mod lifetimes;
+use super::{
+    expression,
+    ir::{CheckedExpression, CheckedStatement, Value},
+    scope::Scope,
+    statements::{self, Binding, StatementContext},
+};
+use crate::{
+    Diagnostic, ErrorKind,
+    ast::{Expression, ExpressionKind, Location, Statement, Type},
+};
+
+pub(super) fn contains(ty: Type, scope: &Scope) -> bool {
+    match ty {
+        Type::Pointer { .. } => true,
+        Type::Struct(id) => scope.structs[id]
+            .fields
+            .iter()
+            .any(|f| contains(f.ty, scope)),
+        _ => false,
+    }
+}
+
+pub(super) fn nonnull(value: &CheckedExpression, scope: &Scope) -> bool {
+    match &value.value {
+        Value::New { .. } => true,
+        Value::Local(id) => scope.nonnull.contains(id),
+        _ => false,
+    }
+}
+
+pub(super) fn deref(
+    value: CheckedExpression,
+    location: Location,
+    scope: &Scope,
+) -> Result<CheckedExpression, Diagnostic> {
+    let Some(ty) = value.ty.pointee() else {
+        return Err(location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!("arena.ptr-operations", "dereference requires ptr"),
+        ));
+    };
+    if !nonnull(&value, scope) {
+        return Err(location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "arena.null-deref",
+                "use if let before dereferencing a possibly null pointer"
+            ),
+        ));
+    }
+    Ok(CheckedExpression {
+        ty,
+        value: Value::Deref(Box::new(value)),
+    })
+}
+
+pub(super) fn expression(
+    expr: &Expression,
+    expected: Option<Type>,
+    scope: &Scope,
+) -> Result<CheckedExpression, Diagnostic> {
+    match &expr.kind {
+        ExpressionKind::Null => {
+            let Some(ty @ Type::Pointer { .. }) = expected else {
+                return Err(expr.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("arena.null", "null requires an expected ptr type"),
+                ));
+            };
+            Ok(CheckedExpression {
+                ty,
+                value: Value::Null,
+            })
+        }
+        ExpressionKind::New(inner) => {
+            if scope.arena_depth == 0 {
+                return Err(expr.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "arena.new",
+                        "new requires a lexical arena in this function"
+                    ),
+                ));
+            }
+            let value = expression::coerced(inner, expected.and_then(Type::pointee), scope)?;
+            if value.ty == Type::Void || matches!(value.ty, Type::Function(_)) {
+                return Err(expr.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("arena.new-value", "new requires a stored value"),
+                ));
+            }
+            Ok(CheckedExpression {
+                ty: value.ty.pointer(),
+                value: Value::New {
+                    value: Box::new(value),
+                    location: expr.location,
+                },
+            })
+        }
+        ExpressionKind::Deref(inner) => deref(
+            expression::expression(inner, None, scope)?,
+            expr.location,
+            scope,
+        ),
+        _ => unreachable!(),
+    }
+}
+
+pub(super) fn statement(
+    statement: &Statement,
+    context: &mut StatementContext<'_>,
+) -> Result<(), Diagnostic> {
+    match statement {
+        Statement::Arena { body, end, .. } => {
+            context.bindings.arena_used.set(true);
+            context.bindings.arena_depth += 1;
+            let result =
+                statements::block(body, context.bindings, context.next_id, context.loop_depth);
+            context.bindings.arena_depth -= 1;
+            context.output.push(CheckedStatement::Arena {
+                body: result?,
+                end: *end,
+            });
+        }
+        Statement::IfLet {
+            name,
+            location,
+            value,
+            body,
+            otherwise,
+        } => {
+            if context.bindings.contains_key(name)
+                || context.bindings.functions.contains_key(name)
+                || context.bindings.is_type_name(name)
+            {
+                return Err(location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("decl.shadowing", "if let binding shadows an existing name"),
+                ));
+            }
+            let value = expression::expression(value, None, context.bindings)?;
+            if value.ty.pointee().is_none() {
+                return Err(location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("arena.if-let", "if let requires ptr"),
+                ));
+            }
+            let id = *context.next_id;
+            *context.next_id += 1;
+            let ty = value.ty;
+            context.bindings.locals.insert(
+                name.clone(),
+                Binding::local(id, ty, false, false, *location),
+            );
+            context.bindings.nonnull.insert(id);
+            let body = statements::block_with_bindings(
+                body,
+                context.bindings,
+                context.next_id,
+                context.loop_depth,
+                vec![name.clone()],
+            )?;
+            let otherwise = statements::block(
+                otherwise,
+                context.bindings,
+                context.next_id,
+                context.loop_depth,
+            )?;
+            context.output.push(CheckedStatement::Block(vec![
+                CheckedStatement::Binding {
+                    location: *location,
+                    mutable: false,
+                    id,
+                    ty,
+                    initializer: Box::new(value),
+                },
+                CheckedStatement::If {
+                    branches: vec![(
+                        CheckedExpression {
+                            ty: Type::Bool,
+                            value: Value::NonNull(Box::new(CheckedExpression {
+                                ty,
+                                value: Value::Local(id),
+                            })),
+                        },
+                        body,
+                    )],
+                    otherwise: Some(otherwise),
+                },
+            ]));
+        }
+        Statement::Store {
+            target,
+            value,
+            operator,
+            location,
+        } => store(target, value, *operator, *location, context)?,
+        _ => unreachable!(),
+    }
+    Ok(())
+}
+
+pub(super) fn indirect_path(mut ty: Type, fields: &[String], scope: &Scope) -> bool {
+    for name in fields {
+        if ty.pointee().is_some() {
+            return true;
+        }
+        let Type::Struct(id) = ty else { return false };
+        let Some(field) = scope.structs[id].fields.iter().find(|f| &f.name == name) else {
+            return false;
+        };
+        ty = field.ty;
+    }
+    false
+}
+
+pub(super) fn named_store(
+    statement: &Statement,
+    context: &mut StatementContext<'_>,
+) -> Result<(), Diagnostic> {
+    let Statement::Assign {
+        compound,
+        name,
+        fields,
+        value,
+        location,
+    } = statement
+    else {
+        unreachable!()
+    };
+    let mut target = Expression {
+        kind: ExpressionKind::Name(name.clone()),
+        location: *location,
+        height: 1,
+    };
+    for field in fields {
+        target = Expression {
+            height: target.height + 1,
+            kind: ExpressionKind::Field {
+                target: Box::new(target),
+                name: field.clone(),
+            },
+            location: *location,
+        };
+    }
+    let (operator, value) = if *compound {
+        let ExpressionKind::Binary {
+            operator, right, ..
+        } = &value.kind
+        else {
+            unreachable!()
+        };
+        (Some(*operator), right.as_ref())
+    } else {
+        (None, value)
+    };
+    store(&target, value, operator, *location, context)
+}
+
+fn store(
+    target: &Expression,
+    value: &Expression,
+    operator: Option<crate::ast::BinaryOperator>,
+    location: Location,
+    context: &mut StatementContext<'_>,
+) -> Result<(), Diagnostic> {
+    let target = expression::expression(target, None, context.bindings)?;
+    fn indirect(value: &Value) -> bool {
+        match value {
+            Value::Deref(_) => true,
+            Value::Field { target, .. } => indirect(&target.value),
+            _ => false,
+        }
+    }
+    if !indirect(&target.value) {
+        return Err(location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "arena.ptr-operations",
+                "pointer assignment requires a dereferenced destination"
+            ),
+        ));
+    }
+    let id = *context.next_id;
+    *context.next_id += 1;
+    // 複合代入は保存済みの代入先から一度だけ読み、通常の算術検査を使う。
+    let name = format!("$arena{id}");
+    context.bindings.locals.insert(
+        name.clone(),
+        Binding::local(id, target.ty.pointer(), false, false, location),
+    );
+    context.bindings.nonnull.insert(id);
+    let compound = operator.map(|operator| Expression {
+        height: value.height + 2,
+        location,
+        kind: ExpressionKind::Binary {
+            operator,
+            left: Box::new(Expression {
+                location,
+                height: 2,
+                kind: ExpressionKind::Deref(Box::new(Expression {
+                    location,
+                    height: 1,
+                    kind: ExpressionKind::Name(name.clone()),
+                })),
+            }),
+            right: Box::new(value.clone()),
+        },
+    });
+    let result = expression::coerced(
+        compound.as_ref().unwrap_or(value),
+        Some(target.ty),
+        context.bindings,
+    );
+    context.bindings.locals.remove(&name);
+    context.bindings.nonnull.remove(&id);
+    let mut value = result?;
+    let mut body = Vec::new();
+    super::control::lower_return_handler(&mut value, &mut body, context.next_id, location);
+    context.output.push(CheckedStatement::Store {
+        target: Box::new(target),
+        id,
+        value: Box::new(value),
+        body,
+        location,
+    });
+    Ok(())
+}
+
+pub(super) fn check_lifetimes(
+    statements: &[CheckedStatement],
+    scope: &Scope,
+) -> Result<(), Diagnostic> {
+    if !scope.arena_used.get() {
+        return Ok(());
+    }
+    lifetimes::check(statements, scope)
+}

@@ -69,7 +69,7 @@ Suzは次のものを含む。
 **[src.keywords]** 次の語はキーワードである。
 
 ```text
-fix var fn fnshape static struct enum error extern unsafe
+fix var fn fnshape static struct enum error extern unsafe arena new ptr null let
 if ifexpr elif else while loop for rev in break continue return match matchexpr
 as or not len c_bytes c_byte_len log panic fail ignore recover allow expr with
 true false nan inf
@@ -172,7 +172,7 @@ fix lower = -inf      // f64 の負の無限大
 
 - 文自体は数えない。文に書いた式とブロックは、その文を含むブロックより1段深い。条件、`match`の対象とパターン、`for`・`rev`の反復対象と範囲の両端も同じであり、範囲演算子は別の段として数えない。
 - `if`・`elif`・`else`・`while`・`loop`・`for`・`rev`の本体、`match`の腕、ブロック文、`allow`のブロックは、それぞれ1つのブロックとして数える。腕の本体を式だけで書く場合も、その式を含むブロックを1段として数える。
-- リテラル、名前、丸括弧、単項・二項演算子、`len`、`as`・`as%`、`or`、関数呼び出し、構造体リテラル、テンプレート、フィールド参照、切り出し・添字、`with`を、それぞれ1つの式として数える。各オペランド、実引数、初期値、添字・切り出しの境界、テンプレートの埋め込みの式は、その式より1段深い。`with`のコピー元と初期値も、その`with`より1段深い。
+- リテラル、名前、丸括弧、単項・二項演算子、`new`、参照解除の`*`、`len`、`as`・`as%`、`or`、関数呼び出し、構造体リテラル、テンプレート、フィールド参照、切り出し・添字、`with`を、それぞれ1つの式として数える。各オペランド、実引数、初期値、添字・切り出しの境界、テンプレートの埋め込みの式は、その式より1段深い。`with`のコピー元と初期値も、その`with`より1段深い。
 - `fn 関数名` は1つの式として数える。名前で呼ぶ `f(x)` の名前は別の段として数えない。それ以外の呼び出しでは、呼び出し対象の式も呼び出しより1段深い。
 - クロージャは1つの式として数える。本体のブロックはその式より1段深く、本体の文の式はさらにその下とする。本体で数え直さない。キャプチャー一覧の名前と仮引数は数えない。
 - 左結合の並びは演算ごとに1段を数える。比較の連鎖は全体で1つの式とし、各オペランドはその1段下とする。
@@ -374,7 +374,7 @@ fn make_range(lo: u8, hi: u16) -> Range {
 
 **[struct.access]** フィールドは `値.フィールド名` で参照する。変更可能な変数のフィールドには代入できる。存在しないフィールドの参照はコンパイルエラーである。
 
-**[struct.recursion]** 構造体は、直接・間接を問わず、自分自身をフィールドの値として含められない。そのような型の宣言はコンパイルエラーである。
+**[struct.recursion]** 構造体は、直接・間接を問わず、自分自身をフィールドの値として含められない。そのような型の宣言はコンパイルエラーである。ポインタを介する循環は [arena.recursive-struct] に従って認める。
 
 **[struct.with]** `式 with { 初期値, ... }` は、左の式の値をコピーし、書いたフィールドを初期値の値に差し替えた値を結果とする。結果の型は、左の式の構造体型である。書かなかったフィールドには、初期値の評価を始める前に保存した左の式の値を使う。`with` 自体は、コピー元の変数へ代入しない。
 
@@ -709,7 +709,7 @@ if not ready {
 | 順位 | 演算 |
 |---|---|
 | 1 | 関数呼び出し、フィールド参照、切り出し・添字の `[ ]` |
-| 2 | 単項 `-` `not` `~` `len` |
+| 2 | 単項 `-` `not` `~` `len` `new` `*` |
 | 3 | `as` `as%` |
 | 4 | `*` `/` `%` `*%` |
 | 5 | `+` `-` `+%` `-%` |
@@ -1546,7 +1546,7 @@ fn main() -> u8 {
 
 ### 8.12 Cへのバイト列の受け渡し
 
-**[ffi.pointer-type]** `*const void`はCの`const void *`に対応し、Suzが管理する不変のバイト列を指す。ポインタを作る操作は`c_bytes`だけとする。ローカルの`fix`・`var`、通常のSuz関数の仮引数・戻り値、構造体のフィールドに保持・コピーできる。保持・受け渡し自体にunsafeは不要である。externでは引数だけに使え、ポインタを返すC関数は宣言できない。その他のポインタ型は認めない。この型表記内の`const`は修飾語であり、予約語には追加しない。
+**[ffi.pointer-type]** `*const void`はCの`const void *`に対応し、Suzが管理する不変のバイト列を指す。ポインタを作る操作は`c_bytes`だけとする。ローカルの`fix`・`var`、通常のSuz関数の仮引数・戻り値、構造体のフィールドに保持・コピーできる。保持・受け渡し自体にunsafeは不要である。externでは引数だけに使え、ポインタを返すC関数は宣言できない。externで使えるポインタ型はこれだけとする。Suz内の `ptr T` は8.13節に従い、Cとの間では受け渡せない。この型表記内の`const`は修飾語であり、予約語には追加しない。
 
 **[ffi.pointer-operations]** ポインタの比較・算術・ビット演算・型変換・テンプレートへの埋め込み・参照先の読み書きは認めない。ポインタを含む構造体の比較や、文字列からその構造体への変換も認めない。整数や文字列値からの暗黙変換、NULLリテラルもない。
 
@@ -1572,6 +1572,59 @@ fn main() -> u8 {
 ```
 
 この例の`output.h`と`output_bytes`の実体はCライブラリ側が提供する。両方の操作へ同じ値を渡すため、メッセージを一度`msg`へ束縛している。
+
+### 8.13 作業領域とポインタ
+
+**[arena.block]** `arena { 文 ... }` は、実体を一時的に置く作業領域と寿命の境界を作る文である。通常のブロックと同じスコープを作り、入れ子にできる。既存の変数宣言の保存場所は変えない。
+
+**[arena.new]** `new 式` は、現在の関数内でその位置を字句的に囲む最内側のarenaへ実体を確保し、`ptr T`を返す。Tは初期値の型である。そのようなarenaがなければコンパイルエラーとする。呼び出し元のarenaを暗黙の確保先にはしない。
+
+**[arena.new-value]** 初期値には保存できる任意の型の値を使える。`void`と呼び出し専用の`fn`型は使えない。既存の変数のアドレスを取得する構文は設けない。`new`と参照解除の`*`は`len`と同じ優先順位で、定数式には含めない。
+
+**[arena.new-order]** 初期値を1回評価し、その後で整列・サイズ・容量を検査して確保し、評価済みの値を格納する。初期値の評価中の確保が先に完了する。失敗時は [rt.arena-allocation] に従う。
+
+**[arena.ptr-type]** ポインタ型は`ptr T`と書く。`ptr ptr T`も認める。コピーは同じ実体を指すポインタ値のコピーであり、実体を複製しない。
+
+**[arena.ptr-decl]** ローカルのポインタ変数は`fix ptr 名前[: ptr T] = 式`または`var ptr 名前[: ptr T] = 式`と宣言する。`ptr`のない宣言でポインタを保持すること、`ptr`を付けた宣言で別の型の値を保持することはできない。必ず初期化する。fixはポインタの再代入を禁じ、varは許す。どちらも参照先の更新は禁じない。
+
+**[arena.ptr-operations]** `*p`は参照先の読み出し、`*p = 値`と`*p += 値`などは更新である。構造体へのポインタの`p.field`は`(*p).field`と同じ意味とする。代入先を1回評価してから右辺を評価する。複合代入では右辺より先に更新前の値を読む。ポインタの算術・比較・添字・型変換・文字列への埋め込みは認めない。ポインタを含む構造体の比較・文字列変換も認めない。
+
+**[arena.null]** `null`は実体を指さないポインタである。要求されるポインタ型が分かる位置だけに書ける。`var ptr p: ptr Node = null`は有効で、`var ptr p = null`は型が決まらないためエラーとする。nullは参照先の領域や寿命を持たない。
+
+**[arena.if-let]** `if let 名前 = 式 { 文 ... } else { 文 ... }`はポインタ式を1回評価し、非nullならその参照を本体内だけ有効な不変の名前へ束縛する。nullならelse側を実行する。elseは省略できる。束縛したポインタは元の変数やフィールドの変更後も取得時の参照を保持する。参照先の更新は許す。名前には通常の命名規則とシャドーイング禁止を適用する。
+
+**[arena.null-deref]** nullの可能性が残るポインタの参照解除・フィールドアクセスは禁止する。`new`、`if let`の束縛、および既に非nullと保証された値で初期化した`fix ptr`は非nullとする。変更可能な変数やフィールドは、以前の初期値だけを根拠に非nullとは扱わない。
+
+```suz
+struct Node { value: i32, next: ptr Node }
+fn main() -> u8 {
+    arena {
+        fix ptr a = new Node { value: 1, next: null }
+        fix ptr b = new Node { value: 2, next: a }
+        a.next = b
+        if let next = a.next { next.value += 1 }
+    }
+    return 0
+}
+```
+
+**[arena.recursive-struct]** ポインタを介する自己参照・相互参照の構造体を認める。構造体の値を直接含む循環は、実体のサイズが決まらないため禁止する。
+
+**[arena.exit]** 通常終了、`return`、`fail`、`recover`、`break`、`continue`でarenaを抜けると、そのarenaの開始時の使用位置へ戻す。複数のarenaを抜ける場合は内側から回収する。領域を抜けない移動では回収しない。returnやrecoverで渡す値は回収前に評価する。
+
+**[arena.resources]** 回収するのはメモリだけである。個別の解放、実体の移動、領域の拡張、実体ごとの終了処理は行わない。ファイルなどの資源を閉じる処理は含まない。
+
+**[arena.lifetime]** 実体の寿命は確保先のarenaで決まり、参照のコピーでは延びない。領域の終了後に利用できる場所へ参照を残してはならない。
+
+**[arena.store]** 保存する参照の実体は、保存先以上に長生きしなければならない。同じ領域や内側への保存は許す。内側でコピーした外側の参照も、保存先以上に長生きするなら外側へ保存できる。判定には変数または書き込み先の実体の寿命を使い、書き込みに使う別名の宣言位置と取り違えない。内側の参照を外側へ保存することは禁止する。nullの保存には参照先の寿命検査を要しない。
+
+**[arena.aggregate]** 構造体内の参照にも再帰的に同じ制約を適用する。構造体のコピー・全体の上書き・フィールドの更新・別名経由の更新で制約を回避できない。同じarena内では循環参照を作れる。回収時に参照をたどる必要はない。
+
+**[arena.region-shape]** 検査では確保箇所ごとの領域と、変数・実体内の参照先の候補集合を使う。通常のブロック内の保存場所の寿命も区別する。コピーと別名経由の読み書きによる候補の追加を、集合が変わらなくなるまで繰り返す。候補のいずれかが寿命の条件を満たさなければ保存を拒否する。分岐の相関や上書きで候補を絞らないため、安全な保存も拒否することがある。同じarena構文を反復しても、前の反復の参照を次へ残すことはできない。
+
+寿命の診断は保存位置を指し、参照先の確保位置とarenaの終了位置を併記する。構造体内の保存では該当するフィールド名も示す。
+
+**[arena.parameter]** 現段階では`ptr T`またはそれを含む値の関数引数・戻り値・クロージャ捕捉・トップレベル変数への保持を認めない。通常関数が自分のarenaで処理し、参照を含まない結果を返すことはできる。関数間の受け渡しと`arena fn`は[#94の段階3](https://github.com/TappoyGK/suz/issues/94)、`objection`は同イシューの段階4で追加する。
 
 ## 9. 実行時の検査
 
@@ -1888,7 +1941,7 @@ ErrorSpecItem    ::= IDENT ( "." IDENT )?
 Variants         ::= IDENT ( "," NL* IDENT )* ","? NL*
 
 Type             ::= IntegerType | "len_t" | "f32" | "f64" | "bool" | "char" | "symbol" | "text" | "void"
-                   | "int" | "float" | IDENT | "static" "fn" IDENT | "fn" IDENT | CIntegerType | "*" "const" "void"
+                   | "ptr" Type | "int" | "float" | IDENT | "static" "fn" IDENT | "fn" IDENT | CIntegerType | "*" "const" "void"
 CIntegerType     ::= "_int" | "_uint" | "_long" | "_ulong" | "_size_t" | "_char"
 IntegerType      ::= "i8" | "i16" | "i32" | "i64"
                    | "u8" | "u16" | "u32" | "u64"
@@ -1910,12 +1963,13 @@ Statement        ::= ( VariableDeclaration | Assignment | ReturnStatement
                      | "break" | "continue" | LogStatement | Expression ) AllowClause?
                    | WhileStatement | LoopStatement | ForStatement | RevStatement
                    | IfStatement | MatchStatement | Block | AllowStatement | PanicStatement | FailStatement
-                   | RecoverStatement | IgnoreStatement | "unsafe" Block
+                   | RecoverStatement | IgnoreStatement | "unsafe" Block | "arena" Block | IfLetStatement
 
-VariableDeclaration ::= ( "fix" | "var" ) IDENT TypeAnnotation?
+VariableDeclaration ::= ( "fix" | "var" ) "ptr"? IDENT TypeAnnotation?
                         "=" Expression
 Assignment       ::= AssignmentTarget AssignmentOperator Expression
-AssignmentTarget ::= IDENT ( "." IDENT )*
+AssignmentTarget ::= IDENT ( "." IDENT )* | "*" Unary | "(" Expression ")" ( "." IDENT )*
+IfLetStatement   ::= "if" "let" IDENT "=" Condition Block ( NL* "else" Block )?
 AssignmentOperator ::= "=" | "+=" | "-=" | "*=" | "/=" | "%="
                      | "+%=" | "-%=" | "*%=" | "&=" | "|=" | "^="
                      | "<<=" | ">>="
@@ -1936,7 +1990,7 @@ AllowClause      ::= "allow" AllowItem ( "," AllowItem )*
 AllowItem        ::= ALLOW_ITEM
 ```
 
-`VariableDeclaration` はブロック内の宣言を表す。トップレベルの宣言は A.3 の `TopLevelBinding` で表す。`AssignmentTarget` の先頭の `IDENT` は、[assign.target] に従い、ブロック内またはトップレベルの `var` の名前として解決する。
+`VariableDeclaration` はブロック内の宣言を表す。トップレベルの宣言は A.3 の `TopLevelBinding` で表す。通常の代入先には [assign.target] を適用する。ポインタを通した更新には [arena.ptr-operations] を適用し、参照先が書き込み可能な場所であることを要求する。
 
 `IGNORE_REASON` は [err.or-ignore] のコロンと理由を表す。`RecoverStatement` と `IgnoreStatement` の記述位置には [err.recover]・[err.or-error] を適用する。
 
@@ -1970,7 +2024,7 @@ Sum              ::= Product ( ( "+" | "-" | "+%" | "-%" ) Product )*
 Product          ::= Cast ( ( "*" | "/" | "%" | "*%" ) Cast )*
 Cast             ::= Unary ( "as%" Type CastHandler? | "as" Type CastHandler? )*
 CastHandler      ::= "or" ( Expression | "return" Expression? | "panic" TEMPLATE )
-Unary            ::= ( "-" | "not" | "~" | "len" | "c_bytes" | "c_byte_len" ) Unary | "fn" IDENT | Postfix
+Unary            ::= ( "-" | "not" | "~" | "len" | "c_bytes" | "c_byte_len" | "new" | "*" ) Unary | "fn" IDENT | Postfix
 Postfix          ::= Primary ( "." IDENT | "[" Index "]" IndexHandler?
                              | "(" Arguments? ")"
                              | "with" "{" NL* Initializers "}" )*
@@ -1978,7 +2032,7 @@ Index            ::= Expression | Expression? ":" Expression?
 IndexHandler     ::= "or" ( Expression | "return" Expression? | "panic" TEMPLATE )
 Primary          ::= Literal | IDENT | FunctionCall | StructLiteral | TEMPLATE
                    | "(" Expression ")" | IfExpression | MatchExpression | BlockExpression
-Literal          ::= INTEGER | FLOAT | CHAR | "true" | "false" | "nan" | "inf"
+Literal          ::= INTEGER | FLOAT | CHAR | "true" | "false" | "nan" | "inf" | "null"
 
 FunctionCall     ::= IDENT "(" Arguments? ")"
 Arguments        ::= Argument ( "," Argument )* ","?

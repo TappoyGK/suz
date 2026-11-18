@@ -113,6 +113,16 @@ pub(super) fn block_height(body: &[Statement]) -> usize {
 
 fn statement_height(statement: &Statement) -> usize {
     match statement {
+        Statement::IfLet {
+            value,
+            body,
+            otherwise,
+            ..
+        } => value
+            .height
+            .max(block_height(body))
+            .max(block_height(otherwise)),
+        Statement::Store { target, value, .. } => target.height.max(value.height),
         Statement::Binding { initializer, .. } => initializer.height,
         Statement::Assign {
             value, compound, ..
@@ -131,7 +141,9 @@ fn statement_height(statement: &Statement) -> usize {
                 .max()
                 .unwrap_or(0)
         }
-        Statement::Block(body) | Statement::Unsafe(body) => block_height(body),
+        Statement::Arena { body, .. } | Statement::Block(body) | Statement::Unsafe(body) => {
+            block_height(body)
+        }
         Statement::Loop { condition, body } => condition
             .as_ref()
             .map_or(0, |v| v.height)
@@ -215,7 +227,8 @@ fn kind_height(kind: &ExpressionKind) -> usize {
         Cast {
             operand, fallback, ..
         } => (operand.height + usize::from(fallback.is_some())).max(handler_height(fallback)),
-        CBytes(v) | CByteLen(v) | Len(v) | Negate(v) | BitNot(v) | Not(v) | Group(v) => v.height,
+        New(v) | Deref(v) | CBytes(v) | CByteLen(v) | Len(v) | Negate(v) | BitNot(v) | Not(v)
+        | Group(v) => v.height,
         If {
             branches,
             otherwise,
@@ -230,7 +243,7 @@ fn kind_height(kind: &ExpressionKind) -> usize {
         Comparison { operands, .. } => operands.iter().map(|v| v.height).max().unwrap_or(0),
         Integer { negative: true, .. } => 1,
         Float(value) if value.starts_with('-') => 1,
-        Integer { .. } | Float(_) | Bool(_) | Char(_) | Name(_) | Variant { .. } | Void => 0,
+        Integer { .. } | Float(_) | Bool(_) | Char(_) | Name(_) | Variant { .. } | Null | Void => 0,
     }
 }
 

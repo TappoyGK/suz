@@ -149,7 +149,8 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
                     slots,
                 )
             }
-            Type::CPointer
+            Type::Pointer { .. }
+            | Type::CPointer
             | Type::CInteger(_)
             | Type::StaticFunction(_)
             | Type::Function(_)

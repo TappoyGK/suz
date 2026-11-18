@@ -319,6 +319,23 @@ pub(super) fn check_with_captures(
 ) -> Result<(CheckedFunction, Vec<crate::ast::Location>), Diagnostic> {
     control::validate_return_positions(&function.statements)?;
     scope.unsafe_block = false;
+    scope.arena_depth = 0;
+    scope.arena_used = Default::default();
+    scope.nonnull.clear();
+    if super::arena::contains(function.result, &scope)
+        || function
+            .parameters
+            .iter()
+            .any(|p| super::arena::contains(p.ty, &scope))
+    {
+        return Err(function.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "arena.parameter",
+                "arena pointers cannot cross function boundaries in this implementation stage"
+            ),
+        ));
+    }
     scope.recovery = None;
     scope.loop_depth = 0;
     let mut warnings = Vec::new();
@@ -384,6 +401,7 @@ pub(super) fn check_with_captures(
             binding.assigned.set(true);
         }
     }
+    super::arena::check_lifetimes(&statements, &scope)?;
     control::check_return_shape(function)?;
     warnings.extend(diagnostics::unhandled_arithmetic(&statements));
     Ok((

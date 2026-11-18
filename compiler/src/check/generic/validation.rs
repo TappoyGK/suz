@@ -30,7 +30,7 @@ pub(crate) fn validate(program: &Program) -> Result<(), Diagnostic> {
     }
     for declaration in &program.structs {
         for field in &declaration.fields {
-            if field.ty.generic() {
+            if leaf(field.ty).generic() {
                 return Err(place_error(
                     field.location,
                     "struct fields cannot use int or float; use a concrete type",
@@ -61,6 +61,7 @@ struct Places {
 }
 impl Places {
     fn ty(&self, ty: Type, location: Location, annotation: bool) -> Result<(), Diagnostic> {
+        let ty = leaf(ty);
         let declared = match ty {
             Type::GenericInt => self.int,
             Type::GenericFloat => self.float,
@@ -110,4 +111,11 @@ impl Visitor for Places {
         }
         visit::walk_statement(self, statement)
     }
+}
+
+fn leaf(mut ty: Type) -> Type {
+    while let Some(inner) = ty.pointee() {
+        ty = inner;
+    }
+    ty
 }

@@ -18,6 +18,37 @@ pub(super) fn emit_block(
     let indent = "    ".repeat(depth);
     for statement in statements {
         match statement {
+            CheckedStatement::Arena { body, .. } => {
+                context.uses_arena = true;
+                let id = *next_assignment;
+                *next_assignment += 1;
+                writeln!(c, "{indent}{{\n{indent}    size_t suz_arena_mark_{id} __attribute__((cleanup(suz_arena_restore))) = suz_arena.used;").unwrap();
+                emit_block(c, body, depth + 1, next_assignment, context);
+                writeln!(c, "{indent}}}").unwrap();
+            }
+            CheckedStatement::Store {
+                target,
+                id,
+                value,
+                body,
+                ..
+            } => {
+                writeln!(
+                    c,
+                    "{indent}{{\n{indent}    {} const suz_local_{id} = &({});",
+                    target.ty.pointer().c_name(),
+                    expression(target, context)
+                )
+                .unwrap();
+                emit_block(c, body, depth + 1, next_assignment, context);
+                writeln!(
+                    c,
+                    "{indent}    *suz_local_{id} = {};\n{indent}}}",
+                    expression(value, context)
+                )
+                .unwrap();
+            }
+
             CheckedStatement::Recover(value) => {
                 let target = context
                     .recovery
@@ -254,6 +285,7 @@ pub(super) fn emit_block(
                 id,
                 ty,
                 initializer,
+                ..
             } => {
                 writeln!(
                     c,
@@ -272,6 +304,7 @@ pub(super) fn emit_block(
                 fields,
                 ty,
                 value,
+                ..
             } => {
                 let index = *next_assignment;
                 *next_assignment += 1;

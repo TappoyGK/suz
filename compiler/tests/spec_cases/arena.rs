@@ -187,3 +187,313 @@ fn arena_capacity_rejects_invalid_and_duplicate_values() {
     assert_eq!(result.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&result.stderr).contains("[tool.arguments]"));
 }
+
+#[test]
+fn arena_pointer_updates_cycles_snapshots_and_nested_lifetimes() {
+    let result = crate::test_util::compile_and_run_c23(
+        r#"
+struct Node { value: i32, next: ptr Node }
+struct Holder { node: ptr Node }
+fn main() -> u8 {
+    arena {
+        fix ptr a = new Node { value: 1, next: null }
+        fix ptr b = new Node { value: 2, next: a }
+        a.next = b
+        b.value += 3
+        if let next = a.next {
+            if next.value != 5 { return 1 }
+            next.value = 6
+        } else { return 2 }
+        var ptr selected: ptr Node = a
+        if let snapshot = selected {
+            selected = b
+            snapshot.value = 7
+        }
+        if a.value != 7 || b.value != 6 { return 3 }
+        fix ptr count = new (3 as i32)
+        *count += 4
+        if *count != 7 { return 4 }
+        fix ptr indirect = new count
+        if let inner = *indirect { *inner = 9 }
+        if *count != 9 { return 5 }
+        var holder = Holder { node: null }
+        arena {
+            fix ptr alias = a
+            holder = Holder { node: alias }
+            fix ptr box = new Holder { node: a }
+            if let copied = box.node { holder.node = copied }
+        }
+        if let saved = holder.node { if saved.value != 7 { return 6 } }
+        else { return 7 }
+    }
+    return 0
+}
+"#,
+        "arena.suz",
+    );
+    assert_eq!(result.status.code(), Some(0), "{result:?}");
+}
+
+#[test]
+fn arena_rejects_escaping_references_through_aliases_and_copies() {
+    for body in [
+        "var ptr saved: ptr Node = null\narena { saved = new Node { next: null } }",
+        "arena { fix ptr outer = new Node { next: null }\narena { fix ptr alias = outer\nalias.next = new Node { next: null } } }",
+        "arena { fix ptr outer = new Node { next: null }\narena { fix ptr inner = new Node { next: null }\n*outer = Node { next: inner } } }",
+        "arena { var box = Box { node: null }\narena { fix ptr inner = new Node { next: null }\nfix copy = Box { node: inner }\nbox = copy } }",
+        "var ptr saved: ptr Node = null\nfor i in 0..<3 { arena { saved = new Node { next: null } } }",
+    ] {
+        let source = format!(
+            "struct Node {{ next: ptr Node }}\nstruct Box {{ node: ptr Node }}\nfn main() -> u8 {{ {body}\nreturn 0 }}"
+        );
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert!(
+            error.to_string().contains("[arena.store]"),
+            "{body}: {error}"
+        );
+        assert_eq!(error.related.len(), 2, "{error}");
+    }
+}
+
+#[test]
+fn arena_rejects_invalid_pointer_operations_and_function_boundaries() {
+    for (body, rule) in [
+        ("fix ptr p = new 1", "arena.new"),
+        ("fix ptr p = null", "arena.null"),
+        ("arena { fix p = new 1 }", "arena.ptr-decl"),
+        ("fix ptr p = 1", "arena.ptr-decl"),
+        (
+            "arena { var ptr p = new 1\nfix n = *p }",
+            "arena.null-deref",
+        ),
+        (
+            "arena { fix ptr p: ptr i32 = null\nfix n = *p }",
+            "arena.null-deref",
+        ),
+        ("arena { fix ptr p = new 1\np = new 2 }", "var.fix-assign"),
+    ] {
+        let source = format!("fn main() -> u8 {{ {body}\nreturn 0 }}");
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert!(
+            error.to_string().contains(&format!("[{rule}]")),
+            "{body}: {error}"
+        );
+    }
+    for source in [
+        "fn read(p: ptr i32) -> i32 { return 0 }\nfn main() -> u8 { return 0 }",
+        "fn make() -> ptr i32 { arena { return new 1 } }\nfn main() -> u8 { return 0 }",
+        "struct Box { p: ptr i32 }\nfn read(b: Box) -> i32 { return 0 }\nfn main() -> u8 { return 0 }",
+    ] {
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert!(error.to_string().contains("[arena.parameter]"), "{error}");
+    }
+}
+
+#[test]
+fn arena_rewinds_on_return_failure_recovery_and_loop_exits() {
+    let directory = TemporaryDirectory::new();
+    let source = directory.0.join("exits.suz");
+    fs::write(
+        &source,
+        r#"
+error Err { Bad }
+fn returned() -> i64 {
+    arena { fix ptr p = new (13 as i64)
+        arena { fix ptr q = new (17 as i64)
+            return *p + *q
+        }
+    }
+}
+fn failed() -> i64 or Err {
+    arena { fix ptr p = new (11 as i64)
+        fail Err.Bad
+    }
+}
+fn forwarded() -> i64 or Err {
+    arena { fix ptr p = new (19 as i64)
+        fix n = failed() or fail
+        return n
+    }
+}
+fn early() -> i64 {
+    arena { fix ptr p = new (23 as i64)
+        fix n = failed() or return *p
+        return n
+    }
+}
+fn main() -> u8 {
+    arena {
+        fix ptr sentinel = new (99 as i64)
+        for i in 0..<1000 {
+            if returned() != 30 { return 1 }
+            if early() != 23 { return 2 }
+            fix result = forwarded() or error {
+                _ => { arena {
+                    fix ptr recovered = new (31 as i64)
+                    recover *recovered
+                } }
+            }
+            if result != 31 { return 3 }
+            loop { arena {
+                fix ptr p = new (37 as i64)
+                break
+            } }
+            arena { fix ptr p = new (41 as i64)
+                if i < 999 { continue }
+            }
+        }
+        if *sentinel != 99 { return 4 }
+        // このループからの脱出では、外側のarenaを回収してはならない。
+        loop { break }
+        fix ptr second = new (43 as i64)
+        if *sentinel != 99 { return 5 }
+    }
+    return 0
+}
+"#,
+    )
+    .unwrap();
+    let result = Command::new(env!("CARGO_BIN_EXE_suz"))
+        .arg("run")
+        .arg(&source)
+        .args(["--arena-limit", "64"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        result.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+}
+
+#[test]
+fn arena_evaluates_initializers_once_and_supports_value_blocks() {
+    let result = crate::test_util::compile_and_run_c23(
+        r#"
+struct Pair { value: i32, link: ptr i32 }
+fn generic(value: int) -> int { arena { fix ptr p = new value
+    return *p } }
+fn main() -> u8 {
+    arena {
+        var calls: i32 = 0
+        fix ptr pair = new Pair {
+            value: expr { calls += 1
+                calls },
+            link: new expr { calls += 1
+                calls },
+        }
+        if calls != 2 || pair.value != 1 { return 1 }
+        if let p = pair.link { if *p != 2 { return 2 } }
+        fix ptr outer = expr { fix ptr inner = new (7 as i32)
+            inner }
+        if let p = outer { *p += expr { calls += 1
+            3 } }
+        if calls != 3 { return 3 }
+        if let p = outer { if *p != 10 { return 4 } }
+        if generic(5 as i16) != 5 { return 5 }
+    }
+    return 0
+}
+"#,
+        "initializers.suz",
+    );
+    assert_eq!(result.status.code(), Some(0), "{result:?}");
+}
+
+#[test]
+fn arena_rejects_pointer_conversions_captures_and_aggregate_operations() {
+    for statement in [
+        "fix n = p + 1",
+        "fix n = p == p",
+        "fix n = p as i64",
+        "fix ptr q = 1 as ptr i32",
+        "fix n = p[0]",
+        "log info `${p}`",
+        "fix n = Box { p: p } == Box { p: p }",
+        "fix box = Box { p: p }\nlog info `${box}`",
+        "fix box = `p: 0` as Box or Box { p: p }",
+        "invoke(fn [p]() -> i32 { return 0 })",
+        "fix box = Box { p: p }\ninvoke(fn [box]() -> i32 { return 0 })",
+        "if let q = p { q = p }",
+        "if let q = p {}\nfix n = *q",
+        "if let q = 1 {}",
+        "fix n = new nothing()",
+    ] {
+        let source = format!(
+            "struct Box {{ p: ptr i32 }}\nfnshape Read() -> i32\nfn invoke(f: fn Read) -> i32 {{ return f() }}\nfn nothing() -> void {{ return }}\nfn main() -> u8 {{ arena {{ fix ptr p = new (1 as i32)\n{statement}\n}}\nreturn 0 }}"
+        );
+        assert!(suz::compile(source.as_bytes()).is_err(), "{statement}");
+    }
+    for source in [
+        "struct Node { next: Node }\nfn main() -> u8 { return 0 }",
+        "struct Node { next: ptr int }\nfn main() -> u8 { return 0 }",
+        "fn main() -> u8 { fix ptr p: ptr int = null\nreturn 0 }",
+        "fn main() -> u8 { fix ptr p: ptr void = null\nreturn 0 }",
+        "fix Ptr: ptr i32 = null\nfn main() -> u8 { return 0 }",
+        "extern \"x.h\" { fn take(p: ptr i32) -> void }\nfn main() -> u8 { return 0 }",
+        "fnshape Read() -> i32\nfn invoke(f: fn Read) -> i32 { return f() }\nfn main() -> u8 { arena { invoke(fn []() -> i32 { fix ptr p = new 1\nreturn 0 }) }\nreturn 0 }",
+    ] {
+        assert!(suz::compile(source.as_bytes()).is_err(), "{source}");
+    }
+}
+
+#[test]
+fn arena_tracks_branch_union_field_loads_and_member_diagnostics() {
+    let source = r#"struct Node { next: ptr Node }
+struct Box { head: ptr Node }
+fn main() -> u8 {
+    arena {
+        fix ptr outer = new Node { next: null }
+        arena {
+            fix ptr inner = new Node { next: null }
+            fix ptr head = new Box { head: inner }
+            fix copy = (*head) with { head: head.head }
+            fix ptr selected = ifexpr true { outer } else { inner }
+            if let p = selected {
+                p.next = copy.head
+            }
+        }
+    }
+    return 0
+}"#;
+    let error = suz::compile(source.as_bytes()).unwrap_err();
+    assert!(error.to_string().contains("[arena.store]"), "{error}");
+    assert_eq!(error.line, 12);
+    assert!(error.message().contains("'next'"), "{error}");
+    assert_eq!(error.related[0].line, 7);
+    assert_eq!(error.related[1].line, 14);
+}
+
+#[test]
+fn arena_pointer_compound_assignment_reads_before_its_rhs() {
+    let result = crate::test_util::compile_and_run_c23(
+        r#"
+struct First { other: ptr Second }
+struct Second { other: ptr First }
+fn generic(value: int) -> int {
+    arena { fix ptr p: ptr int = new value
+        return *p }
+}
+fn main() -> u8 {
+    arena {
+        fix ptr first = new First { other: null }
+        fix ptr second = new Second { other: first }
+        first.other = second
+        fix ptr n = new (7 as i32)
+        *n += expr { *n = 20
+            1 }
+        if *n != 8 { return 1 }
+        fix ptr flag = new true
+        if not *flag { return 2 }
+        fix ptr word = new `hello`
+        if *word != `hello` { return 3 }
+        if generic(5 as u16) != 5 { return 4 }
+    }
+    return 0
+}
+"#,
+        "compound.suz",
+    );
+    assert_eq!(result.status.code(), Some(0), "{result:?}");
+}

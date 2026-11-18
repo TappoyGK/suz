@@ -199,7 +199,7 @@ pub(super) fn cast(
 /// ポインタを含む値にも比較を認めず、アドレス同一性を言語の値の等値性にしない。
 pub(super) fn contains_pointer(ty: Type, scope: &Scope) -> bool {
     match ty {
-        Type::CPointer => true,
+        Type::Pointer { .. } | Type::CPointer => true,
         Type::Struct(id) => scope.structs[id]
             .fields
             .iter()
