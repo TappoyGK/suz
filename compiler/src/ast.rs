@@ -407,6 +407,8 @@ pub(crate) struct MatchArm<T = Vec<Statement>> {
 /// 出力文のレベル。Panicはpanic文でのみ使い、出力後に終了する。
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum LogLevel {
+    Debug,
+    Error,
     Info,
     Warn,
     Panic,

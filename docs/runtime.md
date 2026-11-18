@@ -78,6 +78,8 @@ typedef enum {
     SUZ_LOG_INFO,
     SUZ_LOG_WARN,
     SUZ_LOG_PANIC,
+    SUZ_LOG_DEBUG,
+    SUZ_LOG_ERROR,
 } suz_log_level;
 
 void *suz_env_alloc(size_t size);
@@ -92,7 +94,7 @@ _Noreturn void suz_env_panic(void);
 
 ### 4.1 出力
 
-**[runtime.env-log]** `suz_env_log(level, text, len)` は、`text` から始まる `len` バイトを標準エラーへ出力する。通常のログとパニックの診断の両方に使う。`level` は、`log info` では `SUZ_LOG_INFO`、`log warn` では `SUZ_LOG_WARN`、パニックの診断では `SUZ_LOG_PANIC` とする。同じ出力の接頭辞・本文・末尾の改行には、すべて同じレベルを渡す。標準環境層はレベルを無視して出力する。
+**[runtime.env-log]** `suz_env_log(level, text, len)` は、`text` から始まる `len` バイトを標準エラーへ出力する。通常のログとパニックの診断の両方に使う。`level` は、`log debug` では `SUZ_LOG_DEBUG`、`log error` では `SUZ_LOG_ERROR`、`log info` では `SUZ_LOG_INFO`、`log warn` では `SUZ_LOG_WARN`、パニックの診断では `SUZ_LOG_PANIC` とする。同じ出力の接頭辞・本文・末尾の改行には、すべて同じレベルを渡す。標準環境層はレベルを無視して出力する。
 
 | 項目 | 契約 |
 |---|---|
@@ -131,32 +133,11 @@ _Noreturn void suz_env_panic(void);
 
 ## 5. ログの評価と出力
 
-**[runtime.log-evaluation]** 1つの `log info` または `log warn` では、最初にすべての埋め込み式を左から右に1回ずつ評価し、それぞれの値を保持する。すべての評価が成功してから、そのログ文の出力を始める。
+**[runtime.log-evaluation]** 1つの `log debug`・`log info`・`log warn`・`log error` では、最初にすべての埋め込み式を左から右に1回ずつ評価し、それぞれの値を保持する。すべての評価が成功してから、そのログ文の出力を始める。
 
-埋め込み式が呼び出した関数からのログは、外側のログより先に出力される。埋め込み式の評価中にパニックした場合は、外側のログの接頭辞も出力せず、パニックの診断と終了を行う。
+埋め込みには言語仕様の [output.embed-value] を適用し、名前とそのフィールド参照から値を読む。計算が必要な場合はログ文の前で行う。
 
-たとえば、次を `sample.suz` として保存する。
-
-```suz
-fn value() -> u8 {
-    log info `inner`
-    return 3
-}
-
-fn main() -> u8 {
-    log info `outer: ${value()}`
-    return 0
-}
-```
-
-標準エラーには、次の順で出力する。
-
-```text
-info sample.suz:2: inner
-info sample.suz:7: outer: 3
-```
-
-**[runtime.log-fragments]** `suz_log_begin(level, source, line)` は `suz_log_level` の `SUZ_LOG_INFO` または `SUZ_LOG_WARN` を受け取り、出力のロックを取得して接頭辞を書く。`suz_log_end()` は改行を出力してロックを解放する。ランタイム本体は、言語仕様の [log.output] と [log.fragments] に従って、接頭辞・本文の各断片・末尾の改行を `suz_env_log` へ順に渡す。分割位置と呼び出し回数によらず、連結した出力バイト列は同じでなければならない。
+**[runtime.log-fragments]** `suz_log_begin(level, source, line)` は `suz_log_level` の `SUZ_LOG_DEBUG`・`SUZ_LOG_INFO`・`SUZ_LOG_WARN`・`SUZ_LOG_ERROR` を受け取り、出力のロックを取得して接頭辞を書く。`suz_log_end()` は改行を出力してロックを解放する。ランタイム本体は、言語仕様の [log.output] と [log.fragments] に従って、接頭辞・本文の各断片・末尾の改行を `suz_env_log` へ順に渡す。分割位置と呼び出し回数によらず、連結した出力バイト列は同じでなければならない。
 
 1つのログ文の接頭辞から末尾の改行までは、同じランタイムが出力する別のログやパニック診断を挟まず、ひとまとまりとして出力する。このアトミック性は、環境関数への受け渡しを複数回に分ける場合も、環境層が出力をバッファへ保留する場合も維持する。排他範囲は、すべての埋め込み式の評価が完了した後に開始し、末尾の改行を渡した後に終了する。
 
@@ -166,7 +147,7 @@ info sample.suz:7: outer: 3
 
 **[runtime.value-format]** 値の表示は言語仕様の [symbol.value-format] と [symbol.float-format] に従う。整数・浮動小数点の表示は実行環境のロケールに依存させず、小数点には `.` を使う。`f32` の最短表記は `f32` として読み戻す条件で、`f64` は `f64` として読み戻す条件で決める。
 
-**[runtime.log-storage]** 埋め込み値は生成したCの一時変数へ保持する。固定部分・名前・区切りは静的なバイト列を使い、数値の表示には型ごとに必要な容量を満たす固定長の自動変数を使う。symbolは保持済みのバイト列を環境関数へ渡す。ログ本文の整形と断片の受け渡しでは動的メモリの確保・解放を行わず、本文全体の長さに比例した作業領域を要求しない。埋め込み式自身の評価に必要な確保は、その式の規則に従う。
+**[runtime.log-storage]** 埋め込み値は生成したCの一時変数へ保持する。固定部分・名前・区切りは静的なバイト列を使い、数値の表示には型ごとに必要な容量を満たす固定長の自動変数を使う。symbolは保持済みのバイト列を環境関数へ渡す。ログ本文の整形と断片の受け渡しでは動的メモリの確保・解放を行わず、本文全体の長さに比例した作業領域を要求しない。
 
 ## 6. 数値演算と変換
 

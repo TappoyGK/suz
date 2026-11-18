@@ -31,7 +31,7 @@ fn check_reports_source_errors() {
             "invalid_log",
             "fn main() -> u8 { log info `${noop()}`\nreturn 0 }\nfn noop() -> void {}",
             1,
-            "[symbol.interpolation]",
+            "[output.embed-value]",
         ),
     ] {
         let input = directory.0.join(format!("{name}.suz"));

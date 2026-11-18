@@ -134,7 +134,8 @@ fn build_command_preserves_ieee_results_and_protects_existing_output() {
     if invalid == invalid || 1.0 / -zero != -inf { return 1 }
     fix tiny: f32 = 1.40129846e-45
     if tiny + tiny != 2.80259693e-45 { return 2 }
-    log info `${invalid} ${-zero}`
+    fix negative_zero = -zero
+    log info `${invalid} ${negative_zero}`
     return 7
 }"#,
         )
@@ -157,7 +158,7 @@ fn build_command_preserves_ieee_results_and_protects_existing_output() {
         );
         let result = Command::new(&output).output().unwrap();
         assert_eq!(result.status.code(), Some(7));
-        assert_eq!(result.stderr, b"info <input>:7: nan -0.0\n");
+        assert_eq!(result.stderr, b"info <input>:8: nan -0.0\n");
         assert!(result.stdout.is_empty());
         let bytes = fs::read(&output).unwrap();
         let duplicate = build_command()

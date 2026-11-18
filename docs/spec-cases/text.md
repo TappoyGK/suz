@@ -925,7 +925,8 @@ fn main() -> u8 {
 fn main() -> u8 {
     fix message = `Hello`
     log info `${message}`
-    log info `count: ${1}`
+    fix count = 1
+    log info `count: ${count}`
     return 0
 }
 ```
@@ -940,7 +941,7 @@ fn main() -> u8 {
 
 ```text
 info text-025.suz:3: Hello
-info text-025.suz:4: count: 1
+info text-025.suz:5: count: 1
 ```
 
 ### text-034 lenはUnicodeスカラー値を数え定数式にも使える

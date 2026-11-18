@@ -1304,8 +1304,12 @@ fn main() -> u8 {
     fix byte: u8 = 65
     fix ch = byte as char
     fix narrow: u8 = 'あ' as u8 or 7
-    log info `${ch} ${ch as u32} ${narrow}`
-    log info `${scalar(55296)} ${scalar(-1)} ${scalar(1114112)}`
+    fix code = ch as u32
+    log info `${ch} ${code} ${narrow}`
+    fix surrogate = scalar(55296)
+    fix negative = scalar(-1)
+    fix above = scalar(1114112)
+    log info `${surrogate} ${negative} ${above}`
     return 0
 }
 ```
@@ -1319,8 +1323,8 @@ fn main() -> u8 {
 **標準エラー：**
 
 ```text
-info expr-071.suz:6: A 65 7
-info expr-071.suz:7: ? ? ?
+info expr-071.suz:7: A 65 7
+info expr-071.suz:11: ? ? ?
 ```
 
 ### expr-045 必ず成功する変換と定数式の変換
@@ -2050,7 +2054,11 @@ fn main() -> u8 {
 ```suz
 fn parse(input: symbol) -> char { return input as char or '?' }
 fn main() -> u8 {
-    log info `${parse(`😀`)} ${parse(``)} ${parse(`ab`)} ${parse(`'a'`)}`
+    fix emoji = parse(`😀`)
+    fix empty = parse(``)
+    fix multiple = parse(`ab`)
+    fix quoted = parse(`'a'`)
+    log info `${emoji} ${empty} ${multiple} ${quoted}`
     return 0
 }
 ```
@@ -2064,7 +2072,7 @@ fn main() -> u8 {
 **標準エラー：**
 
 ```text
-info expr-072.suz:3: 😀 ? ? ?
+info expr-072.suz:7: 😀 ? ? ?
 ```
 
 ### expr-073 構造体のcharフィールドを文字リテラルとして読む

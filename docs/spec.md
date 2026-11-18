@@ -16,7 +16,7 @@ Suzは次のものを含む。
 - 宣言：定数、関数、変数、列挙型、構造体
 - 式：テンプレート、算術、ラップする算術、比較、論理、ビット演算、型の変換、`ifexpr`、`matchexpr`、`expr`
 - 制御：`if`、`while`、`loop`、`for`、`rev`、`break`、`continue`、`return`、`match`
-- 出力：`log info`・`log warn` と出力用のテンプレート
+- 出力：`log debug`・`log info`・`log warn`・`log error` と出力用のテンプレート
 
 ### 1.2 安全性
 
@@ -81,7 +81,7 @@ true false nan inf
 i8 i16 i32 i64 u8 u16 u32 u64 len_t f32 f64 int float bool char symbol text void
 ```
 
-**[src.info]** `info` と `warn` は、`log` の直後でログレベルを表す（[log.level]）。それ以外では識別子として使える。
+**[src.info]** `debug`・`info`・`warn` は、`log` の直後でログレベルを表し、それ以外では識別子として使える。`error` は予約語のまま、`log` の直後でもログレベルを表す（[log.level]）。
 
 ### 3.1 文の区切りと行の継続
 
@@ -1099,7 +1099,7 @@ fix narrow: u8 = a + b or 0 // 格納に失敗し、代替値0を使う
 
 **[arith.float]** 浮動小数点演算では、型が決まった浮動小数点オペランドと、式に要求される浮動小数点型を [conv.join] でそろえる。どちらからも型が決まらなければ `f64` とする。整数オペランドの型は、この型の選択に使わない。決まった型へオペランドを変換し、[rt.float] に従って計算する。
 
-**[arith.exact-use]** 比較のオペランド、`as`・`as%` の変換元、テンプレートの埋め込み、`match`・`matchexpr` の対象、シフトの右オペランドでは、算術式を型へ格納せず正確な値のまま使う。128ビットの制限とゼロ除算の失敗条件は適用する。失敗処理を付けた算術式は境界となり、格納済みの値を渡す。
+**[arith.exact-use]** 比較のオペランド、`as`・`as%` の変換元、値を作るsymbolテンプレートの埋め込み、`match`・`matchexpr` の対象、シフトの右オペランドでは、算術式を型へ格納せず正確な値のまま使う。128ビットの制限とゼロ除算の失敗条件は適用する。失敗処理を付けた算術式は境界となり、格納済みの値を渡す。
 
 **[conv.compare]** 数値の比較は、型が異なる場合も数学的な値を正確に比較する。整数と浮動小数点数の比較も含む。NaNには [expr.nan-comparison] を適用する。比較の連鎖は隣り合う値をそれぞれ比較する。
 
@@ -1493,7 +1493,7 @@ fn main() -> u8 {
 
 **[err.or-fail]** `呼び出し or fail` は呼び出し先のエラーをそのまま返す。呼び出し先の全エラーが外側の関数のエラー指定に含まれている必要がある。`呼び出し or fail 式` は失敗時だけ式を評価してエラーを返し、その式には [err.fail] を適用する。どちらも [expr.or-return-position]・[expr.jump-prohibited] の位置の制約に従う。`return read() or fail` は禁止であり、`fix value = read() or fail` で受けてから `return value` と書く。
 
-**[err.or-panic]** `式 or panic テンプレート` は失敗時だけ理由を評価し、[panic.stmt]・[rt.panic] に従って出力して終了する。丸括弧と空テンプレートは禁止する。失敗する関数の呼び出しに加え、`or` を付けられる型変換、textの切り出し・添字、整数演算でも使える。成功時には理由を評価しない。
+**[err.or-panic]** 埋め込みには [output.embed-value] を適用する。`式 or panic テンプレート` は失敗時だけ理由を評価し、[panic.stmt]・[rt.panic] に従って出力して終了する。丸括弧と空テンプレートは禁止する。失敗する関数の呼び出しに加え、`or` を付けられる型変換、textの切り出し・添字、整数演算でも使える。成功時には理由を評価しない。
 
 **[err.or-ignore]** `呼び出し or ignore: 理由` は成功型が `void` の呼び出しの失敗を無視して続行する。理由は実行しない説明であり、評価も出力も行わない。`//`・バッククォート・開き括弧も理由の文字として扱い、行コメントやテンプレートとして解釈しない。`:` の後から改行または最初の `}` の手前までを読み、前後のスペースを除く。空または制御文字を含む理由はコンパイルエラーとし、閉じ `}` はブロックの終端として残す。成功型が `void` 以外の呼び出しや、型変換・整数演算には使えない。
 
@@ -1511,11 +1511,11 @@ fn main() -> u8 {
 
 **[rt.panic]** パニックしたプログラムは、パニックした位置（ファイル、行、列）と理由を標準エラー出力に書き、終了コード 101 で終わる。
 
-**[panic.stmt]** `panic` の後ろにテンプレートを1つ書くと、理由を出力してプログラムを終了する文になる。丸括弧は付けない。空テンプレートはコンパイルエラーである。式としては使えない。テンプレートの記法と値の表示は [symbol.template-line]、[symbol.template-text]、[symbol.escape]、[symbol.interpolation]、[symbol.value-format]、[symbol.float-format] に従う。
+**[panic.stmt]** 埋め込みには [output.embed-value] を適用する。`panic` の後ろにテンプレートを1つ書くと、理由を出力してプログラムを終了する文になる。丸括弧は付けない。空テンプレートはコンパイルエラーである。式としては使えない。テンプレートの記法と値の表示は [symbol.template-line]、[symbol.template-text]、[symbol.escape]、[symbol.interpolation]、[symbol.value-format]、[symbol.float-format] に従う。
 
-**[panic.runtime]** 埋め込み式を左から右へ1回ずつ評価して値を保持した後、`panic ファイル名:行:列: 理由` と末尾の改行を標準エラーへ出力し、終了コード101で終了する。位置は `panic` キーワードを指す。埋め込み式の評価中に別のパニックが起きた場合、この文の出力は開始せず、その失敗の位置と理由を出力する。
+**[panic.runtime]** 埋め込み式を左から右へ1回ずつ評価して値を保持した後、`panic ファイル名:行:列: 理由` と末尾の改行を標準エラーへ出力し、終了コード101で終了する。位置は `panic` キーワードを指す。
 
-理由は [log.fragments] と同じ断片方式で出力し、本文の整形・出力のための動的メモリ確保とテキストプール登録は行わない。埋め込み式自身の確保は、その式の通常の規則に従う。改行やNULを含む理由も、バイト列をそのまま出力する。
+理由は [log.fragments] と同じ断片方式で出力し、本文の整形・出力のための動的メモリ確保とテキストプール登録は行わない。改行やNULを含む理由も、バイト列をそのまま出力する。
 
 **[panic.flow]** `panic` 文は [fn.flow-analysis] で先へ進まない文として扱い、[fn.value-return-required] の条件も満たす。各関数・クロージャの本体で独立に判定し、内側のクロージャの `panic` を外側の終了条件に数えない。後続の到達不能な文も通常どおり型検査する。入れ子の深さは [src.nesting-depth] に従い、テンプレートが文を含むブロックの1段下、埋め込み式がさらに1段下となる。
 
@@ -1581,15 +1581,17 @@ fix b = top + 1     // パニックする
 
 ## 10. ログ
 
-**[log.syntax]** ログは、`log` と [log.level] のレベルのあとにテンプレートを1つ書く。テンプレートの記法、埋め込み、値の表示は [symbol.template-line]、[symbol.template-text]、[symbol.escape]、[symbol.interpolation]、[symbol.value-format]、[symbol.float-format] に従う。
+**[log.syntax]** 埋め込みには [output.embed-value] を適用する。ログは、`log` と [log.level] のレベルのあとにテンプレートを1つ書く。テンプレートの記法、埋め込み、値の表示は [symbol.template-line]、[symbol.template-text]、[symbol.escape]、[symbol.interpolation]、[symbol.value-format]、[symbol.float-format] に従う。
 
-**[log.level]** `log` の直後には `info` または `warn` を書く。どちらも [log.evaluation] と [log.fragments] に従う。
+**[output.embed-value]** `log`・`panic`・`or panic` のテンプレートの埋め込みには、名前と、そのフィールド参照だけを書ける。名前は、ブロック内の `fix`・`var`、仮引数、ループ変数、キャプチャーした名前、トップレベルの `fix`・`var`、enum・errorのバリアントを指す。関数呼び出し、演算、型変換、切り出し・添字、`len`、`with`、リテラル、入れ子のテンプレート、値ブロック、丸括弧で囲んだ式はコンパイルエラーである。計算が必要なら、先に `fix` などで値を受けてから埋め込む。値として使う通常の `symbol` テンプレートには適用しない。埋め込める値の型は [symbol.interpolation] に従う。
 
-**[log.output]** ログは、`レベル ファイル名:行番号: メッセージ` の形式で標準エラー出力へ書く。レベルは `info` または `warn` である。ファイル名と行番号は、そのログ文のソース位置を示す。行番号は 1 から数える。メッセージの末尾に改行を 1 つ追加する。
+**[log.level]** `log` の直後には `debug`・`info`・`warn`・`error` のいずれかを書く。重要度は `debug < info < warn < error` とする。4種類とも [log.evaluation] と [log.fragments] に従い、出力後は後続の文へ進む。`log error` も関数やプログラムを終了しない。`panic`・`ignore`・`off` はログレベルとして書けない。
 
-**[log.evaluation]** すべての埋め込み式を左から右へ1回ずつ評価し、値を保持した後、そのログ文の出力を始める。評価中にパニックした場合、そのログ文の出力は始めない。埋め込み式の中で実行したログは、その式の評価中に出力する。
+**[log.output]** ログは、`レベル ファイル名:行番号: メッセージ` の形式で標準エラー出力へ書く。レベルはソースに書いた `debug`・`info`・`warn`・`error` である。ファイル名と行番号は、そのログ文のソース位置を示す。行番号は 1 から数える。メッセージの末尾に改行を 1 つ追加する。
 
-**[log.fragments]** ログ文に直接書いたテンプレートは、固定部分と評価済みの埋め込み値を、本文の順に断片として出力する。ログ本文の整形と出力のために動的メモリを確保せず、本文をテキストプールへ登録しない。内容がコンパイル時に決まる場合も同じとする。埋め込む `symbol` は実体全体、`text` は指す範囲のバイト列を使う。埋め込み式自身がsymbolを生成する場合は、その式に通常の生成と保持の規則を適用する。出力形式は [log.output]、ログ1件のアトミック性はランタイム仕様に従う。
+**[log.evaluation]** すべての埋め込み式を左から右へ1回ずつ評価し、値を保持した後、そのログ文の出力を始める。埋め込みには [output.embed-value] を適用する。
+
+**[log.fragments]** ログ文に直接書いたテンプレートは、固定部分と評価済みの埋め込み値を、本文の順に断片として出力する。ログ本文の整形と出力のために動的メモリを確保せず、本文をテキストプールへ登録しない。内容がコンパイル時に決まる場合も同じとする。埋め込む `symbol` は実体全体、`text` は指す範囲のバイト列を使う。出力形式は [log.output]、ログ1件のアトミック性はランタイム仕様に従う。
 
 ```suz
 fix count: u8 = 3
@@ -1603,7 +1605,8 @@ fn make_text(count: u8) -> symbol {
     return `count: ${count}`
 }
 fn main() -> u8 {
-    log info `${make_text(3)}`
+    fix message = make_text(3)
+    log info `${message}`
     return 0
 }
 ```
@@ -1827,7 +1830,7 @@ RevStatement     ::= "rev" IDENT "in" Condition ( RangeOperator Condition )? Blo
 RangeOperator    ::= "..<" | "..="
 PanicStatement   ::= "panic" TEMPLATE
 LogStatement     ::= "log" LogLevel TEMPLATE
-LogLevel         ::= "info" | "warn"
+LogLevel         ::= "debug" | "info" | "warn" | "error"
 AllowStatement   ::= "allow" AllowItem ( "," AllowItem )* Block
 AllowClause      ::= "allow" AllowItem ( "," AllowItem )*
 AllowItem        ::= ALLOW_ITEM
@@ -1837,7 +1840,7 @@ AllowItem        ::= ALLOW_ITEM
 
 `IGNORE_REASON` は [err.or-ignore] のコロンと理由を表す。`RecoverStatement` と `IgnoreStatement` の記述位置には [err.recover]・[err.or-error] を適用する。
 
-`ALLOW_ITEM` は [allow.item] に従って読む1つのトークンである。`AllowClause` には [allow.clause] と [allow.contains-block]、`AllowStatement` には [allow.block]、`AllowItem` には [allow.item]・[allow.reason]・[allow.rule-check] を適用する。`LogLevel` の `"info"` と `"warn"` は、そのつづりの `IDENT` に一致する。
+`ALLOW_ITEM` は [allow.item] に従って読む1つのトークンである。`AllowClause` には [allow.clause] と [allow.contains-block]、`AllowStatement` には [allow.block]、`AllowItem` には [allow.item]・[allow.reason]・[allow.rule-check] を適用する。`LogLevel` の `"debug"`・`"info"`・`"warn"` はそのつづりの `IDENT`、`"error"` は予約語トークンに一致する。
 
 `RangeOperator` は [for.range-spacing] に従い、左右の式の境界に隣接する。`Assignment` の右辺には [assign.rhs-write] の代入先の制約を適用する。`ForStatement` と `RevStatement` のすべての `Condition` には [for.bound-reference] の参照の制約も適用する。範囲演算子のない形は [char.for-type] と [char.for] に従う。`Condition` の扱いは A.6 に定める。
 

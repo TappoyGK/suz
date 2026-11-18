@@ -147,7 +147,13 @@ static void lock_output(void) {
 void suz_log_begin(suz_log_level level, const char *source, size_t line) {
     lock_output();
     output_level = level;
-    write_text(level == SUZ_LOG_WARN ? "warn" : "info");
+    switch (level) {
+        case SUZ_LOG_DEBUG: write_text("debug"); break;
+        case SUZ_LOG_INFO: write_text("info"); break;
+        case SUZ_LOG_WARN: write_text("warn"); break;
+        case SUZ_LOG_ERROR: write_text("error"); break;
+        case SUZ_LOG_PANIC: abort(); /* panicは専用の開始処理を使う。 */
+    }
     write_text(" ");
     write_text(source);
     write_text(":");

@@ -6,7 +6,7 @@
 use super::Parser;
 use crate::{
     Diagnostic, ErrorKind,
-    ast::{Expression, Statement, TemplatePart},
+    ast::{Expression, ExpressionKind, Statement, TemplatePart},
     lexer::{
         self, Kind,
         templates::{self, Segment},
@@ -18,12 +18,14 @@ impl Parser<'_, '_> {
         let location = self.location();
         self.cursor += 1;
         let level = match self.token().kind {
+            Kind::Ident("debug") => crate::ast::LogLevel::Debug,
+            Kind::Keyword("error") => crate::ast::LogLevel::Error,
             Kind::Ident("info") => crate::ast::LogLevel::Info,
             Kind::Ident("warn") => crate::ast::LogLevel::Warn,
             _ => {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
-                    crate::diagnostic!("log.level", "expected info or warn"),
+                    crate::diagnostic!("log.level", "expected debug, info, warn, or error"),
                 ));
             }
         };
@@ -34,7 +36,7 @@ impl Parser<'_, '_> {
                 crate::diagnostic!("log.syntax", "expected a log template"),
             ));
         };
-        let parts = self.nested(self.location(), |p| p.template(raw))?;
+        let parts = self.output_template(raw)?;
         Ok(Statement::Log {
             parts,
             location,
@@ -60,13 +62,39 @@ impl Parser<'_, '_> {
                 crate::diagnostic!("panic.stmt", "panic requires a non-empty template"),
             ));
         }
-        let parts = self.nested(self.location(), |p| p.template(raw))?;
+        let parts = self.output_template(raw)?;
         // テンプレートの検査・走査はlogと共通。Panicレベルが終了する文であることを表す。
         Ok(Statement::Log {
             parts,
             location,
             level: crate::ast::LogLevel::Panic,
         })
+    }
+
+    // 出力用テンプレートだけを制限し、値を作るsymbolテンプレートは通常の式を許可する。
+    fn output_template(&mut self, raw: &str) -> Result<Vec<TemplatePart<Expression>>, Diagnostic> {
+        fn readable(value: &Expression) -> bool {
+            match &value.kind {
+                ExpressionKind::Name(_) | ExpressionKind::Variant { .. } => true,
+                ExpressionKind::Field { target, .. } => readable(target),
+                _ => false,
+            }
+        }
+        let parts = self.nested(self.location(), |p| p.template(raw))?;
+        for part in &parts {
+            if let TemplatePart::Value(value) = part
+                && !readable(value)
+            {
+                return Err(value.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "output.embed-value",
+                        "output interpolation requires a name or its field access"
+                    ),
+                ));
+            }
+        }
+        Ok(parts)
     }
 
     pub(super) fn template(
