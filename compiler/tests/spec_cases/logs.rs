@@ -259,3 +259,31 @@ fn output_interpolations_reject_computation_for_logs_and_both_panic_forms() {
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     assert!(String::from_utf8_lossy(&output.stderr).ends_with(": 3\n"));
 }
+
+#[test]
+fn c_string_trigraph_sequences_preserve_output_bytes() {
+    // Cの三文字表記9種類を、同じ変換を使う各出力経路で確認する。
+    let text = "日本語 ??= ??( ??) ??/ ??' ??< ??> ??! ??-";
+    let source = format!(
+        "error Err {{ Bad }}\nfn send() -> void or Err {{ fail Err.Bad }}\nfn main() -> u8 {{\nsend() or ignore: {text}\nfix value = `{text}`\nlog info `${{value}}`\nlog info `{text}`\npanic `{text}`\n}}"
+    );
+    let c = suz::compile_with_options(
+        source.as_bytes(),
+        "trigraph.suz",
+        &suz::CompilationOptions {
+            log_ignore: true,
+            ..Default::default()
+        },
+    )
+    .unwrap()
+    .c;
+    let directory = TemporaryDirectory::new();
+    let path = directory.0.join("trigraph.c");
+    fs::write(&path, c).unwrap();
+    let batch = Batch::build(&directory.0, &[(0, path)], 1).unwrap();
+    let output = batch.run(0).unwrap();
+    assert_eq!(output.status.code(), Some(101), "{output:?}");
+    assert_eq!(output.stderr, format!(
+        "ignore trigraph.suz:4: {text}\ninfo trigraph.suz:6: {text}\ninfo trigraph.suz:7: {text}\npanic trigraph.suz:8:1: {text}\n"
+    ).as_bytes());
+}
