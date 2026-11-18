@@ -501,6 +501,14 @@ fn error_arms_reject_invalid_coverage_values_and_control_positions() {
             "fix n = len (read_text() or error { _ => return 0 })\nreturn 0",
             "expr.or-return-position",
         ),
+        (
+            "fix n = read() or error { Err.Bad => recover 3\nErr.Other => 4 }\nreturn n",
+            "err.recover",
+        ),
+        (
+            "fix n = read() or error { _ => { fix v = expr { recover 0\n0 }\nrecover v } }\nreturn n",
+            "expr.jump-prohibited",
+        ),
         ("recover 0", "err.recover"),
         ("ignore: 理由\nreturn 0", "err.or-ignore"),
         (
@@ -558,4 +566,31 @@ fn main() -> u8 {
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains(": 7 7 2\n"), "{stderr}");
+}
+
+#[test]
+fn recover_inside_value_expressions_finishes_only_the_inner_error_arm() {
+    let source = r#"
+error Err { Bad }
+fn read() -> u8 or Err { fail Err.Bad }
+fn main() -> u8 {
+    fix a = ifexpr true {
+        read() or error { _ => { recover 2 } }
+    } else { 1 }
+    fix b = matchexpr true {
+        true => read() or error { _ => { recover 3 } }
+        false => 1
+    }
+    fix c = expr {
+        fix n = read() or error { _ => { recover 4 } }
+        n + 1
+    }
+    log info `${a} ${b} ${c}`
+    return 0
+}
+"#;
+    let output = compile_and_run_c23(source, "recover-values.suz");
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains(": 2 3 5\n"), "{stderr}");
 }

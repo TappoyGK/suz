@@ -50,6 +50,12 @@ impl Parser<'_, '_> {
     }
 
     fn error_arm(&mut self) -> Result<ErrorArmBody, Diagnostic> {
+        if self.token().kind == Kind::Keyword("recover") {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("err.recover", "recover requires a block arm"),
+            ));
+        }
         let saved = self.in_value;
         // 外側の値式から脱出できるかは制御検査で判定する。腕内部の通常の値ブロックは従来どおり制限する。
         self.in_value = false;

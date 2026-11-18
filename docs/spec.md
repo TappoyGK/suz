@@ -615,7 +615,7 @@ count =
 
 `ifexpr` と `matchexpr` は選ばれた分岐の値を、`expr` はそのブロックの値を、式の結果にする。値を返すブロックでは、最後の式の値を使う（[block.value]）。
 
-**[expr.jump-prohibited]** `ifexpr`、`matchexpr`、`expr` の内部に `return`、`fail`、`recover`、`break`、`continue` を書くとコンパイルエラーである。この規則は、`or return`・`or fail` と、内部に書いたブロックやループにも適用する。
+**[expr.jump-prohibited]** `ifexpr`、`matchexpr`、`expr` の内部に `return`、`fail`、`recover`、`break`、`continue` を書くとコンパイルエラーである。この規則は、`or return`・`or fail` と、内部に書いたブロックやループにも適用する。ただし、値ブロックの内部に書いた `or error` のブロック腕を終える `recover` は許可する。この `recover` は値ブロックの外へ出ない。
 
 **[expr.if-value]** `ifexpr` の条件と分岐の選択は `if` と同じである（[if.condition]）。`else` は必須である。
 
@@ -1503,7 +1503,7 @@ fn main() -> u8 {
 
 腕に `return`・`fail`・`break`・`continue` がある場合は、呼び出し全体が初期値、代入・複合代入の右辺、または式文全体をなす位置に限る。式文では成功型を問わない。式の一部への埋め込みには [expr.or-return-position]、`ifexpr`・`matchexpr`・`expr` 内部には [expr.jump-prohibited] を適用する。腕の中で定義したクロージャの制御移動は、そのクロージャに属し、この制限の判定に含めない。各腕は独立したスコープを持つ。
 
-**[err.recover]** `recover 式` は、最も内側の `or error` のブロック腕を終了し、その呼び出しの成功値として式の値を使って続行する。式には呼び出しの成功型を要求する。成功型が `void` の腕、ブロックでない腕、腕の外には書けない。通常の値ブロック内にも書けず、クロージャの境界を越えて外側の腕を終了することもできない。
+**[err.recover]** `recover 式` は、最も内側の `or error` のブロック腕を終了し、その呼び出しの成功値として式の値を使って続行する。式には呼び出しの成功型を要求する。成功型が `void` の腕、ブロックでない腕、腕の外には書けない。通常の値ブロックやクロージャの境界を越えて外側の腕を終了することはできない。それらの内部に書いた `or error` のブロック腕は、その内部の `recover` で終了できる。
 
 ## 9. 実行時の検査
 
