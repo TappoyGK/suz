@@ -102,6 +102,9 @@ bool suz_try_shr_i64(int64_t a, uint64_t count, unsigned width, int64_t *result)
 bool suz_try_shl_u64(uint64_t a, uint64_t count, unsigned width, uint64_t *result);
 bool suz_try_shr_u64(uint64_t a, uint64_t count, unsigned width, uint64_t *result);
 
+// panic文は開始後にsuz_log_*で評価済みの断片を出力し、終了時までロックを保持する。
+void suz_panic_begin(const char *source, size_t line, size_t column);
+_Noreturn void suz_panic_end(void);
 _Noreturn void suz_panic(const char *source, size_t line, size_t column, const char *reason);
 
 /* beginの前にすべての補間値を評価する。beginとendは対にし、書き込み処理には評価済みの値だけを渡す。 */

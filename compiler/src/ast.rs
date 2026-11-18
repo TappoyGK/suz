@@ -393,11 +393,12 @@ pub(crate) struct MatchArm<T = Vec<Statement>> {
     pub body: T,
 }
 
-/// ログ文で指定されたレベル。生成Cの環境呼び出しへ渡す。
+/// 出力文のレベル。Panicはpanic文でのみ使い、出力後に終了する。
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum LogLevel {
     Info,
     Warn,
+    Panic,
 }
 
 /// 構文解析済みの文。束縛やフィールドの参照はまだソース上の名前で保持する。

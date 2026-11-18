@@ -1,4 +1,4 @@
-//! ログの補間値を先に評価し、出力ロックの取得から解放までのCコードを生成する。
+//! log・panicの補間値を先に評価し、断片出力とロックの解放または終了を生成する。
 //!
 //! 利用元: [`crate::codegen::statements`]。
 
@@ -39,17 +39,29 @@ pub(super) fn emit(
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or(&context.source_name);
-    writeln!(
-        c,
-        "{indent}    suz_log_begin({}, {}, {});",
-        match level {
-            crate::ast::LogLevel::Info => "SUZ_LOG_INFO",
-            crate::ast::LogLevel::Warn => "SUZ_LOG_WARN",
-        },
-        c_string(filename),
-        location.line
-    )
-    .unwrap();
+    if matches!(level, crate::ast::LogLevel::Panic) {
+        writeln!(
+            c,
+            "{indent}    suz_panic_begin({}, {}, {});",
+            c_string(filename),
+            location.line,
+            location.column
+        )
+        .unwrap();
+    } else {
+        writeln!(
+            c,
+            "{indent}    suz_log_begin({}, {}, {});",
+            match level {
+                crate::ast::LogLevel::Info => "SUZ_LOG_INFO",
+                crate::ast::LogLevel::Warn => "SUZ_LOG_WARN",
+                crate::ast::LogLevel::Panic => unreachable!(),
+            },
+            c_string(filename),
+            location.line
+        )
+        .unwrap();
+    }
     for (index, part) in parts.iter().enumerate() {
         let output = match part {
             TemplatePart::Text(text) => {
@@ -86,5 +98,10 @@ pub(super) fn emit(
         };
         writeln!(c, "{indent}    {output}").unwrap();
     }
-    writeln!(c, "{indent}    suz_log_end();\n{indent}}}").unwrap();
+    let end = if matches!(level, crate::ast::LogLevel::Panic) {
+        "suz_panic_end"
+    } else {
+        "suz_log_end"
+    };
+    writeln!(c, "{indent}    {end}();\n{indent}}}").unwrap();
 }

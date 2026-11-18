@@ -370,7 +370,13 @@ fn contains_break(statements: &[Statement]) -> bool {
 fn stops(statements: &[Statement]) -> bool {
     statements.iter().any(|statement| match statement {
         Statement::Match { arms, .. } => arms.iter().all(|arm| stops(&arm.body)),
-        Statement::Return(_) | Statement::Break(_) | Statement::Continue(_) => true,
+        Statement::Return(_)
+        | Statement::Break(_)
+        | Statement::Continue(_)
+        | Statement::Log {
+            level: crate::ast::LogLevel::Panic,
+            ..
+        } => true,
         Statement::Loop { condition, body } => {
             condition
                 .as_ref()
@@ -396,12 +402,19 @@ pub(super) fn check_return_shape(function: &crate::ast::Function) -> Result<(), 
     struct Returns(bool);
     impl Visitor for Returns {
         fn statement(&mut self, statement: &Statement) -> Result<(), Diagnostic> {
-            self.0 |= matches!(statement, Statement::Return(_));
+            self.0 |= matches!(
+                statement,
+                Statement::Return(_)
+                    | Statement::Log {
+                        level: crate::ast::LogLevel::Panic,
+                        ..
+                    }
+            );
             visit::walk_statement(self, statement)
         }
         fn expression(&mut self, expr: &Expression) -> Result<(), Diagnostic> {
             if matches!(expr.kind, ExpressionKind::Closure(_)) {
-                return Ok(()); // 内側のreturnを外側の関数のreturnとして数えない。
+                return Ok(()); // 内側のreturn・panicは外側の関数の終了条件に数えない。
             }
             if let ExpressionKind::Cast { fallback, .. }
             | ExpressionKind::ArithmeticHandler { fallback, .. }
@@ -419,7 +432,7 @@ pub(super) fn check_return_shape(function: &crate::ast::Function) -> Result<(), 
             ErrorKind::InvalidSource,
             crate::diagnostic!(
                 "fn.value-return-required",
-                "a value-returning function requires a return expression"
+                "a value-returning function requires a return expression or panic statement"
             ),
         ));
     }
