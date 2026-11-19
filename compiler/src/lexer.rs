@@ -4,11 +4,21 @@
 //! 主な対象規則: `[char.literal]`、`[for.range-spacing]`、`[lit.float]`、`[lit.integer]`、`[syntax.grammar]`。
 
 use crate::{Diagnostic, ErrorKind};
-pub(crate) mod allows;
+mod reasons;
 pub(crate) mod templates;
 use std::ops::Range;
 
 const KEYWORDS: &[&str] = &[
+    "arena",
+    "objection",
+    "new",
+    "ptr",
+    "null",
+    "let",
+    "extern",
+    "c_bytes",
+    "c_byte_len",
+    "unsafe",
     "allow",
     "fix",
     "var",
@@ -17,6 +27,10 @@ const KEYWORDS: &[&str] = &[
     "static",
     "struct",
     "enum",
+    "error",
+    "fail",
+    "ignore",
+    "recover",
     "if",
     "ifexpr",
     "elif",
@@ -36,6 +50,7 @@ const KEYWORDS: &[&str] = &[
     "not",
     "len",
     "log",
+    "panic",
     "expr",
     "with",
     "true",
@@ -45,16 +60,21 @@ const KEYWORDS: &[&str] = &[
 ];
 const TYPES: &[&str] = &[
     "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "len_t", "f32", "f64", "bool", "char",
-    "text", "symbol", "void", "int", "float",
+    "text", "symbol", "void", "int", "float", "_int", "_uint", "_long", "_ulong", "_size_t",
+    "_char",
 ];
 const SYMBOLS: &[&str] = &[
     "(", ")", "[", "]", "{", "}", ",", ":", ".", "->", "=>", "=", "+=", "-=", "*=", "/=", "%=",
     "+%=", "-%=", "*%=", "&=", "|=", "^=", "<<=", ">>=", "+", "-", "*", "/", "%", "+%", "-%", "*%",
     "&", "|", "^", "~", "<<", ">>", "==", "!=", "<", "<=", ">", ">=", "&&", "||", "..<", "..=",
+    "?",
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Kind<'a> {
+    Header(&'a str),
+    ObjectionReason,
+    IgnoreReason(&'a str),
     AllowItem(&'a str),
     Char(u32),
     Template(&'a str),
@@ -266,6 +286,19 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
                 column = 1;
                 continue;
             }
+            '[' if matches!(tokens.last().map(|t| t.kind), Some(Kind::Keyword("ignore"))) => {
+                let length = reasons::scan(rest, line, column, reasons::Kind::Ignore)?;
+                tokens.push(Token {
+                    kind: Kind::IgnoreReason(rest[1..length - 1].trim_matches(' ')),
+                    line,
+                    column,
+                    span: offset..offset + length,
+                });
+                column += rest[..length].chars().count();
+                offset += length;
+                continuation = false;
+                continue;
+            }
             '[' if matches!(tokens.last().map(|t| t.kind), Some(Kind::Keyword("allow")))
                 || (matches!(tokens.last().map(|t| t.kind), Some(Kind::Symbol(",")))
                     && matches!(
@@ -273,7 +306,7 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
                         Some(Kind::AllowItem(_))
                     )) =>
             {
-                let length = allows::scan(rest, line, column)?;
+                let length = reasons::scan(rest, line, column, reasons::Kind::Allow)?;
                 tokens.push(Token {
                     kind: Kind::AllowItem(&rest[1..length - 1]),
                     line,
@@ -296,6 +329,63 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
                 });
                 offset += length;
                 column += rest[..length].chars().count();
+                continuation = false;
+                continue;
+            }
+            '[' if tokens
+                .last()
+                .is_some_and(|t| t.kind == Kind::Keyword("objection")) =>
+            {
+                let length = reasons::scan(rest, line, column, reasons::Kind::Objection)?;
+                tokens.push(Token {
+                    kind: Kind::ObjectionReason,
+                    line,
+                    column,
+                    span: offset..offset + length,
+                });
+                offset += length;
+                column += rest[..length].chars().count();
+                continuation = false;
+                continue;
+            }
+            '"' if tokens
+                .last()
+                .is_some_and(|t| t.kind == Kind::Keyword("extern")) =>
+            {
+                let Some(end) = rest[1..].find('"') else {
+                    return Err(error(
+                        line,
+                        column,
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!("ffi.header", "unterminated header name"),
+                    ));
+                };
+                let header = &rest[1..end + 1];
+                if header.is_empty()
+                    || !header
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b"_./-".contains(&b))
+                    || header.starts_with('/')
+                    || header
+                        .split('/')
+                        .any(|p| p.is_empty() || p == "." || p == "..")
+                {
+                    return Err(error(
+                        line,
+                        column,
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!("ffi.header", "expected a relative C header name"),
+                    ));
+                }
+                let length = end + 2;
+                tokens.push(Token {
+                    kind: Kind::Header(header),
+                    line,
+                    column,
+                    span: offset..offset + length,
+                });
+                offset += length;
+                column += length;
                 continuation = false;
                 continue;
             }
@@ -464,6 +554,11 @@ pub(crate) fn char_literal(input: &str) -> Result<(u32, usize), crate::Diagnosti
             "expected one Unicode scalar in a character literal"
         )),
     }
+}
+
+/// 外部関数のSuz側の名前には、言語の予約語と組み込み型名を使わせない。
+pub(crate) fn reserved(name: &str) -> bool {
+    KEYWORDS.contains(&name) || TYPES.contains(&name)
 }
 
 #[cfg(test)]

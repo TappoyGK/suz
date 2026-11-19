@@ -375,3 +375,73 @@ fn build_and_run_apply_text_pool_limits() {
         }
     }
 }
+
+#[test]
+fn ffi_headers_cannot_search_private_runtime_directories() {
+    let directory = setup();
+    // Suz型検査だけでは探索先の漏れを検出できない。実際のCLIと配布するビルドスクリプトを使う。
+    for (index, header) in ["ryu/common.h", "ryu/ryu.h", "suz_text.h", "SUZ_text.h"]
+        .iter()
+        .enumerate()
+    {
+        fs::write(directory.0.join("input.suz"), format!(
+            "extern \"{header}\" {{ fn abs(value: _int) -> _int }}\nfn main() -> u8 {{ return 0 }}\n"
+        )).unwrap();
+        code(
+            command(&directory.0)
+                .args(["check", "input.suz"])
+                .output()
+                .unwrap(),
+            0,
+        );
+        for verb in ["build", "run"] {
+            let mut cmd = command(&directory.0);
+            cmd.args([verb, "input.suz"]);
+            if verb == "build" {
+                cmd.args(["-o", "program"]);
+            }
+            let output = cmd.output().unwrap();
+            assert!(!output.status.success(), "{header}: {output:?}");
+            let error = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                error.contains(header) && error.contains("file not found"),
+                "{error}"
+            );
+            assert!(!directory.0.join("program").exists());
+            clean(&directory.0);
+        }
+        let emitted = format!("emitted-{index}");
+        code(
+            command(&directory.0)
+                .args(["emit-c", "input.suz", "-o", &emitted])
+                .output()
+                .unwrap(),
+            0,
+        );
+        let root = directory.0.join(&emitted);
+        let mut build = Command::new(root.join("scripts/build-c.sh"));
+        build
+            .current_dir(&root)
+            .args(["program.c", "-o", "program"]);
+        for name in ["CFLAGS", "CPPFLAGS", "LDFLAGS", "SUZ_CFLAGS"] {
+            build.env_remove(name);
+        }
+        let output = build.output().unwrap();
+        assert!(!output.status.success(), "{header}: {output:?}");
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            error.contains(header) && error.contains("file not found"),
+            "{error}"
+        );
+        assert!(!root.join("program").exists());
+    }
+    fs::write(directory.0.join("input.suz"), "extern \"stdlib.h\" { fn abs(value: _int) -> _int }\nfn main() -> u8 { unsafe { if abs(-(5)) != 5 { return 1 } }\nreturn 0 }\n").unwrap();
+    code(
+        command(&directory.0)
+            .args(["run", "input.suz"])
+            .output()
+            .unwrap(),
+        0,
+    );
+    clean(&directory.0);
+}

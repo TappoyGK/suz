@@ -32,6 +32,7 @@ impl Parser<'_, '_> {
     }
     fn enum_declaration(&mut self, id: usize) -> Result<EnumDeclaration, Diagnostic> {
         let start = self.cursor;
+        let error = self.token().kind == Kind::Keyword("error");
         self.cursor += 1;
         let location = self.location();
         let Kind::Ident(name) = self.token().kind else {
@@ -43,31 +44,45 @@ impl Parser<'_, '_> {
         super::names::check(super::names::Shape::Type, name, location)?;
         let name = name.to_owned();
         self.cursor += 1;
-        if self.token().kind != Kind::Symbol(":") {
+        let base = if error {
+            IntegerType::U32
+        } else {
+            if self.token().kind != Kind::Symbol(":") {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("enum.base", "enum requires an integer base type"),
+                ));
+            }
+            self.cursor += 1;
+            let base = match self.token().kind {
+                Kind::TypeName(name) => {
+                    IntegerType::from_name(name).filter(|ty| *ty != IntegerType::Len)
+                }
+                _ => None,
+            }
+            .ok_or_else(|| {
+                self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("enum.base", "enum base must be an integer type"),
+                )
+            })?;
+            self.cursor += 1;
+            base
+        };
+        if error && self.token().kind == Kind::Symbol(":") {
             return Err(self.error(
                 ErrorKind::InvalidSource,
-                crate::diagnostic!("enum.base", "enum requires an integer base type"),
+                crate::diagnostic!("error.decl", "error types have no integer base"),
             ));
         }
-        self.cursor += 1;
-        let base = match self.token().kind {
-            Kind::TypeName(name) => {
-                IntegerType::from_name(name).filter(|ty| *ty != IntegerType::Len)
-            }
-            _ => None,
-        }
-        .ok_or_else(|| {
-            self.error(
-                ErrorKind::InvalidSource,
-                crate::diagnostic!("enum.base", "enum base must be an integer type"),
-            )
-        })?;
-        self.cursor += 1;
         let variants = self.delimited_list("{", "}", Self::variant)?;
         if variants.is_empty() {
             return Err(location.error(
                 ErrorKind::InvalidSource,
-                crate::diagnostic!("enum.nonempty", "enum requires at least one variant"),
+                crate::diagnostic!(
+                    if error { "error.decl" } else { "enum.nonempty" },
+                    "type requires at least one variant"
+                ),
             ));
         }
         let mut seen = BTreeSet::new();
@@ -75,7 +90,10 @@ impl Parser<'_, '_> {
             if !seen.insert(name) {
                 return Err(location.error(
                     ErrorKind::InvalidSource,
-                    crate::diagnostic!("enum.variant", "duplicate enum variant"),
+                    crate::diagnostic!(
+                        if error { "error.decl" } else { "enum.variant" },
+                        "duplicate variant"
+                    ),
                 ));
             }
             if index as i128 > base.bounds().1 {
@@ -94,6 +112,7 @@ impl Parser<'_, '_> {
             ty: EnumType {
                 id,
                 base,
+                is_error: error,
                 count: variants.len(),
             },
             variants: variants.into_iter().map(|(name, _)| name).collect(),
@@ -122,7 +141,7 @@ pub(super) fn collect(tokens: &[Token<'_>]) -> Result<Vec<EnumDeclaration>, Diag
     let mut enums = Vec::<EnumDeclaration>::new();
     let mut depth = 0usize;
     while p.token().kind != Kind::End {
-        if depth == 0 && p.token().kind == Kind::Keyword("enum") {
+        if depth == 0 && matches!(p.token().kind, Kind::Keyword("enum" | "error")) {
             let declaration = p.enum_declaration(enums.len())?;
             if enums.iter().any(|e| e.name == declaration.name) {
                 return Err(declaration.location.error(

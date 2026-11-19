@@ -34,12 +34,16 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
         signatures.insert(
             function.name.clone(),
             Signature {
+                arena: function.arena,
+                external: false,
                 id,
                 parameters: function.parameters.iter().map(|p| p.ty).collect(),
                 result: function.result,
+                errors: function.errors.clone(),
             },
         );
     }
+    super::ffi::signatures(program, &mut signatures)?;
     let main_id = signatures["main"].id;
     let signatures = Rc::new(signatures);
     let scope = Scope {
@@ -47,11 +51,11 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
         fnshapes: Rc::new(program.fnshapes.clone()),
         function_types: Rc::new(std::cell::RefCell::new(program.function_types.clone())),
         instances: Rc::new(std::cell::RefCell::new(super::generic::Instances::new(
-            program.functions.len(),
+            program.functions.len() + program.externs.len(),
         ))),
         ..Scope::default()
     };
-    let (globals, mut warnings, initializers) =
+    let (globals, mut warnings) =
         declarations::resolve(&program.bindings, &program.enums, &program.structs, scope)?;
     let mut functions = Vec::new();
     check_instances(program, &globals, &mut functions, &mut warnings)?;
@@ -71,32 +75,14 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
         functions.push(checked);
         warnings.extend(found);
     }
-    // 全関数（未使用の汎用関数を含む）の検査後に、大域変数への構文上の代入を確認する。
-    for declaration in program.bindings.iter().filter(|d| d.mutable) {
-        if !globals.globals[&declaration.name].assigned.get() {
-            return Err(declaration.location.error(
-                ErrorKind::InvalidSource,
-                crate::diagnostic!(
-                    "var.never-reassigned",
-                    "global var '{}' is never reassigned; declare it with fix",
-                    declaration.name
-                ),
-            ));
-        }
-    }
     warnings.sort_by_key(|l| (l.line, l.column));
     // 整数演算の箇所は汎用検査と具体化の両方で集まるため、ソースの演算ごとに一度だけ報告する。
     // 比較・除算の候補は汎用検査からだけ集まる。
     warnings.dedup_by_key(|l| (l.line, l.column));
     Ok(CheckedProgram {
+        externs: program.externs.clone(),
+        external_base: program.functions.len(),
         function_types: globals.function_types.borrow().clone(),
-        globals: initializers,
-        global_warnings: program
-            .bindings
-            .iter()
-            .filter(|d| d.mutable)
-            .map(|d| d.location)
-            .collect(),
         division_warnings: globals
             .outputs
             .divisions
@@ -313,6 +299,20 @@ pub(super) fn check_with_captures(
     references: &BTreeMap<String, Binding>,
 ) -> Result<(CheckedFunction, Vec<crate::ast::Location>), Diagnostic> {
     control::validate_return_positions(&function.statements)?;
+    scope.unsafe_block = false;
+    scope.arena_depth = usize::from(function.arena);
+    scope.arena_used = Default::default();
+    if !function.arena && super::arena::contains(function.result, &scope) {
+        return Err(function.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "arena.parameter",
+                "only arena fn can return values containing arena pointers"
+            ),
+        ));
+    }
+    scope.recovery = None;
+    scope.loop_depth = 0;
     let mut warnings = Vec::new();
     // [num.fn-same]、[num.fn-body-type]、[num.fn-recursion]: 関数の具体化内の全型注釈に同じ代入を適用する。
     // 汎用の診断は記号的な型で一度収集済み。具体化では定数登録を残すが、型ごとの警告は追加しない。
@@ -320,6 +320,7 @@ pub(super) fn check_with_captures(
         scope.outputs.comparisons = Default::default();
         scope.outputs.divisions = Default::default();
     }
+    scope.errors = Rc::new(function.errors.clone());
     scope.result = scope.resolve_type(function.result);
     let mut declared = Vec::new();
     for (parameter_id, parameter) in function.parameters.iter().enumerate() {
@@ -351,7 +352,6 @@ pub(super) fn check_with_captures(
             parameter.name.clone(),
             Binding {
                 id: parameter_id,
-                global: false,
                 ty: parameter_type,
                 mutable: false,
                 parameter: true,
@@ -375,6 +375,7 @@ pub(super) fn check_with_captures(
             binding.assigned.set(true);
         }
     }
+    super::arena::check_lifetimes(&statements, &scope, function, references)?;
     control::check_return_shape(function)?;
     warnings.extend(diagnostics::unhandled_arithmetic(&statements));
     Ok((
@@ -386,6 +387,7 @@ pub(super) fn check_with_captures(
                 .map(|p| scope.resolve_type(p.ty))
                 .collect(),
             result: scope.result,
+            fallible: !function.errors.is_empty(),
             statements,
         },
         warnings,
@@ -398,6 +400,7 @@ pub(super) fn call(
     arguments: &[Expression],
     expected: Option<Type>,
     scope: &Scope,
+    handler: Option<&crate::ast::FailureHandler>,
 ) -> Result<CheckedExpression, Diagnostic> {
     if scope.contains_key(name) {
         let target = Expression {
@@ -405,7 +408,7 @@ pub(super) fn call(
             location: expr.location,
             height: 1,
         };
-        return super::function_values::invoke(expr, &target, arguments, scope);
+        return super::function_values::invoke(expr, &target, arguments, scope, handler);
     }
     let signature = scope.functions.get(name).ok_or_else(|| {
         expr.location.error(
@@ -420,6 +423,21 @@ pub(super) fn call(
             },
         )
     })?;
+    if signature.arena && scope.arena_depth == 0 {
+        return Err(expr.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "arena.fn-call",
+                "arena fn requires an enclosing arena or arena fn"
+            ),
+        ));
+    }
+    if signature.external && !scope.unsafe_block {
+        return Err(expr.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!("ffi.unsafe", "C calls require an unsafe block"),
+        ));
+    }
     if arguments.len() != signature.parameters.len() {
         return Err(expr.location.error(
             ErrorKind::InvalidSource,
@@ -457,10 +475,21 @@ pub(super) fn call(
     } else {
         signature.id
     };
-    Ok(CheckedExpression {
-        ty: concrete(signature.result),
-        value: Value::Call { id, arguments },
-    })
+    super::errors::finish(
+        CheckedExpression {
+            ty: concrete(signature.result),
+            value: Value::Call {
+                id,
+                arguments,
+                arena: signature.arena,
+                location: expr.location,
+            },
+        },
+        &signature.errors,
+        handler,
+        expr,
+        scope,
+    )
 }
 
 pub(super) fn return_value(

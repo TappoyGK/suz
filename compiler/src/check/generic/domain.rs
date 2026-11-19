@@ -46,6 +46,8 @@ pub(super) const INTS: [IntegerType; 9] = [
 
 pub(crate) fn at(ty: Type, index: usize) -> Option<Type> {
     match ty {
+        Type::Pointer { .. } => at(ty.pointee().unwrap(), index)
+            .map(|inner| inner.pointer().with_nullable(ty.is_nullable())),
         Type::GenericInt => Some(Type::Integer(INTS[index / 2])),
         Type::GenericFloat => Some(Type::Float(if index.is_multiple_of(2) {
             FloatType::F32
@@ -103,7 +105,7 @@ pub(crate) fn judge_with_failures(
     b: Type,
     mut predicate: impl FnMut(Type, Type) -> bool,
 ) -> (Judgment, u32) {
-    if !a.symbolic() && !b.symbolic() {
+    if !a.leaf().symbolic() && !b.leaf().symbolic() {
         return if predicate(a, b) {
             (Judgment::Valid, 0)
         } else {

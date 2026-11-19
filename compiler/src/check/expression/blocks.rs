@@ -134,3 +134,27 @@ impl Visitor for References {
         visit::walk_statement(self, statement)
     }
 }
+
+/// 非脱出のerrorハンドラーを補助関数にする際に、外側から読む束縛だけを捕捉する。
+pub(in crate::check) fn handler_captures(
+    call: &Expression,
+    arms: &[crate::ast::MatchArm<crate::ast::ErrorArmBody>],
+    scope: &Scope,
+) -> Vec<(usize, Type, bool)> {
+    let mut references = References(BTreeSet::new());
+    references.expression(call).unwrap();
+    for arm in arms {
+        match &arm.body {
+            crate::ast::ErrorArmBody::Value(value) => references.expression(value).unwrap(),
+            crate::ast::ErrorArmBody::Statements { body, .. } => {
+                references.scope(body, None).unwrap()
+            }
+        }
+    }
+    scope
+        .locals
+        .iter()
+        .filter(|(name, _)| references.0.contains(name.as_str()))
+        .map(|(_, b)| (b.id, b.ty, b.mutable))
+        .collect()
+}

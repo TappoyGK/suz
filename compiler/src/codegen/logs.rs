@@ -1,4 +1,4 @@
-//! ログの補間値を先に評価し、出力ロックの取得から解放までのCコードを生成する。
+//! log・panicの補間値を先に評価し、断片出力とロックの解放または終了を生成する。
 //!
 //! 利用元: [`crate::codegen::statements`]。
 
@@ -23,7 +23,7 @@ pub(super) fn emit(
     let indent = "    ".repeat(depth);
     writeln!(c, "{indent}{{").unwrap();
     // 出力ロックを取得する前に全補間値を評価する。
-    // 補間式中のログやパニックは、このログを開始する前に完了させる。
+    // 名前とフィールドから読んだ値を保持し、断片出力中は読み直さない。
     for (index, part) in parts.iter().enumerate() {
         if let TemplatePart::Value(value) = part {
             let evaluated = expression(value, context);
@@ -39,17 +39,31 @@ pub(super) fn emit(
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or(&context.source_name);
-    writeln!(
-        c,
-        "{indent}    suz_log_begin({}, {}, {});",
-        match level {
-            crate::ast::LogLevel::Info => "SUZ_LOG_INFO",
-            crate::ast::LogLevel::Warn => "SUZ_LOG_WARN",
-        },
-        c_string(filename),
-        location.line
-    )
-    .unwrap();
+    if matches!(level, crate::ast::LogLevel::Panic) {
+        writeln!(
+            c,
+            "{indent}    suz_panic_begin({}, {}, {});",
+            c_string(filename),
+            location.line,
+            location.column
+        )
+        .unwrap();
+    } else {
+        writeln!(
+            c,
+            "{indent}    suz_log_begin({}, {}, {});",
+            match level {
+                crate::ast::LogLevel::Debug => "SUZ_LOG_DEBUG",
+                crate::ast::LogLevel::Error => "SUZ_LOG_ERROR",
+                crate::ast::LogLevel::Info => "SUZ_LOG_INFO",
+                crate::ast::LogLevel::Warn => "SUZ_LOG_WARN",
+                crate::ast::LogLevel::Panic => unreachable!(),
+            },
+            c_string(filename),
+            location.line
+        )
+        .unwrap();
+    }
     for (index, part) in parts.iter().enumerate() {
         let output = match part {
             TemplatePart::Text(text) => {
@@ -57,34 +71,104 @@ pub(super) fn emit(
             }
             TemplatePart::Value(value) => {
                 let name = format!("suz_log_{id}_{index}");
-                match value.ty {
-                    Type::Symbol | Type::Text => {
-                        let (bytes, length) = super::text::contents(value.ty, &name);
-                        format!("suz_log_text({bytes}, (size_t){length});")
-                    }
-                    Type::Exact => format!("suz_log_exact({name});"),
-                    Type::Char => format!("suz_log_char({name});"),
-                    Type::Bool => format!("suz_log_bool({name});"),
-                    Type::Enum(ty) => {
-                        context.enum_logs.insert(ty.id);
-                        format!(
-                            "suz_log_text(suz_enum_{}_names[{name}], suz_enum_{}_lengths[{name}]);",
-                            ty.id, ty.id
-                        )
-                    }
-                    Type::Integer(ty) => format!(
-                        "suz_log_{}({name});",
-                        if ty.bounds().0 < 0 { "i64" } else { "u64" }
-                    ),
-                    Type::Float(ty) => {
-                        context.float_types.insert(ty);
-                        format!("suz_log_{}({name});", ty.name())
-                    }
-                    _ => unreachable!("interpolation types are checked"),
-                }
+                output(value.ty, &name, context)
             }
         };
         writeln!(c, "{indent}    {output}").unwrap();
     }
-    writeln!(c, "{indent}    suz_log_end();\n{indent}}}").unwrap();
+    let end = if matches!(level, crate::ast::LogLevel::Panic) {
+        "suz_panic_end"
+    } else {
+        "suz_log_end"
+    };
+    writeln!(c, "{indent}    {end}();\n{indent}}}").unwrap();
+}
+
+fn output(ty: Type, name: &str, context: &mut ExpressionContext) -> String {
+    match ty {
+        Type::Symbol | Type::Text => {
+            let (bytes, length) = super::text::contents(ty, name);
+            format!("suz_log_text({bytes}, (size_t){length});")
+        }
+        Type::Exact => format!("suz_log_exact({name});"),
+        Type::Char => format!("suz_log_char({name});"),
+        Type::Bool => format!("suz_log_bool({name});"),
+        Type::Enum(ty) => {
+            context.enum_logs.insert(ty.id);
+            format!(
+                "suz_log_text(suz_enum_{}_names[{name}], suz_enum_{}_lengths[{name}]);",
+                ty.id, ty.id
+            )
+        }
+        Type::Integer(ty) => format!(
+            "suz_log_{}({name});",
+            if ty.bounds().0 < 0 { "i64" } else { "u64" }
+        ),
+        Type::Float(ty) => {
+            context.float_types.insert(ty);
+            format!("suz_log_{}({name});", ty.name())
+        }
+        _ => unreachable!("interpolation types are checked"),
+    }
+}
+
+/// or panicは式の失敗側でだけ出力する。全補間値をロック取得前に評価する。
+pub(super) fn panic_expression(
+    parts: &[TemplatePart<CheckedExpression>],
+    location: Location,
+    ty: Type,
+    context: &mut ExpressionContext,
+) -> String {
+    let mut sequence = Vec::new();
+    let mut outputs = Vec::new();
+    for part in parts {
+        match part {
+            TemplatePart::Text(text) => {
+                outputs.push(format!("suz_log_text({}, {})", c_string(text), text.len()))
+            }
+            TemplatePart::Value(value) => {
+                let name = format!("suz_cmp_{}", context.temporaries.len());
+                context.temporaries.push(value.ty);
+                sequence.push(format!("{name} = {}", expression(value, context)));
+                outputs.push(
+                    output(value.ty, &name, context)
+                        .trim_end_matches(';')
+                        .to_owned(),
+                );
+            }
+        }
+    }
+    let filename = std::path::Path::new(&context.source_name)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(&context.source_name);
+    sequence.push(format!(
+        "suz_panic_begin({}, {}, {})",
+        c_string(filename),
+        location.line,
+        location.column
+    ));
+    sequence.extend(outputs);
+    sequence.push("suz_panic_end()".into());
+    sequence.push(if ty == Type::Void {
+        "(void)0".into()
+    } else {
+        format!("({}){{0}}", ty.c_name())
+    });
+    format!("({})", sequence.join(", "))
+}
+
+/// 理由は文字列プールへ登録せず、1件の記録全体を既存の出力ロックで囲む。
+pub(super) fn ignore(ignore: &crate::ast::Ignore, context: &ExpressionContext) -> String {
+    let filename = std::path::Path::new(&context.source_name)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(&context.source_name);
+    format!(
+        "(suz_log_begin(SUZ_LOG_IGNORE, {}, {}), suz_log_text({}, {}), suz_log_end())",
+        c_string(filename),
+        ignore.location.line,
+        c_string(&ignore.reason),
+        ignore.reason.len()
+    )
 }

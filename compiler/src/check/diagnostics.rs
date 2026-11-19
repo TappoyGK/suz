@@ -8,6 +8,10 @@ use crate::ast::Location;
 
 pub(super) fn collect(expr: &CheckedExpression, locations: &mut Vec<Location>) {
     match &expr.value {
+        Value::HandledCall { call, handler } => {
+            collect(call, locations);
+            collect_handler(handler, locations);
+        }
         Value::Closure(closure) => collect_statements(&closure.function.statements, locations),
         Value::FunctionBorrow(inner) => collect(inner, locations),
         Value::Exact(e) => {
@@ -32,7 +36,7 @@ pub(super) fn collect(expr: &CheckedExpression, locations: &mut Vec<Location>) {
                 collect(value, locations);
             }
         }
-        Value::Template { parts, .. } => {
+        Value::Template { parts, .. } | Value::Panic { parts, .. } => {
             for part in parts {
                 if let crate::ast::TemplatePart::Value(value) = part {
                     collect(value, locations);
@@ -51,7 +55,9 @@ pub(super) fn collect(expr: &CheckedExpression, locations: &mut Vec<Location>) {
             }
         }
         Value::Field { target, .. } => collect(target, locations),
-        Value::Invoke { target, arguments } => {
+        Value::Invoke {
+            target, arguments, ..
+        } => {
             collect(target, locations);
             for argument in arguments {
                 collect(argument, locations);
@@ -91,7 +97,7 @@ pub(super) fn collect(expr: &CheckedExpression, locations: &mut Vec<Location>) {
             if let Some(handler) = handler {
                 match handler {
                     CheckedHandler::Value(value) => collect(value, locations),
-                    CheckedHandler::Return(_) => {
+                    CheckedHandler::Return { .. } => {
                         unreachable!("failure returns must be lowered to statements")
                     }
                 }
@@ -144,6 +150,14 @@ pub(super) fn collect(expr: &CheckedExpression, locations: &mut Vec<Location>) {
 fn collect_statements(statements: &[CheckedStatement], locations: &mut Vec<Location>) {
     for statement in statements {
         match statement {
+            CheckedStatement::Ignore(_) => {}
+            CheckedStatement::HandleCall { call, handler, .. } => {
+                collect(call, locations);
+                collect_handler(handler, locations);
+            }
+            CheckedStatement::Fail(value) | CheckedStatement::Recover(value) => {
+                collect(value, locations)
+            }
             CheckedStatement::SliceReturn {
                 operation,
                 return_value,
@@ -226,11 +240,22 @@ fn collect_statements(statements: &[CheckedStatement], locations: &mut Vec<Locat
                 collect_statements(body, locations);
             }
             CheckedStatement::Break | CheckedStatement::Continue => {}
-            CheckedStatement::Block(inner) => collect_statements(inner, locations),
-            CheckedStatement::Binding { initializer, .. } => collect(initializer, locations),
-            CheckedStatement::Return(value) | CheckedStatement::Assign { value, .. } => {
-                collect(value, locations)
+            CheckedStatement::Arena { body: inner, .. }
+            | CheckedStatement::Block(inner)
+            | CheckedStatement::Objection(inner) => collect_statements(inner, locations),
+            CheckedStatement::Store {
+                target,
+                value,
+                body,
+                ..
+            } => {
+                collect(target, locations);
+                collect_statements(body, locations);
+                collect(value, locations);
             }
+            CheckedStatement::Binding { initializer, .. } => collect(initializer, locations),
+            CheckedStatement::Assign { value, .. } => collect(value, locations),
+            CheckedStatement::Return { value, .. } => collect(value, locations),
         }
     }
 }
@@ -239,4 +264,18 @@ pub(super) fn unhandled_arithmetic(statements: &[CheckedStatement]) -> Vec<Locat
     let mut locations = Vec::new();
     collect_statements(statements, &mut locations);
     locations
+}
+
+fn collect_handler(handler: &super::ir::CallHandler, locations: &mut Vec<Location>) {
+    match handler {
+        super::ir::CallHandler::Branches(arms) => {
+            for (_, body) in arms {
+                collect_statements(body, locations);
+            }
+        }
+        super::ir::CallHandler::Value(v)
+        | super::ir::CallHandler::Return { value: v, .. }
+        | super::ir::CallHandler::Fail(Some(v)) => collect(v, locations),
+        _ => {}
+    }
 }

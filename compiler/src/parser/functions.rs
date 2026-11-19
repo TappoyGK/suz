@@ -108,7 +108,7 @@ impl Parser<'_, '_> {
 
     pub(super) fn parse_type(&mut self) -> Result<Type, Diagnostic> {
         let location = self.location();
-        let ty = self.function_parameter_type()?;
+        let ty = self.type_atom()?;
         if matches!(ty, Type::Function(_)) {
             return Err(location.error(
                 ErrorKind::InvalidSource,
@@ -121,7 +121,82 @@ impl Parser<'_, '_> {
         Ok(ty)
     }
 
+    /// 束縛とフィールドの型にはエラー集合を保存できない。
+    pub(super) fn stored_type(&mut self) -> Result<Type, Diagnostic> {
+        let ty = self.parse_type()?;
+        self.reject_error_spec()?;
+        Ok(ty)
+    }
+
     pub(super) fn function_parameter_type(&mut self) -> Result<Type, Diagnostic> {
+        let ty = self.type_atom()?;
+        self.reject_error_spec()?;
+        Ok(ty)
+    }
+
+    fn reject_error_spec(&self) -> Result<(), Diagnostic> {
+        if self.token().kind == Kind::Keyword("or") {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "err.no-first-class",
+                    "error specifications are only allowed on function and fnshape return types"
+                ),
+            ));
+        }
+        Ok(())
+    }
+
+    // 戻り値に続くエラー指定と、変換に続くorハンドラーは呼び出し側で解析する。
+    fn type_atom(&mut self) -> Result<Type, Diagnostic> {
+        let mut layers = Vec::new();
+        while self.token().kind == Kind::Keyword("ptr") {
+            if layers.len() == 256 {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("arena.ptr-type", "pointer type nesting exceeds 256"),
+                ));
+            }
+            self.cursor += 1;
+            let nullable = self.token().kind == Kind::Symbol("?");
+            if nullable {
+                self.cursor += 1;
+            }
+            layers.push(nullable);
+        }
+        let mut ty = self.type_leaf()?;
+        if !layers.is_empty() && (ty == Type::Void || matches!(ty, Type::Function(_))) {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("arena.ptr-type", "pointer requires a stored value type"),
+            ));
+        }
+        for nullable in layers.into_iter().rev() {
+            ty = ty.pointer().with_nullable(nullable);
+        }
+        Ok(ty)
+    }
+
+    fn type_leaf(&mut self) -> Result<Type, Diagnostic> {
+        if self.token().kind == Kind::Symbol("*") {
+            self.cursor += 1;
+            if self.token().kind != Kind::Ident("const") {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("ffi.pointer-type", "only *const void is supported"),
+                ));
+            }
+            self.cursor += 1;
+            if self.token().kind != Kind::TypeName("void") {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("ffi.pointer-type", "only *const void is supported"),
+                ));
+            }
+            self.cursor += 1;
+            return Ok(Type::CPointer);
+        }
+
         let persistent = self.token().kind == Kind::Keyword("static");
         if persistent {
             self.cursor += 1;
@@ -243,15 +318,94 @@ impl Parser<'_, '_> {
             self.cursor += 1;
             (parameters, self.parse_type()?)
         };
+        let errors = self.error_spec()?;
+        if name == "main" && !errors.is_empty() {
+            return Err(location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("prog.main", "main cannot return errors"),
+            ));
+        }
         let (statements, end) = self.block()?;
         Ok(Function {
+            arena: false,
             keyword_location,
             name,
             location,
             parameters,
             result,
+            errors,
             statements,
             end,
         })
+    }
+}
+
+impl Parser<'_, '_> {
+    /// 型全体の指定を展開し、重複を拒否してから順序に依存しない集合にする。
+    pub(super) fn error_spec(&mut self) -> Result<Vec<crate::ast::ErrorVariant>, Diagnostic> {
+        let mut errors = std::collections::BTreeSet::new();
+        if self.token().kind != Kind::Keyword("or") {
+            return Ok(Vec::new());
+        }
+        self.cursor += 1;
+        loop {
+            let location = self.location();
+            let Kind::Ident(name) = self.token().kind else {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("err.fn-return", "expected an error type"),
+                ));
+            };
+            let declaration = self
+                .enums
+                .iter()
+                .find(|d| d.name == name && d.ty.is_error)
+                .ok_or_else(|| {
+                    self.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!("err.fn-return", "expected an error type"),
+                    )
+                })?;
+            self.cursor += 1;
+            let variants = if self.token().kind == Kind::Symbol(".") {
+                self.cursor += 1;
+                let Kind::Ident(name) = self.token().kind else {
+                    return Err(self.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!("err.fn-return", "expected an error variant"),
+                    ));
+                };
+                let index = declaration
+                    .variants
+                    .iter()
+                    .position(|v| v == name)
+                    .ok_or_else(|| {
+                        self.error(
+                            ErrorKind::InvalidSource,
+                            crate::diagnostic!("err.fn-return", "unknown error variant"),
+                        )
+                    })?;
+                self.cursor += 1;
+                index..index + 1
+            } else {
+                0..declaration.ty.count
+            };
+            for variant in variants {
+                if !errors.insert(crate::ast::ErrorVariant {
+                    type_id: declaration.ty.id,
+                    variant,
+                }) {
+                    return Err(location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!("err.fn-return", "duplicate error variant"),
+                    ));
+                }
+            }
+            if self.token().kind != Kind::Symbol(",") {
+                break;
+            }
+            self.cursor += 1;
+        }
+        Ok(errors.into_iter().collect())
     }
 }

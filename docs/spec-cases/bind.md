@@ -822,22 +822,25 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | `[assign.statement]` | 3 | 25 |
 
-### bind-030 大域変数を関数から書き換え、コピーした値は保持する
+### bind-030 arenaの状態を関数へ渡し、コピーした値は保持する
 
-主根拠：`[top.var-use]`。
+主根拠：`[arena.ptr-operations]`。
 
-補助根拠：`[top.var]`、`[value.copy-equivalent]`、`[allow.clause]`。
+補助根拠：`[const.decl]`、`[value.copy-equivalent]`。
 
 **ソース：**
 
 ```suz
-var COUNT: u8 = INITIAL allow [diagnostic.global-var: program counter]
 fix INITIAL: u8 = 1
-fn update() -> void { COUNT += 1 }
+struct State { count: u8 }
+fn update(state: ptr State) -> void { state.count += 1 }
 fn main() -> u8 {
-    fix before = COUNT
-    update()
-    if before != 1 || COUNT != 2 { return 1 }
+    arena {
+        fix ptr state = new State { count: INITIAL }
+        fix before = state.count
+        update(state)
+        if before != 1 || state.count != 2 { return 1 }
+    }
     return 0
 }
 ```
@@ -848,20 +851,18 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | 正常終了 | 0 | 0 |
 
-### bind-031 大域変数の名前は定数式に使えない
+### bind-031 トップレベルのvarは代入の有無によらず拒否する
 
-主根拠：`[top.var]`。
+主根拠：`[decl.top-level]`。
 
-補助根拠：`[const.expression]`。
+補助根拠：`[decl.location]`。
 
 **ソース：**
 
 ```suz
-var FIRST: u8 = SECOND
-var SECOND: u8 = 1
+var COUNT: u8 = 1
 fn main() -> u8 {
-    FIRST = 2
-    SECOND = 3
+    COUNT = 2
     return 0
 }
 ```
@@ -876,27 +877,4 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[const.expression]` | 1 | 17 |
-
-### bind-032 代入されない大域変数を拒否する
-
-主根拠：`[var.never-reassigned]`。
-
-**ソース：**
-
-```suz
-var COUNT: u8 = 1
-fn main() -> u8 { return COUNT }
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | コンパイルエラー | — | 0 |
-
-**コンパイル診断：**
-
-| 設定 | 規則 | 行 | 列 |
-|---|---|---:|---:|
-| 通常 | `[var.never-reassigned]` | 1 | 5 |
+| 通常 | `[decl.top-level]` | 1 | 1 |

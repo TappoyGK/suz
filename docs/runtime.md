@@ -33,7 +33,7 @@
 
 **[runtime.c-compiler]** 生成したCとランタイムは、C23に対応したClangでビルドする。C23の言語機能、Clangが提供するヘッダー、Clangの拡張を使える。CライブラリのC23追加ヘッダーは、[tool.platform] のSDKが提供する場合に使える。Clangの最低バージョンは定めず、必要な機能を [runtime.c-check] で検査する。
 
-**[runtime.c-extensions]** 生成Cとランタイム本体が使うClang拡張は、名前と用途を本規則に記載し、使用する変更と同時に更新する。共通の設定ヘッダーで `#pragma float_control(precise, on)` を使い、浮動小数点の演算順序や符号付きゼロなどを無視する最適化を抑える（[runtime.unsafe-math]）。同梱のRyuが使う拡張はRyuのREADMEで扱う。
+**[runtime.c-extensions]** 生成Cとランタイム本体が使うClang拡張は、名前と用途を本規則に記載し、使用する変更と同時に更新する。共通の設定ヘッダーで `#pragma float_control(precise, on)` を使い、浮動小数点の演算順序や符号付きゼロなどを無視する最適化を抑える（[runtime.unsafe-math]）。FFIの関数型照合には `__typeof__` と `__builtin_types_compatible_p` を使う。C固有型の範囲検査にも128ビットの `_BitInt` を使う。同梱のRyuが使う拡張はRyuのREADMEで扱う。
 
 **[runtime.c-check]** `suz_config.h` は `__clang__` の定義、`__STDC_VERSION__ >= 202311L`、128ビット以上の `_BitInt`、C23の `<stdckdint.h>` を要求する。条件を満たさない場合は必要な機能を英語の診断で示し、コンパイルエラーとする。Clang拡張を使用する場合は、プリプロセッサで検査できる機能を本ヘッダーで検査する。
 
@@ -78,6 +78,9 @@ typedef enum {
     SUZ_LOG_INFO,
     SUZ_LOG_WARN,
     SUZ_LOG_PANIC,
+    SUZ_LOG_DEBUG,
+    SUZ_LOG_ERROR,
+    SUZ_LOG_IGNORE,
 } suz_log_level;
 
 void *suz_env_alloc(size_t size);
@@ -92,7 +95,7 @@ _Noreturn void suz_env_panic(void);
 
 ### 4.1 出力
 
-**[runtime.env-log]** `suz_env_log(level, text, len)` は、`text` から始まる `len` バイトを標準エラーへ出力する。通常のログとパニックの診断の両方に使う。`level` は、`log info` では `SUZ_LOG_INFO`、`log warn` では `SUZ_LOG_WARN`、パニックの診断では `SUZ_LOG_PANIC` とする。同じ出力の接頭辞・本文・末尾の改行には、すべて同じレベルを渡す。標準環境層はレベルを無視して出力する。
+**[runtime.env-log]** `suz_env_log(level, text, len)` は、`text` から始まる `len` バイトを標準エラーへ出力する。通常のログ・ignoreの記録・パニックの診断に使う。`level` は、`log debug` では `SUZ_LOG_DEBUG`、`log error` では `SUZ_LOG_ERROR`、`log info` では `SUZ_LOG_INFO`、`log warn` では `SUZ_LOG_WARN`、ignoreの記録では `SUZ_LOG_IGNORE`、パニックの診断では `SUZ_LOG_PANIC` とする。同じ出力の接頭辞・本文・末尾の改行には、すべて同じレベルを渡す。標準環境層はレベルを無視して出力する。`SUZ_LOG_IGNORE`と`SUZ_LOG_PANIC`は通常ログの重要度の序列には含めない。
 
 | 項目 | 契約 |
 |---|---|
@@ -131,40 +134,21 @@ _Noreturn void suz_env_panic(void);
 
 ## 5. ログの評価と出力
 
-**[runtime.log-evaluation]** 1つの `log info` または `log warn` では、最初にすべての埋め込み式を左から右に1回ずつ評価し、それぞれの値を保持する。すべての評価が成功してから、そのログ文の出力を始める。
+**[runtime.log-evaluation]** [log.filter]で生成対象となった1つの `log debug`・`log info`・`log warn`・`log error` では、最初にすべての埋め込み式を左から右に1回ずつ評価し、それぞれの値を保持する。すべての評価が成功してから、そのログ文の出力を始める。
 
-埋め込み式が呼び出した関数からのログは、外側のログより先に出力される。埋め込み式の評価中にパニックした場合は、外側のログの接頭辞も出力せず、パニックの診断と終了を行う。
+埋め込みには言語仕様の [output.embed-value] を適用し、名前とそのフィールド参照から値を読む。計算が必要な場合はログ文の前で行う。
 
-たとえば、次を `sample.suz` として保存する。
-
-```suz
-fn value() -> u8 {
-    log info `inner`
-    return 3
-}
-
-fn main() -> u8 {
-    log info `outer: ${value()}`
-    return 0
-}
-```
-
-標準エラーには、次の順で出力する。
-
-```text
-info sample.suz:2: inner
-info sample.suz:7: outer: 3
-```
-
-**[runtime.log-fragments]** `suz_log_begin(level, source, line)` は `suz_log_level` の `SUZ_LOG_INFO` または `SUZ_LOG_WARN` を受け取り、出力のロックを取得して接頭辞を書く。`suz_log_end()` は改行を出力してロックを解放する。ランタイム本体は、言語仕様の [log.output] と [log.fragments] に従って、接頭辞・本文の各断片・末尾の改行を `suz_env_log` へ順に渡す。分割位置と呼び出し回数によらず、連結した出力バイト列は同じでなければならない。
+**[runtime.log-fragments]** `suz_log_begin(level, source, line)` は `suz_log_level` の `SUZ_LOG_DEBUG`・`SUZ_LOG_INFO`・`SUZ_LOG_WARN`・`SUZ_LOG_ERROR`・`SUZ_LOG_IGNORE` を受け取り、出力のロックを取得して接頭辞を書く。`suz_log_end()` は改行を出力してロックを解放する。ランタイム本体は、言語仕様の [log.output] と [log.fragments] に従って、接頭辞・本文の各断片・末尾の改行を `suz_env_log` へ順に渡す。分割位置と呼び出し回数によらず、連結した出力バイト列は同じでなければならない。
 
 1つのログ文の接頭辞から末尾の改行までは、同じランタイムが出力する別のログやパニック診断を挟まず、ひとまとまりとして出力する。このアトミック性は、環境関数への受け渡しを複数回に分ける場合も、環境層が出力をバッファへ保留する場合も維持する。排他範囲は、すべての埋め込み式の評価が完了した後に開始し、末尾の改行を渡した後に終了する。
 
 テンプレート内の `\n` も本文の一部として出力する。ログ文全体の末尾には、さらに改行を1つ付ける。本文の途中にある改行の後へ接頭辞を再挿入しない。symbolの出力には保持したバイト長を使い、NULを含む内容もそのまま渡す。出力失敗には [runtime.output-failure] を適用する。
 
+**[runtime.panic-fragments]** `suz_panic_begin(source, line, column)` は出力ロックを取得し、`SUZ_LOG_PANIC`で位置の接頭辞を出力する。続く本文は評価済みの値を`suz_log_*`の断片出力関数へ渡す。`suz_panic_end()`は改行を出力し、ロックを保持したまま`suz_env_panic()`で終了する。既存の`suz_panic`もこの開始・終了処理を使う。埋め込み式の評価はロック取得前に完了させる。本文の整形・出力は[runtime.log-storage]と同じく動的確保を行わない。
+
 **[runtime.value-format]** 値の表示は言語仕様の [symbol.value-format] と [symbol.float-format] に従う。整数・浮動小数点の表示は実行環境のロケールに依存させず、小数点には `.` を使う。`f32` の最短表記は `f32` として読み戻す条件で、`f64` は `f64` として読み戻す条件で決める。
 
-**[runtime.log-storage]** 埋め込み値は生成したCの一時変数へ保持する。固定部分・名前・区切りは静的なバイト列を使い、数値の表示には型ごとに必要な容量を満たす固定長の自動変数を使う。symbolは保持済みのバイト列を環境関数へ渡す。ログ本文の整形と断片の受け渡しでは動的メモリの確保・解放を行わず、本文全体の長さに比例した作業領域を要求しない。埋め込み式自身の評価に必要な確保は、その式の規則に従う。
+**[runtime.log-storage]** 埋め込み値は生成したCの一時変数へ保持する。固定部分・名前・区切りは静的なバイト列を使い、数値の表示には型ごとに必要な容量を満たす固定長の自動変数を使う。symbolは保持済みのバイト列を環境関数へ渡す。ログ本文の整形と断片の受け渡しでは動的メモリの確保・解放を行わず、本文全体の長さに比例した作業領域を要求しない。
 
 ## 6. 数値演算と変換
 
@@ -317,6 +301,43 @@ constant symbolの本体は計測対象に含めない。dynamic symbolの本体
 
 切り出し・読み取り・暗黙変換・比較・反復・変換と定数評価は仕様例集で検証する。確保の禁止、範囲外のアクセス、インターン化による共有は `compiler/tests/spec_cases/text_views.rs` で、検証用の環境層とサニタイザーを使って検証する。
 
-## 大域変数
+## C FFI
 
-**[runtime.top-var]** 大域変数の格納領域は、生成したCの静的な変数として確保する。コンパイル時に求めた初期値を、Suzの `main` の実行前に設定する。文字列を参照する初期値は、[runtime.symbol-init] の登録を終えてから設定する。変数の格納領域は静的に確保するが、値が参照する文字列の登録に必要な起動時のメモリ確保は行う。
+**[runtime.ffi-types]** extern関数はCの呼出規約を使い、隠れた引数を追加しない。各型は次のC型へ対応する。
+
+| Suz | C |
+|---|---|
+| `i8`・`i16`・`i32`・`i64` | `int8_t`・`int16_t`・`int32_t`・`int64_t` |
+| `u8`・`u16`・`u32`・`u64` | `uint8_t`・`uint16_t`・`uint32_t`・`uint64_t` |
+| `f32`・`f64` | `float`・`double` |
+| `bool` | `_Bool` |
+| `_int`・`_uint` | `int`・`unsigned int` |
+| `_long`・`_ulong` | `long`・`unsigned long` |
+| `_size_t` | `size_t` |
+| `_char` | `char` |
+| `void`（戻り値のみ） | `void` |
+| `*const void`（引数のみ） | `const void *` |
+
+型照合にはCの型互換性を使い、サイズが同じだけでは一致扱いにしない。引数はSuzの通常の関数と同じ順序で、それぞれ1回評価する。C関数の戻り値をそのまま受け取り、Suzのエラー値への変換はラッパー関数が行う。
+
+**[runtime.ffi-range]** C固有型の整数範囲には `INT_MIN`・`INT_MAX`・`UINT_MAX`・`LONG_MIN`・`LONG_MAX`・`ULONG_MAX`・`SIZE_MAX`・`CHAR_MIN`・`CHAR_MAX` を使う。C固有型またはexternを使うプログラムには整数幅64ビット以下を要求し、生成Cで検査する。これらを使わないプログラムにFFIの制約は課さない。リテラルの範囲はCコンパイル時、値の変換の範囲は評価時に検査する。`_char`の符号は対象環境に従う。変換失敗時には範囲外のCキャストを実行せず、`as%`もCの符号付き狭小化の処理系依存動作に頼らず値を作る。
+
+**[runtime.ffi-contract]** C側はC API自身の契約を守らなければならない。Suzのunsafeは外部コードのメモリ破壊や未定義動作を防止しない。安全なSuz関数として公開するラッパーの実装者は、その公開APIからC APIの契約違反が起きないようにする責任を持つ。
+
+**[runtime.ffi-bytes]** `c_bytes`はインターン済みの文字列の実体、またはtextの参照範囲の先頭を返す。新しいバッファや所有者を作らない。実体はプロセス終了まで保持し、C側に所有権を移さない。Cが呼び出し後も保持することを認めるが、変更・解放・渡された範囲外へのアクセスは契約違反である。NUL終端の保証はなく、埋め込みNULも含めて長さを渡す。
+
+`c_byte_len`は実体またはビューのバイト数を読み、`SIZE_MAX`以下であることを確認して`size_t`へ変換する。超える場合は [rt.ffi-byte-len] に従う。64ビットのsize_tでは保存された64ビットの長さをすべて表せるため、範囲検査を生成しなくてよい。取り出し自体にメモリの確保や文字列のコピーは不要である。
+
+## 作業領域arena
+
+**[runtime.arena]** [rt.arena-storage] と [rt.arena-allocation] の作業領域は、環境層の `suz_env_alloc` でブロックごとに確保する。各ブロックに管理情報と `max_align_t` に整列したデータ領域を置く。管理情報を含む要求サイズがCの `size_t` に収まらない場合は計算のあふれとして拒否し、値を切り詰めない。
+
+ブロックは列として保持する。現在のブロックより後ろは回収済みであり、要求が現在のブロックに収まらなければ、後続から収まるブロックを選んで現在位置の直後へ移す。小さくて選ばれなかったブロックも後続に残して再利用する。適合するブロックがなければ、設定に従って新しいブロックを直後に追加する。既存のデータ領域にreallocは行わない。
+
+領域進入時のブロックと使用位置を生成Cのローカル値に保存し、退出時に復帰する。現在のブロックが変わった場合だけ、データ領域と容量の参照も戻す。内容の消去や参照の走査、環境層への解放は行わない。寿命の検査はコンパイラの責務であり、ランタイムの内部APIだけでは回収済みの実体への参照を検出しない。
+
+生成Cでは保存した位置にClangの`cleanup`属性を付け、通常終了・return・ループ脱出・エラー回復のgotoで`suz_arena_restore`を呼ぶ。戻り値を評価してから回収する。保存・復帰と、現在のブロック内で完了する確保は常にインライン化する。整列の余白はビット演算で求め、ブロックの再利用・追加確保・失敗時診断は通常経路から分離する。
+
+確保位置（現在のブロック、データ領域、容量、使用位置）は、生成Cの翻訳単位内だけで使う静的変数に置く。全Suz関数がこの変数を使い、関数呼び出しや再帰でも同じ位置から確保する。そのアドレスは外部へ渡さず、ランタイムの拡張関数には現在のブロックを値で渡し、新しい確保位置を値で受け取る。外部関数が確保位置を書き換える可能性をなくし、Cコンパイラが通常経路で状態をレジスタに保持できるようにする。この内部APIは、Suzの生成Cを1つの翻訳単位にまとめる構成を前提とする。
+
+`--arena-grow 0`の生成Cではブロックが変わらないため、保存・復帰を使用位置だけに限定する。容量不足の経路も、復帰しないパニック関数へ直接つなぎ、拡張可能な場合に必要なブロックの再読込みを残さない。

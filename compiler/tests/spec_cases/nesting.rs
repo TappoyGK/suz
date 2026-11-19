@@ -239,22 +239,20 @@ fn nesting_limit_checks_nested_blocks_and_top_level_initializers() {
             }
         }
     }
-    for declaration in ["fix", "var"] {
-        let source = format!(
-            "{declaration} VALUE = {}\nfn main() -> u8 {{ return 0 }}",
-            wrap("(", ")", 256, "1")
-        );
-        fs::write(directory.0.join("global.suz"), source).unwrap();
-        let output = suz(&directory.0, &["check", "global.suz"]);
-        assert_eq!(output.status.code(), Some(1), "{output:?}");
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let column = format!("{declaration} VALUE = ").len() + 257;
-        assert!(
-            stderr.contains("[src.nesting-limit]")
-                && stderr.contains(&format!("global.suz:1:{column}:")),
-            "{stderr}"
-        );
-    }
+    let source = format!(
+        "fix VALUE = {}\nfn main() -> u8 {{ return 0 }}",
+        wrap("(", ")", 256, "1")
+    );
+    fs::write(directory.0.join("global.suz"), source).unwrap();
+    let output = suz(&directory.0, &["check", "global.suz"]);
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let column = "fix VALUE = ".len() + 257;
+    assert!(
+        stderr.contains("[src.nesting-limit]")
+            && stderr.contains(&format!("global.suz:1:{column}:")),
+        "{stderr}"
+    );
 }
 
 #[test]
@@ -310,11 +308,7 @@ fn nesting_boundary_compiles_and_runs_through_all_commands() {
         (format!("P with {{ x: {e} }}"), "(Point { x: 1, y: 0 })"),
     ];
     let mut source = "struct Point { x: i32, y: i32 }\nfix P = Point { x: 0, y: 0 }\nfn id(n: int) -> int { return n }\n".to_owned();
-    source += &format!(
-        "fix TOP = {}\nvar GLOBAL = {} allow [diagnostic.global-var: nesting boundary]\n",
-        wrap("(", ")", 255, "1"),
-        wrap("(", ")", 255, "1")
-    );
+    source += &format!("fix TOP = {}\n", wrap("(", ")", 255, "1"));
     for (i, (expression, expected)) in cases.iter().enumerate() {
         source += &format!(
             "fn case_{i}() -> bool {{\nfix value = {expression}\nreturn value == {expected}\n}}\n"
@@ -326,7 +320,7 @@ fn nesting_boundary_compiles_and_runs_through_all_commands() {
         " }".repeat(254)
     );
     source += "fn main() -> u8 {\n";
-    source += "GLOBAL = TOP\nif GLOBAL != 1 { return 3 }\n";
+    source += "if TOP != 1 { return 3 }\n";
     for i in 0..cases.len() {
         source += &format!("if not case_{i}() {{ return 1 }}\n");
     }

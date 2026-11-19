@@ -84,8 +84,9 @@ pub(super) fn resolve(
         let parameters = p.list(Parser::function_parameter_type)?;
         p.expect(FixedToken::Symbol("->"))?;
         let result = p.parse_type()?;
+        let errors = p.error_spec()?;
         for ty in parameters.iter().chain([&result]) {
-            if ty.generic() {
+            if ty.leaf().generic() {
                 return Err(d.location.error(
                     ErrorKind::InvalidSource,
                     crate::diagnostic!(
@@ -101,7 +102,11 @@ pub(super) fn resolve(
                 crate::diagnostic!("type.void", "parameters cannot have type void"),
             ));
         }
-        raw.push(FunctionType { parameters, result });
+        raw.push(FunctionType {
+            parameters,
+            result,
+            errors,
+        });
         ends.push(p.cursor);
     }
     // 依存先から順に解決する。長い前方参照の連鎖でもRustの再帰スタックを使わない。
@@ -109,9 +114,9 @@ pub(super) fn resolve(
     let mut parents = vec![Vec::new(); raw.len()];
     for (id, signature) in raw.iter().enumerate() {
         for ty in signature.parameters.iter().chain([&signature.result]) {
-            if let Type::StaticFunction(child) | Type::Function(child) = ty {
+            if let Type::StaticFunction(child) | Type::Function(child) = ty.leaf() {
                 pending[id] += 1;
-                parents[*child].push(id);
+                parents[child].push(id);
             }
         }
     }
@@ -120,14 +125,11 @@ pub(super) fn resolve(
     let mut ids = vec![None; raw.len()];
     let mut types = Vec::new();
     while let Some(id) = ready.pop_front() {
-        let remap = |ty| match ty {
-            Type::StaticFunction(child) => Type::StaticFunction(ids[child].unwrap()),
-            Type::Function(child) => Type::Function(ids[child].unwrap()),
-            _ => ty,
-        };
+        let remap = |ty| remap(ty, &ids);
         let signature = FunctionType {
             parameters: raw[id].parameters.iter().copied().map(remap).collect(),
             result: remap(raw[id].result),
+            errors: raw[id].errors.clone(),
         };
         let canonical = types
             .iter()
@@ -158,9 +160,19 @@ pub(super) fn resolve(
         d.end = ends[id];
     }
     for field in structs.iter_mut().flat_map(|s| &mut s.fields) {
-        if let Type::StaticFunction(id) = field.ty {
-            field.ty = Type::StaticFunction(ids[id].unwrap());
-        }
+        field.ty = remap(field.ty, &ids);
     }
     Ok(types)
+}
+
+// ptrで包まれた関数型にも、宣言番号から正規化後の番号への置き換えを適用する。
+fn remap(ty: Type, ids: &[Option<usize>]) -> Type {
+    match ty {
+        Type::Pointer { .. } => remap(ty.pointee().unwrap(), ids)
+            .pointer()
+            .with_nullable(ty.is_nullable()),
+        Type::StaticFunction(id) => Type::StaticFunction(ids[id].unwrap()),
+        Type::Function(id) => Type::Function(ids[id].unwrap()),
+        _ => ty,
+    }
 }

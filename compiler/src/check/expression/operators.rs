@@ -22,6 +22,32 @@ pub(super) fn check(
 ) -> Result<CheckedExpression, Diagnostic> {
     Ok(match &expr.kind {
         ExpressionKind::ArithmeticHandler { operand, fallback } => {
+            let mut call = operand.as_ref();
+            while let ExpressionKind::Group(inner) = &call.kind {
+                call = inner;
+            }
+            match &call.kind {
+                ExpressionKind::Call { name, arguments } => {
+                    return super::super::functions::call(
+                        call,
+                        name,
+                        arguments,
+                        expected,
+                        bindings,
+                        fallback.as_ref(),
+                    );
+                }
+                ExpressionKind::Invoke { target, arguments } => {
+                    return super::super::function_values::invoke(
+                        call,
+                        target,
+                        arguments,
+                        bindings,
+                        fallback.as_ref(),
+                    );
+                }
+                _ => {}
+            }
             let mut checked = if super::super::exact::is_operator(operand)
                 && super::super::exact::integer(operand, bindings)
             {
@@ -60,12 +86,22 @@ pub(super) fn check(
             }
             *handler =
                 Some(match fallback.as_ref().unwrap() {
+                    FailureHandler::Ignore(ignore) => {
+                        return Err(crate::check::errors::invalid_handler(ignore.location));
+                    }
+                    FailureHandler::Errors(handler) => {
+                        return Err(crate::check::errors::invalid_handler(handler.location));
+                    }
+                    FailureHandler::Fail { location, .. } => {
+                        return Err(super::super::errors::invalid_handler(*location));
+                    }
                     FailureHandler::Value(value) => CheckedHandler::Value(Box::new(
                         super::coerced(value, Some(checked.ty), bindings)?,
                     )),
-                    FailureHandler::Return { value, .. } => CheckedHandler::Return(Box::new(
-                        crate::check::functions::return_value(value, bindings)?,
-                    )),
+                    FailureHandler::Return { value, location } => CheckedHandler::Return {
+                        value: Box::new(crate::check::functions::return_value(value, bindings)?),
+                        location: *location,
+                    },
                 });
             checked
         }
@@ -316,6 +352,22 @@ pub(super) fn check(
                         "expr.operator-types",
                         "numeric comparison requires numeric operands"
                     ),
+                ));
+            }
+            if crate::check::ffi::contains_pointer(ty, bindings) {
+                return Err(expr.location.error(
+                    ErrorKind::InvalidSource,
+                    if crate::check::arena::contains(ty, bindings) {
+                        crate::diagnostic!(
+                            "arena.ptr-operations",
+                            "pointer values cannot be compared"
+                        )
+                    } else {
+                        crate::diagnostic!(
+                            "ffi.pointer-operations",
+                            "pointer values cannot be compared"
+                        )
+                    },
                 ));
             }
             if bindings.contains_function(ty) {

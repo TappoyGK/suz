@@ -6,6 +6,7 @@
 mod arguments;
 mod assets;
 mod emit;
+mod foreign;
 mod help;
 mod native;
 mod output;
@@ -83,7 +84,7 @@ pub fn run() -> Result<Outcome> {
                     format!("internal error: {}:{error}", options.input.display()),
                 ),
             };
-            let compilation_options = suz::CompilationOptions { arithmetic_mode: options.mode, text_pool_limit: options.text_pool_limit, log_allow: options.log_allow, deny_global_var: options.deny_global_var };
+            let compilation_options = suz::CompilationOptions { log_level: options.log_level, log_ignore: options.log_ignore, arithmetic_mode: options.mode, text_pool_limit: options.text_pool_limit, arena: options.arena, log_allow: options.log_allow };
             let (c, warnings) = if options.command == Command::Check {
                 (
                     None,
@@ -131,7 +132,7 @@ pub fn run() -> Result<Outcome> {
                     }
                 } else {
                     let destination = options.output.as_deref().expect("validated output");
-                    emit::emit(&c, destination, options.environment.as_deref())?;
+                    emit::emit(&c, destination, options.environment.as_deref(), &options.foreign)?;
                 }
             }
             Ok(Outcome::Code(0))

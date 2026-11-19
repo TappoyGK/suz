@@ -155,7 +155,8 @@ fn trailing_allows_reject_blocks_at_any_expression_depth() {
 #[test]
 fn allow_reasons_are_literal_even_inside_template_interpolations() {
     let source = r#"fn main() -> u8 {
-    log warn `value: ${expr { 1 + 2 allow [diagnostic.arithmetic: literal ` ${ // { : , \n 日本語] }}`
+    fix message = `value: ${expr { 1 + 2 allow [diagnostic.arithmetic: literal ` ${ // { : , \n 日本語] }}`
+    log warn `${message}`
     return 0
 }"#;
     let diagnostics =
@@ -172,7 +173,7 @@ fn allow_reasons_are_literal_even_inside_template_interpolations() {
     );
     let output = compile_and_run_c23(source, "allows.suz");
     assert_eq!(output.status.code(), Some(0));
-    assert_eq!(output.stderr, b"warn allows.suz:2: value: 3\n");
+    assert_eq!(output.stderr, b"warn allows.suz:3: value: 3\n");
 }
 
 #[test]

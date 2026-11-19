@@ -5,7 +5,7 @@
 
 use crate::check::generic::domain;
 use crate::check::scope::Scope;
-mod blocks;
+pub(super) mod blocks;
 mod branches;
 pub(in crate::check) mod casts;
 mod operators;
@@ -38,7 +38,7 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
     #[cfg(test)]
     super::generic::work();
     match &expr.kind {
-        ExpressionKind::Closure(_) => None,
+        ExpressionKind::Closure(_) | ExpressionKind::Panic(_) => None,
         ExpressionKind::FunctionValue(name) => {
             let signature = bindings.functions.get(name)?;
             if signature.is_generic() || name == "main" {
@@ -47,6 +47,7 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
             Some(bindings.intern_function(crate::ast::FunctionType {
                 parameters: signature.parameters.clone(),
                 result: signature.result,
+                errors: signature.errors.clone(),
             }))
         }
         ExpressionKind::Invoke { target, .. } => {
@@ -57,12 +58,18 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
             Some(bindings.function_types.borrow()[id].result)
         }
         ExpressionKind::Slice { index, .. } => Some(if *index { Type::Char } else { Type::Text }),
+        ExpressionKind::New(value) => operand_type(value, bindings).map(Type::pointer),
+        ExpressionKind::Deref(value) => operand_type(value, bindings).and_then(Type::pointee),
+        ExpressionKind::Null => None,
+        ExpressionKind::CBytes(_) => Some(Type::CPointer),
+        ExpressionKind::CByteLen(_) => Some(Type::CInteger(crate::ast::CIntegerType::Size)),
         ExpressionKind::Len(_) => Some(Type::Integer(IntegerType::Len)),
         ExpressionKind::Template(_) => Some(Type::Symbol),
         ExpressionKind::Struct { id, .. } => Some(Type::Struct(*id)),
         ExpressionKind::With { target, .. } => operand_type(target, bindings),
         ExpressionKind::Field { target, name } => {
-            let Type::Struct(id) = operand_type(target, bindings)? else {
+            let known = operand_type(target, bindings)?;
+            let Type::Struct(id) = known.pointee().unwrap_or(known) else {
                 return None;
             };
             bindings.structs[id]
@@ -84,17 +91,18 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
             blocks::operand_type(statements, value, bindings)
         }
         ExpressionKind::Match { arms, .. } => {
-            joined_type(arms.iter().map(|arm| operand_type(&arm.body, bindings)))
+            branch_type(arms.iter().map(|arm| &arm.body), bindings)
         }
         ExpressionKind::Cast { target, .. } => Some(bindings.resolve_type(*target)),
         ExpressionKind::If {
             branches,
             otherwise,
-        } => joined_type(
+        } => branch_type(
             branches
                 .iter()
-                .map(|(_, value)| operand_type(value, bindings))
-                .chain(std::iter::once(operand_type(otherwise, bindings))),
+                .map(|(_, value)| value)
+                .chain(std::iter::once(otherwise.as_ref())),
+            bindings,
         ),
         ExpressionKind::Char(_) => Some(Type::Char),
         ExpressionKind::Integer { .. } | ExpressionKind::Float(_) => None,
@@ -314,6 +322,7 @@ enum Widening {
 impl Widening {
     fn accepts(self, from: Type, to: Type) -> bool {
         from == to
+            || from.lifts_to(to)
             || (match self {
                 Self::None => false,
                 Self::All => true,
@@ -340,6 +349,11 @@ fn expression_inner(
     widen: Widening,
     argument: Option<super::generic::Family>,
 ) -> Result<CheckedExpression, Diagnostic> {
+    if let Some(Type::CInteger(_)) = required
+        && let Some(value) = super::ffi::literal(expr, required.unwrap())?
+    {
+        return Ok(value);
+    }
     // 互換性のない数値の種類は独立して推論する。入れ子の汎用呼び出しでも、
     // 変換の診断は外側の仮引数に対して報告する。
     let inference_hint = if argument == Some(super::generic::Family::Int)
@@ -354,6 +368,12 @@ fn expression_inner(
         super::exact::check(expr, inference_hint, bindings, false)?
     } else {
         match &expr.kind {
+            ExpressionKind::Panic(parts) => super::errors::panic(
+                parts,
+                expr.location,
+                required.unwrap_or(Type::Void),
+                bindings,
+            )?,
             ExpressionKind::Closure(_) => {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
@@ -367,7 +387,7 @@ fn expression_inner(
                 super::function_values::value(expr, name, required, bindings)?
             }
             ExpressionKind::Invoke { target, arguments } => {
-                super::function_values::invoke(expr, target, arguments, bindings)?
+                super::function_values::invoke(expr, target, arguments, bindings, None)?
             }
             ExpressionKind::Slice { .. } => slices::check(expr, bindings)?,
             ExpressionKind::Template(parts) => {
@@ -410,10 +430,16 @@ fn expression_inner(
                 value: Value::Void,
             },
             ExpressionKind::Call { name, arguments } => {
-                super::functions::call(expr, name, arguments, inference_hint, bindings)?
+                super::functions::call(expr, name, arguments, inference_hint, bindings, None)?
             }
             ExpressionKind::Block { statements, value } => {
                 blocks::check(statements, value, inference_hint, bindings)?
+            }
+            ExpressionKind::New(_) | ExpressionKind::Deref(_) | ExpressionKind::Null => {
+                super::arena::expression(expr, required, bindings)?
+            }
+            ExpressionKind::CBytes(inner) | ExpressionKind::CByteLen(inner) => {
+                super::ffi::bytes(expr, inner, bindings)?
             }
             ExpressionKind::Len(inner) => {
                 let operand = expression(inner, None, bindings)?;
@@ -506,11 +532,7 @@ fn expression_inner(
                 }
                 binding.constant.clone().unwrap_or(CheckedExpression {
                     ty: binding.ty,
-                    value: if binding.global {
-                        Value::Global(binding.id)
-                    } else {
-                        Value::Local(binding.id)
-                    },
+                    value: Value::Local(binding.id),
                 })
             }
             // 括弧は引数の境界を保つ。新しい式の文脈や独立した変換を作らない。
@@ -520,6 +542,12 @@ fn expression_inner(
         }
     };
 
+    if matches!(checked.ty, Type::Pointer { shape, .. } if shape.depth() > 256) {
+        return Err(expr.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!("arena.ptr-type", "pointer type nesting exceeds 256"),
+        ));
+    }
     let generic_result = matches!(&expr.kind, ExpressionKind::Call { name, .. }
         if bindings.functions.get(name).is_some_and(|f| f.result.generic()));
     let conversion = required.map(|to| {
@@ -615,6 +643,63 @@ fn conversion_error(
     )
 }
 
+// 他の分岐にも型の手がかりがなければ、newの初期値に通常の既定型を使う。
+// 既知の分岐がある場合は先にそちらを使い、数値リテラルの文脈依存を保つ。
+fn allocation_type(value: &Expression, bindings: &Scope) -> Option<Type> {
+    match &value.kind {
+        ExpressionKind::New(inner) => Some(
+            operand_type(inner, bindings)
+                .or_else(|| allocation_type(inner, bindings))
+                .unwrap_or_else(|| default_type(inner, bindings))
+                .pointer(),
+        ),
+        ExpressionKind::Group(inner) | ExpressionKind::Block { value: inner, .. } => {
+            allocation_type(inner, bindings)
+        }
+        _ => None,
+    }
+}
+
+fn has_null_branch(value: &Expression) -> bool {
+    match &value.kind {
+        ExpressionKind::Null => true,
+        ExpressionKind::Group(inner) | ExpressionKind::Block { value: inner, .. } => {
+            has_null_branch(inner)
+        }
+        ExpressionKind::If {
+            branches,
+            otherwise,
+        } => branches.iter().any(|(_, v)| has_null_branch(v)) || has_null_branch(otherwise),
+        ExpressionKind::Match { arms, .. } => arms.iter().any(|a| has_null_branch(&a.body)),
+        _ => false,
+    }
+}
+
+// nullの分岐には、他の分岐から決めた参照先の型を要求する。
+fn branch_type<'a>(
+    values: impl Iterator<Item = &'a Expression> + Clone,
+    bindings: &Scope,
+) -> Option<Type> {
+    let ty = joined_type(values.clone().map(|v| operand_type(v, bindings))).or_else(|| {
+        let mut result: Option<Type> = None;
+        for ty in values.clone().filter_map(|v| allocation_type(v, bindings)) {
+            if result.is_some_and(|previous| previous != ty) {
+                return None;
+            }
+            result = Some(ty);
+        }
+        result
+    })?;
+    if ty.pointee().is_some() && values.clone().any(has_null_branch) {
+        if matches!(ty, Type::Pointer { shape, .. } if shape.depth() > 256) {
+            return None;
+        }
+        Some(ty.with_nullable(true))
+    } else {
+        Some(ty)
+    }
+}
+
 pub(super) fn joined_type(types: impl Iterator<Item = Option<Type>>) -> Option<Type> {
     types.flatten().reduce(joined_or_first)
 }
@@ -622,6 +707,12 @@ pub(super) fn joined_type(types: impl Iterator<Item = Option<Type>>) -> Option<T
 // 代替の型選択も型の代入ごとに適用する。共通型がなくても、
 // 先頭オペランドの型への通常の変換判定まで進む。
 fn joined_or_first(a: Type, b: Type) -> Type {
+    if a.lifts_to(b) {
+        return b;
+    }
+    if b.lifts_to(a) {
+        return a;
+    }
     if a.symbolic() || b.symbolic() {
         return domain::from_types(std::array::from_fn(|i| {
             let (a, b) = (domain::at(a, i)?, domain::at(b, i)?);

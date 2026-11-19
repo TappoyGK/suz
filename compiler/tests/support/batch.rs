@@ -64,7 +64,7 @@ impl Batch {
                 .args(extra_flags)
                 .arg(format!("-Dmain=suz_case_{index}"));
             if needs_runtime {
-                command.arg("-I").arg(&runtime);
+                command.arg("-iquote").arg(&runtime);
             }
             compile_c(command.arg("-c").arg(source).arg("-o").arg(&object))?;
             Ok((
@@ -131,6 +131,7 @@ impl Batch {
         if needs_runtime {
             command
                 .arg(runtime.join("suz_runtime.c"))
+                .arg(runtime.join("suz_arena.c"))
                 .arg(runtime.join("suz_text.c"))
                 .arg(runtime.join("suz_parse.c"))
                 .arg("-lm")

@@ -15,6 +15,37 @@ use crate::{
 
 impl Parser<'_, '_> {
     pub(super) fn expression(&mut self) -> Result<Expression, Diagnostic> {
+        let result = self.expression_before_assignment()?;
+        if matches!(
+            self.token().kind,
+            Kind::Symbol(
+                "=" | "+="
+                    | "-="
+                    | "*="
+                    | "/="
+                    | "%="
+                    | "+%="
+                    | "-%="
+                    | "*%="
+                    | "&="
+                    | "|="
+                    | "^="
+                    | "<<="
+                    | ">>="
+            )
+        ) {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "assign.statement",
+                    "assignment is a statement, not an expression"
+                ),
+            ));
+        }
+        Ok(result)
+    }
+
+    pub(super) fn expression_before_assignment(&mut self) -> Result<Expression, Diagnostic> {
         let operand = self.logical(LogicalOperator::Or)?;
         if self.token().kind != Kind::Keyword("or") {
             return Ok(operand);
@@ -33,6 +64,36 @@ impl Parser<'_, '_> {
     }
 
     fn failure_handler(&mut self) -> Result<FailureHandler, Diagnostic> {
+        if self.token().kind == Kind::Keyword("error") {
+            return self.error_handler();
+        }
+        if self.token().kind == Kind::Keyword("panic") {
+            let crate::ast::Statement::Log {
+                parts, location, ..
+            } = self.panic()?
+            else {
+                unreachable!()
+            };
+            return Ok(FailureHandler::Value(Box::new(
+                self.node(ExpressionKind::Panic(parts), location)?,
+            )));
+        }
+        if self.token().kind == Kind::Keyword("ignore") {
+            return Ok(FailureHandler::Ignore(self.ignore_reason()?));
+        }
+        if self.token().kind == Kind::Keyword("fail") {
+            let location = self.location();
+            self.cursor += 1;
+            let value = if matches!(
+                self.token().kind,
+                Kind::Newline | Kind::Symbol("}" | ")" | ",") | Kind::End
+            ) {
+                None
+            } else {
+                Some(Box::new(self.expression()?))
+            };
+            return Ok(FailureHandler::Fail { value, location });
+        }
         if self.token().kind == Kind::Keyword("return") {
             if self.constant_expression {
                 return Err(self.error(
@@ -242,8 +303,7 @@ impl Parser<'_, '_> {
             Kind::Keyword("fn") => {
                 self.cursor += 1;
                 if self.token().kind == Kind::Symbol("[") {
-                    let closure = self.closure(location)?;
-                    return self.primary_node(ExpressionKind::Closure(Box::new(closure)), location);
+                    return self.closure_node(location);
                 }
                 let Kind::Ident(name) = self.token().kind else {
                     return Err(self.error(
@@ -302,22 +362,29 @@ impl Parser<'_, '_> {
                 self.cursor += 1;
                 self.value_block()?.0.kind
             }
+            Kind::Keyword("null") => {
+                self.cursor += 1;
+                ExpressionKind::Null
+            }
             Kind::Keyword("true" | "false") => {
                 let value = self.token().kind == Kind::Keyword("true");
                 self.cursor += 1;
                 ExpressionKind::Bool(value)
             }
-            Kind::Symbol("~") => {
+            Kind::Symbol("~" | "*")
+            | Kind::Keyword("len" | "not" | "c_bytes" | "c_byte_len" | "new") => {
+                let constructor: fn(Box<Expression>) -> ExpressionKind = match self.token().kind {
+                    Kind::Symbol("*") => ExpressionKind::Deref,
+                    Kind::Keyword("new") => ExpressionKind::New,
+                    Kind::Symbol("~") => ExpressionKind::BitNot,
+                    Kind::Keyword("len") => ExpressionKind::Len,
+                    Kind::Keyword("not") => ExpressionKind::Not,
+                    Kind::Keyword("c_bytes") => ExpressionKind::CBytes,
+                    Kind::Keyword("c_byte_len") => ExpressionKind::CByteLen,
+                    _ => unreachable!(),
+                };
                 self.cursor += 1;
-                ExpressionKind::BitNot(Box::new(self.unary()?))
-            }
-            Kind::Keyword("len") => {
-                self.cursor += 1;
-                ExpressionKind::Len(Box::new(self.unary()?))
-            }
-            Kind::Keyword("not") => {
-                self.cursor += 1;
-                ExpressionKind::Not(Box::new(self.unary()?))
+                constructor(Box::new(self.unary()?))
             }
             Kind::Ident(name) => {
                 self.cursor += 1;
@@ -409,7 +476,12 @@ impl Parser<'_, '_> {
                 ));
             }
         };
-        let mut result = self.primary_node(kind, location)?;
+        let result = self.primary_node(kind, location)?;
+        self.postfix(result)
+    }
+
+    // 後置式の一時値を、原子式の再帰解析中のスタックに積まない。
+    fn postfix(&mut self, mut result: Expression) -> Result<Expression, Diagnostic> {
         while matches!(
             self.token().kind,
             Kind::Symbol("." | "[" | "(") | Kind::Keyword("with")
@@ -504,32 +576,6 @@ impl Parser<'_, '_> {
                 },
                 location,
             )?;
-        }
-        if matches!(
-            self.token().kind,
-            Kind::Symbol(
-                "=" | "+="
-                    | "-="
-                    | "*="
-                    | "/="
-                    | "%="
-                    | "+%="
-                    | "-%="
-                    | "*%="
-                    | "&="
-                    | "|="
-                    | "^="
-                    | "<<="
-                    | ">>="
-            )
-        ) {
-            return Err(self.error(
-                ErrorKind::InvalidSource,
-                crate::diagnostic!(
-                    "assign.statement",
-                    "assignment is a statement, not an expression"
-                ),
-            ));
         }
         Ok(result)
     }

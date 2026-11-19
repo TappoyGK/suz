@@ -23,7 +23,8 @@ fn main() -> u8 {
     fix selected = matchexpr a + b { 300 => 4
         _ => 9 }
     log info `${sum},${scaled},${narrow},${inner},${f},${rounded},${wrap},${negative},${cancel},${tiny},${zero},${selected}`
-    log info `${max * max}`
+    fix square = `${max * max}`
+    log info `${square}`
     return 0
 }"#;
     let out = compile_and_run_c23(source, "numeric.suz");
@@ -34,7 +35,7 @@ fn main() -> u8 {
     );
     assert_eq!(
         String::from_utf8(out.stderr).unwrap(),
-        "info numeric.suz:20: 300,80,7,510,300.0,300.0,44,-200,18446744073709551615,1,3,4\ninfo numeric.suz:21: 340282366920938463426481119284349108225\n"
+        "info numeric.suz:20: 300,80,7,510,300.0,300.0,44,-200,18446744073709551615,1,3,4\ninfo numeric.suz:22: 340282366920938463426481119284349108225\n"
     );
 }
 
@@ -49,15 +50,28 @@ fn main() -> u8 {
     fix small: f64 = 0.5
     fix huge: f64 = 1.0e300
     fix max: u64 = 18_446_744_073_709_551_615
-    log info `${EXACT},${i > f},${f < i},${i != f},${minus < max},${zero == -0.0},${zero < small},${max * max < huge}`
-    log info `${i < nan},${i >= nan},${nan <= i},${nan != i},${i < inf},${-inf < minus}`
+    fix a = i > f
+    fix b = f < i
+    fix c = i != f
+    fix d = minus < max
+    fix e = zero == -0.0
+    fix g = zero < small
+    fix h = max * max < huge
+    log info `${EXACT},${a},${b},${c},${d},${e},${g},${h}`
+    fix j = i < nan
+    fix k = i >= nan
+    fix l = nan <= i
+    fix m = nan != i
+    fix n = i < inf
+    fix o = -inf < minus
+    log info `${j},${k},${l},${m},${n},${o}`
     return 0
 }"#;
     let out = compile_and_run_c23(source, "compare.suz");
     assert!(out.status.success());
     assert_eq!(
         String::from_utf8(out.stderr).unwrap(),
-        "info compare.suz:10: true,true,true,true,true,true,true,true\ninfo compare.suz:11: false,false,false,true,true,true\n"
+        "info compare.suz:17: true,true,true,true,true,true,true,true\ninfo compare.suz:24: false,false,false,true,true,true\n"
     );
 }
 

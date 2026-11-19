@@ -43,9 +43,9 @@ fn generated_bool_values_preserve_negation_and_copies() {
     .enumerate()
     {
         let program = CheckedProgram {
+            externs: Vec::new(),
+            external_base: 0,
             function_types: Vec::new(),
-            globals: Vec::new(),
-            global_warnings: Vec::new(),
             constant_texts: Default::default(),
             main_location: crate::ast::Location { line: 1, column: 1 },
             enums: Vec::new(),
@@ -55,30 +55,36 @@ fn generated_bool_values_preserve_negation_and_copies() {
             division_warnings: Vec::new(),
             main_id: 0,
             functions: vec![crate::check::ir::CheckedFunction {
+                fallible: false,
                 id: 0,
                 parameters: Vec::new(),
                 result: Type::Bool,
                 statements: vec![
                     CheckedStatement::Binding {
+                        location: crate::ast::Location { line: 1, column: 1 },
                         mutable: true,
                         id: 0,
                         ty: Type::Bool,
-                        initializer: boolean(Value::Bool(true)),
+                        initializer: Box::new(boolean(Value::Bool(true))),
                     },
                     CheckedStatement::Binding {
+                        location: crate::ast::Location { line: 1, column: 1 },
                         mutable: false,
                         id: 1,
                         ty: Type::Bool,
-                        initializer: boolean(Value::Local(0)),
+                        initializer: Box::new(boolean(Value::Local(0))),
                     },
                     CheckedStatement::Assign {
-                        global: false,
+                        location: crate::ast::Location { line: 1, column: 1 },
                         fields: Vec::new(),
                         id: 0,
                         ty: Type::Bool,
-                        value: boolean(not(Value::Local(0))),
+                        value: Box::new(boolean(not(Value::Local(0)))),
                     },
-                    CheckedStatement::Return(boolean(value)),
+                    CheckedStatement::Return {
+                        value: boolean(value),
+                        location: crate::ast::Location { line: 1, column: 1 },
+                    },
                 ],
             }],
         };
@@ -86,7 +92,14 @@ fn generated_bool_values_preserve_negation_and_copies() {
         let executable = directory.join(format!("{index}"));
         fs::write(
             &c_file,
-            generate(&program, "test.suz", crate::TextPoolLimit::default()),
+            generate(
+                &program,
+                "test.suz",
+                crate::TextPoolLimit::default(),
+                crate::ArenaOptions::default(),
+                crate::LogLevel::default(),
+                false,
+            ),
         )
         .unwrap();
         let output = runtime_link::compiler()
@@ -219,9 +232,9 @@ fn comparison_codegen_sequences_and_reuses_operands() {
             });
         }
         let program = CheckedProgram {
+            externs: Vec::new(),
+            external_base: 0,
             function_types: Vec::new(),
-            globals: Vec::new(),
-            global_warnings: Vec::new(),
             constant_texts: Default::default(),
             main_location: crate::ast::Location { line: 1, column: 1 },
             enums: Vec::new(),
@@ -231,10 +244,14 @@ fn comparison_codegen_sequences_and_reuses_operands() {
             division_warnings: Vec::new(),
             main_id: 0,
             functions: vec![crate::check::ir::CheckedFunction {
+                fallible: false,
                 id: 0,
                 parameters: Vec::new(),
                 result: Type::Bool,
-                statements: vec![CheckedStatement::Return(expr)],
+                statements: vec![CheckedStatement::Return {
+                    value: expr,
+                    location: crate::ast::Location { line: 1, column: 1 },
+                }],
             }],
         };
         // ローカルの読み取りの記録は、C生成のテスト用コードだけに入れる。
@@ -255,7 +272,14 @@ return result != {expected} || trace != {trace};
             values[0],
             values[1],
             values[2],
-            generate(&program, "test.suz", crate::TextPoolLimit::default())
+            generate(
+                &program,
+                "test.suz",
+                crate::TextPoolLimit::default(),
+                crate::ArenaOptions::default(),
+                crate::LogLevel::default(),
+                false
+            )
         );
         let source = directory.join(format!("{index}.c"));
         let executable = directory.join(format!("{index}"));

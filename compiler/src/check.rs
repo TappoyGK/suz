@@ -2,13 +2,16 @@
 //!
 //! 利用元: [`crate::analyze`]。
 
+mod arena;
 mod closures;
 mod constants;
 mod control;
 mod declarations;
 mod diagnostics;
+mod errors;
 pub(crate) mod exact;
 mod expression;
+mod ffi;
 mod function_values;
 mod functions;
 mod generic;

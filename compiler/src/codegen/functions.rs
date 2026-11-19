@@ -10,13 +10,19 @@ use crate::{
 use std::fmt::Write;
 
 pub(super) fn declaration(function: &CheckedFunction) -> String {
-    let parameters = function
+    let mut parameters = function
         .parameters
         .iter()
         .enumerate()
         .map(|(id, ty)| format!("const {} suz_local_{id}", ty.c_name()))
         .collect::<Vec<_>>()
         .join(", ");
+    if function.fallible {
+        if !parameters.is_empty() {
+            parameters.push_str(", ");
+        }
+        parameters.push_str("uint64_t *suz_error");
+    }
     format!(
         "static inline {} suz_fn_{}({})",
         function.result.c_name(),
@@ -30,6 +36,7 @@ pub(super) fn declaration(function: &CheckedFunction) -> String {
 }
 
 pub(super) fn emit(function: &CheckedFunction, context: &mut ExpressionContext) -> String {
+    context.function_result = Some(function.result);
     context.temporaries.clear();
     context.closure_environments.clear();
     for ty in function.parameters.iter().chain([&function.result]) {
@@ -40,7 +47,11 @@ pub(super) fn emit(function: &CheckedFunction, context: &mut ExpressionContext) 
             context.float_types.insert(*ty);
         }
     }
-    let mut body = String::new();
+    let mut body = if function.fallible {
+        "    *suz_error = 0;\n".into()
+    } else {
+        String::new()
+    };
     statements::emit_block(&mut body, &function.statements, 1, &mut 0, context);
     let mut c = format!("{} {{\n", declaration(function));
     for id in 0..function.parameters.len() {
@@ -62,6 +73,7 @@ pub(super) fn call(
     id: usize,
     arguments: &[CheckedExpression],
     context: &mut ExpressionContext,
+    error: Option<&str>,
 ) -> String {
     let mut setup = Vec::new();
     let mut names = Vec::new();
@@ -71,6 +83,9 @@ pub(super) fn call(
         let name = format!("suz_cmp_{index}");
         setup.push(format!("{name} = {}", expression(argument, context)));
         names.push(name);
+    }
+    if let Some(error) = error {
+        names.push(format!("&{error}"));
     }
     let call = format!("suz_fn_{id}({})", names.join(", "));
     if setup.is_empty() {
@@ -86,6 +101,7 @@ pub(super) fn invoke(
     target: &CheckedExpression,
     arguments: &[CheckedExpression],
     context: &mut ExpressionContext,
+    error: Option<&str>,
 ) -> String {
     let id = context.temporaries.len();
     context.temporaries.push(target.ty);
@@ -100,6 +116,9 @@ pub(super) fn invoke(
         ));
         names.push(format!("suz_cmp_{index}"));
     }
+    if let Some(error) = error {
+        names.push(format!("&{error}"));
+    }
     if matches!(target.ty, Type::Function(_)) {
         names.insert(0, format!("suz_cmp_{id}.environment"));
         setup.push(format!("suz_cmp_{id}.call({})", names.join(", ")));
@@ -113,7 +132,7 @@ pub(super) fn invoke(
 /// 関数値の型の番号は依存先から付くため、ここでは番号順に出力できる。
 pub(super) fn type_declarations(c: &mut String, context: &ExpressionContext) {
     for (id, ty) in context.function_types.iter().enumerate() {
-        let args = if ty.parameters.is_empty() {
+        let mut args = if ty.parameters.is_empty() {
             "void".into()
         } else {
             ty.parameters
@@ -122,6 +141,14 @@ pub(super) fn type_declarations(c: &mut String, context: &ExpressionContext) {
                 .collect::<Vec<_>>()
                 .join(", ")
         };
+        if !ty.errors.is_empty() {
+            if args == "void" {
+                args.clear();
+            } else {
+                args.push_str(", ");
+            }
+            args.push_str("uint64_t *");
+        }
         writeln!(
             c,
             "typedef {} (*suz_fntype_{id})({args});",
@@ -131,6 +158,9 @@ pub(super) fn type_declarations(c: &mut String, context: &ExpressionContext) {
         if context.call_only_types.contains(&id) {
             let mut arguments = vec!["void *".to_owned()];
             arguments.extend(ty.parameters.iter().map(|ty| ty.c_name()));
+            if !ty.errors.is_empty() {
+                arguments.push("uint64_t *".into());
+            }
             writeln!(
                 c,
                 "typedef struct {{ {} (*call)({}); void *environment; }} suz_callback_{id};",
@@ -172,11 +202,20 @@ pub(super) fn call_only_declarations(c: &mut String, context: &ExpressionContext
             .collect();
         let mut with_environment = vec!["void *environment".to_owned()];
         with_environment.extend(parameters);
+        if !ty.errors.is_empty() {
+            with_environment.push("uint64_t *suz_error".into());
+        }
         let parameters = with_environment.join(", ");
-        let arguments = (0..ty.parameters.len())
+        let mut arguments = (0..ty.parameters.len())
             .map(|i| format!("argument_{i}"))
             .collect::<Vec<_>>()
             .join(", ");
+        if !ty.errors.is_empty() {
+            if !arguments.is_empty() {
+                arguments.push_str(", ");
+            }
+            arguments.push_str("suz_error");
+        }
         let return_value = if ty.result == Type::Void {
             ""
         } else {

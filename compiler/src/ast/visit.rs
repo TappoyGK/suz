@@ -43,13 +43,9 @@ pub(crate) fn walk_expression<V: Visitor + ?Sized>(
             for bound in [start, end].into_iter().flatten() {
                 visitor.expression(bound)?;
             }
-            if let Some(FailureHandler::Value(value) | FailureHandler::Return { value, .. }) =
-                fallback
-            {
-                visitor.expression(value)?;
-            }
+            walk_handler(visitor, fallback)?;
         }
-        ExpressionKind::Template(parts) => {
+        ExpressionKind::Template(parts) | ExpressionKind::Panic(parts) => {
             for part in parts {
                 if let TemplatePart::Value(value) = part {
                     visitor.expression(value)?;
@@ -81,7 +77,7 @@ pub(crate) fn walk_expression<V: Visitor + ?Sized>(
                 visitor.expression(argument)?;
             }
         }
-        ExpressionKind::Void | ExpressionKind::Variant { .. } => {}
+        ExpressionKind::Null | ExpressionKind::Void | ExpressionKind::Variant { .. } => {}
         ExpressionKind::Block { statements, value } => visitor.scope(statements, Some(value))?,
         ExpressionKind::If {
             branches,
@@ -107,14 +103,14 @@ pub(crate) fn walk_expression<V: Visitor + ?Sized>(
             operand, fallback, ..
         } => {
             visitor.expression(operand)?;
-            if let Some(FailureHandler::Value(value) | FailureHandler::Return { value, .. }) =
-                fallback
-            {
-                visitor.expression(value)?;
-            }
+            walk_handler(visitor, fallback)?;
         }
         ExpressionKind::Group(inner)
         | ExpressionKind::Negate(inner)
+        | ExpressionKind::New(inner)
+        | ExpressionKind::Deref(inner)
+        | ExpressionKind::CBytes(inner)
+        | ExpressionKind::CByteLen(inner)
         | ExpressionKind::Len(inner)
         | ExpressionKind::Not(inner)
         | ExpressionKind::BitNot(inner) => visitor.expression(inner)?,
@@ -142,9 +138,25 @@ pub(crate) fn walk_statement<V: Visitor + ?Sized>(
     statement: &Statement,
 ) -> Result<(), Diagnostic> {
     match statement {
+        Statement::Let {
+            value,
+            body,
+            otherwise,
+            ..
+        } => {
+            visitor.expression(value)?;
+            visitor.scope(body, None)?;
+            visitor.scope(otherwise, None)?;
+        }
+        Statement::Store { target, value, .. } => {
+            visitor.expression(target)?;
+            visitor.expression(value)?;
+        }
         Statement::Binding { initializer, .. } => visitor.expression(initializer)?,
         Statement::Assign { value, .. }
         | Statement::Return(value)
+        | Statement::Fail(value)
+        | Statement::Recover(value)
         | Statement::Expression(value) => visitor.expression(value)?,
         Statement::Log { parts, .. } => {
             for part in parts {
@@ -153,7 +165,10 @@ pub(crate) fn walk_statement<V: Visitor + ?Sized>(
                 }
             }
         }
-        Statement::Block(body) => visitor.scope(body, None)?,
+        Statement::Arena { body, .. }
+        | Statement::Block(body)
+        | Statement::Unsafe(body)
+        | Statement::Objection(body) => visitor.scope(body, None)?,
         Statement::Loop { condition, body } => {
             if let Some(condition) = condition {
                 visitor.expression(condition)?;
@@ -190,7 +205,36 @@ pub(crate) fn walk_statement<V: Visitor + ?Sized>(
                 visitor.scope(&arm.body, None)?;
             }
         }
-        Statement::Break(_) | Statement::Continue(_) => {}
+        Statement::Break(_) | Statement::Continue(_) | Statement::Ignore(_) => {}
+    }
+    Ok(())
+}
+
+fn walk_handler<V: Visitor + ?Sized>(
+    visitor: &mut V,
+    handler: &Option<FailureHandler>,
+) -> Result<(), Diagnostic> {
+    match handler {
+        Some(FailureHandler::Errors(handler)) => {
+            let arms = &handler.arms;
+            for arm in arms {
+                if let Some(pattern) = &arm.pattern {
+                    visitor.expression(pattern)?;
+                }
+                match &arm.body {
+                    super::ErrorArmBody::Value(value) => visitor.expression(value)?,
+                    super::ErrorArmBody::Statements { body, .. } => visitor.scope(body, None)?,
+                }
+            }
+        }
+        Some(
+            FailureHandler::Value(value)
+            | FailureHandler::Return { value, .. }
+            | FailureHandler::Fail {
+                value: Some(value), ..
+            },
+        ) => visitor.expression(value)?,
+        _ => {}
     }
     Ok(())
 }

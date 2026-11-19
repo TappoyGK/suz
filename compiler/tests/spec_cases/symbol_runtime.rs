@@ -238,7 +238,9 @@ fn log_fragments_do_not_allocate() {
         r#"enum State: u8 { Ready }
 fn main() -> u8 {
     for i in 0..<1000 {
-        log info `value ${i} / ${1.5} / ${true} / ${State.Ready}`
+        fix fraction = 1.5
+        fix yes = true
+        log info `value ${i} / ${fraction} / ${yes} / ${State.Ready}`
         log info ``
     }
     return 0
@@ -261,7 +263,7 @@ int main(void) {
         String::from_utf8_lossy(&result.stderr)
     );
     let expected: String = (0..1000)
-        .map(|i| format!("info text.suz:4: value {i} / 1.5 / true / Ready\ninfo text.suz:5: \n"))
+        .map(|i| format!("info text.suz:6: value {i} / 1.5 / true / Ready\ninfo text.suz:7: \n"))
         .collect();
     assert_eq!(result.stderr, expected.as_bytes());
 }

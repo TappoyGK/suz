@@ -30,6 +30,7 @@ pub(super) fn emit(closure: &CheckedClosure, ty: Type, context: &mut ExpressionC
             }
         ));
     }
+    let saved_recovery = context.recovery.take();
     let saved_temporaries = std::mem::take(&mut context.temporaries);
     let saved_environments = std::mem::take(&mut context.closure_environments);
     let saved_references = std::mem::take(&mut context.references);
@@ -41,7 +42,12 @@ pub(super) fn emit(closure: &CheckedClosure, ty: Type, context: &mut ExpressionC
         .filter(|(_, c)| c.by_reference)
         .map(|(i, _)| parameter_count + i)
         .collect();
-    let mut body = String::new();
+    let saved_result = context.function_result.replace(function.result);
+    let mut body = if function.fallible {
+        "    *suz_error = 0;\n".into()
+    } else {
+        String::new()
+    };
     emit_block(&mut body, &function.statements, 1, &mut 0, context);
     let mut definition = String::new();
     if !closure.captures.is_empty() {
@@ -63,6 +69,9 @@ pub(super) fn emit(closure: &CheckedClosure, ty: Type, context: &mut ExpressionC
             context.call_only_types.insert(*shape);
         }
         parameters.push(format!("const {} suz_local_{index}", ty.c_name()));
+    }
+    if function.fallible {
+        parameters.push("uint64_t *suz_error".into());
     }
     writeln!(
         definition,
@@ -93,6 +102,8 @@ pub(super) fn emit(closure: &CheckedClosure, ty: Type, context: &mut ExpressionC
     definition.push_str("}\n\n");
     // 入れ子のクロージャと値ブロックは、外側の本体より先に出力済み。
     context.functions.push_str(&definition);
+    context.function_result = saved_result;
+    context.recovery = saved_recovery;
     context.temporaries = saved_temporaries;
     context.closure_environments = saved_environments;
     context.references = saved_references;

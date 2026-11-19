@@ -7,7 +7,6 @@ fnshape Calc(i32) -> i32
 fnshape Once() -> i32
 fnshape Action() -> void
 struct Point { x: i32 }
-var STATE: i32 = 1
 fn apply(f: fn Calc, n: i32) -> i32 { return f(n) }
 fn run(f: fn Once) -> i32 { return f() }
 fn pair(a: fn Once, b: fn Once) -> i32 { return a() * 10 + b() }
@@ -20,6 +19,7 @@ fn generic(n: int) -> i32 {
     return run(fn [n]() -> i32 { return n as i32 or 0 })
 }
 fn main() -> u8 {
+    var state: i32 = 1
     var scale: i32 = 2
     fix first = apply(fn [scale](x: i32) -> i32 { return x * scale }, expr {
         scale = 10
@@ -44,8 +44,8 @@ fn main() -> u8 {
     if nested != 5 { return 3 }
     if use_capture(fn [](x: i32) -> i32 { return x + 2 }) != 6 { return 4 }
     if generic(7 as i8) != 7 || generic(9 as u64) != 9 { return 5 }
-    execute(fn []() -> void { STATE = 12 })
-    if run(fn []() -> i32 { return STATE }) != 12 { return 6 }
+    execute(fn [var state]() -> void { state = 12 })
+    if run(fn [state]() -> i32 { return state }) != 12 { return 6 }
     // クロージャのローカル変数は、同名の外側の変数とは別の束縛。
     var local: i32 = 0
     local = run(fn []() -> i32 { var local: i32 = 1
@@ -58,9 +58,9 @@ fn main() -> u8 {
     fix a: i32 = 2
     fix b: i32 = 7
     if pair(fn [a]() -> i32 { return a }, fn [b]() -> i32 { return b }) != 27 { return 9 }
-    // グローバルは環境に写さず、後続の実引数による変更後の値を読む。
-    if apply(fn [](x: i32) -> i32 { return STATE + x }, expr {
-        STATE = 20
+    // 参照キャプチャーは、後続の実引数による変更後の値を読む。
+    if apply(fn [var state](x: i32) -> i32 { return state + x }, expr {
+        state = 20
         1
     }) != 21 { return 10 }
     return 0

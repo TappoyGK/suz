@@ -71,9 +71,10 @@ pub fn build_and_run_c(c_file: &Path, executable: &Path) -> Result<Output> {
     if source.contains("#include \"suz_runtime.h\"") {
         let runtime = Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime");
         command
-            .arg("-I")
+            .arg("-iquote")
             .arg(&runtime)
             .arg(runtime.join("suz_runtime.c"))
+            .arg(runtime.join("suz_arena.c"))
             .arg(runtime.join("suz_text.c"))
             .arg(runtime.join("suz_parse.c"))
             .args(

@@ -6,7 +6,12 @@
 use super::{Failure, Result, assets, output::StagedDirectory};
 use std::{fs, path::Path};
 
-pub fn emit(c: &str, destination: &Path, environment: Option<&Path>) -> Result<()> {
+pub fn emit(
+    c: &str,
+    destination: &Path,
+    environment: Option<&Path>,
+    foreign: &super::foreign::ForeignOptions,
+) -> Result<()> {
     let failure = |error| {
         Failure::tool(
             2,
@@ -38,6 +43,19 @@ pub fn emit(c: &str, destination: &Path, environment: Option<&Path>) -> Result<(
         .unwrap_or(Path::new("."));
     let staged = StagedDirectory::new(parent).map_err(failure)?;
     unpack(c, staged.path(), environment.as_deref()).map_err(failure)?;
+    if !foreign.args.is_empty() {
+        let script = staged.path().join("scripts/build-c.sh");
+        let bytes = fs::read(&script).map_err(failure)?;
+        let marker = b"ffi_args=()";
+        let start = bytes
+            .windows(marker.len())
+            .position(|w| w == marker)
+            .expect("bundled FFI argument marker");
+        let mut updated = bytes[..start].to_vec();
+        updated.extend(foreign.script_assignment());
+        updated.extend_from_slice(&bytes[start + marker.len()..]);
+        fs::write(script, updated).map_err(failure)?;
+    }
     staged.publish(destination).map_err(failure)
 }
 

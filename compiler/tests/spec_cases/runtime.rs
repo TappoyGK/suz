@@ -169,7 +169,14 @@ _Noreturn void suz_env_panic(void) {
     puts("panic callback");
     exit(101);
 }
-int main(void) {
+int main(int argc, char **argv) {
+    (void)argv;
+    if (argc > 1) {
+        suz_panic_begin("sample.suz", 3, 9);
+        suz_log_text("integer ", 8);
+        suz_log_text("overflow", 8);
+        suz_panic_end();
+    }
     suz_panic("sample.suz", 3, 9, "integer overflow");
 }
 "#;
@@ -178,10 +185,12 @@ int main(void) {
     fs::write(&path, source).unwrap();
     let executable = directory.0.join("custom-env");
     build(&path, &executable, "-O2", false);
-    let result = Command::new(executable).output().unwrap();
-    assert_eq!(result.status.code(), Some(101));
-    assert_eq!(result.stdout, b"panic callback\n");
-    assert!(result.stderr.is_empty());
+    for args in [vec![], vec!["fragments"]] {
+        let result = Command::new(&executable).args(args).output().unwrap();
+        assert_eq!(result.status.code(), Some(101));
+        assert_eq!(result.stdout, b"panic callback\n");
+        assert!(result.stderr.is_empty());
+    }
 }
 
 #[test]

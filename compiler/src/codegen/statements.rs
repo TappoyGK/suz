@@ -18,11 +18,74 @@ pub(super) fn emit_block(
     let indent = "    ".repeat(depth);
     for statement in statements {
         match statement {
+            CheckedStatement::Arena { body, .. } => {
+                context.uses_arena = true;
+                let id = *next_assignment;
+                *next_assignment += 1;
+                writeln!(c, "{indent}{{\n{indent}    suz_arena_mark suz_arena_mark_{id} __attribute__((cleanup(suz_arena_restore))) = suz_arena_save();").unwrap();
+                emit_block(c, body, depth + 1, next_assignment, context);
+                writeln!(c, "{indent}}}").unwrap();
+            }
+            CheckedStatement::Store {
+                target,
+                id,
+                value,
+                body,
+                ..
+            } => {
+                writeln!(
+                    c,
+                    "{indent}{{\n{indent}    {} const suz_local_{id} = &({});",
+                    target.ty.pointer().c_name(),
+                    expression(target, context)
+                )
+                .unwrap();
+                emit_block(c, body, depth + 1, next_assignment, context);
+                writeln!(
+                    c,
+                    "{indent}    *suz_local_{id} = {};\n{indent}}}",
+                    expression(value, context)
+                )
+                .unwrap();
+            }
+
+            CheckedStatement::Recover(value) => {
+                let target = context
+                    .recovery
+                    .as_mut()
+                    .expect("recover belongs to an error arm");
+                target.used = true;
+                let result = target.result.clone().expect("recover requires a value");
+                let label = target.label.clone();
+                writeln!(
+                    c,
+                    "{indent}{result} = {};\n{indent}goto {label};",
+                    expression(value, context)
+                )
+                .unwrap();
+            }
+
+            CheckedStatement::Fail(value) => {
+                let failure = super::errors::fail(Some(value), "", context);
+                writeln!(c, "{indent}{failure}").unwrap();
+            }
+            CheckedStatement::HandleCall { id, call, handler } => {
+                super::errors::statement(c, *id, call, handler, &indent, context)
+            }
+            CheckedStatement::Ignore(ignore) => {
+                if context.log_ignore {
+                    writeln!(c, "{indent}{};", super::logs::ignore(ignore, context)).unwrap();
+                }
+            }
             CheckedStatement::Log {
                 parts,
                 location,
                 level,
             } => {
+                // 検査済みIRを保持したまま生成だけを省く。値の読み取りや表示用データも登録しない。
+                if !context.log_level.includes(*level) {
+                    continue;
+                }
                 let id = *next_assignment;
                 *next_assignment += 1;
                 super::logs::emit(c, parts, (*location, *level), depth, id, context);
@@ -212,7 +275,7 @@ pub(super) fn emit_block(
                     writeln!(c, "{indent}}}").unwrap();
                 }
             }
-            CheckedStatement::Block(inner) => {
+            CheckedStatement::Block(inner) | CheckedStatement::Objection(inner) => {
                 writeln!(c, "{indent}{{").unwrap();
                 emit_block(c, inner, depth + 1, next_assignment, context);
                 writeln!(c, "{indent}}}").unwrap();
@@ -222,6 +285,7 @@ pub(super) fn emit_block(
                 id,
                 ty,
                 initializer,
+                ..
             } => {
                 writeln!(
                     c,
@@ -235,11 +299,11 @@ pub(super) fn emit_block(
                 writeln!(c, "{indent}(void)suz_local_{id};").unwrap();
             }
             CheckedStatement::Assign {
-                global,
                 id,
                 fields,
                 ty,
                 value,
+                ..
             } => {
                 let index = *next_assignment;
                 *next_assignment += 1;
@@ -250,18 +314,14 @@ pub(super) fn emit_block(
                     expression(value, context)
                 )
                 .unwrap();
-                let mut local = if *global {
-                    format!("suz_global_{id}")
-                } else {
-                    context.local(*id)
-                };
+                let mut local = context.local(*id);
                 for index in fields {
                     write!(local, ".suz_field_{index}").unwrap();
                 }
                 writeln!(c, "{indent}{local} = suz_assign_{index};").unwrap();
                 writeln!(c, "{indent}(void){local};").unwrap();
             }
-            CheckedStatement::Return(value) => {
+            CheckedStatement::Return { value, .. } => {
                 writeln!(c, "{indent}return {};", expression(value, context)).unwrap();
             }
         }

@@ -9,21 +9,22 @@ fix RIGHT = ORIGIN with { x: 1 }
 fix ORIGIN = Point { x: 0, y: 2 }
 fix PLAYER = Player { pos: RIGHT, name: `old`, view: `abc`[:] }
 fix UPDATED = PLAYER with { pos: RIGHT with { y: 3 }, name: `new` }
-var STATE = ORIGIN with { x: 5 } allow [diagnostic.global-var: evaluation order test]
-var TRACE: i32 = 0 allow [diagnostic.global-var: evaluation order test]
-fn base() -> Point { TRACE = TRACE * 10 + 1
-    return STATE }
-fn mark(n: i32) -> i32 { TRACE = TRACE * 10 + n
-    STATE.y = 99
+struct State { point: Point, trace: i32 }
+fn base(state: ptr State) -> Point { state.trace = state.trace * 10 + 1
+    return state.point }
+fn mark(state: ptr State, n: i32) -> i32 { state.trace = state.trace * 10 + n
+    state.point.y = 99
     return n }
 fn generic(n: int) -> Point { return ORIGIN with { x: n as i32 or 0 } }
 fn accepts(p: Point) -> bool { return p.x == 8 }
 fn main() -> u8 {
-    fix snapshot = base() with { x: mark(2) }
-    if TRACE != 12 || snapshot.x != 2 || snapshot.y != 2 || STATE.y != 99 { return 1 }
-    TRACE = 0
-    fix ordered = base() with { y: mark(2), x: mark(3) }
-    if TRACE != 123 || ordered.x != 3 || ordered.y != 2 { return 2 }
+    arena {
+    fix ptr state = new State { point: ORIGIN with { x: 5 }, trace: 0 }
+    fix snapshot = base(state) with { x: mark(state, 2) }
+    if state.trace != 12 || snapshot.x != 2 || snapshot.y != 2 || state.point.y != 99 { return 1 }
+    state.trace = 0
+    fix ordered = base(state) with { y: mark(state, 2), x: mark(state, 3) }
+    if state.trace != 123 || ordered.x != 3 || ordered.y != 2 { return 2 }
     fix x: u8 = 8
     fix chained = ORIGIN with { x } with { y: 4 }
     if chained.x != 8 || chained.y != 4 || ORIGIN.y != 2 { return 3 }
@@ -55,9 +56,10 @@ fn main() -> u8 {
     fix wide = (Wide { x: 0 }) with { x: narrow }
     if wide.x != -7 { return 13 }
     fix casted = ORIGIN with { x: 3 }.x as u8 or 9
-    fix sum = base() with { x: 3 }.x + ORIGIN with { y: 1 }.y * 2
+    fix sum = base(state) with { x: 3 }.x + ORIGIN with { y: 1 }.y * 2
     if casted != 3 || sum != 5 { return 14 }
     return 0
+    }
 }
 "#;
     let output = compile_and_run_c23(source, "with.suz");
@@ -102,17 +104,13 @@ fn struct_with_rejects_invalid_targets_fields_and_hidden_writes() {
         suz::compile(source).unwrap_err().rule(),
         "arith.div-zero-always"
     );
-    // 関数呼び出しと大域varは、withのコピー元でも定数式にはならない。
-    for target in ["id(ORIGIN)", "STATE"] {
-        let source = format!(
-            "struct Point {{ x: i32 }}\nfix ORIGIN = Point {{ x: 0 }}\nvar STATE = ORIGIN\nfix BAD = {target} with {{ x: 1 }}\nfn id(p: Point) -> Point {{ return p }}\nfn main() -> u8 {{ STATE.x = 2\nreturn 0 }}"
-        );
-        assert_eq!(
-            suz::compile(source.as_bytes()).unwrap_err().rule(),
-            "const.expression",
-            "{source}"
-        );
-    }
+    // 関数呼び出しは、withのコピー元でも定数式にはならない。
+    let source = "struct Point { x: i32 }\nfix ORIGIN = Point { x: 0 }\nfix BAD = id(ORIGIN) with { x: 1 }\nfn id(p: Point) -> Point { return p }\nfn main() -> u8 { return 0 }";
+    assert_eq!(
+        suz::compile(source.as_bytes()).unwrap_err().rule(),
+        "const.expression",
+        "{source}"
+    );
 }
 
 #[test]

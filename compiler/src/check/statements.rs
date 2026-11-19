@@ -18,7 +18,6 @@ use crate::{
 pub(super) struct Binding {
     pub(super) constant: Option<CheckedExpression>,
     pub(super) id: usize,
-    pub(super) global: bool,
     pub(super) ty: Type,
     pub(super) mutable: bool,
     pub(super) parameter: bool,
@@ -33,9 +32,14 @@ impl Binding {
         Self::local(0, ty, false, false, location)
     }
 
-    fn local(id: usize, ty: Type, mutable: bool, loop_variable: bool, location: Location) -> Self {
+    pub(super) fn local(
+        id: usize,
+        ty: Type,
+        mutable: bool,
+        loop_variable: bool,
+        location: Location,
+    ) -> Self {
         Self {
-            global: false,
             constant: None,
             id,
             ty,
@@ -83,18 +87,22 @@ pub(super) fn check_statements(
         declared,
         output: Vec::new(),
     };
-    for statement in input {
-        check_statement(statement, &mut context)?;
-    }
+    let saved_loop = context.bindings.loop_depth;
+    context.bindings.loop_depth = loop_depth;
+    let result = input
+        .iter()
+        .try_for_each(|statement| check_statement(statement, &mut context));
+    context.bindings.loop_depth = saved_loop;
+    result?;
     Ok(context.output)
 }
 
-struct StatementContext<'a> {
-    bindings: &'a mut Scope,
-    next_id: &'a mut usize,
-    loop_depth: usize,
-    declared: &'a mut Vec<String>,
-    output: Vec<CheckedStatement>,
+pub(super) struct StatementContext<'a> {
+    pub(super) bindings: &'a mut Scope,
+    pub(super) next_id: &'a mut usize,
+    pub(super) loop_depth: usize,
+    pub(super) declared: &'a mut Vec<String>,
+    pub(super) output: Vec<CheckedStatement>,
 }
 
 fn check_statement(
@@ -104,6 +112,44 @@ fn check_statement(
     #[cfg(test)]
     super::generic::work();
     match statement {
+        Statement::Arena { .. } | Statement::Let { .. } | Statement::Store { .. } => {
+            super::arena::statement(statement, context)?
+        }
+        Statement::Recover(value) => {
+            let Some(ty) = context.bindings.recovery.filter(|ty| *ty != Type::Void) else {
+                return Err(value.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "err.recover",
+                        "recover requires a non-void error block arm"
+                    ),
+                ));
+            };
+            let value = super::expression::coerced(value, Some(ty), context.bindings)?;
+            context.output.push(CheckedStatement::Recover(value));
+        }
+        Statement::Ignore(ignore) => {
+            let location = ignore.location;
+            if context.bindings.recovery != Some(Type::Void) {
+                return Err(location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "err.or-ignore",
+                        "ignore statements require a void error arm"
+                    ),
+                ));
+            }
+            context
+                .output
+                .push(CheckedStatement::Ignore(ignore.clone()));
+        }
+
+        Statement::Fail(value) => context
+            .output
+            .push(CheckedStatement::Fail(super::errors::fail(
+                value,
+                context.bindings,
+            )?)),
         Statement::Log {
             parts,
             location,
@@ -117,11 +163,31 @@ fn check_statement(
             });
         }
         Statement::Expression(value) => {
-            context.output.push(CheckedStatement::Expression(expression(
-                value,
-                None,
-                context.bindings,
-            )?));
+            let mut checked = expression(value, None, context.bindings)?;
+            if let super::ir::Value::HandledCall { handler, .. } = &checked.value
+                && matches!(
+                    handler.as_ref(),
+                    super::ir::CallHandler::Return { .. } | super::ir::CallHandler::Fail(_)
+                )
+                && checked.ty != Type::Void
+            {
+                return Err(value.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "expr.or-return-position",
+                        "a call statement with or return or or fail must have success type void"
+                    ),
+                ));
+            }
+            // void呼び出しを文へ移した場合、評価すべき値の式は残らない。
+            if !lower_return_handler(
+                &mut checked,
+                &mut context.output,
+                context.next_id,
+                value.location,
+            ) {
+                context.output.push(CheckedStatement::Expression(checked));
+            }
         }
         Statement::Match {
             target,
@@ -211,6 +277,23 @@ fn check_statement(
                 otherwise,
             });
         }
+        Statement::Unsafe(inner) => {
+            // スコープを複製すると、外側の変数への再代入の記録まで分離される。
+            // 通常のブロックと同じ束縛を使い、unsafeの状態だけを一時的に切り替える。
+            let previous = context.bindings.unsafe_block;
+            context.bindings.unsafe_block = true;
+            let checked = block(inner, context.bindings, context.next_id, context.loop_depth);
+            context.bindings.unsafe_block = previous;
+            context.output.push(CheckedStatement::Block(checked?));
+        }
+        Statement::Objection(inner) => {
+            context.output.push(CheckedStatement::Objection(block(
+                inner,
+                context.bindings,
+                context.next_id,
+                context.loop_depth,
+            )?));
+        }
         Statement::Block(inner) => {
             context.output.push(CheckedStatement::Block(block(
                 inner,
@@ -224,12 +307,10 @@ fn check_statement(
         Statement::Assign { .. } => check_assign(statement, context)?,
 
         Statement::Return(value) => {
-            context
-                .output
-                .push(CheckedStatement::Return(super::functions::return_value(
-                    value,
-                    context.bindings,
-                )?));
+            context.output.push(CheckedStatement::Return {
+                value: super::functions::return_value(value, context.bindings)?,
+                location: value.location,
+            });
         }
     }
     Ok(())
@@ -303,6 +384,7 @@ fn check_binding(
     context: &mut StatementContext<'_>,
 ) -> Result<(), Diagnostic> {
     let Statement::Binding {
+        pointer,
         mutable,
         name,
         location,
@@ -343,13 +425,27 @@ fn check_binding(
         annotation.map(|t| context.bindings.resolve_type(t)),
         context.bindings,
     )?;
+    if initializer.ty.pointee().is_some() != *pointer {
+        return Err(location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "arena.ptr-decl",
+                "pointer bindings require fix ptr or var ptr"
+            ),
+        ));
+    }
     if initializer.ty == Type::Void {
         return Err(location.error(
             ErrorKind::InvalidSource,
             crate::diagnostic!("type.void", "bindings cannot have type void"),
         ));
     }
-    lower_return_handler(&mut initializer, &mut context.output, context.next_id);
+    lower_return_handler(
+        &mut initializer,
+        &mut context.output,
+        context.next_id,
+        *location,
+    );
     let id = *context.next_id;
     *context.next_id += 1;
     context.declared.push(name.clone());
@@ -359,10 +455,11 @@ fn check_binding(
         Binding::local(id, ty, *mutable, false, *location),
     );
     context.output.push(CheckedStatement::Binding {
+        location: *location,
         mutable: *mutable,
         id,
         ty,
-        initializer,
+        initializer: Box::new(initializer),
     });
 
     Ok(())
@@ -389,6 +486,9 @@ fn check_assign(
             crate::diagnostic!("decl.local-scope", "binding '{name}' is not in scope"),
         )
     })?;
+    if super::arena::indirect_path(binding.ty, fields, context.bindings) {
+        return super::arena::named_store(statement, context);
+    }
     if binding.constant.is_some() {
         return Err(location.error(
             ErrorKind::InvalidSource,
@@ -412,8 +512,8 @@ fn check_assign(
             },
         ));
     }
-    super::writes::check(value, name, fields, binding.global)?;
-    let (id, global, mut ty) = (binding.id, binding.global, binding.ty);
+    super::writes::check(value, name, fields)?;
+    let (id, mut ty) = (binding.id, binding.ty);
     let mut indices = Vec::new();
     for name in fields {
         let (index, field_type) =
@@ -422,14 +522,14 @@ fn check_assign(
         ty = field_type;
     }
     let mut value = super::expression::coerced(value, Some(ty), context.bindings)?;
-    lower_return_handler(&mut value, &mut context.output, context.next_id);
+    lower_return_handler(&mut value, &mut context.output, context.next_id, *location);
     context.bindings[name].assigned.set(true);
     context.output.push(CheckedStatement::Assign {
-        global,
+        location: *location,
         id,
         fields: indices,
         ty,
-        value,
+        value: Box::new(value),
     });
 
     Ok(())

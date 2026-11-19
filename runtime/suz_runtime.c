@@ -147,7 +147,14 @@ static void lock_output(void) {
 void suz_log_begin(suz_log_level level, const char *source, size_t line) {
     lock_output();
     output_level = level;
-    write_text(level == SUZ_LOG_WARN ? "warn" : "info");
+    switch (level) {
+        case SUZ_LOG_DEBUG: write_text("debug"); break;
+        case SUZ_LOG_INFO: write_text("info"); break;
+        case SUZ_LOG_WARN: write_text("warn"); break;
+        case SUZ_LOG_IGNORE: write_text("ignore"); break;
+        case SUZ_LOG_ERROR: write_text("error"); break;
+        case SUZ_LOG_PANIC: abort(); /* panicは専用の開始処理を使う。 */
+    }
     write_text(" ");
     write_text(source);
     write_text(":");
@@ -183,7 +190,7 @@ void suz_log_end(void) {
     atomic_flag_clear_explicit(&output_lock, memory_order_release);
 }
 
-_Noreturn void suz_panic(const char *source, size_t line, size_t column, const char *reason) {
+void suz_panic_begin(const char *source, size_t line, size_t column) {
     lock_output();
     output_level = SUZ_LOG_PANIC;
     write_text("panic ");
@@ -193,9 +200,18 @@ _Noreturn void suz_panic(const char *source, size_t line, size_t column, const c
     write_text(":");
     write_position(column);
     write_text(": ");
-    write_text(reason);
+}
+
+_Noreturn void suz_panic_end(void) {
+    // 終了までロックを保持し、パニック診断の間に別の出力を挟まない。
     write_text("\n");
     suz_env_panic();
+}
+
+_Noreturn void suz_panic(const char *source, size_t line, size_t column, const char *reason) {
+    suz_panic_begin(source, line, column);
+    write_text(reason);
+    suz_panic_end();
 }
 
 int suz_exact_compare_float(suz_exact a, double b) {

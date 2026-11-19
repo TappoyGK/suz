@@ -4,10 +4,13 @@
 //! 主な対象規則: `[const.decl]`、`[decl.location]`、`[decl.top-level]`、`[fn.return]`、`[for.range]`、`[prog.main]`。
 
 mod allows;
+mod arena;
 mod branches;
 mod closures;
 mod enums;
+mod errors;
 mod expressions;
+mod ffi;
 mod function_types;
 mod functions;
 mod logs;
@@ -89,7 +92,6 @@ impl<'a, 's> Parser<'a, 's> {
 
     fn top_level_binding(&mut self) -> Result<TopLevelBinding, Diagnostic> {
         let start = self.location();
-        let mutable = self.token().kind == Kind::Keyword("var");
         self.cursor += 1;
         let location = self.location();
         let name = match self.token().kind {
@@ -108,7 +110,7 @@ impl<'a, 's> Parser<'a, 's> {
         self.cursor += 1;
         let annotation = if self.token().kind == Kind::Symbol(":") {
             self.cursor += 1;
-            let ty = self.parse_type()?;
+            let ty = self.stored_type()?;
             if ty == Type::Void {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
@@ -122,10 +124,7 @@ impl<'a, 's> Parser<'a, 's> {
         if self.token().kind != Kind::Symbol("=") {
             return Err(self.error(
                 ErrorKind::InvalidSource,
-                crate::diagnostic!(
-                    if mutable { "top.var" } else { "const.decl" },
-                    "a top-level binding requires an initializer"
-                ),
+                crate::diagnostic!("const.decl", "a top-level binding requires an initializer"),
             ));
         }
         self.cursor += 1;
@@ -134,7 +133,6 @@ impl<'a, 's> Parser<'a, 's> {
         self.constant_expression = false;
         self.allow_clause(start, allows::expression_contains_block(&initializer))?;
         Ok(TopLevelBinding {
-            mutable,
             name,
             location,
             annotation,
@@ -161,13 +159,15 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
         depth: 0,
         limit_location: None,
     };
+    let mut externs = Vec::new();
     let mut bindings = Vec::new();
     let mut functions = Vec::new();
     let mut main = false;
     p.newlines();
     while p.token().kind != Kind::End {
         match p.token().kind {
-            Kind::Keyword("fix" | "var") => bindings.push(p.top_level_binding()?),
+            Kind::Keyword("extern") => externs.extend(p.extern_block()?),
+            Kind::Keyword("fix") => bindings.push(p.top_level_binding()?),
             Kind::Keyword("fnshape") => {
                 p.cursor = fnshapes.iter().find(|d| d.start == p.cursor).unwrap().end;
             }
@@ -178,12 +178,31 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
                     .unwrap()
                     .end;
             }
-            Kind::Keyword("enum") => {
+            Kind::Keyword("enum" | "error") => {
                 p.cursor = enums
                     .iter()
                     .find(|decl| decl.start == p.cursor)
                     .unwrap()
                     .end;
+            }
+            Kind::Keyword("arena") => {
+                let location = p.location();
+                p.cursor += 1;
+                if p.token().kind != Kind::Keyword("fn") {
+                    return Err(location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!("arena.fn", "expected arena fn at top level"),
+                    ));
+                }
+                let mut function = p.function(main)?;
+                if function.name == "main" {
+                    return Err(location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!("arena.fn", "main cannot be an arena fn"),
+                    ));
+                }
+                function.arena = true;
+                functions.push(function);
             }
             Kind::Keyword("fn") => {
                 let function = p.function(main)?;
@@ -201,7 +220,7 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
                     ErrorKind::InvalidSource,
                     crate::diagnostic!(
                         "decl.top-level",
-                        "expected a fix, var, fn, fnshape, struct or enum declaration"
+                        "expected a fix, fn, fnshape, struct, enum, error or extern declaration"
                     ),
                 ));
             }
@@ -224,6 +243,7 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
         ));
     }
     Ok(Program {
+        externs,
         allows: p.allows,
         fnshapes,
         function_types,

@@ -66,14 +66,6 @@ pub(crate) fn collect(
             true,
         )
     }));
-    candidates.extend(checked.global_warnings.iter().map(|&location| {
-        (
-            location,
-            "diagnostic.global-var",
-            "global mutable state creates dependencies between functions".to_owned(),
-            true,
-        )
-    }));
     candidates.sort_by_key(|(location, ..)| position(*location));
     for scope in scopes {
         for item in &scope.items {
@@ -109,17 +101,6 @@ pub(crate) fn collect(
             crate::diagnostic!(
                 "diagnostic.arithmetic",
                 "integer arithmetic has no 'or' handler"
-            ),
-        ));
-    }
-    if options.deny_global_var
-        && let Some(location) = checked.global_warnings.first()
-    {
-        return Err(location.error(
-            ErrorKind::InvalidSource,
-            crate::diagnostic!(
-                "diagnostic.global-var-deny",
-                "global variables are forbidden by --deny-global-var"
             ),
         ));
     }

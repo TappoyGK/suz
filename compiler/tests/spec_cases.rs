@@ -1,5 +1,9 @@
 #[path = "spec_cases/allows.rs"]
 mod allows;
+#[path = "spec_cases/arena.rs"]
+mod arena;
+#[path = "spec_cases/arena_functions.rs"]
+mod arena_functions;
 #[path = "spec_cases/arithmetic.rs"]
 mod arithmetic;
 #[path = "spec_cases/arithmetic_handlers.rs"]
@@ -32,6 +36,12 @@ mod execution;
 mod expressions;
 #[path = "spec_cases/extra_flags.rs"]
 mod extra_flags;
+#[path = "spec_cases/ffi.rs"]
+mod ffi;
+#[path = "spec_cases/ffi_bytes.rs"]
+mod ffi_bytes;
+#[path = "spec_cases/ffi_link.rs"]
+mod ffi_link;
 #[path = "spec_cases/float_logs.rs"]
 mod float_logs;
 #[path = "spec_cases/floats.rs"]
@@ -52,6 +62,8 @@ mod globals;
 mod integer_bounds;
 #[path = "spec_cases/invalid_inputs.rs"]
 mod invalid_inputs;
+#[path = "spec_cases/log_filter.rs"]
+mod log_filter;
 #[path = "spec_cases/logs.rs"]
 mod logs;
 #[path = "spec_cases/matches.rs"]
@@ -62,8 +74,12 @@ mod names;
 mod native_cli;
 #[path = "spec_cases/nesting.rs"]
 mod nesting;
+#[path = "spec_cases/nullable_pointers.rs"]
+mod nullable_pointers;
 #[path = "spec_cases/numeric.rs"]
 mod numeric;
+#[path = "spec_cases/panic.rs"]
+mod panic;
 #[path = "spec_cases/panics.rs"]
 mod panics;
 #[path = "spec_cases/ranges.rs"]
@@ -262,3 +278,12 @@ fn run_spec_cases(optimized: bool) {
 
 #[path = "spec_cases/length.rs"]
 mod length;
+
+#[path = "spec_cases/errors.rs"]
+mod errors;
+
+#[path = "spec_cases/log_ignore.rs"]
+mod log_ignore;
+
+#[path = "spec_cases/objection.rs"]
+mod objection;

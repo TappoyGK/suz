@@ -8,6 +8,8 @@ use crate::ast::{BinaryOperator, ComparisonOperator, Location, LogicalOperator, 
 /// 型・名前を解決した関数、入口の関数番号、文字列定数と診断候補を保持する。
 /// 型宣言はASTの表現を共有し、関数は必要な汎用型の具体化も含めてC生成へ渡す。
 pub(crate) struct CheckedProgram {
+    pub external_base: usize,
+    pub externs: Vec<crate::ast::ExternFunction>,
     pub function_types: Vec<crate::ast::FunctionType>,
     /// 整数除算を含む浮動小数点演算の警告候補。
     pub division_warnings: Vec<Location>,
@@ -15,9 +17,7 @@ pub(crate) struct CheckedProgram {
     pub comparison_warnings: Vec<(Location, bool)>,
     /// 実行開始時に登録する文字列定数。
     pub constant_texts: std::collections::BTreeSet<String>,
-    /// 静的な格納領域へmainの前に設定する、評価済みの大域変数の初期値。
-    pub globals: Vec<CheckedExpression>,
-    pub global_warnings: Vec<Location>,
+    /// 起動時の初期化失敗を報告するmainの位置。
     pub main_location: Location,
     pub structs: Vec<crate::ast::StructDeclaration>,
     pub enums: Vec<crate::ast::EnumDeclaration>,
@@ -34,6 +34,7 @@ pub(crate) struct CheckedFunction {
     pub id: usize,
     pub parameters: Vec<Type>,
     pub result: Type,
+    pub fallible: bool,
     pub statements: Vec<CheckedStatement>,
 }
 /// [`crate::ast::Statement`] の検査結果。
@@ -43,7 +44,28 @@ pub(crate) struct CheckedFunction {
 /// 失敗時returnの式は、検査中に作ったBoxをそのまま使う。
 #[derive(Clone)]
 pub(crate) enum CheckedStatement {
+    Arena {
+        body: Vec<CheckedStatement>,
+        end: Location,
+    },
+    Store {
+        target: Box<CheckedExpression>,
+        id: usize,
+        value: Box<CheckedExpression>,
+        body: Vec<CheckedStatement>,
+        location: Location,
+    },
+
+    Ignore(Box<crate::ast::Ignore>),
+    Recover(CheckedExpression),
+    Fail(CheckedExpression),
+    HandleCall {
+        id: usize,
+        call: Box<CheckedExpression>,
+        handler: Box<CallHandler>,
+    },
     SliceReturn {
+        location: Location,
         id: usize,
         operation: CheckedExpression,
         return_value: Box<CheckedExpression>,
@@ -69,11 +91,13 @@ pub(crate) enum CheckedStatement {
         body: Vec<CheckedStatement>,
     },
     ArithmeticReturn {
+        location: Location,
         id: usize,
         operation: CheckedExpression,
         return_value: Box<CheckedExpression>,
     },
     CastReturn {
+        return_location: Location,
         location: Location,
         wrap: bool,
         id: usize,
@@ -92,20 +116,26 @@ pub(crate) enum CheckedStatement {
         otherwise: Option<Vec<CheckedStatement>>,
     },
     Block(Vec<CheckedStatement>),
+    Objection(Vec<CheckedStatement>),
     Binding {
+        location: Location,
         mutable: bool,
         id: usize,
         ty: Type,
-        initializer: CheckedExpression,
+        // 型とソース位置の追加で全ての文が肥大化しないよう、初期値を別に保持する。
+        initializer: Box<CheckedExpression>,
     },
     Assign {
-        global: bool,
+        location: Location,
         fields: Vec<usize>,
         id: usize,
         ty: Type,
-        value: CheckedExpression,
+        value: Box<CheckedExpression>,
     },
-    Return(CheckedExpression),
+    Return {
+        value: CheckedExpression,
+        location: Location,
+    },
 }
 /// [`crate::ast::Expression`] の検査結果。
 /// 推論・検査した型と、参照先を解決した [`Value`] を対にする。
@@ -119,8 +149,24 @@ pub(crate) struct CheckedExpression {
 #[derive(Clone)]
 pub(crate) enum CheckedHandler {
     Value(Box<CheckedExpression>),
-    Return(Box<CheckedExpression>),
+    Return {
+        value: Box<CheckedExpression>,
+        location: Location,
+    },
 }
+/// 呼び出しの失敗処理。脱出するものはC生成前に文へ持ち上げる。
+#[derive(Clone)]
+pub(crate) enum CallHandler {
+    Branches(Vec<(Option<crate::ast::ErrorVariant>, Vec<CheckedStatement>)>),
+    Value(CheckedExpression),
+    Return {
+        value: CheckedExpression,
+        location: Location,
+    },
+    Fail(Option<CheckedExpression>),
+    Ignore(Box<crate::ast::Ignore>),
+}
+
 /// クロージャ本体と、評価位置で順に保持する値・参照。
 /// functionの仮引数列の末尾にキャプチャーを並べ、本体で使うローカル番号を割り当てる。
 #[derive(Clone)]
@@ -175,10 +221,37 @@ impl IntegerOperation {
 /// 値ブロックには捕捉した変数を、汎用リテラルには具体化まで必要な綴りを残す。
 #[derive(Clone)]
 pub(crate) enum Value {
+    New {
+        value: Box<CheckedExpression>,
+        location: Location,
+    },
+    Deref(Box<CheckedExpression>),
+    NonNull(Box<CheckedExpression>),
+    Null,
+
+    CBytes(Box<CheckedExpression>),
+    CByteLen {
+        operand: Box<CheckedExpression>,
+        location: Location,
+    },
+    /// 値は既知だが対象C環境の範囲は未確定。生成Cで静的に検査する。
+    CIntegerLiteral {
+        value: crate::numeric::Int,
+        location: Location,
+    },
+    Panic {
+        parts: Vec<crate::ast::TemplatePart<CheckedExpression>>,
+        location: Location,
+    },
+    HandledCall {
+        call: Box<CheckedExpression>,
+        handler: Box<CallHandler>,
+    },
     Function(usize),
     FunctionBorrow(Box<CheckedExpression>),
     Closure(Box<CheckedClosure>),
     Invoke {
+        location: Location,
         target: Box<CheckedExpression>,
         arguments: Vec<CheckedExpression>,
     },
@@ -224,6 +297,8 @@ pub(crate) enum Value {
     },
     Void,
     Call {
+        arena: bool,
+        location: Location,
         id: usize,
         arguments: Vec<CheckedExpression>,
     },
@@ -243,6 +318,7 @@ pub(crate) enum Value {
         handler: Option<CheckedHandler>,
     },
     CastReturn {
+        return_location: Location,
         location: Location,
         wrap: bool,
         operand: Box<CheckedExpression>,
@@ -286,7 +362,6 @@ pub(crate) enum Value {
         operands: Vec<CheckedExpression>,
     },
     Local(usize),
-    Global(usize),
 }
 
 // 参照用と変更用の定数式の文法を一つの定義で保つ。違いは可変性と訪問メソッドだけ。
@@ -306,7 +381,7 @@ macro_rules! constant_children_visitor {
                         visit(value);
                         true
                     }
-                    Some(CheckedHandler::Return(_)) => false,
+                    Some(CheckedHandler::Return { .. }) => false,
                 }
             };
             match self {
@@ -318,7 +393,7 @@ macro_rules! constant_children_visitor {
                     }
                     return handler(h, visit);
                 }
-                Self::FunctionBorrow(v) | Self::Len(v) | Self::Cast(v) | Self::Negate(v) | Self::Truncate(v) | Self::BitNot(v)
+                Self::New { value: v, .. } | Self::Deref(v) | Self::NonNull(v) | Self::CBytes(v) | Self::CByteLen { operand: v, .. } | Self::FunctionBorrow(v) | Self::Len(v) | Self::Cast(v) | Self::Negate(v) | Self::Truncate(v) | Self::BitNot(v)
                 | Self::Not(v) | Self::TextView(v) | Self::Intern { operand: v, .. }
                 | Self::Field { target: v, .. } => visit(v),
                 // constant_structはオペランドの解析から得た具体的なキャッシュであり、ソースのオペランドではない。
@@ -361,9 +436,9 @@ macro_rules! constant_children_visitor {
                     }
                     return handler(h, visit);
                 }
-                Self::GenericNumericLiteral { .. } | Self::Integer { .. } | Self::Float(_)
+                Self::Null | Self::CIntegerLiteral { .. } | Self::GenericNumericLiteral { .. } | Self::Integer { .. } | Self::Float(_)
                 | Self::Function(_) | Self::Bool(_) | Self::Text { .. } => {}
-                Self::Closure(_) | Self::Local(_) | Self::Global(_) | Self::Void | Self::Invoke { .. } | Self::Call { .. } | Self::Block { .. }
+                Self::Panic { .. } | Self::HandledCall { .. } | Self::Closure(_) | Self::Local(_) | Self::Void | Self::Invoke { .. } | Self::Call { .. } | Self::Block { .. }
                 | Self::Match { .. } | Self::If { .. } | Self::CastReturn { .. } => return false,
             }
             true

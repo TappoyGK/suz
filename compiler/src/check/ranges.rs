@@ -15,7 +15,6 @@ use crate::{
 
 struct References {
     mutable: std::collections::BTreeSet<String>,
-    globals: std::collections::BTreeSet<String>,
 }
 
 impl crate::ast::visit::Visitor for References {
@@ -33,7 +32,7 @@ impl crate::ast::visit::Visitor for References {
                 }
             }
             // 本体の仮引数と値キャプチャーは不変で、外側の同名のvarとは別の束縛。
-            let saved = std::mem::replace(&mut self.mutable, self.globals.clone());
+            let saved = std::mem::take(&mut self.mutable);
             let result = self.scope(&closure.function.statements, None);
             self.mutable = saved;
             return result;
@@ -85,11 +84,9 @@ pub(super) fn check_references(expr: &Expression, bindings: &Scope) -> Result<()
         mutable: bindings
             .locals
             .iter()
-            .chain(bindings.globals.iter())
             .filter(|(_, b)| b.mutable)
             .map(|(name, _)| name.clone())
             .collect(),
-        globals: bindings.globals.keys().cloned().collect(),
     }
     .expression(expr)
 }

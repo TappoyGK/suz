@@ -2,7 +2,9 @@
 //!
 //! 利用元: [`crate::parser`]、[`crate::check`]。
 
+mod pointer_shape;
 pub(crate) mod visit;
+use pointer_shape::PointerShape;
 
 use crate::{Diagnostic, ErrorKind};
 
@@ -129,6 +131,8 @@ pub(crate) struct EnumType {
     pub id: usize,
     pub base: IntegerType,
     pub count: usize,
+    /// error宣言は整数との変換を持たない。
+    pub is_error: bool,
 }
 
 /// 列挙型の宣言。列挙子の名前と、宣言を読み飛ばすためのトークン範囲を保持する。
@@ -157,6 +161,12 @@ pub(crate) const NUMERIC_COMBINATIONS: usize = 18;
 /// Structの番号は構造体宣言、Functionの番号は共通化した関数値の型を参照する。汎用の型はC生成までに具体化する。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Type {
+    Pointer {
+        leaf: PointerLeaf,
+        shape: PointerShape,
+    },
+    CPointer,
+    CInteger(CIntegerType),
     GenericInt,
     GenericFloat,
     Numeric([Option<ScalarType>; NUMERIC_COMBINATIONS]), // intとfloatの内部の型関数。
@@ -174,7 +184,118 @@ pub(crate) enum Type {
     Text,
 }
 
+/// ポインタの末端の値型。各段のnull許容性はPointerShapeで別に持つ。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PointerLeaf {
+    CPointer,
+    CInteger(CIntegerType),
+    GenericInt,
+    GenericFloat,
+    Numeric([Option<ScalarType>; NUMERIC_COMBINATIONS]),
+    Exact,
+    Struct(usize),
+    StaticFunction(usize),
+    Function(usize),
+    Enum(EnumType),
+    Void,
+    Float(FloatType),
+    Integer(IntegerType),
+    Bool,
+    Char,
+    Symbol,
+    Text,
+}
 impl Type {
+    pub fn pointer(self) -> Self {
+        let leaf = match self {
+            Self::Pointer { leaf, shape } => {
+                return Self::Pointer {
+                    leaf,
+                    shape: shape.push(),
+                };
+            }
+            Self::CPointer => PointerLeaf::CPointer,
+            Self::CInteger(v) => PointerLeaf::CInteger(v),
+            Self::GenericInt => PointerLeaf::GenericInt,
+            Self::GenericFloat => PointerLeaf::GenericFloat,
+            Self::Numeric(v) => PointerLeaf::Numeric(v),
+            Self::Exact => PointerLeaf::Exact,
+            Self::Struct(v) => PointerLeaf::Struct(v),
+            Self::StaticFunction(v) => PointerLeaf::StaticFunction(v),
+            Self::Function(v) => PointerLeaf::Function(v),
+            Self::Enum(v) => PointerLeaf::Enum(v),
+            Self::Void => PointerLeaf::Void,
+            Self::Float(v) => PointerLeaf::Float(v),
+            Self::Integer(v) => PointerLeaf::Integer(v),
+            Self::Bool => PointerLeaf::Bool,
+            Self::Char => PointerLeaf::Char,
+            Self::Symbol => PointerLeaf::Symbol,
+            Self::Text => PointerLeaf::Text,
+        };
+        Self::Pointer {
+            leaf,
+            shape: PointerShape::new(),
+        }
+    }
+    pub fn is_nullable(self) -> bool {
+        matches!(self, Self::Pointer { shape, .. } if shape.is_nullable())
+    }
+    pub fn is_nonnull(self) -> bool {
+        matches!(self, Self::Pointer { .. }) && !self.is_nullable()
+    }
+    pub fn with_nullable(self, enabled: bool) -> Self {
+        match self {
+            Self::Pointer { leaf, shape } => Self::Pointer {
+                leaf,
+                shape: shape.with_nullable(enabled),
+            },
+            _ => self,
+        }
+    }
+    /// 外側のnull許容性だけを広げる。参照先の型は変更しない。
+    pub fn lifts_to(self, to: Self) -> bool {
+        self.is_nonnull() && to.is_nullable() && self.pointee() == to.pointee()
+    }
+    pub fn pointee(self) -> Option<Self> {
+        let Self::Pointer { leaf, shape } = self else {
+            return None;
+        };
+        if shape.depth() > 1 {
+            return Some(Self::Pointer {
+                leaf,
+                shape: shape.pop(),
+            });
+        }
+        Some(match leaf {
+            PointerLeaf::CPointer => Self::CPointer,
+            PointerLeaf::CInteger(v) => Self::CInteger(v),
+            PointerLeaf::GenericInt => Self::GenericInt,
+            PointerLeaf::GenericFloat => Self::GenericFloat,
+            PointerLeaf::Numeric(v) => Self::Numeric(v),
+            PointerLeaf::Exact => Self::Exact,
+            PointerLeaf::Struct(v) => Self::Struct(v),
+            PointerLeaf::StaticFunction(v) => Self::StaticFunction(v),
+            PointerLeaf::Function(v) => Self::Function(v),
+            PointerLeaf::Enum(v) => Self::Enum(v),
+            PointerLeaf::Void => Self::Void,
+            PointerLeaf::Float(v) => Self::Float(v),
+            PointerLeaf::Integer(v) => Self::Integer(v),
+            PointerLeaf::Bool => Self::Bool,
+            PointerLeaf::Char => Self::Char,
+            PointerLeaf::Symbol => Self::Symbol,
+            PointerLeaf::Text => Self::Text,
+        })
+    }
+}
+
+impl Type {
+    /// ポインタの深さを除いた型。汎用数値型と関数型の宣言を調べるときに使う。
+    pub fn leaf(mut self) -> Self {
+        while let Some(inner) = self.pointee() {
+            self = inner;
+        }
+        self
+    }
     pub fn generic(self) -> bool {
         matches!(self, Self::GenericInt | Self::GenericFloat)
     }
@@ -227,7 +348,9 @@ impl Type {
         }
     }
     pub fn from_name(name: &str) -> Option<Self> {
-        if name == "int" {
+        if let Some(ty) = CIntegerType::from_name(name) {
+            Some(Self::CInteger(ty))
+        } else if name == "int" {
             Some(Self::GenericInt)
         } else if name == "float" {
             Some(Self::GenericFloat)
@@ -251,6 +374,15 @@ impl Type {
     }
     pub fn name(self) -> &'static str {
         match self {
+            Self::Pointer { .. } => {
+                if self.is_nullable() {
+                    "ptr?"
+                } else {
+                    "ptr"
+                }
+            }
+            Self::CPointer => "*const void",
+            Self::CInteger(ty) => ty.name(),
             Self::Exact => "exact integer",
             Self::GenericInt => "int",
             Self::GenericFloat => "float",
@@ -275,6 +407,9 @@ impl Type {
     }
     pub fn c_name(self) -> String {
         match self {
+            Self::Pointer { .. } => format!("typeof({} *)", self.pointee().unwrap().c_name()),
+            Self::CPointer => "suz_ffi_bytes".into(),
+            Self::CInteger(ty) => ty.c_name().into(),
             Self::Exact => "suz_exact".into(),
             Self::GenericInt | Self::GenericFloat | Self::Numeric(_) => {
                 unreachable!("generic types are resolved before code generation")
@@ -320,13 +455,19 @@ pub(crate) struct FieldInitializer {
     pub location: Location,
 }
 
-/// トップレベルのfix・varの宣言。省略可能な型注釈と、まだ評価していない初期化式。
+/// トップレベルのfixの宣言。省略可能な型注釈と、まだ評価していない初期化式。
 pub(crate) struct TopLevelBinding {
-    pub mutable: bool,
     pub name: String,
     pub location: Location,
     pub annotation: Option<Type>,
     pub initializer: Expression,
+}
+
+/// エラー集合の要素。型番号とバリアント番号をソートして関数の形を比較する。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct ErrorVariant {
+    pub type_id: usize,
+    pub variant: usize,
 }
 
 /// 関数値の型。同じ仮引数・戻り値の組を一つの番号へまとめる。
@@ -334,6 +475,7 @@ pub(crate) struct TopLevelBinding {
 pub(crate) struct FunctionType {
     pub parameters: Vec<Type>,
     pub result: Type,
+    pub errors: Vec<ErrorVariant>,
 }
 
 /// fnshapeの名前と宣言位置。型の同一性は名前ではなく仮引数と戻り値の型で決まる。
@@ -349,6 +491,7 @@ pub(crate) struct FnShapeDeclaration {
 /// 構文解析の結果全体。型宣言・トップレベル束縛・関数とallowの範囲を保持する。
 /// [`crate::check`] が検査して [`crate::check::ir::CheckedProgram`] へ変換する。
 pub(crate) struct Program {
+    pub externs: Vec<ExternFunction>,
     pub fnshapes: Vec<FnShapeDeclaration>,
     pub function_types: Vec<FunctionType>,
     pub allows: Vec<crate::warnings::AllowScope>,
@@ -369,18 +512,24 @@ pub(crate) struct Parameter {
 /// 関数の構文。仮引数・戻り値型・本体の文と、宣言の開始・終了位置を保持する。
 #[derive(Clone)]
 pub(crate) struct Function {
+    pub arena: bool,
     pub keyword_location: Location,
     pub name: String,
     pub location: Location,
     pub parameters: Vec<Parameter>,
     pub result: Type,
+    pub errors: Vec<ErrorVariant>,
     pub statements: Vec<Statement>,
     pub end: Location,
 }
 
 impl Function {
     pub fn declares_numeric(&self, ty: Type) -> bool {
-        self.result == ty || self.parameters.iter().any(|parameter| parameter.ty == ty)
+        self.result.leaf() == ty
+            || self
+                .parameters
+                .iter()
+                .any(|parameter| parameter.ty.leaf() == ty)
     }
 }
 
@@ -393,16 +542,39 @@ pub(crate) struct MatchArm<T = Vec<Statement>> {
     pub body: T,
 }
 
-/// ログ文で指定されたレベル。生成Cの環境呼び出しへ渡す。
+/// 出力文のレベル。Panicはpanic文でのみ使い、出力後に終了する。
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum LogLevel {
+    Debug,
+    Error,
     Info,
     Warn,
+    Panic,
 }
 
 /// 構文解析済みの文。束縛やフィールドの参照はまだソース上の名前で保持する。
 #[derive(Clone)]
 pub(crate) enum Statement {
+    Arena {
+        body: Vec<Statement>,
+        end: Location,
+    },
+    Let {
+        name: String,
+        location: Location,
+        value: Box<Expression>,
+        body: Vec<Statement>,
+        otherwise: Vec<Statement>,
+    },
+    Store {
+        target: Box<Expression>,
+        value: Box<Expression>,
+        operator: Option<BinaryOperator>,
+        location: Location,
+    },
+
+    Unsafe(Vec<Statement>),
+    Objection(Vec<Statement>),
     Log {
         level: LogLevel,
         parts: Vec<TemplatePart<Expression>>,
@@ -436,11 +608,13 @@ pub(crate) enum Statement {
     },
     Block(Vec<Statement>),
     Binding {
+        pointer: bool,
         mutable: bool,
         name: String,
         location: Location,
         annotation: Option<Type>,
-        initializer: Expression,
+        // 型とソース位置の追加で全ての文が肥大化しないよう、初期値を別に保持する。
+        initializer: Box<Expression>,
     },
     Assign {
         compound: bool,
@@ -450,6 +624,9 @@ pub(crate) enum Statement {
         value: Expression,
     },
     Return(Expression),
+    Fail(Expression),
+    Recover(Expression),
+    Ignore(Box<Ignore>),
 }
 
 /// 構文解析済みの式とソース位置。型は意味検査で決定する。
@@ -608,9 +785,29 @@ impl BinaryOperator {
     }
 }
 
+/// errorハンドラーの腕。ブロックだけがrecoverを文として使える。
+#[derive(Clone)]
+pub(crate) enum ErrorArmBody {
+    Value(Box<Expression>),
+    Statements { body: Vec<Statement>, block: bool },
+}
+
+#[derive(Clone)]
+pub(crate) struct ErrorHandler {
+    pub arms: Vec<MatchArm<ErrorArmBody>>,
+    pub location: Location,
+}
+
 /// 失敗時に値を返す処理、または関数からreturnする処理の構文。
 #[derive(Clone)]
 pub(crate) enum FailureHandler {
+    // 腕のない通常の式まで大きくしないよう、分岐の内容をまとめて保持する。
+    Errors(Box<ErrorHandler>),
+    Fail {
+        value: Option<Box<Expression>>,
+        location: Location,
+    },
+    Ignore(Box<Ignore>),
     Value(Box<Expression>),
     Return {
         value: Box<Expression>,
@@ -636,6 +833,11 @@ pub(crate) struct Capture {
 /// 式の構文ごとの内容。名前・リテラルの綴り・子の式を保持し、意味検査で [`crate::check::ir::Value`] へ変換する。
 #[derive(Clone)]
 pub(crate) enum ExpressionKind {
+    New(Box<Expression>),
+    Deref(Box<Expression>),
+    Null,
+    /// or panicの内部表現。通常の値式としては構文から作らない。
+    Panic(Vec<TemplatePart<Expression>>),
     Closure(Box<Closure>),
     FunctionValue(String),
     Invoke {
@@ -690,6 +892,8 @@ pub(crate) enum ExpressionKind {
         target: Type,
         fallback: Option<FailureHandler>,
     },
+    CBytes(Box<Expression>),
+    CByteLen(Box<Expression>),
     Len(Box<Expression>),
     Negate(Box<Expression>),
     Float(String),
@@ -721,4 +925,75 @@ pub(crate) enum ExpressionKind {
     },
     Name(String),
     Group(Box<Expression>),
+}
+
+/// ignoreの実行位置と、補間・評価しない理由。記録を有効にした場合だけCへ出力する。
+#[derive(Clone, Debug)]
+pub(crate) struct Ignore {
+    pub location: Location,
+    pub reason: String,
+}
+
+/// C環境で幅や符号が決まる整数型。Suzの演算型と分けて保持する。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CIntegerType {
+    Int,
+    Uint,
+    Long,
+    Ulong,
+    Size,
+    Char,
+}
+impl CIntegerType {
+    pub fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "_int" => Self::Int,
+            "_uint" => Self::Uint,
+            "_long" => Self::Long,
+            "_ulong" => Self::Ulong,
+            "_size_t" => Self::Size,
+            "_char" => Self::Char,
+            _ => return None,
+        })
+    }
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Int => "_int",
+            Self::Uint => "_uint",
+            Self::Long => "_long",
+            Self::Ulong => "_ulong",
+            Self::Size => "_size_t",
+            Self::Char => "_char",
+        }
+    }
+    pub fn c_name(self) -> &'static str {
+        match self {
+            Self::Int => "int",
+            Self::Uint => "unsigned int",
+            Self::Long => "long",
+            Self::Ulong => "unsigned long",
+            Self::Size => "size_t",
+            Self::Char => "char",
+        }
+    }
+    pub fn limits(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Int => ("INT_MIN", "INT_MAX"),
+            Self::Uint => ("0", "UINT_MAX"),
+            Self::Long => ("LONG_MIN", "LONG_MAX"),
+            Self::Ulong => ("0", "ULONG_MAX"),
+            Self::Size => ("0", "SIZE_MAX"),
+            Self::Char => ("CHAR_MIN", "CHAR_MAX"),
+        }
+    }
+}
+/// 本体をCヘッダーとリンカーから得る、ファイル内の関数宣言。
+#[derive(Clone)]
+pub(crate) struct ExternFunction {
+    pub header: String,
+    pub c_name: String,
+    pub name: String,
+    pub parameters: Vec<Parameter>,
+    pub result: Type,
+    pub location: Location,
 }

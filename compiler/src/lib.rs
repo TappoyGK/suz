@@ -124,6 +124,23 @@ impl TextPoolLimit {
     }
 }
 
+/// 作業領域の初期容量・追加容量・総容量の上限。0の初期容量は遅延確保、0の追加容量は拡張禁止。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ArenaOptions {
+    pub initial: u64,
+    pub grow: u64,
+    pub limit: Option<NonZeroU64>,
+}
+impl Default for ArenaOptions {
+    fn default() -> Self {
+        Self {
+            initial: 64 * 1024 * 1024,
+            grow: 64 * 1024 * 1024,
+            limit: None,
+        }
+    }
+}
+
 impl Warning {
     pub fn rule(&self) -> &str {
         &self.rule_id
@@ -133,12 +150,42 @@ impl Warning {
     }
 }
 
+/// 生成する通常ログの最低レベル。panicの生成には影響しない。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LogLevel {
+    Debug,
+    #[default]
+    Info,
+    Warn,
+    Error,
+    Off,
+}
+
+impl LogLevel {
+    pub(crate) fn includes(self, level: ast::LogLevel) -> bool {
+        use ast::LogLevel as Output;
+        if matches!(level, Output::Panic) {
+            return true;
+        }
+        match self {
+            Self::Debug => true,
+            Self::Info => !matches!(level, Output::Debug),
+            Self::Warn => matches!(level, Output::Warn | Output::Error),
+            Self::Error => matches!(level, Output::Error),
+            Self::Off => false,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CompilationOptions {
+    pub log_level: LogLevel,
+    /// 実行されたignoreの位置と理由を記録する。既定では記録しない。
+    pub log_ignore: bool,
     pub log_allow: bool,
-    pub deny_global_var: bool,
     pub arithmetic_mode: ArithmeticMode,
     pub text_pool_limit: TextPoolLimit,
+    pub arena: ArenaOptions,
 }
 
 #[derive(Debug)]
@@ -188,7 +235,14 @@ pub fn compile_with_options(
 ) -> Result<Compilation, Diagnostic> {
     let (checked, warnings) = analyze(bytes, options)?;
     Ok(Compilation {
-        c: codegen::generate(&checked, source_name, options.text_pool_limit),
+        c: codegen::generate(
+            &checked,
+            source_name,
+            options.text_pool_limit,
+            options.arena,
+            options.log_level,
+            options.log_ignore,
+        ),
         warnings,
     })
 }
@@ -255,7 +309,9 @@ mod tests {
     #[test]
     #[cfg(target_pointer_width = "64")]
     fn statement_storage_stays_within_budget() {
-        // メモリ効率を維持するため、全ての文の格納サイズが再び肥大化する変更を検出する。
+        // ポインタの情報でTypeが大きくなると、ポインタを使わない式や文も肥大化する。
+        // 大きな入力の検査速度を落とさないよう、型と文の格納サイズを制限する。
+        assert!(std::mem::size_of::<ast::Type>() <= 48);
         assert!(std::mem::size_of::<ast::Statement>() <= 200);
         assert!(std::mem::size_of::<check::ir::CheckedStatement>() <= 208);
     }

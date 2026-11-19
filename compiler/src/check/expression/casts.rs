@@ -42,6 +42,33 @@ pub(in crate::check) fn check(
                 }
             }
             let operand = super::super::exact::use_value(operand, bindings)?;
+            if operand.ty.pointee().is_some()
+                || target.pointee().is_some()
+                || operand.ty == Type::CPointer
+                || target == Type::CPointer
+            {
+                return Err(expr.location.error(
+                    ErrorKind::InvalidSource,
+                    if operand.ty.pointee().is_some() || target.pointee().is_some() {
+                        crate::diagnostic!("arena.ptr-operations", "pointer values cannot be cast")
+                    } else {
+                        crate::diagnostic!(
+                            "ffi.pointer-operations",
+                            "pointer values cannot be cast"
+                        )
+                    },
+                ));
+            }
+            if matches!(operand.ty, Type::CInteger(_)) || matches!(target, Type::CInteger(_)) {
+                return crate::check::ffi::cast(
+                    operand,
+                    target,
+                    *wrap,
+                    fallback,
+                    expr.location,
+                    bindings,
+                );
+            }
             if operand.ty == Type::Exact {
                 return super::super::exact::cast(
                     operand,
@@ -94,7 +121,11 @@ pub(in crate::check) fn check(
                             | Type::Struct(_)
                     )
                 };
-                if !valid || bindings.contains_function(target) {
+                if !valid
+                    || bindings.contains_function(target)
+                    || crate::check::ffi::contains_c_type(target, bindings)
+                    || crate::check::arena::contains(target, bindings)
+                {
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
                         if *wrap {
@@ -174,11 +205,16 @@ pub(in crate::check) fn check(
                 let safe = conversion_safety(operand.ty, target).unwrap_or(false);
                 require_handler(&operand, target, safe, expr.location, bindings)?;
             }
-            if let Some(FailureHandler::Return { value, .. }) = fallback {
+            if let Some(FailureHandler::Return {
+                value,
+                location: return_location,
+            }) = fallback
+            {
                 let return_value = crate::check::functions::return_value(value, bindings)?;
                 let checked = CheckedExpression {
                     ty: target,
                     value: Value::CastReturn {
+                        return_location: *return_location,
                         location: expr.location,
                         wrap: *wrap,
                         operand: Box::new(operand),
@@ -188,6 +224,15 @@ pub(in crate::check) fn check(
                 return Ok(checked);
             }
             let fallback = match fallback {
+                Some(FailureHandler::Ignore(ignore)) => {
+                    return Err(crate::check::errors::invalid_handler(ignore.location));
+                }
+                Some(FailureHandler::Errors(handler)) => {
+                    return Err(crate::check::errors::invalid_handler(handler.location));
+                }
+                Some(FailureHandler::Fail { location, .. }) => {
+                    return Err(crate::check::errors::invalid_handler(*location));
+                }
                 Some(FailureHandler::Value(value)) => {
                     Some(super::coerced(value, Some(target), bindings)?)
                 }
@@ -249,6 +294,9 @@ pub(in crate::check) fn check(
 // [expr.cast-risk]、[arith.cast]、[const.cast-check]。通常検査と汎用検査で同じ分類を使い、Scopeは変更しない。
 // スカラー変換の規則は通常の検査と記号的な検査で共有する。
 fn conversion_safety(from: Type, to: Type) -> Option<bool> {
+    if matches!(from, Type::Enum(e) if e.is_error) || matches!(to, Type::Enum(e) if e.is_error) {
+        return None;
+    }
     Some(match (from, to) {
         (Type::Symbol | Type::Text, _) => false,
         (Type::Char, Type::Integer(_)) | (Type::Integer(_), Type::Char) => {

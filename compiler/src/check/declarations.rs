@@ -1,4 +1,4 @@
-//! トップレベル宣言の初期値を定数式として検査する。fixの依存を解決し、varの格納先と評価済み初期値を作る。
+//! トップレベル宣言の初期値を定数式として検査する。fixの依存を解決し、評価済みの定数を作る。
 //!
 //! 利用元: [`crate::check::functions`]。
 //! 主な対象規則: `[const.expression]`、`[const.initializer]`、`[decl.duplicate]`。
@@ -19,6 +19,12 @@ pub(super) fn dependencies(
     names: &mut Vec<(String, Location)>,
 ) -> Result<(), Diagnostic> {
     match &expr.kind {
+        ExpressionKind::Panic(_) => {
+            return Err(expr.location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("const.expression", "panic is not constant"),
+            ));
+        }
         ExpressionKind::Closure(_) => {
             return Err(expr.location.error(
                 ErrorKind::InvalidSource,
@@ -58,7 +64,8 @@ pub(super) fn dependencies(
         }
         ExpressionKind::Field { target, .. } => dependencies(target, names)?,
         ExpressionKind::Name(name) => names.push((name.clone(), expr.location)),
-        ExpressionKind::FunctionValue(_)
+        ExpressionKind::Null
+        | ExpressionKind::FunctionValue(_)
         | ExpressionKind::Integer { .. }
         | ExpressionKind::Float(_)
         | ExpressionKind::Char(_)
@@ -66,6 +73,10 @@ pub(super) fn dependencies(
         | ExpressionKind::Variant { .. } => {}
         ExpressionKind::Group(inner)
         | ExpressionKind::Negate(inner)
+        | ExpressionKind::New(inner)
+        | ExpressionKind::Deref(inner)
+        | ExpressionKind::CBytes(inner)
+        | ExpressionKind::CByteLen(inner)
         | ExpressionKind::Len(inner)
         | ExpressionKind::Not(inner)
         | ExpressionKind::BitNot(inner) => dependencies(inner, names)?,
@@ -109,8 +120,24 @@ fn handler_dependencies(
     names: &mut Vec<(String, Location)>,
 ) -> Result<(), Diagnostic> {
     match fallback {
+        Some(FailureHandler::Errors(handler)) => Err(handler.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "const.expression",
+                "error handlers are not constant expressions"
+            ),
+        )),
         Some(FailureHandler::Value(value)) => dependencies(value, names),
-        Some(FailureHandler::Return { location, .. }) => Err(location.error(
+        Some(FailureHandler::Return { location, .. } | FailureHandler::Fail { location, .. }) => {
+            Err(location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "const.expression",
+                    "control transfers are not constant expressions"
+                ),
+            ))
+        }
+        Some(FailureHandler::Ignore(ignore)) => Err(ignore.location.error(
             ErrorKind::InvalidSource,
             crate::diagnostic!(
                 "const.expression",
@@ -139,12 +166,6 @@ impl Resolver<'_> {
                 crate::diagnostic!("const.expression", "'{name}' is not a constant"),
             )
         })?;
-        if declaration.mutable {
-            return Err(location.error(
-                ErrorKind::InvalidSource,
-                crate::diagnostic!("const.expression", "'{name}' is not a constant"),
-            ));
-        }
         if !self.visiting.insert(name.to_owned()) {
             return Err(location.error(
                 ErrorKind::InvalidSource,
@@ -158,7 +179,6 @@ impl Resolver<'_> {
                 loop_variable: false,
                 // 定数はローカル変数の格納先ではなく、評価済みの値として置き換える。
                 id: 0,
-                global: false,
                 ty: value.ty,
                 mutable: false,
                 parameter: false,
@@ -186,6 +206,21 @@ impl Resolver<'_> {
             declaration.annotation,
             &self.bindings,
         )?;
+        if super::arena::contains(checked.ty, &self.bindings) {
+            return Err(declaration.location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("arena.store", "arena pointers cannot be stored globally"),
+            ));
+        }
+        if super::ffi::uses_c_environment(&checked) {
+            return Err(declaration.initializer.location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "const.expression",
+                    "C-dependent values are not constant expressions"
+                ),
+            ));
+        }
         diagnostics::collect(&checked, &mut self.warnings);
         let value = constants::evaluate(&checked)?.ok_or_else(|| {
             declaration.location.error(
@@ -206,7 +241,7 @@ pub(super) fn resolve(
     enums: &[crate::ast::EnumDeclaration],
     structs: &[crate::ast::StructDeclaration],
     scope: Scope,
-) -> Result<(Scope, Vec<Location>, Vec<CheckedExpression>), Diagnostic> {
+) -> Result<(Scope, Vec<Location>), Diagnostic> {
     let mut resolver = Resolver {
         declarations: BTreeMap::new(),
         bindings: Scope {
@@ -241,31 +276,10 @@ pub(super) fn resolve(
             ));
         }
     }
-    for declaration in declarations.iter().filter(|d| !d.mutable) {
+    for declaration in declarations {
         resolver.resolve(&declaration.name, declaration.location)?;
     }
-    let mut initializers = Vec::new();
-    let mut globals = BTreeMap::new();
-    for declaration in declarations.iter().filter(|d| d.mutable) {
-        let value = resolver.initializer(declaration)?;
-        globals.insert(
-            declaration.name.clone(),
-            Binding {
-                id: initializers.len(),
-                global: true,
-                ty: value.ty,
-                mutable: true,
-                parameter: false,
-                loop_variable: false,
-                assigned: Default::default(),
-                location: declaration.location,
-                constant: None,
-            },
-        );
-        initializers.push(value);
-    }
-    resolver.bindings.globals = std::rc::Rc::new(globals);
     // 定数は不変であり、すべての関数スコープと型の代入で共有する。
     resolver.bindings.constants = std::rc::Rc::new(std::mem::take(&mut resolver.bindings.locals));
-    Ok((resolver.bindings, resolver.warnings, initializers))
+    Ok((resolver.bindings, resolver.warnings))
 }

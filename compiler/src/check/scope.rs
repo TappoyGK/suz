@@ -8,9 +8,12 @@ use std::{collections::BTreeMap, rc::Rc};
 
 #[derive(Clone)]
 pub(super) struct Signature {
+    pub arena: bool,
+    pub external: bool,
     pub id: usize,
     pub parameters: Vec<Type>,
     pub result: Type,
+    pub errors: Vec<crate::ast::ErrorVariant>,
 }
 
 impl Signature {
@@ -18,10 +21,10 @@ impl Signature {
         self.parameters
             .iter()
             .chain([&self.result])
-            .any(|ty| super::generic::Family::of(*ty) == Some(family))
+            .any(|ty| super::generic::Family::of(ty.leaf()) == Some(family))
     }
     pub fn is_generic(&self) -> bool {
-        self.result.generic() || self.parameters.iter().any(|t| t.generic())
+        self.result.leaf().generic() || self.parameters.iter().any(|t| t.leaf().generic())
     }
 }
 
@@ -43,6 +46,13 @@ pub(super) enum Mode {
 
 #[derive(Clone)]
 pub(super) struct Scope {
+    pub arena_depth: usize,
+    pub arena_used: Rc<std::cell::Cell<bool>>,
+    pub unsafe_block: bool,
+    // 最も内側のerror腕の成功型。関数の戻り値型とは独立し、クロージャ境界で解除する。
+    pub recovery: Option<Type>,
+    // 式のerror腕からbreak・continueできるかを調べるため、文のループ深さを渡す。
+    pub loop_depth: usize,
     pub fnshapes: Rc<Vec<crate::ast::FnShapeDeclaration>>,
     pub function_types: Rc<std::cell::RefCell<Vec<crate::ast::FunctionType>>>,
     pub mode: Mode,
@@ -60,12 +70,11 @@ pub(super) struct Scope {
     pub uncaptured: std::collections::BTreeSet<String>,
     // 不変の宣言は共有し、ローカル束縛の状態だけを複製する。
     pub constants: Rc<BTreeMap<String, Binding>>,
-    // 大域変数の型・格納先と代入済みフラグを、全関数の検査で共有する。
-    pub globals: Rc<BTreeMap<String, Binding>>,
     pub enums: Rc<Vec<crate::ast::EnumDeclaration>>,
     pub structs: Rc<Vec<crate::ast::StructDeclaration>>,
     pub functions: Rc<BTreeMap<String, Signature>>,
     pub result: Type,
+    pub errors: Rc<Vec<crate::ast::ErrorVariant>>,
 }
 impl Scope {
     pub fn contains_function(&self, ty: Type) -> bool {
@@ -90,10 +99,7 @@ impl Scope {
         Type::StaticFunction(id)
     }
     pub fn get(&self, name: &str) -> Option<&Binding> {
-        self.locals
-            .get(name)
-            .or_else(|| self.constants.get(name))
-            .or_else(|| self.globals.get(name))
+        self.locals.get(name).or_else(|| self.constants.get(name))
     }
     pub fn contains_key(&self, name: &str) -> bool {
         self.get(name).is_some()
@@ -113,6 +119,11 @@ impl Scope {
 
     pub fn type_name(&self, ty: Type) -> String {
         match ty {
+            Type::Pointer { .. } => format!(
+                "ptr{} {}",
+                if ty.is_nullable() { "?" } else { "" },
+                self.type_name(ty.pointee().unwrap())
+            ),
             Type::Enum(ty) => self.enums[ty.id].name.clone(),
             Type::Struct(id) => self.structs[id].name.clone(),
             Type::StaticFunction(id) | Type::Function(id) => {
@@ -150,6 +161,11 @@ impl Scope {
 impl Default for Scope {
     fn default() -> Self {
         Self {
+            arena_depth: 0,
+            arena_used: Default::default(),
+            unsafe_block: false,
+            recovery: None,
+            loop_depth: 0,
             fnshapes: Rc::default(),
             function_types: Rc::default(),
             mode: Default::default(),
@@ -164,11 +180,11 @@ impl Default for Scope {
             value_captures: Default::default(),
             uncaptured: Default::default(),
             constants: Rc::default(),
-            globals: Rc::default(),
             enums: Rc::default(),
             structs: Rc::default(),
             functions: Rc::default(),
             result: Type::Integer(IntegerType::U8),
+            errors: Rc::default(),
         }
     }
 }

@@ -19,7 +19,12 @@ fn float_interpolations_preserve_precision_and_evaluate_before_output() {
 fn main() -> u8 {
     fix small: f32 = 0.3
     fix precise = small as f64
-    log info `${mark(small)} ${precise} ${-0.0} ${nan} ${inf} ${-inf}`
+    fix marked = mark(small)
+    fix negative_zero = -0.0
+    fix negative_inf = -inf
+    fix not_number = nan
+    fix infinity = inf
+    log info `${marked} ${precise} ${negative_zero} ${not_number} ${infinity} ${negative_inf}`
     return 0
 }
 "#;
@@ -28,7 +33,7 @@ fn main() -> u8 {
     assert!(output.stdout.is_empty());
     assert_eq!(
         String::from_utf8(output.stderr).unwrap(),
-        "info float.suz:2: mark 0.3\ninfo float.suz:8: 0.3 0.30000001192092896 -0.0 nan inf -inf\n"
+        "info float.suz:2: mark 0.3\ninfo float.suz:13: 0.3 0.30000001192092896 -0.0 nan inf -inf\n"
     );
 }
 

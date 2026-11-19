@@ -8,8 +8,9 @@ use std::fmt::Write;
 
 pub(super) fn c_string(text: &str) -> String {
     let mut result = String::from("\"");
+    // ?もエスケープし、三文字表記によるCコンパイラの警告や文字の置換を防ぐ。
     for byte in text.bytes() {
-        if (32..=126).contains(&byte) && !matches!(byte, b'"' | b'\\') {
+        if (32..=126).contains(&byte) && !matches!(byte, b'"' | b'\\' | b'?') {
             result.push(char::from(byte));
         } else {
             write!(result, "\\{byte:03o}").unwrap();
@@ -20,6 +21,8 @@ pub(super) fn c_string(text: &str) -> String {
 }
 
 pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionContext) -> String {
+    context.uses_c_pointer |= matches!(expr.ty, crate::ast::Type::CPointer);
+    context.uses_c_integer |= matches!(expr.ty, crate::ast::Type::CInteger(_));
     if matches!(
         expr.value,
         Value::IntegerArithmetic {
@@ -30,13 +33,37 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
         return super::exact::stored(expr, context);
     }
     match expr.value {
+        Value::New {
+            ref value,
+            location,
+        } => super::arena::allocate(value, expr.ty, location, context),
+        Value::Deref(ref value) => format!("(*({}))", expression(value, context)),
+        Value::NonNull(ref value) => format!("({} != NULL)", expression(value, context)),
+        Value::Null => "NULL".into(),
+        Value::CBytes(ref operand) => super::ffi::bytes(operand, context),
+        Value::CByteLen {
+            ref operand,
+            location,
+        } => super::ffi::byte_len(operand, location, context),
+        Value::CIntegerLiteral { value, location } => {
+            super::ffi::literal(value, expr.ty, location, context)
+        }
+        Value::Panic {
+            ref parts,
+            location,
+        } => super::logs::panic_expression(parts, location, expr.ty, context),
+        Value::HandledCall {
+            ref call,
+            ref handler,
+        } => super::errors::expression(call, handler, context),
         Value::Closure(ref closure) => super::closures::emit(closure, expr.ty, context),
         Value::Function(id) => format!("suz_fn_{id}"),
         Value::FunctionBorrow(ref value) => super::functions::borrow(value, context),
         Value::Invoke {
             ref target,
             ref arguments,
-        } => super::functions::invoke(target, arguments, context),
+            ..
+        } => super::functions::invoke(target, arguments, context, None),
         Value::GenericNumericLiteral { .. } => {
             unreachable!("generic values are substituted before code generation")
         }
@@ -117,7 +144,9 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             format!("({}).suz_field_{index}", expression(target, context))
         }
         Value::Void => String::new(),
-        Value::Call { id, ref arguments } => super::functions::call(id, arguments, context),
+        Value::Call {
+            id, ref arguments, ..
+        } => super::functions::call(id, arguments, context, None),
         Value::Block {
             ref statements,
             ref value,
@@ -135,7 +164,7 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             }
             let fallback = match handler {
                 Some(CheckedHandler::Value(value)) => expression(value, context),
-                Some(CheckedHandler::Return(_)) => {
+                Some(CheckedHandler::Return { .. }) => {
                     unreachable!("failure returns must be lowered to statements")
                 }
                 None => {
@@ -297,6 +326,9 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             result
         }
         Value::Truncate(ref inner) => {
+            if matches!(expr.ty, crate::ast::Type::CInteger(_)) {
+                return super::ffi::truncate(inner, expr.ty, context);
+            }
             let crate::ast::Type::Integer(ty) = expr.ty else {
                 unreachable!()
             };
@@ -411,7 +443,10 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             if !floating
                 && !text
                 && structure.is_none()
-                && !matches!(operands[0].ty, Type::Integer(_) | Type::Exact)
+                && !matches!(
+                    operands[0].ty,
+                    Type::Integer(_) | Type::Exact | Type::CInteger(_)
+                )
             {
                 context.helpers.insert(unsigned);
             }
@@ -481,6 +516,16 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                         operators[index],
                     );
                 }
+                if matches!(operands[index].ty, Type::CInteger(_)) {
+                    // 同じC型同士なので、その型の符号と幅のまま比較する。
+                    // int64_tの比較ヘルパーへ渡すとsize_tなどの上半分を負数にしてしまう。
+                    return format!(
+                        "{} {} {}",
+                        names[index],
+                        operators[index].symbol(),
+                        names[index + 1]
+                    );
+                }
                 format!(
                     "suz_compare_{}({}, {}) {} 0",
                     if unsigned { "unsigned" } else { "signed" },
@@ -511,7 +556,6 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             result
         }
         Value::Local(id) => context.local(id),
-        Value::Global(id) => format!("suz_global_{id}"),
         Value::Integer { value, .. } if value == i64::MIN as i128 => {
             "(-INT64_C(9223372036854775807) - INT64_C(1))".into()
         }

@@ -2,13 +2,16 @@
 //!
 //! 利用元: [`crate::compile_with_options`]。
 
+mod arena;
 mod arithmetic;
 mod blocks;
 mod casts;
 mod characters;
 mod closures;
+mod errors;
 mod exact;
 mod expressions;
+mod ffi;
 mod functions;
 mod helpers;
 mod logs;
@@ -23,8 +26,22 @@ mod text_structure;
 use crate::check::CheckedProgram;
 use std::{collections::BTreeSet, fmt::Write};
 
+struct RecoveryTarget {
+    result: Option<String>,
+    label: String,
+    used: bool,
+}
+
 #[derive(Default)]
 struct ExpressionContext {
+    uses_arena: bool,
+    uses_c_byte_len: bool,
+    uses_c_integer: bool,
+    uses_c_pointer: bool,
+    c_literal_checks: BTreeSet<String>,
+    log_level: crate::LogLevel,
+    log_ignore: bool,
+    function_result: Option<crate::ast::Type>,
     text_literals: std::collections::BTreeMap<String, usize>,
     uses_text: bool,
     structs: Vec<crate::ast::StructDeclaration>,
@@ -37,6 +54,8 @@ struct ExpressionContext {
     enum_logs: BTreeSet<usize>,
     functions: String,
     next_block: usize,
+    next_recovery: usize,
+    recovery: Option<RecoveryTarget>,
     next_closure: usize,
     closure_environments: Vec<String>,
     references: BTreeSet<usize>,
@@ -64,6 +83,9 @@ pub(crate) fn generate(
     program: &CheckedProgram,
     source_name: &str,
     text_pool_limit: crate::TextPoolLimit,
+    arena: crate::ArenaOptions,
+    log_level: crate::LogLevel,
+    log_ignore: bool,
 ) -> String {
     let mut c = String::from(
         r#"#include <limits.h>
@@ -78,7 +100,16 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
 
 "#,
     );
+    for (name, value) in [
+        ("INITIAL", arena.initial),
+        ("GROW", arena.grow),
+        ("LIMIT", arena.limit.map_or(0, |n| n.get())),
+    ] {
+        writeln!(c, "#define SUZ_ARENA_{name} UINT64_C({value})").unwrap();
+    }
     let mut context = ExpressionContext {
+        log_level,
+        log_ignore,
         source_name: source_name.into(),
         enums: program.enums.clone(),
         structs: program.structs.clone(),
@@ -95,6 +126,8 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
             .collect(),
         ..ExpressionContext::default()
     };
+    // logの埋め込みは名前とフィールド参照だけ。ここには独立した宣言・式が必要とする
+    // symbol定数が入るため維持する。ログ本文と表示用の名前は、文の生成時だけ登録する。
     for value in &program.constant_texts {
         text::constant(value, &mut context);
     }
@@ -105,18 +138,16 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
             }
         }
     }
-    // 初期値を先に生成し、必要な文字列と補助関数を出力対象へ登録する。
-    let global_initializers: Vec<_> = program
-        .globals
-        .iter()
-        .map(|value| expressions::expression(value, &mut context))
-        .collect();
-    let global_temporaries = std::mem::take(&mut context.temporaries);
     let bodies: Vec<_> = program
         .functions
         .iter()
         .map(|function| functions::emit(function, &mut context))
         .collect();
+    if context.uses_arena {
+        c.push_str("#include \"suz_arena.h\"\n");
+    }
+    ffi::checks(&mut c, program, &context);
+    ffi::declarations(&mut c, program);
     text_structure::prepare(&mut context);
     helpers::emit(&mut c, &context);
     structs::emit(&mut c, &context);
@@ -124,9 +155,6 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
     text_structure::emit(&mut c, &context);
     for function in &program.functions {
         writeln!(c, "{};", functions::declaration(function)).unwrap();
-    }
-    for (id, value) in program.globals.iter().enumerate() {
-        writeln!(c, "static {} suz_global_{id};", value.ty.c_name()).unwrap();
     }
     c.push_str(&context.functions);
     for body in bodies {
@@ -147,16 +175,19 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
     } else {
         String::new()
     };
+    if context.uses_arena {
+        text_init.insert_str(
+            0,
+            &format!(
+                "    suz_arena_init(SUZ_ARENA_INITIAL, SUZ_ARENA_GROW, SUZ_ARENA_LIMIT, {}, {}, {});\n",
+                expressions::c_string(source_name),
+                program.main_location.line,
+                program.main_location.column
+            ),
+        );
+    }
     for (value, id) in &context.text_literals {
         writeln!(text_init, "    suz_text_constant_{id} = suz_text_intern(suz_text_literal_{id}, UINT64_C({}), true, {});", value.len(), text::position(program.main_location, &context)).unwrap();
-    }
-    // symbol/text（構造体のフィールドも含む）の参照先を登録してから初期値を設定する。
-    for (id, ty) in global_temporaries.iter().enumerate() {
-        writeln!(text_init, "    {} suz_cmp_{id};", ty.c_name()).unwrap();
-    }
-    for (id, initializer) in global_initializers.iter().enumerate() {
-        writeln!(text_init, "    suz_global_{id} = {initializer};").unwrap();
-        writeln!(text_init, "    (void)suz_global_{id};").unwrap();
     }
     writeln!(
         c,

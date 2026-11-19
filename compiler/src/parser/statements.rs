@@ -76,11 +76,37 @@ impl Parser<'_, '_> {
         }
     }
 
-    fn statement(&mut self) -> Result<Statement, Diagnostic> {
+    pub(super) fn statement(&mut self) -> Result<Statement, Diagnostic> {
         let start = self.location();
-        let statement = self.statement_inner()?;
+        let statement = if matches!(self.token().kind, Kind::Keyword("fail" | "recover")) {
+            self.error_value_statement()?
+        } else if self.token().kind == Kind::Keyword("ignore") {
+            Statement::Ignore(self.ignore_reason()?)
+        } else {
+            self.statement_inner()?
+        };
         self.allow_clause(start, super::allows::statement_contains_block(&statement))?;
         Ok(statement)
+    }
+
+    fn error_value_statement(&mut self) -> Result<Statement, Diagnostic> {
+        if self.in_value {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "expr.jump-prohibited",
+                    "fail and recover are forbidden inside value expressions"
+                ),
+            ));
+        }
+        let recover = self.token().kind == Kind::Keyword("recover");
+        self.cursor += 1;
+        let value = self.expression()?;
+        Ok(if recover {
+            Statement::Recover(value)
+        } else {
+            Statement::Fail(value)
+        })
     }
 
     fn statement_inner(&mut self) -> Result<Statement, Diagnostic> {
@@ -108,6 +134,7 @@ impl Parser<'_, '_> {
                 ),
             )),
             Kind::Keyword("log") => self.log(),
+            Kind::Keyword("panic") => self.panic(),
             Kind::Keyword("match") => {
                 let location = self.location();
                 self.cursor += 1;
@@ -178,7 +205,7 @@ impl Parser<'_, '_> {
                     "functions and types must be declared at top level"
                 ),
             )),
-            Kind::Keyword("enum" | "struct" | "fnshape") => Err(self.error(
+            Kind::Keyword("enum" | "error" | "struct" | "fnshape" | "extern") => Err(self.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(
                     "decl.location",
@@ -219,7 +246,30 @@ impl Parser<'_, '_> {
                     Statement::Continue(location)
                 })
             }
+            Kind::Keyword("let") => self.let_statement(),
             Kind::Keyword("if") => self.if_statement(),
+            Kind::Keyword("objection") => {
+                self.cursor += 1;
+                if self.token().kind != Kind::ObjectionReason {
+                    return Err(self.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "arena.objection-reason",
+                            "objection requires a non-empty reason in brackets"
+                        ),
+                    ));
+                }
+                self.cursor += 1;
+                let (body, _) = self.block()?;
+                Ok(Statement::Objection(body))
+            }
+            Kind::Keyword("arena") => {
+                self.cursor += 1;
+                let (body, end) = self.block()?;
+                Ok(Statement::Arena { body, end })
+            }
+            Kind::Symbol("*" | "(") => self.indirect_statement(),
+
             Kind::Keyword("elif" | "else") => Err(self.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!("if.elif", "unexpected branch clause"),
@@ -231,6 +281,10 @@ impl Parser<'_, '_> {
             Kind::Keyword("fix" | "var") => {
                 let mutable = self.token().kind == Kind::Keyword("var");
                 self.cursor += 1;
+                let pointer = self.token().kind == Kind::Keyword("ptr");
+                if pointer {
+                    self.cursor += 1;
+                }
                 let location = self.location();
                 let name = match self.token().kind {
                     Kind::Ident(name) => name.to_owned(),
@@ -251,7 +305,7 @@ impl Parser<'_, '_> {
                 super::names::check(super::names::Shape::Value, &name, location)?;
                 let annotation = if self.token().kind == Kind::Symbol(":") {
                     self.cursor += 1;
-                    let ty = self.parse_type()?;
+                    let ty = self.stored_type()?;
                     if ty == Type::Void {
                         return Err(self.error(
                             ErrorKind::InvalidSource,
@@ -271,11 +325,12 @@ impl Parser<'_, '_> {
                 self.cursor += 1;
                 let initializer = self.expression()?;
                 Ok(Statement::Binding {
+                    pointer,
                     mutable,
                     name,
                     location,
                     annotation,
-                    initializer,
+                    initializer: Box::new(initializer),
                 })
             }
             Kind::Ident(name) if self.assignment_operator().is_some() => {
@@ -346,6 +401,13 @@ impl Parser<'_, '_> {
                 }
                 Ok(Statement::Return(self.expression()?))
             }
+            Kind::Keyword("unsafe") => {
+                self.cursor += 1;
+                self.nested(self.location(), |p| {
+                    let (body, _) = p.block()?;
+                    Ok(Statement::Unsafe(body))
+                })
+            }
             _ => Ok(Statement::Expression(self.expression()?)),
         }
     }
@@ -371,8 +433,8 @@ impl Parser<'_, '_> {
                 Kind::Symbol("}") => {}
                 Kind::Keyword(
                     "fix" | "var" | "return" | "if" | "while" | "loop" | "for" | "rev" | "break"
-                    | "continue" | "log" | "match" | "matchexpr" | "ifexpr" | "true" | "false"
-                    | "not" | "nan" | "inf" | "expr",
+                    | "continue" | "log" | "panic" | "match" | "matchexpr" | "ifexpr" | "true"
+                    | "false" | "not" | "nan" | "inf" | "expr",
                 )
                 | Kind::Ident(_)
                 | Kind::Template(_)

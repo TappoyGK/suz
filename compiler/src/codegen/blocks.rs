@@ -29,6 +29,7 @@ pub(super) fn emit(
         &mut context.references,
         captures.iter().map(|(id, _, _)| *id).collect(),
     );
+    let saved_recovery = context.recovery.take();
     let saved_temporaries = std::mem::take(&mut context.temporaries);
     let saved_environments = std::mem::take(&mut context.closure_environments);
     let mut body = String::new();
@@ -64,6 +65,7 @@ pub(super) fn emit(
     function.push_str("}\n\n");
     // 入れ子の補助関数は、呼び出す側より前に出力済み。
     context.functions.push_str(&function);
+    context.recovery = saved_recovery;
     context.temporaries = saved_temporaries;
     context.closure_environments = saved_environments;
     context.references = saved_references;
