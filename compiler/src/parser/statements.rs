@@ -125,6 +125,21 @@ impl Parser<'_, '_> {
             ));
         }
         match self.token().kind {
+            // 旧FFIブロックだけを案内し、unsafeという通常の名前は引き続き認める。
+            Kind::Ident("unsafe")
+                if self
+                    .tokens
+                    .get(self.cursor + 1)
+                    .is_some_and(|t| t.kind == Kind::Symbol("{")) =>
+            {
+                Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "ffi.trusted",
+                        "use trusted {{ ... }} instead of unsafe {{ ... }}"
+                    ),
+                ))
+            }
             Kind::Keyword("allow") => self.allow_block(),
             Kind::Keyword("or") => Err(self.error(
                 ErrorKind::InvalidSource,

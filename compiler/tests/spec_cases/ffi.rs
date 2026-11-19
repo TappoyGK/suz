@@ -63,7 +63,6 @@ fn ffi_rejects_trusted_escape_and_unsupported_operations() {
     let declaration = "extern \"stdlib.h\" { fn abs(value: _int) -> _int }\n";
     for body in [
         "fix x = abs(-1)",
-        "unsafe { fix x = abs(-1) }",
         "trusted { fix callback = fn abs }",
         "fix callback = fn abs",
         "trusted { }\nfix x = abs(-1)",
@@ -106,6 +105,25 @@ fn ffi_rejects_trusted_escape_and_unsupported_operations() {
     );
     let error = suz::compile(closure.as_bytes()).unwrap_err();
     assert!(error.message().contains("ffi.trusted"), "{error:?}");
+}
+
+#[test]
+fn old_unsafe_block_points_to_trusted_without_reserving_the_name() {
+    let error = suz::compile(
+        b"extern \"stdlib.h\" { fn abs(value: _int) -> _int }\nfn main() -> u8 {\nunsafe { fix m = abs(-7) }\nreturn 0 }",
+    )
+    .unwrap_err();
+    assert_eq!(error.rule(), "ffi.trusted", "{error}");
+    assert!(
+        error
+            .message()
+            .contains("use trusted { ... } instead of unsafe { ... }"),
+        "{error}"
+    );
+    suz::compile(
+        b"fn main() -> u8 {\nvar unsafe = false\nunsafe = true\nif unsafe { return 0 }\nreturn 1 }",
+    )
+    .unwrap();
 }
 
 #[test]
