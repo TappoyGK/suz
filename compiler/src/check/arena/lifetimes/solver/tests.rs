@@ -250,6 +250,7 @@ fn connected_arena_calls_do_not_repeat_dense_propagation_per_call() {
     let ty = Type::Struct(0);
     let scope = Scope {
         structs: std::rc::Rc::new(vec![StructDeclaration {
+            external: None,
             name: "Node".into(),
             location: HERE,
             start: 0,

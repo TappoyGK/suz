@@ -324,7 +324,7 @@ pub(super) fn check_with_captures(
     references: &BTreeMap<String, Binding>,
 ) -> Result<(CheckedFunction, Vec<crate::ast::Location>), Diagnostic> {
     control::validate_return_positions(&function.statements)?;
-    scope.unsafe_block = false;
+    scope.trusted_block = false;
     scope.arena_depth = usize::from(function.arena);
     scope.arena_used = Default::default();
     if !function.arena && super::arena::contains(function.result, &scope) {
@@ -458,10 +458,10 @@ pub(super) fn call(
             ),
         ));
     }
-    if signature.external && !scope.unsafe_block {
+    if signature.external && !scope.trusted_block {
         return Err(expr.location.error(
             ErrorKind::InvalidSource,
-            crate::diagnostic!("ffi.unsafe", "C calls require an unsafe block"),
+            crate::diagnostic!("ffi.trusted", "C calls require a trusted block"),
         ));
     }
     if arguments.len() != signature.parameters.len() {

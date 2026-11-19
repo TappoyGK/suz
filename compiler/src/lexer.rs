@@ -18,7 +18,7 @@ const KEYWORDS: &[&str] = &[
     "extern",
     "c_bytes",
     "c_byte_len",
-    "unsafe",
+    "trusted",
     "allow",
     "fix",
     "var",

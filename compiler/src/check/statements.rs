@@ -277,13 +277,13 @@ fn check_statement(
                 otherwise,
             });
         }
-        Statement::Unsafe(inner) => {
+        Statement::Trusted(inner) => {
             // スコープを複製すると、外側の変数への再代入の記録まで分離される。
-            // 通常のブロックと同じ束縛を使い、unsafeの状態だけを一時的に切り替える。
-            let previous = context.bindings.unsafe_block;
-            context.bindings.unsafe_block = true;
+            // 通常のブロックと同じ束縛を使い、trustedの状態だけを一時的に切り替える。
+            let previous = context.bindings.trusted_block;
+            context.bindings.trusted_block = true;
             let checked = block(inner, context.bindings, context.next_id, context.loop_depth);
-            context.bindings.unsafe_block = previous;
+            context.bindings.trusted_block = previous;
             context.output.push(CheckedStatement::Block(checked?));
         }
         Statement::Objection(inner) => {
@@ -525,6 +525,7 @@ fn check_assign(
     lower_return_handler(&mut value, &mut context.output, context.next_id, *location);
     context.bindings[name].assigned.set(true);
     context.output.push(CheckedStatement::Assign {
+        root_type: binding.ty,
         location: *location,
         id,
         fields: indices,

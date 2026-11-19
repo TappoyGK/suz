@@ -440,11 +440,19 @@ pub(crate) struct StructField {
 /// 構造体の宣言。宣言順のフィールドとトークン範囲を持つ。
 #[derive(Clone)]
 pub(crate) struct StructDeclaration {
+    pub external: Option<ExternStruct>,
     pub name: String,
     pub location: Location,
     pub fields: Vec<StructField>,
     pub start: usize,
     pub end: usize,
+}
+
+/// ヘッダーのstructタグとの照合に使うC側の名前。
+#[derive(Clone)]
+pub(crate) struct ExternStruct {
+    pub header: String,
+    pub c_name: String,
 }
 
 /// 構造体リテラルに書いたフィールド名・初期化式・位置。意味検査でフィールド番号へ解決する。
@@ -581,7 +589,7 @@ pub(crate) enum Statement {
         location: Location,
     },
 
-    Unsafe(Vec<Statement>),
+    Trusted(Vec<Statement>),
     Objection(Vec<Statement>),
     Log {
         level: LogLevel,
@@ -1012,7 +1020,17 @@ pub(crate) struct ExternFunction {
     pub header: String,
     pub c_name: String,
     pub name: String,
-    pub parameters: Vec<Parameter>,
+    pub parameters: Vec<ExternParameter>,
     pub result: Type,
     pub location: Location,
+}
+
+/// 外部関数の仮引数。型付きCポインタはSuz側では非nullのptr Tとして検査する。
+#[derive(Clone)]
+pub(crate) struct ExternParameter {
+    pub name: String,
+    pub ty: Type,
+    pub location: Location,
+    /// 型付きポインタの参照先にCのconstを付ける。Suzのptr型自体は変更しない。
+    pub read_only: bool,
 }

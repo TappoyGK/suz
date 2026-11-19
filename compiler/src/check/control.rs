@@ -269,7 +269,7 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
             }
             Statement::Arena { body, .. }
             | Statement::Block(body)
-            | Statement::Unsafe(body)
+            | Statement::Trusted(body)
             | Statement::Objection(body) => validate_statements(body, in_value)?,
             _ => {}
         }
@@ -516,7 +516,7 @@ pub(super) fn stops(statements: &[Statement]) -> bool {
         }
         Statement::Arena { body: inner, .. }
         | Statement::Block(inner)
-        | Statement::Unsafe(inner)
+        | Statement::Trusted(inner)
         | Statement::Objection(inner) => stops(inner),
         Statement::If {
             branches,

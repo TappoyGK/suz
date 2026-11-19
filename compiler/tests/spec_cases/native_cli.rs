@@ -435,7 +435,7 @@ fn ffi_headers_cannot_search_private_runtime_directories() {
         );
         assert!(!root.join("program").exists());
     }
-    fs::write(directory.0.join("input.suz"), "extern \"stdlib.h\" { fn abs(value: _int) -> _int }\nfn main() -> u8 { unsafe { if abs(-(5)) != 5 { return 1 } }\nreturn 0 }\n").unwrap();
+    fs::write(directory.0.join("input.suz"), "extern \"stdlib.h\" { fn abs(value: _int) -> _int }\nfn main() -> u8 { trusted { if abs(-(5)) != 5 { return 1 } }\nreturn 0 }\n").unwrap();
     code(
         command(&directory.0)
             .args(["run", "input.suz"])

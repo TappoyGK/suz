@@ -128,6 +128,8 @@ pub(crate) enum CheckedStatement {
     },
     Assign {
         location: Location,
+        // フィールド経路の各段で、通常の構造体かC構造体かを判定するための元変数の型。
+        root_type: Type,
         fields: Vec<usize>,
         id: usize,
         ty: Type,

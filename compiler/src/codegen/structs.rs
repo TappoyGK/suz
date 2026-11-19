@@ -6,6 +6,18 @@ use super::{ExpressionContext, expressions::expression};
 use crate::{ast::Type, check::CheckedExpression};
 use std::{collections::BTreeSet, fmt::Write};
 
+/// 外部構造体はヘッダーの実際のメンバー名でアクセスする。
+pub(super) fn field_name(ty: Type, index: usize, context: &ExpressionContext) -> String {
+    let Type::Struct(id) = ty else {
+        unreachable!("checked struct field")
+    };
+    if context.structs[id].external.is_some() {
+        context.structs[id].fields[index].name.clone()
+    } else {
+        format!("suz_field_{index}")
+    }
+}
+
 pub(super) fn literal(
     id: usize,
     fields: &[(usize, CheckedExpression)],
@@ -18,7 +30,10 @@ pub(super) fn literal(
         context.temporaries.push(value.ty);
         let value = expression(value, context);
         setup.push(format!("suz_cmp_{index} = {value}"));
-        initializers.push(format!(".suz_field_{field} = suz_cmp_{index}"));
+        initializers.push(format!(
+            ".{} = suz_cmp_{index}",
+            field_name(Type::Struct(id), *field, context)
+        ));
     }
     setup.push(format!(
         "(suz_struct_{id}){{ {} }}",
@@ -37,8 +52,9 @@ pub(super) fn with(
     // 初期値の呼び出しがコピー元を書き換える前に、構造体全体を保存する。
     let mut setup = vec![format!("suz_cmp_{index} = {}", expression(target, context))];
     for (field, value) in fields {
+        let name = field_name(target.ty, *field, context);
         setup.push(format!(
-            "suz_cmp_{index}.suz_field_{field} = {}",
+            "suz_cmp_{index}.{name} = {}",
             expression(value, context)
         ));
     }
@@ -47,8 +63,12 @@ pub(super) fn with(
 }
 
 pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
-    for id in 0..context.structs.len() {
-        writeln!(c, "typedef struct suz_struct_{id} suz_struct_{id};").unwrap();
+    for (id, declaration) in context.structs.iter().enumerate() {
+        let tag = declaration
+            .external
+            .as_ref()
+            .map_or_else(|| format!("suz_struct_{id}"), |s| s.c_name.clone());
+        writeln!(c, "typedef struct {tag} suz_struct_{id};").unwrap();
     }
     super::functions::type_declarations(c, context);
     fn declaration(
@@ -58,6 +78,9 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
         emitted: &mut BTreeSet<usize>,
     ) {
         if !emitted.insert(id) {
+            return;
+        }
+        if context.structs[id].external.is_some() {
             return;
         }
         for field in &context.structs[id].fields {
@@ -96,8 +119,8 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
             .map(|(index, field)| {
                 super::expressions::equality(
                     field.ty,
-                    &format!("left.suz_field_{index}"),
-                    &format!("right.suz_field_{index}"),
+                    &format!("left.{}", field_name(Type::Struct(id), index, context)),
+                    &format!("right.{}", field_name(Type::Struct(id), index, context)),
                 )
             })
             .collect::<Vec<_>>()

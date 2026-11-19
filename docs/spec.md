@@ -8,7 +8,7 @@ Suz は、ガベージコレクタを使わない、メモリ安全なプログ�
 
 ### 1.1 範囲
 
-Suzのプログラムはメモリの確保と解放を直接行わない。FFIでは読み取り専用のバイト列を指すポインタの保持・受け渡しだけを認める（[ffi.pointer-type]）。ランタイム内部のメモリ確保はランタイム仕様に従う。値の受け渡しは、[1.3 節](#13-値の受け渡し)の原則に従う。
+Suzのプログラムはメモリの確保と解放を直接行わない。FFIでは文字列のバイト列と、Arena内の対応する型の実体をポインタでCへ渡せる（[ffi.pointer-type]・[ffi.arena-pointer]）。ランタイム内部のメモリ確保はランタイム仕様に従う。値の受け渡しは、[1.3 節](#13-値の受け渡し)の原則に従う。
 
 Suzは次のものを含む。
 
@@ -20,7 +20,7 @@ Suzは次のものを含む。
 
 ### 1.2 安全性
 
-正しい Suz のプログラムは、未定義動作を起こさない。ただし、FFIでは呼び出すC関数の契約を守る責任を呼び出し側が持ち、C側の不正動作はこの保証に含めない（[ffi.unsafe]）。整数演算では、[9 章](#9-実行時の検査)で定める検査に違反し、対応する `or` がないときにパニックする。失敗しうる `as` と、`symbol`・`text` からの `as%` は、変換失敗を `or` で処理する。ラップする算術と `as%` はビット幅に収める規則に従い、浮動小数点数の演算は IEEE 754 に従う。
+正しい Suz のプログラムは、未定義動作を起こさない。ただし、FFIでは呼び出すC関数の契約を守る責任を呼び出し側が持ち、C側の不正動作はこの保証に含めない（[ffi.trusted]）。整数演算では、[9 章](#9-実行時の検査)で定める検査に違反し、対応する `or` がないときにパニックする。失敗しうる `as` と、`symbol`・`text` からの `as%` は、変換失敗を `or` で処理する。ラップする算術と `as%` はビット幅に収める規則に従い、浮動小数点数の演算は IEEE 754 に従う。
 
 ### 1.3 値の受け渡し
 
@@ -71,7 +71,7 @@ Suzは次のものを含む。
 **[src.keywords]** 次の語はキーワードである。
 
 ```text
-fix var fn fnshape self static struct enum error extern unsafe arena new ptr null let objection
+fix var fn fnshape self static struct enum error extern trusted arena new ptr null let objection
 if ifexpr elif else while loop for rev in break continue return match matchexpr
 as or not len c_bytes c_byte_len log panic fail ignore recover allow expr with
 true false nan inf
@@ -1510,14 +1510,14 @@ fn main() -> u8 {
 
 ### 8.11 C関数の呼び出し
 
-**[ffi.decl]** `.suz`のトップレベルに `extern "ヘッダー名" { fn C名(仮引数...) -> 型 }` と書く。関数宣言は改行で区切る。宣言はファイル内だけで有効で、モジュールや別の宣言ファイルを必要としない。本体、`impl fn`、`or Error`は書けない。`.sif`への宣言は認めない。
+**[ffi.decl]** `.suz`のトップレベルに `extern "ヘッダー名" { fn C名(仮引数...) -> 型 }` と書く。関数宣言と [ffi.struct] の構造体宣言は改行で区切る。宣言はファイル内だけで有効で、モジュールや別の宣言ファイルを必要としない。本体、`impl fn`、`or Error`は書けない。`.sif`への宣言は認めない。
 
 ```suz
 extern "stdlib.h" {
     fn abs(value: _int) -> _int
 }
 fn main() -> u8 {
-    unsafe {
+    trusted {
         if abs(-7) != 7 { return 1 }
     }
     return 0
@@ -1528,9 +1528,26 @@ fn main() -> u8 {
 
 **[ffi.name]** `fn C名 as Suz名(...) -> 型`で別名を付ける。C名はCの識別子の綴りとし、Suzの予約語や組み込み型名と同じ綴りも認める。Suz名には通常の関数名の規則と予約語・組み込み名との衝突禁止を適用し、`main`も使えない。`as Suz名`を省略するとC名をSuz名にする。例えばCの`log`は `fn log as natural_log(value: f64) -> f64` と宣言する。照合とリンクはC名で行う。`suz_`で始まるC名はランタイムの内部名として予約し、別名の有無によらず拒否する。
 
-**[ffi.duplicate]** 同じファイル内で同じC名を複数回宣言すると、ヘッダー・別名・型が同じかどうかによらずコンパイルエラーである。Suz名には [decl.duplicate]・[decl.shadowing] を適用する。
+**[ffi.duplicate]** 同じファイル内で同じC関数名または同じC構造体タグを複数回宣言すると、ヘッダー・別名・型が同じかどうかによらずコンパイルエラーである。C関数名とC構造体タグの重複は認める。Suz名には [decl.duplicate]・[decl.shadowing] を適用する。
 
-**[ffi.type]** externの引数・戻り値には固定幅整数型、`f32`・`f64`・`bool`、下記のC固有型を使える。`void`は戻り値だけ、`*const void`は引数だけに使える。`len_t`・`char`・`text`・`symbol`・汎用型・構造体・列挙型・エラー型・関数値は使えない。Cとの対応表は [runtime.ffi-types] に定める。
+**[ffi.type]** externの引数・戻り値には固定幅整数型、`f32`・`f64`・`bool`、下記のC固有型を使える。`void`は戻り値だけに使える。引数にはさらに`*const void`と [ffi.arena-pointer] の型付きポインタを使える。`len_t`・`char`・`text`・`symbol`・汎用型・構造体・列挙型・エラー型・関数値は使えない。Cとの対応表は [runtime.ffi-types] に定める。
+
+**[ffi.struct]** externブロック内に `struct Cタグ as Suz名 { フィールド名: 型, ... }` と宣言できる。Cタグはヘッダーの `struct Cタグ` を指し、typedef名やunion名ではない。Suz名は [name.type] に従い、Cタグがその規則を満たす場合は `as Suz名` を省略できる。`suz_`で始まるCタグは [ffi.name] により拒否する。
+
+フィールドは宣言順に並べ、名前には [name.value] を適用する。使える型はi8〜i64・u8〜u64、f32・f64、C固有整数型である。空の宣言、フィールド名の重複、bool・len_t・char・文字列・ポインタ・構造体・列挙型・関数値のフィールドは認めない。C側の配列、ビットフィールド、const・volatile・atomicのフィールドも対象外とする。
+
+Suz内では通常の構造体と同じく初期化・コピー・フィールドの読み書き・with・メソッド・newに使える。各フィールドの型に応じた通常の制約を適用する。C構造体もextern関数の値引数・戻り値には使えない。ヘッダーとの配置・型の照合は [tool.ffi-header] に従う。
+
+```suz
+extern "time.h" {
+    struct timespec as Timespec {
+        tv_sec: _long,
+        tv_nsec: _long,
+    }
+}
+```
+
+この宣言は、対象環境の `struct timespec` が指定した型・配置と一致する場合に使える。
 
 **[ffi.c-integer]** `_int`・`_uint`・`_long`・`_ulong`・`_size_t`・`_char`はそれぞれCの `int`・`unsigned int`・`long`・`unsigned long`・`size_t`・`char` に対応する別々の組み込み型である。externの内外で使え、値の保持、関数の引数・戻り値、構造体のフィールド、同じ型同士の等値・順序比較を認める。型の幅・符号・範囲はCの対象環境に従う。汎用型`int`には含めない。C固有型は通常の整数型を対象にした算術・ビット演算・反復・添字・テンプレート埋め込みの規則には含めず、それらの操作ではSuzの型へ明示的に変換する。文字列からC固有型およびそれを含む構造体への変換も認めない。
 
@@ -1538,21 +1555,25 @@ fn main() -> u8 {
 
 **[ffi.cast]** C固有型とSuzの整数型・浮動小数点型との変換、およびC固有型同士の変換は明示的に行う。異なる型への暗黙変換はない。`as`でC固有型またはSuzの整数型に変換する場合は、同じ型への変換を除き`or`を必須とし、変換先の範囲外なら既存の失敗処理を行う。浮動小数点からは0方向へ丸めた整数の範囲を検査し、NaN・無限大は失敗する。C固有型から浮動小数点型へは最近接・偶数丸めを行い、`or`を省略できる。`as%`は整数同士だけに認め、変換先のビット幅の下位ビットを使う。符号付きの変換先ではそのビット列を2の補数として解釈する。`len_t`を`as%`の変換先にはできない。整数の`as%`に`or`は付けない。
 
-**[ffi.unsafe]** extern関数の呼び出しと`c_bytes`は字句的に `unsafe { ... }` の内側だけで許可する。通常のブロックと同じスコープを作り、`return`・`break`・`continue`にも既存の規則を適用する。unsafeは別の関数・クロージャの本体へ引き継がない。unsafe内でも型・範囲などの検査を省略しない。呼び出すC APIの契約を守る責任を示す構文であり、Cの不正動作を検出・防止する保証ではない。C固有型の保持・比較・変換にはunsafeは不要である。
+**[ffi.trusted]** extern関数の呼び出しと`c_bytes`は字句的に `trusted { ... }` の内側だけで許可する。通常のブロックと同じスコープを作り、`return`・`break`・`continue`にも既存の規則を適用する。trustedは別の関数・クロージャの本体へ引き継がない。trusted内でも型・範囲・寿命の検査を省略しない。C固有型の保持・比較・変換にはtrustedは不要である。
 
-**[ffi.function-value]** extern関数は名前による直接呼び出しだけに使える。`fn 名前`による関数値化はunsafe内でもコンパイルエラーである。関数値が必要なら、内部のunsafeでC関数を呼ぶ通常のSuz関数を用意し、その関数を値にする。
+Suzが検証できない外部APIの契約をプログラマーが保証する構文である。C側の契約遵守に加え、呼び出し側が引数、実体の寿命、読み書きの範囲、APIが要求する同期などの条件を守ることを含む。Cが参照を保持する場合、ブロックを抜けてもCによる最後の利用まで契約を守る責任は続く。C内部の動作を証明したり、不正動作を検出・防止したりする保証ではない。Suz内の寿命検査が証明できなかった判断への異議を示すobjectionとは役割が異なり、trustedによって寿命検査を解除することはできない。
 
-### 8.12 Cへのバイト列の受け渡し
+**[ffi.function-value]** extern関数は名前による直接呼び出しだけに使える。`fn 名前`による関数値化はtrusted内でもコンパイルエラーである。関数値が必要なら、内部のtrustedでC関数を呼ぶ通常のSuz関数を用意し、その関数を値にする。
 
-**[ffi.pointer-type]** `*const void`はCの`const void *`に対応し、Suzが管理する不変のバイト列を指す。ポインタを作る操作は`c_bytes`だけとする。ローカルの`fix`・`var`、通常のSuz関数の仮引数・戻り値、構造体のフィールドに保持・コピーできる。保持・受け渡し自体にunsafeは不要である。externでは引数だけに使え、ポインタを返すC関数は宣言できない。externで使えるポインタ型はこれだけとする。Suz内の `ptr T` は8.13節に従い、Cとの間では受け渡せない。この型表記内の`const`は修飾語であり、予約語には追加しない。
+### 8.12 Cへのポインタの受け渡し
 
-**[ffi.pointer-operations]** ポインタの比較・算術・ビット演算・型変換・テンプレートへの埋め込み・参照先の読み書きは認めない。ポインタを含む構造体の比較や、文字列からその構造体への変換も認めない。整数や文字列値からの暗黙変換、NULLリテラルもない。
+#### 8.12.1 文字列のバイト列
+
+**[ffi.pointer-type]** `*const void`はCの`const void *`に対応し、Suzが管理する不変のバイト列を指す。ポインタを作る操作は`c_bytes`だけとする。ローカルの`fix`・`var`、通常のSuz関数の仮引数・戻り値、構造体のフィールドに保持・コピーできる。保持・受け渡し自体にtrustedは不要である。externでは引数だけに使え、ポインタを返すC関数は宣言できない。Arenaの実体を渡す型付きポインタは [ffi.arena-pointer] に従う。`*const void`とSuzの`ptr T`の間では変換・受け渡しを認めない。この型表記内の`const`は修飾語であり、予約語には追加しない。
+
+**[ffi.pointer-operations]** `*const void`の比較・算術・ビット演算・型変換・テンプレートへの埋め込み・参照先の読み書きは認めない。ポインタを含む構造体の比較や、文字列からその構造体への変換も認めない。整数や文字列値からの暗黙変換、NULLリテラルもない。
 
 **[ffi.bytes-source]** `c_bytes 式`と`c_byte_len 式`の対象には`symbol`または`text`を要求する。関数ではなく`len`と同じ優先順位の前置構文であり、対象式をそれぞれ1回だけ評価する。`c_bytes make_message()`のように関数の戻り値にも使える。これらの操作はSuzの定数式には含めない。
 
-**[ffi.bytes]** `c_bytes`は対象範囲の先頭を指す`*const void`を返す。字句的にunsafeの内側でだけ使える。文字列の実体をコピーせず、動的確保やNUL終端の追加も行わない。対象式自身が文字列を生成するときの確保はこの制約に含めない。
+**[ffi.bytes]** `c_bytes`は対象範囲の先頭を指す`*const void`を返す。字句的にtrustedの内側でだけ使える。文字列の実体をコピーせず、動的確保やNUL終端の追加も行わない。対象式自身が文字列を生成するときの確保はこの制約に含めない。
 
-**[ffi.byte-len]** `c_byte_len`は対象範囲のUTF-8バイト数を`_size_t`で返す。unsafeの外でも使える。Unicodeスカラー値の個数を返す`len`とは異なり、埋め込みNULも1バイトとして数える。空の範囲のバイト数は0である。
+**[ffi.byte-len]** `c_byte_len`は対象範囲のUTF-8バイト数を`_size_t`で返す。trustedの外でも使える。Unicodeスカラー値の個数を返す`len`とは異なり、埋め込みNULも1バイトとして数える。空の範囲のバイト数は0である。
 
 **[ffi.bytes-contract]** ポインタが指すバイト列は、元のローカル束縛のスコープを抜けてもプロセス終了まで生存する。C側で呼び出し後に保持してよいが、変更・解放してはいけない。ポインタと長さが同じ範囲を表すこと、C側がその範囲だけを読むことは呼び出し側の責任である。切り出したtextは切り出し位置からの範囲を渡す。空の範囲ではC側は1バイトも読んではならない。NUL終端は保証しないため、NUL終端や書き込みバッファを要求するAPIにはC側のラッパーを用意する。
 
@@ -1562,7 +1583,7 @@ extern "output.h" {
 }
 fn main() -> u8 {
     fix msg = `こんにちは\n`
-    unsafe {
+    trusted {
         if output_bytes(c_bytes msg, c_byte_len msg) < 0 { return 1 }
     }
     return 0
@@ -1570,6 +1591,75 @@ fn main() -> u8 {
 ```
 
 この例の`output.h`と`output_bytes`の実体はCライブラリ側が提供する。両方の操作へ同じ値を渡すため、メッセージを一度`msg`へ束縛している。
+
+#### 8.12.2 Arenaの実体
+
+**[ffi.arena-pointer]** externの仮引数には、Cが読み取るための `*const T` と、Cが読み書きするための `*T` を指定できる。Tはi8〜i64・u8〜u64、f32・f64、C固有整数型、externで宣言したC構造体のいずれかとする。通常のSuz構造体、bool・len_t・char・文字列・列挙型・関数値・ポインタをTには使えない。`*void`と多段のCポインタも認めない。
+
+この表記はexternの仮引数だけに使い、Suz内の変数や関数には従来の`ptr T`を使う。実引数には同じTの非nullな`ptr T`を要求する。`ptr? T`はletで確認してから渡す。Cで互換な型でも、異なるSuz型のポインタは暗黙変換しない。値そのものや`c_bytes`の結果は渡せない。externの戻り値にはポインタを認めない。
+
+**[ffi.borrow]** 型付きポインタは [ffi.trusted] の内側でCへ渡し、`keep`のない仮引数ではCが実体を使える期間を呼び出し中だけとする。実体のコピーや所有権の移譲は行わない。実引数を左から右へ1回ずつ評価してから呼び出し、後の実引数がポインタ変数を付け替えても、先に評価したポインタが指す実体を渡す。
+
+C側の解放・再確保は禁止し、`*const T`ではそのポインタを通じた書き込みも禁止する。`*T`による更新は同じ実体を指すSuz側の参照にも反映される。Cが渡された実体の範囲を守り、Tとして妥当な値だけを書き込むことはプログラマーが保証する。非同期処理と別スレッドからのアクセスは対象外とする。文字列用の`*const void`の保持期間は [ffi.bytes-contract] のままである。
+
+```suz
+extern "counter.h" {
+    struct counter as Counter { value: i32 }
+    fn counter_read(p: *const Counter) -> i32
+    fn counter_set(p: *Counter, value: i32) -> void
+}
+fn main() -> u8 {
+    arena {
+        fix ptr p = new Counter { value: 0 }
+        trusted {
+            counter_set(p, 7)
+            if counter_read(p) != 7 { return 1 }
+        }
+    }
+    return 0
+}
+```
+
+この例のヘッダーは `struct counter { int32_t value; };`、`int32_t counter_read(const struct counter *);`、`void counter_set(struct counter *, int32_t);` を宣言し、関数の実体をリンク時に用意する。
+
+**[ffi.keep]** externの型付きポインタ仮引数に `keep p: *T` または `keep p: *const T` と書くと、Cが呼び出し後もポインタを保持できる。`keep`はこの位置だけの修飾語であり、名前としての利用は予約しない。数値などの値渡しや、独自の保持契約を持つ`*const void`には付けられない。実引数の型と非nullの要件は [ffi.arena-pointer] と同じである。
+
+プログラマーは、登録解除などによってCの利用が終了するまで、実体を確保したArenaを生かす。`trusted`ブロックや、Cへ登録したSuz関数からの退出は、Cの利用終了を意味しない。mainや特定のArenaには限定せず、通常関数の引数やクロージャの値捕捉からも渡せる。ラッパー関数を作る場合、その関数の呼び出し側も保持期間の条件を満たすように契約を定める。
+
+所有権・解放禁止・読み書きの制約は [ffi.borrow] のままである。Suzは通常の型・寿命検査を行うが、C内部の保持や利用終了を証明せず、Arenaの寿命も延長しない。Suz内で禁止される保存や返却を`keep`で許可するものではない。
+
+例：Cライブラリの`state.h`が次を宣言する。`state_detach`は保持したポインタを破棄し、以降は使用しない契約とする。各関数の実体はリンク時に用意する。
+
+```c
+#include <stdint.h>
+struct state { int32_t value; };
+void state_attach(struct state *p);
+void state_tick(void);
+void state_detach(void);
+```
+
+Suz側の`main.suz`では、Cの利用を終えてからArenaを閉じる。
+
+```suz
+extern "state.h" {
+    struct state as State { value: i32 }
+    fn state_attach(keep p: *State) -> void
+    fn state_tick() -> void
+    fn state_detach() -> void
+}
+fn main() -> u8 {
+    arena {
+        fix ptr p = new State { value: 0 }
+        trusted { state_attach(p) }
+        // 登録したtrustedを抜けた後も、同じ実体をCが利用する。
+        trusted {
+            state_tick()
+            state_detach()
+        }
+    }
+    return 0
+}
+```
 
 ### 8.13 作業領域とポインタ
 
@@ -1595,7 +1685,7 @@ fn main() -> u8 {
 
 例えば`a`が`ptr Node`、`b.next`が`ptr? Node`なら、`ifexpr ready { a } else { null }`と`ifexpr ready { a } else { b.next }`は、ともに`ptr? Node`となる。
 
-**[arena.ptr-operations]** `.p`はポインタpの参照先の値を読む式である。参照先全体を更新するときは、代入文の先頭に`#p = 値`、`#p += 値`などと書く。`#p`は書き換え対象の指定であり、式としては使えない。`.p`自体への代入は括弧で囲んでも認めない。単項の`*p`は認めない。乗算とFFIの型表記`*const void`には影響しない。
+**[arena.ptr-operations]** `.p`はポインタpの参照先の値を読む式である。参照先全体を更新するときは、代入文の先頭に`#p = 値`、`#p += 値`などと書く。`#p`は書き換え対象の指定であり、式としては使えない。`.p`自体への代入は括弧で囲んでも認めない。単項の`*p`は認めない。乗算とFFIの型表記`*const void`・`*const T`・`*T`には影響しない。
 
 前置の`.`は単項演算子と同じ優先順位で右から結び付く。`..pp`は`.(.pp)`と同じく2段の参照先を読む。`#.pp = 値`は`.pp`が指す実体を更新する。`#`の対象は単項式であり、二項式を対象にするときは括弧が必要である。関数の返すポインタも`.get()`、`#get() = 値`で扱える。
 
@@ -1650,7 +1740,7 @@ fn main() -> u8 {
 
 **[arena.parameter-regions]** 各引数に含まれる参照先は未知の領域に属するものとして扱い、引数同士が同じ領域にあるとは仮定しない。引数から参照をたどって到達する実体にも借用の制約を適用する。借りた実体へポインタを保存することは禁止する。`null`の代入、構造体全体の上書き、別名を経由する更新も同じである。参照を含まないメンバーの更新は許す。
 
-**[arena.function-check]** 借用の契約は関数定義で検査する。実引数の寿命に応じて保存・返却の許可を変えない。関数値やクロージャも同じ契約を持つ。値捕捉したポインタは借りた参照として利用できる。参照捕捉した変数へのポインタの再代入は、呼び出し元への保存として禁止する。externにはSuzのポインタやそれを含む値を渡せない。
+**[arena.function-check]** 借用の契約は関数定義で検査する。実引数の寿命に応じて保存・返却の許可を変えない。関数値やクロージャも同じ契約を持つ。値捕捉したポインタは借りた参照として利用できる。参照捕捉した変数へのポインタの再代入は、呼び出し元への保存として禁止する。externへの型付きポインタの受け渡しは [ffi.arena-pointer] に従う。Cが呼び出し後も保持する場合は、[ffi.keep] の保持期間をプログラマーが保証する。
 
 **[arena.call-allocation]** 通常関数は自分の本体で開いたarenaにだけ確保できる。実行時には呼び出し元の領域の内側に積まれ、そのarenaを抜けると回収される。クロージャは、宣言位置を囲むarenaを確保先として引き継がない。
 
@@ -2066,8 +2156,12 @@ Program          ::= NL* ( Declaration NL+ )* Declaration? EOF
 Declaration      ::= TopLevelBinding | FunctionDeclaration
                    | StructDeclaration | EnumDeclaration | ErrorDeclaration | FnShapeDeclaration | ExternBlock
 
-ExternBlock      ::= "extern" HEADER "{" NL* ( ExternFunction NL+ )* ExternFunction? "}"
-ExternFunction   ::= "fn" CNAME ( "as" IDENT )? "(" Parameters? ")" "->" Type
+ExternBlock      ::= "extern" HEADER "{" NL* ( ExternDeclaration NL+ )* ExternDeclaration? "}"
+ExternDeclaration ::= ExternFunction | ExternStruct
+ExternStruct     ::= "struct" CNAME ( "as" IDENT )? "{" NL* Fields "}"
+ExternFunction   ::= "fn" CNAME ( "as" IDENT )? "(" ExternParameters? ")" "->" Type
+ExternParameters ::= ExternParameter ( "," ExternParameter )* ","?
+ExternParameter  ::= "keep"? IDENT ":" ( "*" "const"? Type | Type )
 
 TopLevelBinding  ::= "fix" IDENT TypeAnnotation? "=" ConstExpression AllowClause?
 TypeAnnotation   ::= ":" Type
@@ -2114,7 +2208,7 @@ Statement        ::= ( VariableDeclaration | Assignment | ReturnStatement
                      | "break" | "continue" | LogStatement | Expression ) AllowClause?
                    | WhileStatement | LoopStatement | ForStatement | RevStatement
                    | IfStatement | MatchStatement | Block | AllowStatement | PanicStatement | FailStatement
-                   | RecoverStatement | IgnoreStatement | "unsafe" Block | "arena" Block | LetStatement
+                   | RecoverStatement | IgnoreStatement | "trusted" Block | "arena" Block | LetStatement
                    | "objection" OBJECTION_REASON Block
 
 VariableDeclaration ::= ( "fix" | "var" ) "ptr"? IDENT TypeAnnotation?

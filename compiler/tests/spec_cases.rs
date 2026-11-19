@@ -42,6 +42,10 @@ mod ffi;
 mod ffi_bytes;
 #[path = "spec_cases/ffi_link.rs"]
 mod ffi_link;
+#[path = "spec_cases/ffi_pointers.rs"]
+mod ffi_pointers;
+#[path = "spec_cases/ffi_structs.rs"]
+mod ffi_structs;
 #[path = "spec_cases/float_logs.rs"]
 mod float_logs;
 #[path = "spec_cases/floats.rs"]

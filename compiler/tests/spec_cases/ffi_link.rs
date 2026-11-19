@@ -61,7 +61,7 @@ fn ffi_external_objects_libraries_and_exported_paths() {
         root.0.join("src/main.suz"),
         r#"
 extern "bridge.h" { fn bridge(value: _int) -> _int }
-fn main() -> u8 { unsafe { if bridge(20) != 41 { return 1 } }
+fn main() -> u8 { trusted { if bridge(20) != 41 { return 1 } }
 return 0 }
 "#,
     )

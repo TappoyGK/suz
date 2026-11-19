@@ -87,7 +87,9 @@ SUZ_TIMINGS=1 ./scripts/test-spec-cases.sh
 - `compiler/tests/spec_cases/arena.rs`・`arena_runtime.c`：固定領域の整列・入れ子と再利用、容量と計算のあふれ、失敗前の状態保持、容量オプションと出力物への引き継ぎを検査する。
 - `compiler/tests/spec_cases/ffi_bytes.rs`：UTF-8バイト列・NUL・切り出し、実体の同一性と寿命、評価回数、ポインタ操作の制限、バイト数の範囲検査を確認する。
 - `compiler/tests/spec_cases/ffi_link.rs`：外部ヘッダー・オブジェクト・ライブラリ、リンクの順序と失敗、emit-cのパス引き継ぎを実際のCLIで検査する。
-- `compiler/tests/spec_cases/ffi.rs`：Cヘッダーとの関数型照合、全スカラー型のABI、引数の評価順、C固有型の変換、unsafeの境界を検査する。
+- `compiler/tests/spec_cases/ffi_pointers.rs`：Arenaの実体をCへ渡す借用、型・constのヘッダー照合、評価順序と更新の反映、非nullと対応型の制約、keepによる登録後の利用とArena退出前の登録解除を検査する。
+- `compiler/tests/spec_cases/ffi_structs.rs`：C構造体の宣言、ヘッダーとの配置・型・修飾の照合、実際のCメンバーを使った値操作を検査する。
+- `compiler/tests/spec_cases/ffi.rs`：Cヘッダーとの関数型照合、全スカラー型のABI、引数の評価順、C固有型の変換、trustedの境界を検査する。
 - `compiler/tests/spec_cases/functions.rs`：関数の引数・戻り値、評価順序、再帰、仮引数の制約、voidのテスト。
 - `compiler/tests/spec_cases/value_blocks.rs`：値ブロックのスコープ、外側の変数の更新、評価順序、制御移動と代入先の制約のテスト。
 - `compiler/tests/spec_cases/arithmetic.rs`：整数の算術、境界値、パニック、定数評価のテスト。
