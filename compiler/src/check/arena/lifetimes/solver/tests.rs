@@ -28,7 +28,17 @@ fn reference(analysis: &mut Analysis<'_>, constraints: &[Constraint]) {
                 }
             };
             for dst in destinations {
-                analysis.targets[dst].extend(&values);
+                let accepted: Vec<_> = values
+                    .iter()
+                    .copied()
+                    .filter(|value| {
+                        analysis
+                            .call_regions
+                            .get(&dst)
+                            .is_none_or(|region| analysis.cells[value].region == *region)
+                    })
+                    .collect();
+                analysis.targets[dst].extend(accepted);
             }
         }
         if before == analysis.targets {
@@ -97,6 +107,16 @@ fn delta_solver_matches_full_iteration_with_aliases_and_cycles() {
         let mut expected = fixture(&scope, count);
         actual.node();
         expected.node();
+        // 領域を限定した呼び出し効果も、後から増える候補や循環を含めて全体反復と比べる。
+        if seed % 2 == 0 {
+            for analysis in [&mut actual, &mut expected] {
+                analysis.cells.get_mut(&1).unwrap().region = 1;
+                analysis.cells.get_mut(&3).unwrap().region = 1;
+                analysis.call_regions.insert(count + 2, 0);
+                analysis.call_regions.insert(count + 4, 1);
+                analysis.targets[count + 4].clear();
+            }
+        }
         let originals = actual.targets.len();
         Worklist::default().run(&mut actual, &constraints);
         reference(&mut expected, &constraints);

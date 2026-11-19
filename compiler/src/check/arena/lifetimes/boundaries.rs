@@ -8,6 +8,13 @@ pub(super) struct CallCheck {
     location: Location,
 }
 
+pub(super) struct CallGroup {
+    pub region: usize,
+    ty: Type,
+    reachable: Node,
+    local: Node,
+}
+
 impl Analysis<'_> {
     fn field_type(&self, mut ty: Type, path: &[usize]) -> Type {
         for &index in path {
@@ -133,14 +140,14 @@ impl Analysis<'_> {
         for (ty, shape) in arguments {
             for (path, &source) in shape {
                 let target = self.field_type(*ty, path).pointee().unwrap();
-                let group = self.call_group(region, target, location);
-                self.constraints.push(Constraint::Copy(group, source));
+                let (reachable, _) = self.call_group(region, target, location);
+                self.constraints.push(Constraint::Copy(reachable, source));
             }
         }
         for (path, &node) in &result {
             let target = self.field_type(result_ty, path).pointee().unwrap();
-            let group = self.call_group(region, target, location);
-            self.constraints.push(Constraint::Copy(node, group));
+            let (_, local) = self.call_group(region, target, location);
+            self.constraints.push(Constraint::Copy(node, local));
         }
         self.calls.push(CallCheck {
             arguments: arguments.to_vec(),
@@ -153,41 +160,63 @@ impl Analysis<'_> {
     // 同じR・型の呼び出し効果は一組だけ作る。R以外に届く実引数は必ず拒否するので、
     // この合流で保存・返却の寿命判定は変わらない。呼び出しごとに同じ密な参照グラフを
     // 複製すると、実体数に対する二乗の伝播をさらに呼び出し回数だけ繰り返してしまう。
-    fn call_group(&mut self, region: usize, ty: Type, location: Location) -> Node {
-        if let Some((_, _, node)) = self
+    fn add_call_group(&mut self, region: usize, ty: Type) -> (Node, Node) {
+        let reachable = self.node();
+        let local = self.node();
+        self.call_regions.insert(local, region);
+        self.constraints.push(Constraint::Copy(local, reachable));
+        self.call_groups.push(CallGroup {
+            region,
+            ty,
+            reachable,
+            local,
+        });
+        (reachable, local)
+    }
+
+    fn call_group(&mut self, region: usize, ty: Type, location: Location) -> (Node, Node) {
+        if let Some(group) = self
             .call_groups
             .iter()
-            .find(|(r, t, _)| *r == region && *t == ty)
+            .find(|g| g.region == region && g.ty == ty)
         {
-            return *node;
+            return (group.reachable, group.local);
         }
         let start = self.call_groups.len();
-        let root = self.node();
-        self.call_groups.push((region, ty, root));
+        let root = self.add_call_group(region, ty);
         let mut index = start;
         while index < self.call_groups.len() {
-            let (_, ty, node) = self.call_groups[index];
+            let CallGroup {
+                ty,
+                reachable,
+                local,
+                ..
+            } = self.call_groups[index];
             let allocated = self.cell(region, location, ty);
             self.cells.get_mut(&allocated).unwrap().origin = Origin::Call;
-            self.targets[node].insert(allocated);
+            self.targets[reachable].insert(allocated);
             for path in self.paths(ty) {
                 let target = self.field_type(ty, &path).pointee().unwrap();
-                let other = if let Some((_, _, node)) = self
+                let (other_reachable, other_local) = if let Some(group) = self
                     .call_groups
                     .iter()
-                    .find(|(r, t, _)| *r == region && *t == target)
+                    .find(|g| g.region == region && g.ty == target)
                 {
-                    *node
+                    (group.reachable, group.local)
                 } else {
-                    let node = self.node();
-                    self.call_groups.push((region, target, node));
-                    node
+                    self.add_call_group(region, target)
                 };
-                let place = Place::Indirect(node, path);
-                self.constraints
-                    .push(Constraint::Load(other, place.clone()));
-                self.constraints
-                    .push(Constraint::Store(place, other, location));
+                // R外に届く入力は検査のためにたどるが、その実体への書き込みや
+                // R外の参照の返却を、別の呼び出しへ伝播させてはならない。
+                self.constraints.push(Constraint::Load(
+                    other_reachable,
+                    Place::Indirect(reachable, path.clone()),
+                ));
+                self.constraints.push(Constraint::Store(
+                    Place::Indirect(local, path),
+                    other_local,
+                    location,
+                ));
             }
             index += 1;
         }
@@ -199,13 +228,14 @@ impl Analysis<'_> {
         let invalid: BTreeSet<_> = self
             .call_groups
             .iter()
-            .filter_map(|&(region, _, node)| {
-                self.targets[node]
+            .filter_map(|group| {
+                self.targets[group.reachable]
                     .iter()
-                    .any(|target| self.cells[target].region != region)
-                    .then_some(region)
+                    .any(|target| self.cells[target].region != group.region)
+                    .then_some(group.region)
             })
             .collect();
+        let mut secondary = None;
         for call in &self.calls {
             if !invalid.contains(&call.region) {
                 continue;
@@ -248,7 +278,14 @@ impl Analysis<'_> {
                                 }
                             ),
                         ));
-                        return Err(error);
+                        // 短命な候補は別の違反から伝わった結果かもしれない。
+                        // 外側や借用先へ届く呼び出しを優先し、それがなければこの診断を使う。
+                        if self.outlives(cell.region, call.region) {
+                            return Err(error);
+                        }
+                        if secondary.is_none() {
+                            secondary = Some(error);
+                        }
                     }
                     if !visited.insert(target) {
                         continue;
@@ -265,7 +302,7 @@ impl Analysis<'_> {
                 }
             }
         }
-        Ok(())
+        secondary.map_or(Ok(()), Err)
     }
 
     fn field_label(&self, mut ty: Type, path: &[usize], mut label: String) -> String {

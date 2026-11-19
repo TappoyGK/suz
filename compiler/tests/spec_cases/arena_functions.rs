@@ -2,6 +2,60 @@
 use crate::test_util::compile_and_run_c23;
 
 #[test]
+fn invalid_inner_arena_call_is_reported_at_its_argument_not_an_outer_call() {
+    for (operation, argument) in [
+        ("link(i, o)", "argument 2"),
+        (
+            "if let outer = o { outer.next = i }\n                link(i, o)",
+            "argument 2",
+        ),
+        ("fix ptr n = first(*h)", "argument 1.node"),
+        ("fix ptr n = from_pointer(h)", "argument 1"),
+    ] {
+        let source = format!(
+            r#"struct Node {{ v: i32, next: ptr Node }}
+struct Holder {{ node: ptr Node }}
+arena fn mk(v: i32) -> ptr Node {{ return new Node {{ v: v, next: null }} }}
+arena fn link(a: ptr Node, b: ptr Node) -> void {{ if let x = a {{ x.next = b }} }}
+arena fn hold(n: ptr Node) -> ptr Holder {{ return new Holder {{ node: n }} }}
+arena fn first(h: Holder) -> ptr Node {{ return h.node }}
+arena fn from_pointer(h: ptr Holder) -> ptr Node {{ if let p = h {{ return p.node }}
+    return null }}
+fn main() -> u8 {{
+    arena {{
+        fix ptr o = mk(1)
+        fix ptr maybe_h = hold(o)
+        if let h = maybe_h {{
+            arena {{
+                fix ptr i = mk(2)
+                {operation}
+            }}
+        }}
+    }}
+    return 0
+}}"#
+        );
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert!(error.to_string().contains("[arena.fn-call]"), "{error}");
+        assert_eq!(
+            error.line,
+            15 + operation.lines().count(),
+            "{operation}: {error}"
+        );
+        assert!(error.message().contains(argument), "{operation}: {error}");
+        let allocation_line = if operation.contains("from_pointer") {
+            12
+        } else {
+            11
+        };
+        assert_eq!(
+            error.related[0].line, allocation_line,
+            "{operation}: {error}"
+        );
+    }
+}
+
+#[test]
 fn value_captures_preserve_nonnull_pointers_with_independent_local_ids() {
     let output = compile_and_run_c23(
         r#"

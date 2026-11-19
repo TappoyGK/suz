@@ -31,6 +31,15 @@ impl Worklist {
             {
                 self.propagated += 1;
             }
+            // arena fnの効果はR内だけに限定する。R外の入力は別の候補集合に残して
+            // 呼び出しを拒否し、不正な呼び出しの効果で合法な呼び出しを汚染しない。
+            if analysis
+                .call_regions
+                .get(&dst)
+                .is_some_and(|region| analysis.cells[&value].region != *region)
+            {
+                continue;
+            }
             if analysis.targets[dst].insert(value) {
                 self.pending[dst].push(value);
             }
