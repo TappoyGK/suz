@@ -11,12 +11,12 @@ fn call(call: &CheckedExpression, context: &mut ExpressionContext) -> (String, S
     let error = format!("suz_cmp_{}", context.temporaries.len());
     context.temporaries.push(Type::Integer(IntegerType::U64));
     let code = match &call.value {
-        Value::Call { id, arguments } => {
+        Value::Call { id, arguments, .. } => {
             super::functions::call(*id, arguments, context, Some(&error))
         }
-        Value::Invoke { target, arguments } => {
-            super::functions::invoke(target, arguments, context, Some(&error))
-        }
+        Value::Invoke {
+            target, arguments, ..
+        } => super::functions::invoke(target, arguments, context, Some(&error)),
         _ => unreachable!(),
     };
     (code, error)
@@ -99,7 +99,7 @@ pub(super) fn statement(
         .unwrap();
     }
     let branch = match handler {
-        CallHandler::Return(v) => format!("return {};", value(v, context)),
+        CallHandler::Return { value: v, .. } => format!("return {};", value(v, context)),
         CallHandler::Fail(v) => fail(v.as_ref(), &error, context),
         _ => unreachable!(),
     };

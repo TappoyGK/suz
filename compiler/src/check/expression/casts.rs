@@ -205,11 +205,16 @@ pub(in crate::check) fn check(
                 let safe = conversion_safety(operand.ty, target).unwrap_or(false);
                 require_handler(&operand, target, safe, expr.location, bindings)?;
             }
-            if let Some(FailureHandler::Return { value, .. }) = fallback {
+            if let Some(FailureHandler::Return {
+                value,
+                location: return_location,
+            }) = fallback
+            {
                 let return_value = crate::check::functions::return_value(value, bindings)?;
                 let checked = CheckedExpression {
                     ty: target,
                     value: Value::CastReturn {
+                        return_location: *return_location,
                         location: expr.location,
                         wrap: *wrap,
                         operand: Box::new(operand),

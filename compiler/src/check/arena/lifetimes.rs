@@ -1,5 +1,6 @@
 //! 実行順によらない候補の包含制約を解く。各保存場所は自身の寿命を持ち、
 //! 別名経由のメンバーも同じセルへ合流させる。安全でも候補を絞れない保存は拒否する。
+mod boundaries;
 mod solver;
 
 use super::*;
@@ -16,6 +17,13 @@ struct Cell {
     path: Vec<usize>,
     region: usize,
     location: Location,
+    origin: Origin,
+}
+#[derive(Clone, Copy)]
+enum Origin {
+    Allocation,
+    Parameter,
+    Call,
 }
 struct Region {
     parent: Option<usize>,
@@ -34,6 +42,10 @@ enum Constraint {
 }
 struct Analysis<'a> {
     scope: &'a Scope,
+    borrowed: BTreeSet<usize>,
+    return_region: Option<usize>,
+    recovery: Option<Shape>,
+    calls: Vec<boundaries::CallCheck>,
     // 各値が指しうる保存場所。実体の領域は参照変数の宣言位置から独立している。
     targets: Vec<BTreeSet<Node>>,
     cells: BTreeMap<Node, Cell>,
@@ -47,6 +59,10 @@ impl<'a> Analysis<'a> {
     fn new(scope: &'a Scope) -> Self {
         Self {
             scope,
+            borrowed: BTreeSet::new(),
+            return_region: None,
+            recovery: None,
+            calls: Vec::new(),
             targets: vec![],
             cells: BTreeMap::new(),
             projections: BTreeMap::new(),
@@ -69,6 +85,7 @@ impl<'a> Analysis<'a> {
         self.cells.insert(
             n,
             Cell {
+                origin: Origin::Allocation,
                 root: n,
                 ty,
                 path: vec![],
@@ -264,11 +281,26 @@ impl<'a> Analysis<'a> {
                 }
                 result
             }
-            Value::Call { arguments, .. } => {
-                for argument in arguments {
-                    self.expr(argument, region, arena);
+            Value::Call {
+                arguments,
+                arena: is_arena,
+                location,
+                ..
+            } => {
+                let shapes: Vec<_> = arguments
+                    .iter()
+                    .map(|argument| (argument.ty, self.expr(argument, region, arena)))
+                    .collect();
+                if *is_arena {
+                    self.arena_call(
+                        &shapes,
+                        value.ty,
+                        arena.expect("checked arena call"),
+                        *location,
+                    )
+                } else {
+                    Shape::new()
                 }
-                Shape::new() // この段階では関数境界のptr型は禁止されている。
             }
             Value::Invoke {
                 target, arguments, ..
@@ -277,12 +309,13 @@ impl<'a> Analysis<'a> {
                 for argument in arguments {
                     self.expr(argument, region, arena);
                 }
-                Shape::new()
+                Shape::new() // 関数値は通常関数の借用契約だけを持つ。
             }
-            Value::HandledCall { call, handler, .. } => {
-                self.expr(call, region, arena);
-                self.handler(handler, region, arena);
-                Shape::new()
+            Value::HandledCall { call, handler } => {
+                let result = self.expr(call, region, arena);
+                let alternative = self.handler(handler, call.ty, region, arena);
+                self.join(&result, alternative);
+                result
             }
             Value::Panic { parts, .. } => {
                 for p in parts {
@@ -293,15 +326,17 @@ impl<'a> Analysis<'a> {
                 Shape::new()
             }
             Value::CastReturn {
+                return_location: location,
                 operand,
                 return_value,
                 ..
             } => {
                 self.expr(operand, region, arena);
-                self.expr(return_value, region, arena);
+                let returned = self.expr(return_value, region, arena);
+                self.return_value(return_value.ty, returned, *location);
                 Shape::new()
             }
-            Value::Closure(_) => Shape::new(), // 本体は独立して検査し、ptrの捕捉も境界で拒否する。
+            Value::Closure(_) => Shape::new(), // 本体を独立して検査し、捕捉した参照にも通常関数の借用契約を適用する。
             _ => {
                 value.value.visit_constant_children(&mut |child| {
                     self.expr(child, region, arena);
@@ -310,23 +345,41 @@ impl<'a> Analysis<'a> {
             }
         }
     }
+    fn call_location(call: &CheckedExpression) -> Location {
+        match call.value {
+            Value::Call { location, .. } | Value::Invoke { location, .. } => location,
+            _ => unreachable!("checked call handler"),
+        }
+    }
     fn handler(
         &mut self,
         handler: &super::super::ir::CallHandler,
+        ty: Type,
         region: usize,
         arena: Option<usize>,
-    ) {
+    ) -> Shape {
         use super::super::ir::CallHandler;
         match handler {
             CallHandler::Branches(arms) => {
+                let result = self.shape(ty);
+                let saved = self.recovery.replace(result.clone());
                 for (_, body) in arms {
                     self.block(body, region, arena);
                 }
+                self.recovery = saved;
+                result
             }
-            CallHandler::Value(v) | CallHandler::Return(v) | CallHandler::Fail(Some(v)) => {
+            CallHandler::Value(v) => self.expr(v, region, arena),
+            CallHandler::Return { value: v, location } => {
+                let value = self.expr(v, region, arena);
+                self.return_value(v.ty, value, *location);
+                Shape::new()
+            }
+            CallHandler::Fail(Some(v)) => {
                 self.expr(v, region, arena);
+                Shape::new()
             }
-            _ => {}
+            _ => Shape::new(),
         }
     }
     fn block(&mut self, body: &[CheckedStatement], region: usize, arena: Option<usize>) {
@@ -450,41 +503,54 @@ impl<'a> Analysis<'a> {
                         }
                     }
                 }
-                CheckedStatement::Return(v)
-                | CheckedStatement::Fail(v)
-                | CheckedStatement::Recover(v)
-                | CheckedStatement::Expression(v) => {
+                CheckedStatement::Return { value, location } => {
+                    let shape = self.expr(value, region, arena);
+                    self.return_value(value.ty, shape, *location);
+                }
+                CheckedStatement::Recover(v) => {
+                    let shape = self.expr(v, region, arena);
+                    let result = self.recovery.clone().expect("recover has a handler");
+                    self.join(&result, shape);
+                }
+                CheckedStatement::Fail(v) | CheckedStatement::Expression(v) => {
                     self.expr(v, region, arena);
                 }
                 CheckedStatement::HandleCall { id, call, handler } => {
-                    self.expr(call, region, arena);
-                    self.handler(handler, region, arena);
-                    let cell = self.cell(region, self.regions[region].end, Type::Void);
+                    let value = self.expr(call, region, arena);
+                    let alternative = self.handler(handler, call.ty, region, arena);
+                    self.join(&value, alternative);
+                    let cell = self.cell(region, Self::call_location(call), call.ty);
                     self.locals.insert(*id, cell);
+                    self.write(Place::Direct(cell), value, Self::call_location(call));
                 }
                 CheckedStatement::SliceReturn {
+                    location,
                     id,
                     operation,
                     return_value,
                 }
                 | CheckedStatement::ArithmeticReturn {
+                    location,
                     id,
                     operation,
                     return_value,
                 } => {
                     self.expr(operation, region, arena);
-                    self.expr(return_value, region, arena);
+                    let returned = self.expr(return_value, region, arena);
+                    self.return_value(return_value.ty, returned, *location);
                     let cell = self.cell(region, self.regions[region].end, Type::Void);
                     self.locals.insert(*id, cell);
                 }
                 CheckedStatement::CastReturn {
+                    return_location: location,
                     id,
                     operand,
                     return_value,
                     ..
                 } => {
                     self.expr(operand, region, arena);
-                    self.expr(return_value, region, arena);
+                    let returned = self.expr(return_value, region, arena);
+                    self.return_value(return_value.ty, returned, *location);
                     let cell = self.cell(region, self.regions[region].end, Type::Void);
                     self.locals.insert(*id, cell);
                 }
@@ -505,6 +571,10 @@ impl<'a> Analysis<'a> {
         }
     }
     fn outlives(&self, source: usize, mut destination: usize) -> bool {
+        // 借用先は呼び出し中ずっと有効。ただし借用した実体への参照保存は別途禁止する。
+        if self.borrowed.contains(&source) {
+            return !self.borrowed.contains(&destination);
+        }
         loop {
             if source == destination {
                 return true;
@@ -543,11 +613,31 @@ impl<'a> Analysis<'a> {
     }
     // 候補の収束後に判定し、走査順でまだ見えていない参照先を安全と取り違えない。
     fn validate(&mut self, constraints: &[Constraint]) -> Result<(), Diagnostic> {
+        self.validate_calls()?;
         for constraint in constraints {
             let Constraint::Store(place, src, location) = constraint else {
                 continue;
             };
             for destination in self.destinations(place) {
+                if self.borrowed.contains(&self.cells[&destination].region) {
+                    let cell = &self.cells[&destination];
+                    let mut error = location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "arena.parameter",
+                            "cannot store a pointer into a borrowed caller object{}",
+                            self.member_path(destination)
+                        ),
+                    );
+                    error.related.push(cell.location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "arena.parameter-regions",
+                            "this parameter is borrowed only for the duration of the call"
+                        ),
+                    ));
+                    return Err(error);
+                }
                 for &source in &self.targets[*src] {
                     let source = &self.cells[&source];
                     if !self.outlives(source.region, self.cells[&destination].region) {
@@ -563,7 +653,13 @@ impl<'a> Analysis<'a> {
                             ErrorKind::InvalidSource,
                             crate::diagnostic!(
                                 "arena.lifetime",
-                                "referenced object is allocated here"
+                                "{}",
+                                match source.origin {
+                                    Origin::Allocation => "referenced object is allocated here",
+                                    Origin::Call => "this call may allocate the referenced object",
+                                    Origin::Parameter =>
+                                        "referenced object comes from this parameter",
+                                }
                             ),
                         ));
                         error.related.push(self.regions[source.region].end.error(
@@ -579,9 +675,14 @@ impl<'a> Analysis<'a> {
     }
 }
 
-pub(super) fn check(statements: &[CheckedStatement], scope: &Scope) -> Result<(), Diagnostic> {
+pub(super) fn check(
+    statements: &[CheckedStatement],
+    scope: &Scope,
+    function: &crate::ast::Function,
+    references: &BTreeMap<String, super::Binding>,
+) -> Result<(), Diagnostic> {
     let mut analysis = Analysis::new(scope);
-    // 関数境界のptrは禁止しているので、引数由来の領域はまだ導入しない。
-    analysis.statements(statements, 0, None);
+    let (region, arena) = analysis.parameters(function, references);
+    analysis.statements(statements, region, arena);
     analysis.solve()
 }

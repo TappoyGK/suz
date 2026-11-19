@@ -84,7 +84,10 @@ fn generated_bool_values_preserve_negation_and_copies() {
                         ty: Type::Bool,
                         value: Box::new(boolean(not(Value::Local(0)))),
                     },
-                    CheckedStatement::Return(boolean(value)),
+                    CheckedStatement::Return {
+                        value: boolean(value),
+                        location: crate::ast::Location { line: 1, column: 1 },
+                    },
                 ],
             }],
         };
@@ -250,7 +253,10 @@ fn comparison_codegen_sequences_and_reuses_operands() {
                 id: 0,
                 parameters: Vec::new(),
                 result: Type::Bool,
-                statements: vec![CheckedStatement::Return(expr)],
+                statements: vec![CheckedStatement::Return {
+                    value: expr,
+                    location: crate::ast::Location { line: 1, column: 1 },
+                }],
             }],
         };
         // ローカルの読み取りの記録は、C生成のテスト用コードだけに入れる。

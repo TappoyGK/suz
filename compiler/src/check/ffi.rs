@@ -32,6 +32,7 @@ pub(super) fn signatures(
         signatures.insert(
             function.name.clone(),
             Signature {
+                arena: false,
                 external: true,
                 id: program.functions.len() + index,
                 parameters: function.parameters.iter().map(|p| p.ty).collect(),
@@ -156,11 +157,16 @@ pub(super) fn cast(
             value: Value::Truncate(Box::new(operand)),
         });
     }
-    if let Some(FailureHandler::Return { value, .. }) = fallback {
+    if let Some(FailureHandler::Return {
+        value,
+        location: return_location,
+    }) = fallback
+    {
         let return_value = super::functions::return_value(value, scope)?;
         return Ok(CheckedExpression {
             ty: target,
             value: Value::CastReturn {
+                return_location: *return_location,
                 location,
                 wrap: false,
                 operand: Box::new(operand),

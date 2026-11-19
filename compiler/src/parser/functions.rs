@@ -318,6 +318,7 @@ impl Parser<'_, '_> {
         }
         let (statements, end) = self.block()?;
         Ok(Function {
+            arena: false,
             keyword_location,
             name,
             location,

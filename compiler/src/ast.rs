@@ -262,6 +262,13 @@ impl Type {
 }
 
 impl Type {
+    /// ポインタの深さを除いた型。汎用数値型と関数型の宣言を調べるときに使う。
+    pub fn leaf(mut self) -> Self {
+        while let Some(inner) = self.pointee() {
+            self = inner;
+        }
+        self
+    }
     pub fn generic(self) -> bool {
         matches!(self, Self::GenericInt | Self::GenericFloat)
     }
@@ -473,6 +480,7 @@ pub(crate) struct Parameter {
 /// 関数の構文。仮引数・戻り値型・本体の文と、宣言の開始・終了位置を保持する。
 #[derive(Clone)]
 pub(crate) struct Function {
+    pub arena: bool,
     pub keyword_location: Location,
     pub name: String,
     pub location: Location,
@@ -485,7 +493,11 @@ pub(crate) struct Function {
 
 impl Function {
     pub fn declares_numeric(&self, ty: Type) -> bool {
-        self.result == ty || self.parameters.iter().any(|parameter| parameter.ty == ty)
+        self.result.leaf() == ty
+            || self
+                .parameters
+                .iter()
+                .any(|parameter| parameter.ty.leaf() == ty)
     }
 }
 

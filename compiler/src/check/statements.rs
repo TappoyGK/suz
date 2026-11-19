@@ -169,7 +169,7 @@ fn check_statement(
             if let super::ir::Value::HandledCall { handler, .. } = &checked.value
                 && matches!(
                     handler.as_ref(),
-                    super::ir::CallHandler::Return(_) | super::ir::CallHandler::Fail(_)
+                    super::ir::CallHandler::Return { .. } | super::ir::CallHandler::Fail(_)
                 )
                 && checked.ty != Type::Void
             {
@@ -301,12 +301,10 @@ fn check_statement(
         Statement::Assign { .. } => check_assign(statement, context)?,
 
         Statement::Return(value) => {
-            context
-                .output
-                .push(CheckedStatement::Return(super::functions::return_value(
-                    value,
-                    context.bindings,
-                )?));
+            context.output.push(CheckedStatement::Return {
+                value: super::functions::return_value(value, context.bindings)?,
+                location: value.location,
+            });
         }
     }
     Ok(())

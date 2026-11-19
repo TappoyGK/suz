@@ -1577,7 +1577,7 @@ fn main() -> u8 {
 
 **[arena.block]** `arena { 文 ... }` は、実体を一時的に置く作業領域と寿命の境界を作る文である。通常のブロックと同じスコープを作り、入れ子にできる。既存の変数宣言の保存場所は変えない。
 
-**[arena.new]** `new 式` は、現在の関数内でその位置を字句的に囲む最内側のarenaへ実体を確保し、`ptr T`を返す。Tは初期値の型である。そのようなarenaがなければコンパイルエラーとする。呼び出し元のarenaを暗黙の確保先にはしない。
+**[arena.new]** `new 式` は、現在の関数内でその位置を字句的に囲む最内側のarenaへ実体を確保し、`ptr T`を返す。Tは初期値の型である。関数内にそのようなarenaがない場合、`arena fn`では呼び出し元の領域Rへ確保し、通常関数ではコンパイルエラーとする。
 
 **[arena.new-value]** 初期値には保存できる任意の型の値を使える。`void`と呼び出し専用の`fn`型は使えない。既存の変数のアドレスを取得する構文は設けない。`new`と参照解除の`*`は`len`と同じ優先順位で、定数式には含めない。
 
@@ -1624,7 +1624,61 @@ fn main() -> u8 {
 
 寿命の診断は保存位置を指し、参照先の確保位置とarenaの終了位置を併記する。構造体内の保存では該当するフィールド名も示す。
 
-**[arena.parameter]** 現段階では`ptr T`またはそれを含む値の関数引数・戻り値・クロージャ捕捉・トップレベル変数への保持を認めない。通常関数が自分のarenaで処理し、参照を含まない結果を返すことはできる。関数間の受け渡しと`arena fn`は[#94の段階3](https://github.com/TappoyGK/suz/issues/94)、`objection`は同イシューの段階4で追加する。
+#### 関数への受け渡し
+
+**[arena.parameter]** 通常関数は、引数の`ptr T`や構造体内の参照を、呼び出し中だけ借りる。参照先の読み出し、参照を含まない値への更新、ローカル変数への参照のコピー、通常関数への転送を許す。ポインタを含む戻り値型は禁止する。`null`を返す場合も例外にはしない。トップレベル変数へのポインタまたはそれを含む値の保持も禁止する。
+
+**[arena.parameter-regions]** 各引数に含まれる参照先は未知の領域に属するものとして扱い、引数同士が同じ領域にあるとは仮定しない。引数から参照をたどって到達する実体にも借用の制約を適用する。借りた実体へポインタを保存することは禁止する。`null`の代入、構造体全体の上書き、別名を経由する更新も同じである。参照を含まないメンバーの更新は許す。
+
+**[arena.function-check]** 借用の契約は関数定義で検査する。実引数の寿命に応じて保存・返却の許可を変えない。関数値やクロージャも同じ契約を持つ。値捕捉したポインタは借りた参照として利用できる。参照捕捉した変数へのポインタの再代入は、呼び出し元への保存として禁止する。externにはSuzのポインタやそれを含む値を渡せない。
+
+**[arena.call-allocation]** 通常関数は自分の本体で開いたarenaにだけ確保できる。実行時には呼び出し元の領域の内側に積まれ、そのarenaを抜けると回収される。クロージャは、宣言位置を囲むarenaを確保先として引き継がない。
+
+```suz
+fn increment(p: ptr i32) -> void {
+    if let value = p { *value += 1 }
+}
+
+fn main() -> u8 {
+    arena {
+        fix ptr count = new (0 as i32)
+        increment(count)
+        if *count != 1 { return 1 }
+    }
+    return 0
+}
+```
+
+**[arena.fn]** `arena fn 名前(...) -> 型 { ... }` は、呼び出し元の1つの領域Rで動くトップレベル関数である。引数から参照をたどって到達する実体はすべてRに属するとして本体を検査する。本体内に開いたarenaの外での`new`はRへ確保する。Rの実体への参照を、別のRの実体へ保存したり、戻り値に含めたりできる。戻り値が構造体の場合も同じである。本体内で開いたarenaの参照をRへ保存・返却することは禁止する。Rは型や引数に記述しない。`main`を`arena fn`にはできない。
+
+**[arena.fn-call]** 呼び出し位置を囲む最内側のarenaをRとする。`arena fn`の本体で、その本体内に開いたarenaの外から呼ぶ場合は、呼び出し元のRを使う。それ以外の、確保先の領域がない位置からは呼び出せない。実引数から、ポインタや構造体のメンバーを推移的にたどって到達しうるすべての実体がRに属さなければならない。`null`は到達先を持たない。R内の構造体でも、そのメンバーが外側の実体を参照していれば渡せない。
+
+呼び出し後の寿命検査では、呼び出し先が引数から到達可能なRの実体と新たにRへ確保した実体を、型の合う参照先として保存・返却しうるものとする。呼び出し先の本体が現在何を書き換えているかには依存しない。呼び出し後に引数のメンバーを読み出す場合も、この変更の候補を含める。候補集合には [arena.region-shape] の保守的な判定を適用する。
+
+**[arena.fn-exit]** `arena fn`の呼び出し自体はRを新設せず、復帰時にもRを回収しない。本体内で開いたarenaは [arena.exit] に従って回収する。Rへの確保は実行時の現在の使用位置を進めるだけなので、隠れた領域引数は加えない。
+
+**[arena.fn-value]** `arena fn`は関数値にもextern宣言にもできない。
+
+```suz
+struct Node { value: i32, next: ptr Node }
+
+arena fn prepend(value: i32, tail: ptr Node) -> ptr Node {
+    return new Node { value: value, next: tail }
+}
+
+fn main() -> u8 {
+    arena {
+        fix ptr first = prepend(1, null)
+        fix ptr second = prepend(2, first)
+        if let p = second { if p.value != 2 { return 1 } }
+    }
+    return 0
+}
+```
+
+通常関数・`arena fn`ともに、シグネチャの`ptr int`・`ptr float`は汎用数値型を宣言する。参照先の具体型を推論に使うが、数値の幅の拡大をポインタの変換には適用しない。例えば`ptr i16`を`ptr i32`として渡せない。
+
+`objection`は[#94の段階4](https://github.com/TappoyGK/suz/issues/94)で追加する。
 
 ## 9. 実行時の検査
 
@@ -1922,7 +1976,7 @@ ExternFunction   ::= "fn" CNAME ( "as" IDENT )? "(" Parameters? ")" "->" Type
 TopLevelBinding  ::= ( "fix" | "var" ) IDENT TypeAnnotation? "=" ConstExpression AllowClause?
 TypeAnnotation   ::= ":" Type
 
-FunctionDeclaration ::= "fn" IDENT "(" Parameters? ")" "->" ReturnType Block
+FunctionDeclaration ::= "arena"? "fn" IDENT "(" Parameters? ")" "->" ReturnType Block
 FnShapeDeclaration ::= "fnshape" IDENT "(" FnShapeParameters? ")" "->" ReturnType
 FnShapeParameters ::= Type ( "," Type )* ","?
 Parameters       ::= Parameter ( "," Parameter )* ","?

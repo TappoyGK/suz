@@ -100,9 +100,10 @@ pub(super) fn finish(
             }
             CallHandler::Value(expression::coerced(value, Some(call.ty), scope)?)
         }
-        FailureHandler::Return { value, .. } => {
-            CallHandler::Return(functions::return_value(value, scope)?)
-        }
+        FailureHandler::Return { value, .. } => CallHandler::Return {
+            value: functions::return_value(value, scope)?,
+            location: value.location,
+        },
         FailureHandler::Fail {
             value: Some(value), ..
         } => CallHandler::Fail(Some(fail(value, scope)?)),

@@ -326,7 +326,7 @@ pub(super) fn emit_block(
                 writeln!(c, "{indent}{local} = suz_assign_{index};").unwrap();
                 writeln!(c, "{indent}(void){local};").unwrap();
             }
-            CheckedStatement::Return(value) => {
+            CheckedStatement::Return { value, .. } => {
                 writeln!(c, "{indent}return {};", expression(value, context)).unwrap();
             }
         }

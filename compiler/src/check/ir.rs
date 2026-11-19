@@ -67,6 +67,7 @@ pub(crate) enum CheckedStatement {
         handler: Box<CallHandler>,
     },
     SliceReturn {
+        location: Location,
         id: usize,
         operation: CheckedExpression,
         return_value: Box<CheckedExpression>,
@@ -92,11 +93,13 @@ pub(crate) enum CheckedStatement {
         body: Vec<CheckedStatement>,
     },
     ArithmeticReturn {
+        location: Location,
         id: usize,
         operation: CheckedExpression,
         return_value: Box<CheckedExpression>,
     },
     CastReturn {
+        return_location: Location,
         location: Location,
         wrap: bool,
         id: usize,
@@ -131,7 +134,10 @@ pub(crate) enum CheckedStatement {
         ty: Type,
         value: Box<CheckedExpression>,
     },
-    Return(CheckedExpression),
+    Return {
+        value: CheckedExpression,
+        location: Location,
+    },
 }
 /// [`crate::ast::Expression`] の検査結果。
 /// 推論・検査した型と、参照先を解決した [`Value`] を対にする。
@@ -145,14 +151,20 @@ pub(crate) struct CheckedExpression {
 #[derive(Clone)]
 pub(crate) enum CheckedHandler {
     Value(Box<CheckedExpression>),
-    Return(Box<CheckedExpression>),
+    Return {
+        value: Box<CheckedExpression>,
+        location: Location,
+    },
 }
 /// 呼び出しの失敗処理。脱出するものはC生成前に文へ持ち上げる。
 #[derive(Clone)]
 pub(crate) enum CallHandler {
     Branches(Vec<(Option<crate::ast::ErrorVariant>, Vec<CheckedStatement>)>),
     Value(CheckedExpression),
-    Return(CheckedExpression),
+    Return {
+        value: CheckedExpression,
+        location: Location,
+    },
     Fail(Option<CheckedExpression>),
     Ignore(Box<crate::ast::Ignore>),
 }
@@ -241,6 +253,7 @@ pub(crate) enum Value {
     FunctionBorrow(Box<CheckedExpression>),
     Closure(Box<CheckedClosure>),
     Invoke {
+        location: Location,
         target: Box<CheckedExpression>,
         arguments: Vec<CheckedExpression>,
     },
@@ -286,6 +299,8 @@ pub(crate) enum Value {
     },
     Void,
     Call {
+        arena: bool,
+        location: Location,
         id: usize,
         arguments: Vec<CheckedExpression>,
     },
@@ -305,6 +320,7 @@ pub(crate) enum Value {
         handler: Option<CheckedHandler>,
     },
     CastReturn {
+        return_location: Location,
         location: Location,
         wrap: bool,
         operand: Box<CheckedExpression>,
@@ -368,7 +384,7 @@ macro_rules! constant_children_visitor {
                         visit(value);
                         true
                     }
-                    Some(CheckedHandler::Return(_)) => false,
+                    Some(CheckedHandler::Return { .. }) => false,
                 }
             };
             match self {

@@ -282,14 +282,9 @@ fn arena_rejects_invalid_pointer_operations_and_function_boundaries() {
             "{body}: {error}"
         );
     }
-    for source in [
-        "fn read(p: ptr i32) -> i32 { return 0 }\nfn main() -> u8 { return 0 }",
-        "fn make() -> ptr i32 { arena { return new 1 } }\nfn main() -> u8 { return 0 }",
-        "struct Box { p: ptr i32 }\nfn read(b: Box) -> i32 { return 0 }\nfn main() -> u8 { return 0 }",
-    ] {
-        let error = suz::compile(source.as_bytes()).unwrap_err();
-        assert!(error.to_string().contains("[arena.parameter]"), "{error}");
-    }
+    let source = "fn make() -> ptr i32 { arena { return new 1 } }\nfn main() -> u8 { return 0 }";
+    let error = suz::compile(source.as_bytes()).unwrap_err();
+    assert!(error.to_string().contains("[arena.parameter]"), "{error}");
 }
 
 #[test]
@@ -416,8 +411,6 @@ fn arena_rejects_pointer_conversions_captures_and_aggregate_operations() {
         "fix n = Box { p: p } == Box { p: p }",
         "fix box = Box { p: p }\nlog info `${box}`",
         "fix box = `p: 0` as Box or Box { p: p }",
-        "invoke(fn [p]() -> i32 { return 0 })",
-        "fix box = Box { p: p }\ninvoke(fn [box]() -> i32 { return 0 })",
         "if let q = p { q = p }",
         "if let q = p {}\nfix n = *q",
         "if let q = 1 {}",

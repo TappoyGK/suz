@@ -142,6 +142,7 @@ pub(super) struct ResolvedTypes {
 impl ResolvedTypes {
     pub fn resolve(&self, ty: Type) -> Type {
         match ty {
+            Type::Pointer { .. } => self.resolve(ty.pointee().unwrap()).pointer(),
             Type::GenericInt => self.int.unwrap(),
             Type::GenericFloat => self.float.unwrap(),
             _ => ty,
@@ -175,13 +176,13 @@ fn candidates(
     into: &mut Vec<Type>,
 ) {
     for (parameter, argument) in signature.parameters.iter().zip(arguments) {
-        if Family::of(*parameter) != Some(family) {
+        if Family::of(parameter.leaf()) != Some(family) {
             continue;
         }
         let argument = without_groups(argument);
         if let ExpressionKind::Call { name, arguments } = &argument.kind
             && let Some(inner) = scope.functions.get(name)
-            && Family::of(inner.result) == Some(family)
+            && Family::of(inner.result.leaf()) == Some(family)
         {
             // [num.fn-nested] 既定型を適用する前に、つながった呼び出しを集める。
             candidates(inner, arguments, family, scope, into);
@@ -202,7 +203,7 @@ fn candidates(
                 },
             )
         });
-        if let Some(ty) = known
+        if let Some(ty) = known.map(Type::leaf)
             && family.contains(ty)
         {
             into.push(ty);
@@ -226,8 +227,8 @@ pub(super) fn resolve(
         }
         let mut types = Vec::new();
         candidates(signature, arguments, family, scope, &mut types);
-        if Family::of(signature.result) == Some(family)
-            && let Some(ty) = expected
+        if Family::of(signature.result.leaf()) == Some(family)
+            && let Some(ty) = expected.map(Type::leaf)
             && family.contains(ty)
         {
             types.push(ty);
@@ -280,12 +281,18 @@ pub(super) fn call_operand_type(
         };
     }
     let signature = scope.functions.get(name)?;
-    let Some(family) = Family::of(signature.result) else {
+    let Some(family) = Family::of(signature.result.leaf()) else {
         return Some(signature.result);
     };
     let mut types = Vec::new();
     candidates(signature, arguments, family, scope, &mut types);
-    expression::joined_type(types.into_iter().map(Some))
+    let mut result = expression::joined_type(types.into_iter().map(Some))?;
+    if let Type::Pointer { depth, .. } = signature.result {
+        for _ in 0..depth {
+            result = result.pointer();
+        }
+    }
+    Some(result)
 }
 
 #[cfg(test)]

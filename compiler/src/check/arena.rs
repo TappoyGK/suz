@@ -332,9 +332,14 @@ fn store(
 pub(super) fn check_lifetimes(
     statements: &[CheckedStatement],
     scope: &Scope,
+    function: &crate::ast::Function,
+    references: &std::collections::BTreeMap<String, Binding>,
 ) -> Result<(), Diagnostic> {
-    if !scope.arena_used.get() {
+    if !scope.arena_used.get()
+        && !function.arena
+        && !function.parameters.iter().any(|p| contains(p.ty, scope))
+    {
         return Ok(());
     }
-    lifetimes::check(statements, scope)
+    lifetimes::check(statements, scope, function, references)
 }

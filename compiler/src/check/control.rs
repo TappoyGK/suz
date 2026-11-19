@@ -292,17 +292,17 @@ fn has_return_handler(expr: &CheckedExpression) -> bool {
         Value::Cast(inner) | Value::TextView(inner) => has_return_handler(inner),
         Value::HandledCall { handler, .. } => matches!(
             handler.as_ref(),
-            super::ir::CallHandler::Return(_)
+            super::ir::CallHandler::Return { .. }
                 | super::ir::CallHandler::Fail(_)
                 | super::ir::CallHandler::Branches(_)
         ),
         Value::CastReturn { .. }
         | Value::Slice {
-            handler: Some(CheckedHandler::Return(_)),
+            handler: Some(CheckedHandler::Return { .. }),
             ..
         }
         | Value::IntegerArithmetic {
-            handler: Some(CheckedHandler::Return(_)),
+            handler: Some(CheckedHandler::Return { .. }),
             ..
         } => true,
         _ => false,
@@ -316,7 +316,7 @@ pub(super) fn lower_return_handler(
     next_id: &mut usize,
     location: crate::ast::Location,
 ) -> bool {
-    if matches!(&expr.value, Value::HandledCall { handler, .. } if matches!(handler.as_ref(), super::ir::CallHandler::Return(_) | super::ir::CallHandler::Fail(_) | super::ir::CallHandler::Branches(_)))
+    if matches!(&expr.value, Value::HandledCall { handler, .. } if matches!(handler.as_ref(), super::ir::CallHandler::Return { .. } | super::ir::CallHandler::Fail(_) | super::ir::CallHandler::Branches(_)))
     {
         let id = *next_id;
         *next_id += 1;
@@ -338,10 +338,10 @@ pub(super) fn lower_return_handler(
     if matches!(
         &expr.value,
         Value::Slice {
-            handler: Some(CheckedHandler::Return(_)),
+            handler: Some(CheckedHandler::Return { .. }),
             ..
         } | Value::IntegerArithmetic {
-            handler: Some(CheckedHandler::Return(_)),
+            handler: Some(CheckedHandler::Return { .. }),
             ..
         }
     ) {
@@ -354,17 +354,23 @@ pub(super) fn lower_return_handler(
             Value::IntegerArithmetic { handler, .. } => (handler, false),
             _ => unreachable!(),
         };
-        let Some(CheckedHandler::Return(return_value)) = handler.take() else {
+        let Some(CheckedHandler::Return {
+            value: return_value,
+            location,
+        }) = handler.take()
+        else {
             unreachable!()
         };
         statements.push(if slice {
             CheckedStatement::SliceReturn {
+                location,
                 id,
                 operation,
                 return_value,
             }
         } else {
             CheckedStatement::ArithmeticReturn {
+                location,
                 id,
                 operation,
                 return_value,
@@ -440,6 +446,7 @@ pub(super) fn lower_return_handler(
     let id = *next_id;
     *next_id += 1;
     let Value::CastReturn {
+        return_location,
         location,
         wrap,
         operand,
@@ -449,6 +456,7 @@ pub(super) fn lower_return_handler(
         unreachable!()
     };
     statements.push(CheckedStatement::CastReturn {
+        return_location,
         location,
         wrap,
         id,

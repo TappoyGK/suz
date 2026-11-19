@@ -55,7 +55,9 @@ pub(super) fn collect(expr: &CheckedExpression, locations: &mut Vec<Location>) {
             }
         }
         Value::Field { target, .. } => collect(target, locations),
-        Value::Invoke { target, arguments } => {
+        Value::Invoke {
+            target, arguments, ..
+        } => {
             collect(target, locations);
             for argument in arguments {
                 collect(argument, locations);
@@ -95,7 +97,7 @@ pub(super) fn collect(expr: &CheckedExpression, locations: &mut Vec<Location>) {
             if let Some(handler) = handler {
                 match handler {
                     CheckedHandler::Value(value) => collect(value, locations),
-                    CheckedHandler::Return(_) => {
+                    CheckedHandler::Return { .. } => {
                         unreachable!("failure returns must be lowered to statements")
                     }
                 }
@@ -253,7 +255,7 @@ fn collect_statements(statements: &[CheckedStatement], locations: &mut Vec<Locat
             }
             CheckedStatement::Binding { initializer, .. } => collect(initializer, locations),
             CheckedStatement::Assign { value, .. } => collect(value, locations),
-            CheckedStatement::Return(value) => collect(value, locations),
+            CheckedStatement::Return { value, .. } => collect(value, locations),
         }
     }
 }
@@ -272,7 +274,7 @@ fn collect_handler(handler: &super::ir::CallHandler, locations: &mut Vec<Locatio
             }
         }
         super::ir::CallHandler::Value(v)
-        | super::ir::CallHandler::Return(v)
+        | super::ir::CallHandler::Return { value: v, .. }
         | super::ir::CallHandler::Fail(Some(v)) => collect(v, locations),
         _ => {}
     }

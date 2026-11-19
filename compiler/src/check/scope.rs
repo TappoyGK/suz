@@ -8,6 +8,7 @@ use std::{collections::BTreeMap, rc::Rc};
 
 #[derive(Clone)]
 pub(super) struct Signature {
+    pub arena: bool,
     pub external: bool,
     pub id: usize,
     pub parameters: Vec<Type>,
@@ -20,10 +21,10 @@ impl Signature {
         self.parameters
             .iter()
             .chain([&self.result])
-            .any(|ty| super::generic::Family::of(*ty) == Some(family))
+            .any(|ty| super::generic::Family::of(ty.leaf()) == Some(family))
     }
     pub fn is_generic(&self) -> bool {
-        self.result.generic() || self.parameters.iter().any(|t| t.generic())
+        self.result.leaf().generic() || self.parameters.iter().any(|t| t.leaf().generic())
     }
 }
 

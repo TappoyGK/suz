@@ -190,6 +190,25 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
                     .unwrap()
                     .end;
             }
+            Kind::Keyword("arena") => {
+                let location = p.location();
+                p.cursor += 1;
+                if p.token().kind != Kind::Keyword("fn") {
+                    return Err(location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!("arena.fn", "expected arena fn at top level"),
+                    ));
+                }
+                let mut function = p.function(main)?;
+                if function.name == "main" {
+                    return Err(location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!("arena.fn", "main cannot be an arena fn"),
+                    ));
+                }
+                function.arena = true;
+                functions.push(function);
+            }
             Kind::Keyword("fn") => {
                 let function = p.function(main)?;
                 main |= function.name == "main";

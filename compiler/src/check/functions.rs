@@ -34,6 +34,7 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
         signatures.insert(
             function.name.clone(),
             Signature {
+                arena: function.arena,
                 external: false,
                 id,
                 parameters: function.parameters.iter().map(|p| p.ty).collect(),
@@ -319,20 +320,15 @@ pub(super) fn check_with_captures(
 ) -> Result<(CheckedFunction, Vec<crate::ast::Location>), Diagnostic> {
     control::validate_return_positions(&function.statements)?;
     scope.unsafe_block = false;
-    scope.arena_depth = 0;
+    scope.arena_depth = usize::from(function.arena);
     scope.arena_used = Default::default();
     scope.nonnull.clear();
-    if super::arena::contains(function.result, &scope)
-        || function
-            .parameters
-            .iter()
-            .any(|p| super::arena::contains(p.ty, &scope))
-    {
+    if !function.arena && super::arena::contains(function.result, &scope) {
         return Err(function.location.error(
             ErrorKind::InvalidSource,
             crate::diagnostic!(
                 "arena.parameter",
-                "arena pointers cannot cross function boundaries in this implementation stage"
+                "only arena fn can return values containing arena pointers"
             ),
         ));
     }
@@ -401,7 +397,7 @@ pub(super) fn check_with_captures(
             binding.assigned.set(true);
         }
     }
-    super::arena::check_lifetimes(&statements, &scope)?;
+    super::arena::check_lifetimes(&statements, &scope, function, references)?;
     control::check_return_shape(function)?;
     warnings.extend(diagnostics::unhandled_arithmetic(&statements));
     Ok((
@@ -449,6 +445,15 @@ pub(super) fn call(
             },
         )
     })?;
+    if signature.arena && scope.arena_depth == 0 {
+        return Err(expr.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "arena.fn-call",
+                "arena fn requires an enclosing arena or arena fn"
+            ),
+        ));
+    }
     if signature.external && !scope.unsafe_block {
         return Err(expr.location.error(
             ErrorKind::InvalidSource,
@@ -495,7 +500,12 @@ pub(super) fn call(
     super::errors::finish(
         CheckedExpression {
             ty: concrete(signature.result),
-            value: Value::Call { id, arguments },
+            value: Value::Call {
+                id,
+                arguments,
+                arena: signature.arena,
+                location: expr.location,
+            },
         },
         &signature.errors,
         handler,

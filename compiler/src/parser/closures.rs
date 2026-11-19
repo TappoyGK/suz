@@ -27,7 +27,7 @@ impl Parser<'_, '_> {
         self.expect(FixedToken::Symbol("->"))?;
         let result = self.parse_type()?;
         let errors = self.error_spec()?;
-        if result.generic() || parameters.iter().any(|p| p.ty.generic()) {
+        if result.leaf().generic() || parameters.iter().any(|p| p.ty.leaf().generic()) {
             return Err(location.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(
@@ -50,6 +50,7 @@ impl Parser<'_, '_> {
         Ok(Closure {
             captures,
             function: Function {
+                arena: false,
                 name: String::new(),
                 keyword_location: location,
                 location,

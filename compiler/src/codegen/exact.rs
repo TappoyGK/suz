@@ -200,7 +200,7 @@ pub(super) fn stored(expr: &CheckedExpression, c: &mut ExpressionContext) -> Str
     let native = c.temporaries[id] != Type::Exact;
     let fallback = match handler {
         Some(CheckedHandler::Value(v)) => expression(v, c),
-        Some(CheckedHandler::Return(_)) => unreachable!(),
+        Some(CheckedHandler::Return { .. }) => unreachable!(),
         None if native => format!(
             "(suz_panic({}, {}, {}, \"integer arithmetic overflow [rt.int-overflow]\"), ({})0)",
             c_string(&c.source_name),
