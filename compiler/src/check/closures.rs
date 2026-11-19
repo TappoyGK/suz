@@ -45,6 +45,7 @@ pub(super) fn check(
     let mut function = closure.function.clone();
     let mut captures = Vec::new();
     let mut references = BTreeMap::new();
+    let mut nonnull = BTreeSet::new();
     for capture in &closure.captures {
         if !names.insert(capture.name.clone()) {
             return Err(capture.location.error(
@@ -76,6 +77,11 @@ pub(super) fn check(
             }
             references.insert(capture.name.clone(), binding.clone());
         }
+        // 値捕捉は不変のコピーなので、外側で確定した非null性を引き継ぐ。
+        // 参照捕捉や通常の仮引数には、この保証を与えない。
+        if !capture.by_reference && outer.nonnull.contains(&binding.id) {
+            nonnull.insert(function.parameters.len());
+        }
         captures.push(CheckedCapture {
             value: binding.constant.clone().unwrap_or(CheckedExpression {
                 ty: binding.ty,
@@ -102,7 +108,7 @@ pub(super) fn check(
     scope.type_hints = Default::default();
     scope.float_hints = Default::default();
     scope.hint_depth = Default::default();
-    let (function, _) = functions::check_with_captures(&function, scope, 0, &references)?;
+    let (function, _) = functions::check_with_captures(&function, scope, 0, &references, &nonnull)?;
     for (name, binding) in references {
         if binding.assigned.get() {
             outer.locals[&name].assigned.set(true);

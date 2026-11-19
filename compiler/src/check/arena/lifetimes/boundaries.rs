@@ -130,58 +130,17 @@ impl Analysis<'_> {
         location: Location,
     ) -> Shape {
         let result = self.shape(result_ty);
-        // 各ポインタの指す型について、既存実体と呼び出し中の確保の候補をまとめる。
-        let mut groups: Vec<(Type, Node)> = Vec::new();
-        let mut add_type = |ty: Type, this: &mut Self| {
-            for path in this.paths(ty) {
-                let target = this.field_type(ty, &path).pointee().unwrap();
-                if !groups.iter().any(|(ty, _)| *ty == target) {
-                    groups.push((target, this.node()));
-                }
-            }
-        };
-        for (ty, _) in arguments {
-            add_type(*ty, self);
-        }
-        add_type(result_ty, self);
-        let mut index = 0;
-        while index < groups.len() {
-            let (ty, _) = groups[index];
-            for path in self.paths(ty) {
-                let target = self.field_type(ty, &path).pointee().unwrap();
-                if !groups.iter().any(|(ty, _)| *ty == target) {
-                    groups.push((target, self.node()));
-                }
-            }
-            index += 1;
-        }
-        let group = |ty| groups.iter().find(|(t, _)| *t == ty).unwrap().1;
-        for &(ty, node) in &groups {
-            let allocated = self.cell(region, location, ty);
-            self.cells.get_mut(&allocated).unwrap().origin = Origin::Call;
-            self.targets[node].insert(allocated);
-            for path in self.paths(ty) {
-                let target = self.field_type(ty, &path).pointee().unwrap();
-                let other = group(target);
-                let place = Place::Indirect(node, path);
-                // 引数から推移的に到達する候補を読み、書き換えうる同型の候補を保存する。
-                // 新たな辺が見つかるたびに既存のsolverが伝播するため、循環や後からの更新も含む。
-                self.constraints
-                    .push(Constraint::Load(other, place.clone()));
-                self.constraints
-                    .push(Constraint::Store(place, other, location));
-            }
-        }
         for (ty, shape) in arguments {
             for (path, &source) in shape {
                 let target = self.field_type(*ty, path).pointee().unwrap();
-                self.constraints
-                    .push(Constraint::Copy(group(target), source));
+                let group = self.call_group(region, target, location);
+                self.constraints.push(Constraint::Copy(group, source));
             }
         }
         for (path, &node) in &result {
             let target = self.field_type(result_ty, path).pointee().unwrap();
-            self.constraints.push(Constraint::Copy(node, group(target)));
+            let group = self.call_group(region, target, location);
+            self.constraints.push(Constraint::Copy(node, group));
         }
         self.calls.push(CallCheck {
             arguments: arguments.to_vec(),
@@ -191,8 +150,66 @@ impl Analysis<'_> {
         result
     }
 
+    // 同じR・型の呼び出し効果は一組だけ作る。R以外に届く実引数は必ず拒否するので、
+    // この合流で保存・返却の寿命判定は変わらない。呼び出しごとに同じ密な参照グラフを
+    // 複製すると、実体数に対する二乗の伝播をさらに呼び出し回数だけ繰り返してしまう。
+    fn call_group(&mut self, region: usize, ty: Type, location: Location) -> Node {
+        if let Some((_, _, node)) = self
+            .call_groups
+            .iter()
+            .find(|(r, t, _)| *r == region && *t == ty)
+        {
+            return *node;
+        }
+        let start = self.call_groups.len();
+        let root = self.node();
+        self.call_groups.push((region, ty, root));
+        let mut index = start;
+        while index < self.call_groups.len() {
+            let (_, ty, node) = self.call_groups[index];
+            let allocated = self.cell(region, location, ty);
+            self.cells.get_mut(&allocated).unwrap().origin = Origin::Call;
+            self.targets[node].insert(allocated);
+            for path in self.paths(ty) {
+                let target = self.field_type(ty, &path).pointee().unwrap();
+                let other = if let Some((_, _, node)) = self
+                    .call_groups
+                    .iter()
+                    .find(|(r, t, _)| *r == region && *t == target)
+                {
+                    *node
+                } else {
+                    let node = self.node();
+                    self.call_groups.push((region, target, node));
+                    node
+                };
+                let place = Place::Indirect(node, path);
+                self.constraints
+                    .push(Constraint::Load(other, place.clone()));
+                self.constraints
+                    .push(Constraint::Store(place, other, location));
+            }
+            index += 1;
+        }
+        root
+    }
+
     pub(super) fn validate_calls(&self) -> Result<(), Diagnostic> {
+        // グループには推移的な参照先まで伝播済み。正常な領域を呼び出しごとにたどらない。
+        let invalid: BTreeSet<_> = self
+            .call_groups
+            .iter()
+            .filter_map(|&(region, _, node)| {
+                self.targets[node]
+                    .iter()
+                    .any(|target| self.cells[target].region != region)
+                    .then_some(region)
+            })
+            .collect();
         for call in &self.calls {
+            if !invalid.contains(&call.region) {
+                continue;
+            }
             // 実引数から実体をたどり、違反に至るメンバーの経路を診断にも残す。
             // 同じ実体は一度だけ調べ、循環するグラフでも停止させる。
             let mut pending = std::collections::VecDeque::new();

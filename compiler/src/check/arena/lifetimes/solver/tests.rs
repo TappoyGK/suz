@@ -145,3 +145,60 @@ fn reverse_copy_cycle_propagates_each_candidate_without_rescanning_old_sets() {
         );
     }
 }
+
+#[test]
+fn connected_arena_calls_do_not_repeat_dense_propagation_per_call() {
+    use crate::ast::{StructDeclaration, StructField};
+    let ty = Type::Struct(0);
+    let scope = Scope {
+        structs: std::rc::Rc::new(vec![StructDeclaration {
+            name: "Node".into(),
+            location: HERE,
+            start: 0,
+            end: 0,
+            fields: ["next", "other"]
+                .into_iter()
+                .map(|name| StructField {
+                    name: name.into(),
+                    ty: ty.pointer(),
+                    location: HERE,
+                })
+                .collect(),
+        }]),
+        ..Scope::default()
+    };
+    for count in [32, 64] {
+        let mut analysis = Analysis::new(&scope);
+        let mut arguments = Vec::new();
+        for _ in 0..count {
+            let cell = analysis.cell(0, HERE, ty);
+            let node = analysis.node();
+            analysis.targets[node].insert(cell);
+            arguments.push((
+                ty.pointer(),
+                std::collections::BTreeMap::from([(vec![], node)]),
+            ));
+        }
+        // 連結する実体の数と呼び出し数を一緒に増やす。戻り値も実体のフィールドへ保存する。
+        for i in 0..5 * count {
+            let a = &arguments[i % count];
+            let b = &arguments[(i + 1) % count];
+            let result = analysis.arena_call(&[a.clone(), b.clone()], ty.pointer(), 0, HERE);
+            analysis.constraints.push(Constraint::Store(
+                Place::Indirect(a.1[&vec![]], vec![1]),
+                result[&vec![]],
+                HERE,
+            ));
+        }
+        let constraints = std::mem::take(&mut analysis.constraints);
+        let mut work = Worklist::default();
+        work.run(&mut analysis, &constraints);
+        analysis.validate(&constraints).unwrap();
+        // 時間に依存しない作業量の上限。呼び出しごとの密なグラフによる三乗への退行を検出する。
+        assert!(
+            work.propagated <= 100 * count * count,
+            "{} for {count}",
+            work.propagated
+        );
+    }
+}

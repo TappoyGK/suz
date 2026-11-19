@@ -46,6 +46,7 @@ struct Analysis<'a> {
     return_region: Option<usize>,
     recovery: Option<Shape>,
     calls: Vec<boundaries::CallCheck>,
+    call_groups: Vec<(usize, Type, Node)>,
     // 各値が指しうる保存場所。実体の領域は参照変数の宣言位置から独立している。
     targets: Vec<BTreeSet<Node>>,
     cells: BTreeMap<Node, Cell>,
@@ -63,6 +64,7 @@ impl<'a> Analysis<'a> {
             return_region: None,
             recovery: None,
             calls: Vec::new(),
+            call_groups: Vec::new(),
             targets: vec![],
             cells: BTreeMap::new(),
             projections: BTreeMap::new(),

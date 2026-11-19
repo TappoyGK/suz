@@ -2,6 +2,50 @@
 use crate::test_util::compile_and_run_c23;
 
 #[test]
+fn value_captures_preserve_nonnull_pointers_with_independent_local_ids() {
+    let output = compile_and_run_c23(
+        r#"
+struct Node { v: i64 }
+fnshape Act() -> i64
+fnshape Add(i64) -> i64
+fn call(f: fn Act) -> i64 { return f() }
+fn apply(f: fn Add) -> i64 { return f(2) }
+fn main() -> u8 {
+    arena {
+        fix ptr o = new Node { v: 7 }
+        fix ptr alias = o
+        if call(fn [o]() -> i64 { return o.v }) != 7 { return 1 }
+        if apply(fn [alias](x: i64) -> i64 { return alias.v + x }) != 9 { return 2 }
+        if call(fn [o]() -> i64 { return call(fn [o]() -> i64 { return o.v }) }) != 7 { return 3 }
+        if let p = o {
+            if call(fn [p]() -> i64 { return p.v }) != 7 { return 4 }
+        }
+    }
+    return 0
+}
+"#,
+        "nonnull-capture.suz",
+    );
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    for body in [
+        "fix ptr p: ptr Node = null\ncall(fn [p]() -> i64 { return p.v })",
+        "var ptr p = new Node { v: 1 }\ncall(fn [p]() -> i64 { return p.v })\np = null",
+        "var ptr p = new Node { v: 1 }\ncall(fn [var p]() -> i64 { return p.v })\np = null",
+        // 外側の非nullのローカル番号0と、クロージャの通常の仮引数番号0を混同しない。
+        "fix ptr p = new Node { v: 1 }\nborrow(fn [p](q: ptr Node) -> i64 { return q.v })",
+    ] {
+        let source = format!(
+            "struct Node {{ v: i64 }}\nfnshape Act() -> i64\nfnshape Borrow(ptr Node) -> i64\nfn call(f: fn Act) -> i64 {{ return f() }}\nfn borrow(f: fn Borrow) -> i64 {{ return f(null) }}\nfn main() -> u8 {{ arena {{ {body}\n}}\nreturn 0 }}"
+        );
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert!(
+            error.to_string().contains("[arena.null-deref]"),
+            "{body}: {error}"
+        );
+    }
+}
+
+#[test]
 fn ordinary_functions_borrow_forward_and_capture_without_rewinding_the_caller() {
     let output = compile_and_run_c23(
         r#"
@@ -66,6 +110,10 @@ fn sum(p: ptr Node) -> i32 {
 fn main() -> u8 {
     arena {
         fix ptr root = make(1, null)
+        arena {
+            fix ptr temporary = make(11, null)
+            if sum(temporary) != 11 { return 5 }
+        }
         append(root, 2)
         fix box = boxed(root)
         if sum(box.p) != 6 { return 1 }
