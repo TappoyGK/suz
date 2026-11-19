@@ -676,6 +676,35 @@ impl Parser<'_, '_> {
                 location,
             )?;
         }
+        // #fieldは代入先として文の解析へ残す。ただし後ろにメソッド呼び出しが
+        // 続く形は、ポインタ代入ではなく受け手のたどり方の誤りとして診断する。
+        if self.token().kind == Kind::Symbol("#") {
+            let mut cursor = self.cursor;
+            while self
+                .tokens
+                .get(cursor)
+                .is_some_and(|t| matches!(t.kind, Kind::Symbol("." | "#")))
+                && self
+                    .tokens
+                    .get(cursor + 1)
+                    .is_some_and(|t| matches!(t.kind, Kind::Ident(_)))
+            {
+                cursor += 2;
+            }
+            if self
+                .tokens
+                .get(cursor)
+                .is_some_and(|t| t.kind == Kind::Symbol("("))
+            {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "method.call",
+                        "use . for receiver fields and # only before the called write method; write v.pos#shift(...) instead of v#pos#shift(...)"
+                    ),
+                ));
+            }
+        }
         Ok(result)
     }
 }

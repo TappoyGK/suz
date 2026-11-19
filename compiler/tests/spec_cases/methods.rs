@@ -1,4 +1,28 @@
 #[test]
+fn hash_in_receiver_fields_reports_method_call_syntax() {
+    for call in [
+        "v#pos#shift(1)",
+        "(v)#pos#shift(1)",
+        "v#pos.read()",
+        "v#inner.pos#shift(1)",
+        "fix n = v#pos.read()",
+    ] {
+        let source = format!(
+            "struct Pos {{ x: i32 }}\nstruct Ve {{ pos: Pos }}\nfn Pos#shift(d: i32) -> void {{ self#x += d }}\nfn Pos.read() -> i32 {{ return self.x }}\nfn main() -> u8 {{\nvar v = Ve {{ pos: Pos {{ x: 1 }} }}\n{call}\nreturn 0\n}}"
+        );
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(error.rule(), "method.call", "{call}: {error}");
+        assert!(error.to_string().contains("v.pos#shift(...)"), "{error}");
+    }
+    // 同じ記号の並びでも、代入先なら既存の代入規則で診断する。
+    let error = suz::compile(
+        b"struct Pos { x: i32 }\nstruct Ve { pos: Pos }\nfn main() -> u8 {\nvar v = Ve { pos: Pos { x: 1 } }\nv#pos#x = 2\nreturn 0\n}",
+    )
+    .unwrap_err();
+    assert_eq!(error.rule(), "assign.target");
+}
+
+#[test]
 fn methods_reject_invalid_receivers_names_and_writes() {
     for (declaration, body, rule) in [
         ("fn Counter.value() -> i32 { return 0 }", "", "method.name"),
