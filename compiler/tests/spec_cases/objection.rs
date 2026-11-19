@@ -12,7 +12,7 @@ fn connect(flag: bool) -> void {
             fix ptr destination = ifexpr flag { outer } else { inner }
             fix ptr source = ifexpr flag { outer } else { inner }
             objection [both choices use the same flag and therefore the same object] {
-                if let p = destination { p.next = source }
+                let p = destination { p.next = source }
             }
         }
     }
@@ -39,9 +39,9 @@ fn main() -> u8 {
             var ptr selected = outer
             selected = inner
             objection [selected was replaced by inner] {
-                if let p = selected { p.next = inner }
+                let p = selected { p.next = inner }
             }
-            if let p = inner.next { if p.v != 2 { return 1 } }
+            let p = inner.next { if p.v != 2 { return 1 } }
             else { return 2 }
         }
         if outer.v != 1 { return 3 }
@@ -70,7 +70,7 @@ fn objection_never_removes_proven_lifetime_violations() {
     for operation in [
         "saved = inner",
         "fix ptr copy = inner\nsaved = copy",
-        "fix ptr maybe: ptr Node = inner\nif let p = maybe { saved = p }",
+        "fix ptr maybe: ptr Node = inner\nlet p = maybe { saved = p }",
         "saved = new Node { next: null }",
         "saved = ifexpr true { inner } else { new Node { next: null } }",
         "outer.next = inner",
@@ -144,7 +144,7 @@ fn main() -> u8 {
             selected = inner
             objection [selected is inner] {
                 objection [same guarantee] {
-                    if let p = selected { p.next = inner }
+                    let p = selected { p.next = inner }
                 }
             }
             saved = outer.next
@@ -161,7 +161,7 @@ fn main() -> u8 {
 fn objection_does_not_override_explicit_contracts_or_callee_checks() {
     for (source, rule) in [
         (
-            "fn change(p: ptr ptr i32) -> void { objection [claim] { if let q = p { *q = null } } }\nfn main() -> u8 { return 0 }",
+            "fn change(p: ptr ptr i32) -> void { objection [claim] { let q = p { *q = null } } }\nfn main() -> u8 { return 0 }",
             "arena.parameter",
         ),
         (
@@ -177,7 +177,7 @@ fn objection_does_not_override_explicit_contracts_or_callee_checks() {
             "arena.null-deref",
         ),
         (
-            "fn bad(p: ptr ptr i32) -> void { if let q = p { *q = null } }\nfn main() -> u8 { objection [claim] { bad(null) }\nreturn 0 }",
+            "fn bad(p: ptr ptr i32) -> void { let q = p { *q = null } }\nfn main() -> u8 { objection [claim] { bad(null) }\nreturn 0 }",
             "arena.parameter",
         ),
         (

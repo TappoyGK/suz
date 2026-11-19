@@ -7,13 +7,13 @@ use crate::{
 };
 
 impl Parser<'_, '_> {
-    pub(super) fn if_let(&mut self) -> Result<Statement, Diagnostic> {
-        self.cursor += 2;
+    pub(super) fn let_statement(&mut self) -> Result<Statement, Diagnostic> {
+        self.cursor += 1;
         let location = self.location();
         let Kind::Ident(name) = self.token().kind else {
             return Err(self.error(
                 ErrorKind::InvalidSource,
-                crate::diagnostic!("src.ident", "expected an if let binding"),
+                crate::diagnostic!("src.ident", "expected a let binding"),
             ));
         };
         let name = name.to_owned();
@@ -31,7 +31,7 @@ impl Parser<'_, '_> {
             self.cursor = saved;
             Vec::new()
         };
-        Ok(Statement::IfLet {
+        Ok(Statement::Let {
             name,
             location,
             value: Box::new(value),

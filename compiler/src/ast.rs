@@ -527,7 +527,7 @@ pub(crate) enum Statement {
         body: Vec<Statement>,
         end: Location,
     },
-    IfLet {
+    Let {
         name: String,
         location: Location,
         value: Box<Expression>,

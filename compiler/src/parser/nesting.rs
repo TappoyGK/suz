@@ -113,7 +113,7 @@ pub(super) fn block_height(body: &[Statement]) -> usize {
 
 fn statement_height(statement: &Statement) -> usize {
     match statement {
-        Statement::IfLet {
+        Statement::Let {
             value,
             body,
             otherwise,

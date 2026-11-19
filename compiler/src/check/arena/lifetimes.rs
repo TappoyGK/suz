@@ -513,7 +513,7 @@ impl<'a> Analysis<'a> {
                 } => {
                     for (c, b) in branches {
                         self.expr(c, region, arena);
-                        // if letの本体だけ、束縛したスナップショットの非null性を使う。
+                        // letの本体だけ、束縛したスナップショットの非null性を使う。
                         let confirmed = if let Value::NonNull(pointer) = &c.value {
                             if let Value::Local(id) = pointer.value {
                                 Some(self.locals[&id])

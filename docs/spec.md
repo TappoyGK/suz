@@ -1591,9 +1591,9 @@ fn main() -> u8 {
 
 **[arena.null]** `null`は実体を指さないポインタである。要求されるポインタ型が分かる位置だけに書ける。`var ptr p: ptr Node = null`は有効で、`var ptr p = null`は型が決まらないためエラーとする。nullは参照先の領域や寿命を持たない。
 
-**[arena.if-let]** `if let 名前 = 式 { 文 ... } else { 文 ... }`はポインタ式を1回評価し、非nullならその参照を本体内だけ有効な不変の名前へ束縛する。nullならelse側を実行する。elseは省略できる。束縛したポインタは元の変数やフィールドの変更後も取得時の参照を保持する。参照先の更新は許す。名前には通常の命名規則とシャドーイング禁止を適用する。
+**[arena.let]** `let 名前 = 式 { 文 ... } else { 文 ... }`はポインタ式を1回評価し、非nullならその参照を本体内だけ有効な不変の名前へ束縛する。nullならelse側を実行する。elseは省略できる。束縛したポインタは元の変数やフィールドの変更後も取得時の参照を保持する。参照先の更新は許す。名前には通常の命名規則とシャドーイング禁止を適用する。
 
-**[arena.null-deref]** nullの可能性が残るポインタの参照解除・フィールドアクセスは禁止する。`new`、`if let`の束縛、および既に非nullと保証された値で初期化した`fix ptr`は非nullとする。値捕捉したポインタには、捕捉時に保証された非null性を引き継ぐ。通常の仮引数と参照捕捉にはこの保証を与えない。変更可能な変数やフィールドは、以前の初期値だけを根拠に非nullとは扱わない。
+**[arena.null-deref]** nullの可能性が残るポインタの参照解除・フィールドアクセスは禁止する。`new`、`let`の束縛、および既に非nullと保証された値で初期化した`fix ptr`は非nullとする。値捕捉したポインタには、捕捉時に保証された非null性を引き継ぐ。通常の仮引数と参照捕捉にはこの保証を与えない。変更可能な変数やフィールドは、以前の初期値だけを根拠に非nullとは扱わない。
 
 ```suz
 struct Node { value: i32, next: ptr Node }
@@ -1602,7 +1602,7 @@ fn main() -> u8 {
         fix ptr a = new Node { value: 1, next: null }
         fix ptr b = new Node { value: 2, next: a }
         a.next = b
-        if let next = a.next { next.value += 1 }
+        let next = a.next { next.value += 1 }
     }
     return 0
 }
@@ -1636,7 +1636,7 @@ fn main() -> u8 {
 
 ```suz
 fn increment(p: ptr i32) -> void {
-    if let value = p { *value += 1 }
+    let value = p { *value += 1 }
 }
 
 fn main() -> u8 {
@@ -1670,7 +1670,7 @@ fn main() -> u8 {
     arena {
         fix ptr first = prepend(1, null)
         fix ptr second = prepend(2, first)
-        if let p = second { if p.value != 2 { return 1 } }
+        let p = second { if p.value != 2 { return 1 } }
     }
     return 0
 }
@@ -1686,7 +1686,7 @@ fn main() -> u8 {
 
 **[arena.objection-scope]** 解除できるのは [arena.store] の未証明の寿命違反だけである。保存する参照が必ず非nullで、保存先と参照先の候補の全組が寿命の条件に違反する場合は、証明済みとして拒否を維持する。いずれかの候補集合が空なら、この証明には使わない。構造体はポインタを含む各メンバーについて判定する。診断には証明済みか、違反する可能性があるだけかを示す。
 
-非nullの証明には、`new`、非nullの値で初期化した不変のポインタ変数、`if let`の本体の束縛、非null性を引き継いだ値捕捉を使う。`ifexpr`・`matchexpr`の結果は全分岐で非nullの場合にだけ証明できる。不変の構造体の値では、初期値から各ポインタメンバーの非null性も引き継ぐ。変更可能な変数や、ポインタ経由の可変フィールドの読み出しは、参照先候補にnullが現れないことだけを根拠に非nullとは扱わない。
+非nullの証明には、`new`、非nullの値で初期化した不変のポインタ変数、`let`の本体の束縛、非null性を引き継いだ値捕捉を使う。`ifexpr`・`matchexpr`の結果は全分岐で非nullの場合にだけ証明できる。不変の構造体の値では、初期値から各ポインタメンバーの非null性も引き継ぐ。変更可能な変数や、ポインタ経由の可変フィールドの読み出しは、参照先候補にnullが現れないことだけを根拠に非nullとは扱わない。
 
 構文・型・初期化・null参照解除のエラー、通常関数の参照保存・返却禁止、[arena.fn-call] の領域の一致など、明示的な制約は解除しない。指定は字句上のブロック内の操作だけに適用し、呼び出した関数やクロージャの定義には引き継がない。ブロック内の更新は解析から除外せず、後続の候補にも反映する。
 
@@ -1703,7 +1703,7 @@ fn main() -> u8 {
             var ptr selected = outer
             selected = inner
             objection [selectedをinnerへ差し替えたので、保存先も参照先も内側のarenaに属する] {
-                if let p = selected { p.next = inner }
+                let p = selected { p.next = inner }
             }
         }
     }
@@ -2050,14 +2050,14 @@ Statement        ::= ( VariableDeclaration | Assignment | ReturnStatement
                      | "break" | "continue" | LogStatement | Expression ) AllowClause?
                    | WhileStatement | LoopStatement | ForStatement | RevStatement
                    | IfStatement | MatchStatement | Block | AllowStatement | PanicStatement | FailStatement
-                   | RecoverStatement | IgnoreStatement | "unsafe" Block | "arena" Block | IfLetStatement
+                   | RecoverStatement | IgnoreStatement | "unsafe" Block | "arena" Block | LetStatement
                    | "objection" OBJECTION_REASON Block
 
 VariableDeclaration ::= ( "fix" | "var" ) "ptr"? IDENT TypeAnnotation?
                         "=" Expression
 Assignment       ::= AssignmentTarget AssignmentOperator Expression
 AssignmentTarget ::= IDENT ( "." IDENT )* | "*" Unary | "(" Expression ")" ( "." IDENT )*
-IfLetStatement   ::= "if" "let" IDENT "=" Condition Block ( NL* "else" Block )?
+LetStatement     ::= "let" IDENT "=" Condition Block ( NL* "else" Block )?
 AssignmentOperator ::= "=" | "+=" | "-=" | "*=" | "/=" | "%="
                      | "+%=" | "-%=" | "*%=" | "&=" | "|=" | "^="
                      | "<<=" | ">>="

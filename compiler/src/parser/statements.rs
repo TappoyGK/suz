@@ -246,9 +246,7 @@ impl Parser<'_, '_> {
                     Statement::Continue(location)
                 })
             }
-            Kind::Keyword("if") if self.tokens[self.cursor + 1].kind == Kind::Keyword("let") => {
-                self.if_let()
-            }
+            Kind::Keyword("let") => self.let_statement(),
             Kind::Keyword("if") => self.if_statement(),
             Kind::Keyword("objection") => {
                 self.cursor += 1;

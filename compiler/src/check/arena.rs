@@ -46,7 +46,7 @@ pub(super) fn deref(
             ErrorKind::InvalidSource,
             crate::diagnostic!(
                 "arena.null-deref",
-                "use if let before dereferencing a possibly null pointer"
+                "use let before dereferencing a possibly null pointer"
             ),
         ));
     }
@@ -124,7 +124,7 @@ pub(super) fn statement(
                 end: *end,
             });
         }
-        Statement::IfLet {
+        Statement::Let {
             name,
             location,
             value,
@@ -137,14 +137,14 @@ pub(super) fn statement(
             {
                 return Err(location.error(
                     ErrorKind::InvalidSource,
-                    crate::diagnostic!("decl.shadowing", "if let binding shadows an existing name"),
+                    crate::diagnostic!("decl.shadowing", "let binding shadows an existing name"),
                 ));
             }
             let value = expression::expression(value, None, context.bindings)?;
             if value.ty.pointee().is_none() {
                 return Err(location.error(
                     ErrorKind::InvalidSource,
-                    crate::diagnostic!("arena.if-let", "if let requires ptr"),
+                    crate::diagnostic!("arena.let", "let requires ptr"),
                 ));
             }
             let id = *context.next_id;

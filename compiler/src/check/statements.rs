@@ -114,7 +114,7 @@ fn check_statement(
     #[cfg(test)]
     super::generic::work();
     match statement {
-        Statement::Arena { .. } | Statement::IfLet { .. } | Statement::Store { .. } => {
+        Statement::Arena { .. } | Statement::Let { .. } | Statement::Store { .. } => {
             super::arena::statement(statement, context)?
         }
         Statement::Recover(value) => {

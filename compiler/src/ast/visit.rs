@@ -138,7 +138,7 @@ pub(crate) fn walk_statement<V: Visitor + ?Sized>(
     statement: &Statement,
 ) -> Result<(), Diagnostic> {
     match statement {
-        Statement::IfLet {
+        Statement::Let {
             value,
             body,
             otherwise,

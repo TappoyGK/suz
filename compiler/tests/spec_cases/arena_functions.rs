@@ -6,7 +6,7 @@ fn invalid_inner_arena_call_is_reported_at_its_argument_not_an_outer_call() {
     for (operation, argument) in [
         ("link(i, o)", "argument 2"),
         (
-            "if let outer = o { outer.next = i }\n                link(i, o)",
+            "let outer = o { outer.next = i }\n                link(i, o)",
             "argument 2",
         ),
         ("fix ptr n = first(*h)", "argument 1.node"),
@@ -16,16 +16,16 @@ fn invalid_inner_arena_call_is_reported_at_its_argument_not_an_outer_call() {
             r#"struct Node {{ v: i32, next: ptr Node }}
 struct Holder {{ node: ptr Node }}
 arena fn mk(v: i32) -> ptr Node {{ return new Node {{ v: v, next: null }} }}
-arena fn link(a: ptr Node, b: ptr Node) -> void {{ if let x = a {{ x.next = b }} }}
+arena fn link(a: ptr Node, b: ptr Node) -> void {{ let x = a {{ x.next = b }} }}
 arena fn hold(n: ptr Node) -> ptr Holder {{ return new Holder {{ node: n }} }}
 arena fn first(h: Holder) -> ptr Node {{ return h.node }}
-arena fn from_pointer(h: ptr Holder) -> ptr Node {{ if let p = h {{ return p.node }}
+arena fn from_pointer(h: ptr Holder) -> ptr Node {{ let p = h {{ return p.node }}
     return null }}
 fn main() -> u8 {{
     arena {{
         fix ptr o = mk(1)
         fix ptr maybe_h = hold(o)
-        if let h = maybe_h {{
+        let h = maybe_h {{
             arena {{
                 fix ptr i = mk(2)
                 {operation}
@@ -71,7 +71,7 @@ fn main() -> u8 {
         if call(fn [o]() -> i64 { return o.v }) != 7 { return 1 }
         if apply(fn [alias](x: i64) -> i64 { return alias.v + x }) != 9 { return 2 }
         if call(fn [o]() -> i64 { return call(fn [o]() -> i64 { return o.v }) }) != 7 { return 3 }
-        if let p = o {
+        let p = o {
             if call(fn [p]() -> i64 { return p.v }) != 7 { return 4 }
         }
     }
@@ -107,12 +107,12 @@ struct Box { p: ptr i32 }
 fnshape Read() -> i32
 fnshape Update(ptr i32) -> void
 fn invoke(f: fn Read) -> i32 { return f() }
-fn update(p: ptr i32) -> void { if let q = p { *q += 1 } }
+fn update(p: ptr i32) -> void { let q = p { *q += 1 } }
 fn forward(b: Box, f: fn Update) -> i32 {
     f(b.p)
     arena {
         fix ptr copy = new b
-        if let q = copy.p { return *q }
+        let q = copy.p { return *q }
     }
     return 0
 }
@@ -121,9 +121,9 @@ fn main() -> u8 {
         fix ptr p = new (10 as i32)
         fix box = Box { p: p }
         if forward(box, fn update) != 11 { return 1 }
-        if invoke(fn [p]() -> i32 { if let q = p { return *q }
+        if invoke(fn [p]() -> i32 { let q = p { return *q }
             return 0 }) != 11 { return 2 }
-        if invoke(fn [box]() -> i32 { if let q = box.p { return *q }
+        if invoke(fn [box]() -> i32 { let q = box.p { return *q }
             return 0 }) != 11 { return 3 }
         fix ptr after = new (20 as i32)
         if *p != 11 || *after != 20 { return 4 }
@@ -146,8 +146,8 @@ arena fn make(value: i32, tail: ptr Node) -> ptr Node {
     return new Node { value: value, next: tail }
 }
 arena fn append(p: ptr Node, n: i32) -> void {
-    if let q = p {
-        if let next = q.next { append(next, n) }
+    let q = p {
+        let next = q.next { append(next, n) }
         else { q.next = make(n, null) }
     }
 }
@@ -158,7 +158,7 @@ arena fn boxed(p: ptr Node) -> Box {
     return Box { p: make(3, p) }
 }
 fn sum(p: ptr Node) -> i32 {
-    if let q = p { return q.value + sum(q.next) }
+    let q = p { return q.value + sum(q.next) }
     return 0
 }
 fn main() -> u8 {
@@ -171,12 +171,12 @@ fn main() -> u8 {
         append(root, 2)
         fix box = boxed(root)
         if sum(box.p) != 6 { return 1 }
-        if let q = root {
-            if let next = q.next { next.next = root }
+        let q = root {
+            let next = q.next { next.next = root }
         }
         // 循環があっても呼び出し時の到達可能性検査は停止する。
         fix cycle = boxed(root)
-        if let q = cycle.p { if q.value != 3 { return 2 } }
+        let q = cycle.p { if q.value != 3 { return 2 } }
         else { return 3 }
     }
     return 0
@@ -190,11 +190,11 @@ fn main() -> u8 {
 #[test]
 fn borrowed_objects_cannot_receive_pointers_even_null_or_whole_struct_copies() {
     for body in [
-        "if let q = p { q.next = p }",
-        "if let q = p { q.next = null }",
-        "if let q = p { *q = Node { next: null } }",
-        "if let q = p { if let r = q.next { r.next = p } }",
-        "if let q = p { arena { q.next = new Node { next: null } } }",
+        "let q = p { q.next = p }",
+        "let q = p { q.next = null }",
+        "let q = p { *q = Node { next: null } }",
+        "let q = p { let r = q.next { r.next = p } }",
+        "let q = p { arena { q.next = new Node { next: null } } }",
     ] {
         let source = format!(
             "struct Node {{ next: ptr Node }}\nfn change(p: ptr Node) -> void {{ {body} }}\nfn main() -> u8 {{ return 0 }}"
@@ -227,7 +227,7 @@ fn borrowed_objects_cannot_receive_pointers_even_null_or_whole_struct_copies() {
 
 #[test]
 fn arena_calls_check_transitive_regions_and_effects_of_callee_allocations() {
-    let definitions = "struct Node { next: ptr Node }\nstruct Box { p: ptr Node }\narena fn attach(p: ptr Box) -> ptr Node { fix ptr n = new Node { next: null }\nif let q = p { q.p = n }\nreturn n }\n";
+    let definitions = "struct Node { next: ptr Node }\nstruct Box { p: ptr Node }\narena fn attach(p: ptr Box) -> ptr Node { fix ptr n = new Node { next: null }\nlet q = p { q.p = n }\nreturn n }\n";
     for (body, rule) in [
         ("attach(null)", "arena.fn-call"),
         (
@@ -271,7 +271,7 @@ fn arena_calls_check_transitive_regions_and_effects_of_callee_allocations() {
 fn arena_function_cannot_return_or_store_inner_references() {
     for body in [
         "arena { return new Node { next: null } }",
-        "arena { if let q = p { q.next = new Node { next: null } } }\nreturn p",
+        "arena { let q = p { q.next = new Node { next: null } } }\nreturn p",
         "arena { fix ptr inner = new Node { next: null }\nfix n = failed() or return inner\nreturn p }",
         "arena { fix ptr inner = new Node { next: null }\nfix n = (300 as i32) as u8 or return inner\nreturn p }",
         "arena { fix ptr inner = new Node { next: null }\nvar n: u8 = 255\nn = n + 1 or return inner\nreturn p }",
@@ -318,11 +318,11 @@ fn generic_pointer_parameters_and_results_keep_the_pointee_type() {
     let output = compile_and_run_c23(
         r#"
 arena fn make(value: int) -> ptr int { return new value }
-fn read(p: ptr int) -> int { if let q = p { return *q }
+fn read(p: ptr int) -> int { let q = p { return *q }
     return 0 }
 fn forward(p: ptr int) -> int { return read(p) }
-fn clear(p: ptr int) -> void { if let q = p { *q = 0 } }
-fn read_float(p: ptr float) -> float { if let q = p { return *q }
+fn clear(p: ptr int) -> void { let q = p { *q = 0 } }
+fn read_float(p: ptr float) -> float { let q = p { return *q }
     return 0.0 }
 fnshape Read(ptr i16) -> i16
 fn main() -> u8 {
@@ -366,9 +366,9 @@ recover fallback } }
 fn main() -> u8 {
     arena {
         fix ptr a = recover_pointer()
-        if let p = a { if *p != 17 { return 1 } } else { return 2 }
+        let p = a { if *p != 17 { return 1 } } else { return 2 }
         fix ptr b = maybe(false) or new (23 as i32)
-        if let p = b { if *p != 23 { return 3 } } else { return 4 }
+        let p = b { if *p != 23 { return 3 } } else { return 4 }
     }
     return 0
 }
@@ -394,7 +394,7 @@ fn reference_captures_and_pointer_chains_keep_the_borrowed_boundary() {
     let error = suz::compile(source).unwrap_err();
     assert!(error.to_string().contains("[arena.parameter]"), "{error}");
     for source in [
-        "fn change(p: ptr ptr i32) -> void { if let q = p { *q = null } }\nfn main() -> u8 { return 0 }",
+        "fn change(p: ptr ptr i32) -> void { let q = p { *q = null } }\nfn main() -> u8 { return 0 }",
         "arena fn change(p: ptr ptr i32) -> void { return }\nfn main() -> u8 { arena { fix ptr outer = new (1 as i32)\narena { fix ptr inner = new outer\nchange(inner) } }\nreturn 0 }",
     ] {
         assert!(suz::compile(source.as_bytes()).is_err(), "{source}");
@@ -411,7 +411,7 @@ fnshape Use(ptr static fn Alias) -> i32
 struct Box { f: ptr static fn Alias }
 fn value() -> i32 { return 29 }
 fn call(p: ptr static fn Same) -> i32 {
-    if let q = p { fix f = *q
+    let q = p { fix f = *q
         return f() }
     return 0
 }
@@ -436,4 +436,32 @@ fn main() -> u8 {
         let source = format!("{shape}\nfn main() -> u8 {{ return 0 }}");
         assert!(suz::compile(source.as_bytes()).is_err(), "{source}");
     }
+}
+
+#[test]
+fn let_evaluates_the_pointer_once_and_selects_the_nonnull_or_null_branch() {
+    let source = r#"
+arena fn select(count: ptr i32, value: ptr i32) -> ptr i32 {
+    let c = count { *c += 1 }
+    return value
+}
+fn main() -> u8 {
+    arena {
+        fix ptr count = new (0 as i32)
+        fix ptr value = new (7 as i32)
+        let p = select(count, value) {
+            if *p != 7 { return 1 }
+        } else { return 2 }
+        let p = select(count, null) { return 3 }
+        else { if *count != 2 { return 4 } }
+    }
+    return 0
+}
+"#;
+    assert_eq!(
+        crate::test_util::compile_and_run_c23(source, "let.suz")
+            .status
+            .code(),
+        Some(0)
+    );
 }

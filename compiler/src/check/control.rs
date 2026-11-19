@@ -253,7 +253,7 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
                     validate_statements(body, in_value)?;
                 }
             }
-            Statement::IfLet {
+            Statement::Let {
                 value,
                 body,
                 otherwise,
@@ -495,7 +495,7 @@ fn contains_break(statements: &[Statement]) -> bool {
 }
 pub(super) fn stops(statements: &[Statement]) -> bool {
     statements.iter().any(|statement| match statement {
-        Statement::IfLet {
+        Statement::Let {
             body, otherwise, ..
         } => stops(body) && stops(otherwise),
         Statement::Match { arms, .. } => arms.iter().all(|arm| stops(&arm.body)),

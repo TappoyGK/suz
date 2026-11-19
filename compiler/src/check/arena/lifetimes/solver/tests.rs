@@ -190,7 +190,7 @@ fn mixed_arena_cycles_do_not_repeat_store_candidates_for_each_read() {
         }
         constraints.push(Constraint::Copy(outer_values, inner_values));
         for i in 0..5 * count {
-            // if letのスナップショットと、保存元の変数を毎回読み出す形を再現する。
+            // letのスナップショットと、保存元の変数を毎回読み出す形を再現する。
             let snapshot = analysis.cell(inner, HERE, Type::Void);
             let pointer = analysis.node();
             let value = analysis.node();

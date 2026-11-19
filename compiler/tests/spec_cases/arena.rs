@@ -203,12 +203,12 @@ fn main() -> u8 {
         fix ptr b = new Node { value: 2, next: a }
         a.next = b
         b.value += 3
-        if let next = a.next {
+        let next = a.next {
             if next.value != 5 { return 1 }
             next.value = 6
         } else { return 2 }
         var ptr selected: ptr Node = a
-        if let snapshot = selected {
+        let snapshot = selected {
             selected = b
             snapshot.value = 7
         }
@@ -217,16 +217,16 @@ fn main() -> u8 {
         *count += 4
         if *count != 7 { return 4 }
         fix ptr indirect = new count
-        if let inner = *indirect { *inner = 9 }
+        let inner = *indirect { *inner = 9 }
         if *count != 9 { return 5 }
         var holder = Holder { node: null }
         arena {
             fix ptr alias = a
             holder = Holder { node: alias }
             fix ptr box = new Holder { node: a }
-            if let copied = box.node { holder.node = copied }
+            let copied = box.node { holder.node = copied }
         }
-        if let saved = holder.node { if saved.value != 7 { return 6 } }
+        let saved = holder.node { if saved.value != 7 { return 6 } }
         else { return 7 }
     }
     return 0
@@ -382,13 +382,13 @@ fn main() -> u8 {
                 calls },
         }
         if calls != 2 || pair.value != 1 { return 1 }
-        if let p = pair.link { if *p != 2 { return 2 } }
+        let p = pair.link { if *p != 2 { return 2 } }
         fix ptr outer = expr { fix ptr inner = new (7 as i32)
             inner }
-        if let p = outer { *p += expr { calls += 1
+        let p = outer { *p += expr { calls += 1
             3 } }
         if calls != 3 { return 3 }
-        if let p = outer { if *p != 10 { return 4 } }
+        let p = outer { if *p != 10 { return 4 } }
         if generic(5 as i16) != 5 { return 5 }
     }
     return 0
@@ -411,9 +411,13 @@ fn arena_rejects_pointer_conversions_captures_and_aggregate_operations() {
         "fix n = Box { p: p } == Box { p: p }",
         "fix box = Box { p: p }\nlog info `${box}`",
         "fix box = `p: 0` as Box or Box { p: p }",
-        "if let q = p { q = p }",
-        "if let q = p {}\nfix n = *q",
-        "if let q = 1 {}",
+        "let q = p { q = p }",
+        "let q = p {}\nfix n = *q",
+        "let q = 1 {}",
+        "if let q = p {}",
+        "let q = p",
+        "let q = p {} else { fix n = *q }",
+        "let p = p {}",
         "fix n = new nothing()",
     ] {
         let source = format!(
@@ -446,7 +450,7 @@ fn main() -> u8 {
             fix ptr head = new Box { head: inner }
             fix copy = (*head) with { head: head.head }
             fix ptr selected = ifexpr true { outer } else { inner }
-            if let p = selected {
+            let p = selected {
                 p.next = copy.head
             }
         }
