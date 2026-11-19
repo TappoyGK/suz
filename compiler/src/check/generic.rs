@@ -293,20 +293,11 @@ pub(super) fn call_operand_type(
     let mut types = Vec::new();
     candidates(signature, arguments, family, scope, &mut types);
     let mut result = expression::joined_type(types.into_iter().map(Some))?;
-    if let Type::Pointer {
-        leaf: _,
-        depth,
-        nullable,
-    } = signature.result
-    {
+    if let Type::Pointer { leaf: _, shape } = signature.result {
         let Type::Pointer { leaf, .. } = result.pointer() else {
             unreachable!()
         };
-        result = Type::Pointer {
-            leaf,
-            depth,
-            nullable,
-        };
+        result = Type::Pointer { leaf, shape };
     }
     Some(result)
 }

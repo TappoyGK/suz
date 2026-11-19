@@ -144,6 +144,7 @@ pub(super) fn statement(
             }
             let id = *context.next_id;
             *context.next_id += 1;
+            let nonnull = value.ty.is_nonnull();
             let ty = value.ty.with_nullable(false);
             context.bindings.locals.insert(
                 name.clone(),
@@ -170,18 +171,22 @@ pub(super) fn statement(
                     ty,
                     initializer: Box::new(value),
                 },
-                CheckedStatement::If {
-                    branches: vec![(
-                        CheckedExpression {
-                            ty: Type::Bool,
-                            value: Value::NonNull(Box::new(CheckedExpression {
-                                ty,
-                                value: Value::Local(id),
-                            })),
-                        },
-                        body,
-                    )],
-                    otherwise: Some(otherwise),
+                if nonnull {
+                    CheckedStatement::Block(body)
+                } else {
+                    CheckedStatement::If {
+                        branches: vec![(
+                            CheckedExpression {
+                                ty: Type::Bool,
+                                value: Value::NonNull(Box::new(CheckedExpression {
+                                    ty,
+                                    value: Value::Local(id),
+                                })),
+                            },
+                            body,
+                        )],
+                        otherwise: Some(otherwise),
+                    }
                 },
             ]));
         }

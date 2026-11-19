@@ -151,7 +151,12 @@ impl Parser<'_, '_> {
     fn type_atom(&mut self) -> Result<Type, Diagnostic> {
         let mut layers = Vec::new();
         while self.token().kind == Kind::Keyword("ptr") {
-            self.check_height(layers.len() + 1, self.location())?;
+            if layers.len() == 256 {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("arena.ptr-type", "pointer type nesting exceeds 256"),
+                ));
+            }
             self.cursor += 1;
             let nullable = self.token().kind == Kind::Symbol("?");
             if nullable {

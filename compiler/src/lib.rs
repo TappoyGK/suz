@@ -310,10 +310,11 @@ mod tests {
     #[test]
     #[cfg(target_pointer_width = "64")]
     fn statement_storage_stays_within_budget() {
-        // 型は256段までのnull許容性を32バイトで保持する。
-        // この増分を含む予算で、文の格納サイズの意図しない肥大化を検出する。
-        assert!(std::mem::size_of::<ast::Statement>() <= 232);
-        assert!(std::mem::size_of::<check::ir::CheckedStatement>() <= 224);
+        // ポインタの情報でTypeが大きくなると、ポインタを使わない式や文も肥大化する。
+        // 大きな入力の検査速度を落とさないよう、型と文の格納サイズを制限する。
+        assert!(std::mem::size_of::<ast::Type>() <= 48);
+        assert!(std::mem::size_of::<ast::Statement>() <= 200);
+        assert!(std::mem::size_of::<check::ir::CheckedStatement>() <= 208);
     }
 
     #[test]

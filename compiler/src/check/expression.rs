@@ -546,7 +546,7 @@ fn expression_inner(
         }
     };
 
-    if matches!(checked.ty, Type::Pointer { depth, .. } if depth > 256) {
+    if matches!(checked.ty, Type::Pointer { shape, .. } if shape.depth() > 256) {
         return Err(expr.location.error(
             ErrorKind::InvalidSource,
             crate::diagnostic!("arena.ptr-type", "pointer type nesting exceeds 256"),
@@ -695,7 +695,7 @@ fn branch_type<'a>(
         result
     })?;
     if ty.pointee().is_some() && values.clone().any(has_null_branch) {
-        if matches!(ty, Type::Pointer { depth, .. } if depth > 256) {
+        if matches!(ty, Type::Pointer { shape, .. } if shape.depth() > 256) {
             return None;
         }
         Some(ty.with_nullable(true))

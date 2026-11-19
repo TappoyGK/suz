@@ -162,3 +162,42 @@ fn inferred_pointer_depth_limit_reports_an_error_instead_of_overflowing() {
         "{error}"
     );
 }
+
+#[test]
+fn explicit_pointer_depth_uses_the_pointer_limit_diagnostic() {
+    for layer in ["ptr ", "ptr? "] {
+        for depth in [256, 257] {
+            let source = format!(
+                "struct Other {{ value: {}i32 }}\nfn main() -> u8 {{ return 0 }}",
+                layer.repeat(depth)
+            );
+            let result = suz::check_source(source.as_bytes(), suz::ArithmeticMode::Default);
+            if depth == 256 {
+                result.unwrap();
+            } else {
+                let error = result.unwrap_err();
+                assert!(error.message().contains("[arena.ptr-type]"), "{error}");
+            }
+        }
+    }
+}
+
+#[test]
+fn let_only_tests_null_for_nullable_inputs() {
+    // 非nullの引数でもCコンパイラが分岐を取り除くとは限らないため、生成時点で確認する。
+    for (ty, expected_checks) in [("ptr", 0), ("ptr?", 1)] {
+        let source = format!(
+            "struct Cell {{ value: i32 }}\nfn get(p: {ty} Cell) -> i32 {{ let q = p {{ return q.value }}\nreturn 7 }}\nfn main() -> u8 {{ arena {{ fix ptr p = new Cell {{ value: 3 }}\nreturn get(p) as u8 or 0 }} }}"
+        );
+        let c = suz::compile(source.as_bytes()).unwrap();
+        // ランタイム内の確保失敗検査ではなく、letが生成する局所変数の検査を数える。
+        let checks = c
+            .lines()
+            .filter(|line| line.contains("suz_local_") && line.contains("!= NULL"))
+            .count();
+        assert_eq!(checks, expected_checks, "{c}");
+    }
+    // 実行されないelseも通常どおり型検査する。
+    let source = b"fn get(p: ptr i32) -> i32 { let q = p { return *q } else { return true }\nreturn 7 }\nfn main() -> u8 { return 0 }";
+    assert!(suz::compile(source).is_err());
+}

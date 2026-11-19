@@ -2,7 +2,9 @@
 //!
 //! 利用元: [`crate::parser`]、[`crate::check`]。
 
+mod pointer_shape;
 pub(crate) mod visit;
+use pointer_shape::PointerShape;
 
 use crate::{Diagnostic, ErrorKind};
 
@@ -161,8 +163,7 @@ pub(crate) const NUMERIC_COMBINATIONS: usize = 18;
 pub(crate) enum Type {
     Pointer {
         leaf: PointerLeaf,
-        depth: usize,
-        nullable: [u64; 4],
+        shape: PointerShape,
     },
     CPointer,
     CInteger(CIntegerType),
@@ -183,7 +184,7 @@ pub(crate) enum Type {
     Text,
 }
 
-/// ポインタの末端の値型。間接参照の段数を別に持ち、型をヒープへ確保しない。
+/// ポインタの末端の値型。各段のnull許容性はPointerShapeで別に持つ。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PointerLeaf {
     CPointer,
@@ -207,15 +208,10 @@ pub(crate) enum PointerLeaf {
 impl Type {
     pub fn pointer(self) -> Self {
         let leaf = match self {
-            Self::Pointer {
-                leaf,
-                depth,
-                nullable,
-            } => {
+            Self::Pointer { leaf, shape } => {
                 return Self::Pointer {
                     leaf,
-                    depth: depth + 1,
-                    nullable,
+                    shape: shape.push(),
                 };
             }
             Self::CPointer => PointerLeaf::CPointer,
@@ -238,42 +234,22 @@ impl Type {
         };
         Self::Pointer {
             leaf,
-            depth: 1,
-            nullable: [0; 4],
+            shape: PointerShape::new(),
         }
     }
-    /// null許容の段は末端から数える。newで外側に非nullの段を追加しても位置は変わらない。
     pub fn is_nullable(self) -> bool {
-        matches!(self, Self::Pointer { depth, nullable, .. } if depth <= 256 && nullable[(depth - 1) / 64] & (1 << ((depth - 1) % 64)) != 0)
+        matches!(self, Self::Pointer { shape, .. } if shape.is_nullable())
     }
     pub fn is_nonnull(self) -> bool {
-        self.pointee().is_some() && !self.is_nullable()
+        matches!(self, Self::Pointer { .. }) && !self.is_nullable()
     }
     pub fn with_nullable(self, enabled: bool) -> Self {
-        let Self::Pointer {
-            leaf,
-            depth,
-            mut nullable,
-        } = self
-        else {
-            return self;
-        };
-        assert!(
-            depth <= 256 || !enabled,
-            "nullable pointer nesting is checked before construction"
-        );
-        if depth <= 256 {
-            let bit = 1 << ((depth - 1) % 64);
-            if enabled {
-                nullable[(depth - 1) / 64] |= bit;
-            } else {
-                nullable[(depth - 1) / 64] &= !bit;
-            }
-        }
-        Self::Pointer {
-            leaf,
-            depth,
-            nullable,
+        match self {
+            Self::Pointer { leaf, shape } => Self::Pointer {
+                leaf,
+                shape: shape.with_nullable(enabled),
+            },
+            _ => self,
         }
     }
     /// 外側のnull許容性だけを広げる。参照先の型は変更しない。
@@ -281,22 +257,13 @@ impl Type {
         self.is_nonnull() && to.is_nullable() && self.pointee() == to.pointee()
     }
     pub fn pointee(self) -> Option<Self> {
-        let Self::Pointer {
-            leaf,
-            depth,
-            mut nullable,
-        } = self
-        else {
+        let Self::Pointer { leaf, shape } = self else {
             return None;
         };
-        if depth <= 256 {
-            nullable[(depth - 1) / 64] &= !(1 << ((depth - 1) % 64));
-        }
-        if depth > 1 {
+        if shape.depth() > 1 {
             return Some(Self::Pointer {
                 leaf,
-                depth: depth - 1,
-                nullable,
+                shape: shape.pop(),
             });
         }
         Some(match leaf {
