@@ -41,9 +41,9 @@ fn main() -> u8 {
     log info `${indirect_value} ${returned_value} ${invoked}`
     fix closure_value = invoke(fn [](ok: bool) -> i32 or ReadError, DecodeError.Broken { fail ReadError.Missing })
     log info `${closure_value}`
-    send() or ignore: 送信失敗は無視
+    send() or ignore [送信失敗は無視]
     success() or panic `unexpected`
-    falling() or ignore: 失敗は無視
+    falling() or ignore [失敗は無視]
     fix record = Record { problem: ReadError.Denied }
     fix denied = record.problem == ReadError.Denied
     log info `${record.problem} ${denied}`
@@ -68,7 +68,7 @@ fn fallible_signatures_reject_unhandled_or_undeclared_errors() {
     for source in [
         "fn main() -> u8 { risky()\nreturn 0 }",
         "fn main() -> u8 { fix n = risky()\nreturn 0 }",
-        "fn main() -> u8 { risky() or ignore: 理由\nreturn 0 }",
+        "fn main() -> u8 { risky() or ignore [理由]\nreturn 0 }",
         "fn main() -> u8 { fail Err.First }",
         "fn bad() -> i32 or Err.Second { fail Err.First }\nfn main() -> u8 { return 0 }",
         "fn bad(e: Err) -> i32 or Err.First { fail e }\nfn main() -> u8 { return 0 }",
@@ -82,9 +82,9 @@ fn fallible_signatures_reject_unhandled_or_undeclared_errors() {
         "fn main() -> u8 { fix e = Err.First + Err.Second\nreturn 0 }",
         "fn main() -> u8 { fix n = risky() or panic ``\nreturn 0 }",
         "fn main() -> u8 { fix n = risky() or panic(`bad`)\nreturn 0 }",
-        "fn send() -> void or Err { fail Err.First }\nfn main() -> u8 { send() or ignore:   }",
-        "fn send() -> void or Err { fail Err.First }\nfn main() -> u8 { send() or ignore: x\ty\nreturn 0 }",
-        "fn main() -> u8 { fix n = 1 as u8 or ignore: 理由\nreturn 0 }",
+        "fn send() -> void or Err { fail Err.First }\nfn main() -> u8 { send() or ignore [] }",
+        "fn send() -> void or Err { fail Err.First }\nfn main() -> u8 { send() or ignore [x\ty]\nreturn 0 }",
+        "fn main() -> u8 { fix n = 1 as u8 or ignore [理由]\nreturn 0 }",
     ] {
         let source = format!("{prefix}{source}");
         assert!(suz::compile(source.as_bytes()).is_err(), "{source}");
@@ -131,7 +131,7 @@ fnshape Action() -> i32 or Err
 fn run(f: fn Action) -> i32 { return f() or 99 }
 fn failed_value(e: Err) -> Err or Err { fail e }
 fn send() -> void or Err { fail Err.Bad }
-fn empty() -> void { send() or ignore: 理由 }
+fn empty() -> void { send() or ignore [理由] }
 fn main() -> u8 {
     fix f: static fn Generic = fn number
     fix first = f(0) or 8
@@ -169,7 +169,7 @@ fnshape Once() -> void
 fn run(f: fn Once) -> i32 { f()
     return 7 }
 fn main() -> u8 {
-    fix message = `${run(fn []() -> void { send() or ignore: // ` { ' \ })}`
+    fix message = `${run(fn []() -> void { send() or ignore [// ` ${x} } { [ ' \] })}`
     log info `${message}`
     return 0
 }
@@ -204,11 +204,11 @@ fn indirect(f: fn Action, ok: bool) -> u8 {
 }
 fn main() -> u8 {
     relay(true) or return 1
-    relay(false) or ignore: 外への伝播を確認 // ここも理由
-    mapped() or ignore: 変換後の伝播を確認
+    relay(false) or ignore [外への伝播を確認 // ここも理由]
+    mapped() or ignore [変換後の伝播を確認]
     direct()
     fix f: static fn Action = fn send
-    f(false) or ignore: 関数値からの失敗
+    f(false) or ignore [関数値からの失敗]
     fix failed = indirect(fn send, false)
     fix succeeded = indirect(fn send, true)
     log info `${failed} ${succeeded}`
@@ -437,11 +437,11 @@ fn send(n: u8) -> void or Err {
 fn main() -> u8 {
     send(0) or error { _ => panic `unexpected` }
     send(1) or error {
-        Err.Bad => ignore: 通知は不要 // 理由
+        Err.Bad => ignore [通知は不要 // 理由]
         Err.Other => { log info `unexpected` }
     }
     send(2) or error {
-        Err.Bad => ignore: 通知は不要
+        Err.Bad => ignore [通知は不要]
         Err.Other => { log info `handled` }
     }
     send(1) or error { _ => return 7 }
@@ -494,7 +494,7 @@ fn error_arms_reject_invalid_coverage_values_and_control_positions() {
         ),
         ("send() or error { _ => 0 }\nreturn 0", "err.or-error"),
         (
-            "fix n = read() or error { _ => { ignore: 理由\nrecover 0 } }\nreturn 0",
+            "fix n = read() or error { _ => { ignore [理由]\nrecover 0 } }\nreturn 0",
             "err.or-ignore",
         ),
         (
@@ -530,7 +530,7 @@ fn error_arms_reject_invalid_coverage_values_and_control_positions() {
             "expr.jump-prohibited",
         ),
         ("recover 0", "err.recover"),
-        ("ignore: 理由\nreturn 0", "err.or-ignore"),
+        ("ignore [理由]\nreturn 0", "err.or-ignore"),
         (
             "return read() or error { _ => return 0 }",
             "expr.or-return-position",

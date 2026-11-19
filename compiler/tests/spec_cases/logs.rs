@@ -265,7 +265,7 @@ fn c_string_trigraph_sequences_preserve_output_bytes() {
     // Cの三文字表記9種類を、同じ変換を使う各出力経路で確認する。
     let text = "日本語 ??= ??( ??) ??/ ??' ??< ??> ??! ??-";
     let source = format!(
-        "error Err {{ Bad }}\nfn send() -> void or Err {{ fail Err.Bad }}\nfn main() -> u8 {{\nsend() or ignore: {text}\nfix value = `{text}`\nlog info `${{value}}`\nlog info `{text}`\npanic `{text}`\n}}"
+        "error Err {{ Bad }}\nfn send() -> void or Err {{ fail Err.Bad }}\nfn main() -> u8 {{\nsend() or ignore [{text}]\nfix value = `{text}`\nlog info `${{value}}`\nlog info `{text}`\npanic `{text}`\n}}"
     );
     let c = suz::compile_with_options(
         source.as_bytes(),

@@ -63,7 +63,7 @@ fn main() -> u8 { return forward() or 0 }
 ```suz
 error SendError { Offline }
 fn send() -> void or SendError { fail SendError.Offline }
-fn notify() -> void { send() or ignore: オフライン時は通知を省略 }
+fn notify() -> void { send() or ignore [オフライン時は通知を省略] }
 fn main() -> u8 {
     notify()
     return 0
@@ -226,7 +226,7 @@ fn send() -> void or SendError { fail SendError.Busy }
 fn main() -> u8 {
     var result: u8 = 0
     send() or error {
-        SendError.Offline => ignore: オフライン時は通知を省略
+        SendError.Offline => ignore [オフライン時は通知を省略]
         SendError.Busy => { result = 3 }
     }
     return result
