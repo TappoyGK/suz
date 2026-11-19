@@ -2,11 +2,63 @@
 use super::{FixedToken, Parser};
 use crate::{
     Diagnostic, ErrorKind,
-    ast::{ExternFunction, Type},
+    ast::{ExternFunction, ExternParameter, Type},
     lexer::Kind,
 };
 
 impl Parser<'_, '_> {
+    fn extern_parameter(&mut self) -> Result<ExternParameter, Diagnostic> {
+        let (name, location) = self.parameter_name()?;
+        let mut read_only = false;
+        let ty = if self.token().kind == Kind::Symbol("*") {
+            self.cursor += 1;
+            if self.token().kind == Kind::Ident("const") {
+                read_only = true;
+                self.cursor += 1;
+            }
+            let target = self.parse_type()?;
+            if read_only && target == Type::Void {
+                Type::CPointer // 文字列のバイト列を渡す既存の契約を維持する。
+            } else if numeric_type(target)
+                || matches!(target, Type::Struct(id) if self.structs[id].external.is_some())
+            {
+                target.pointer()
+            } else {
+                return Err(location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "ffi.pointer-type",
+                        "C pointer parameters require a supported numeric type or an extern struct"
+                    ),
+                ));
+            }
+        } else {
+            let ty = self.function_parameter_type()?;
+            if ty.pointee().is_some() {
+                return Err(location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "ffi.pointer-type",
+                        "use *const T or *T for an extern pointer parameter, not ptr T"
+                    ),
+                ));
+            }
+            if ty == Type::Void {
+                return Err(location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("type.void", "parameters cannot have type void"),
+                ));
+            }
+            ty
+        };
+        Ok(ExternParameter {
+            name,
+            ty,
+            location,
+            read_only,
+        })
+    }
+
     pub(super) fn extern_block(&mut self) -> Result<Vec<ExternFunction>, Diagnostic> {
         self.cursor += 1;
         let Kind::Header(header) = self.token().kind else {
@@ -79,13 +131,13 @@ impl Parser<'_, '_> {
                     crate::diagnostic!("ffi.name", "C function requires a non-reserved Suz alias"),
                 ));
             }
-            let parameters = self.list(Self::parameter)?;
+            let parameters = self.list(Self::extern_parameter)?;
             self.expect(FixedToken::Symbol("->"))?;
             let result = self.parse_type()?;
             let supported = |ty| numeric_type(ty) || ty == Type::Bool;
             if !parameters
                 .iter()
-                .all(|p| p.ty == Type::CPointer || supported(p.ty))
+                .all(|p| p.ty == Type::CPointer || p.ty.pointee().is_some() || supported(p.ty))
                 || !(result == Type::Void || supported(result))
             {
                 return Err(location.error(

@@ -1020,7 +1020,17 @@ pub(crate) struct ExternFunction {
     pub header: String,
     pub c_name: String,
     pub name: String,
-    pub parameters: Vec<Parameter>,
+    pub parameters: Vec<ExternParameter>,
     pub result: Type,
     pub location: Location,
+}
+
+/// 外部関数の仮引数。型付きCポインタはSuz側では非nullのptr Tとして検査する。
+#[derive(Clone)]
+pub(crate) struct ExternParameter {
+    pub name: String,
+    pub ty: Type,
+    pub location: Location,
+    /// 型付きポインタの参照先にCのconstを付ける。Suzのptr型自体は変更しない。
+    pub read_only: bool,
 }

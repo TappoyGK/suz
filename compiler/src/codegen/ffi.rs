@@ -34,7 +34,7 @@ pub(super) fn declarations(c: &mut String, program: &CheckedProgram) {
         } else {
             f.parameters
                 .iter()
-                .map(|p| p.ty.c_name())
+                .map(|p| parameter_type(p, program))
                 .collect::<Vec<_>>()
                 .join(", ")
         };
@@ -49,7 +49,7 @@ pub(super) fn declarations(c: &mut String, program: &CheckedProgram) {
             .parameters
             .iter()
             .enumerate()
-            .map(|(i, p)| format!("{} a{i}", p.ty.c_name()))
+            .map(|(i, p)| format!("{} a{i}", parameter_type(p, program)))
             .collect::<Vec<_>>()
             .join(", ");
         let names = (0..f.parameters.len())
@@ -65,6 +65,27 @@ pub(super) fn declarations(c: &mut String, program: &CheckedProgram) {
         // 未使用の宣言でもヘッダー照合は行うが、リンク対象は実際に呼ぶ関数だけ。
         writeln!(c, "static inline __attribute__((unused)) {} suz_fn_{id}({args}) {{ {returned}{}({names}); }}", f.result.c_name(), f.c_name).unwrap();
     }
+}
+
+/// C側のconstとSuz側のポインタ束縛を区別する。構造体はヘッダーのタグで照合する。
+fn parameter_type(parameter: &crate::ast::ExternParameter, program: &CheckedProgram) -> String {
+    let Some(target) = parameter.ty.pointee() else {
+        return parameter.ty.c_name();
+    };
+    let target = if let Type::Struct(id) = target {
+        format!(
+            "struct {}",
+            program.structs[id]
+                .external
+                .as_ref()
+                .expect("checked C struct pointer")
+                .c_name
+        )
+    } else {
+        target.c_name()
+    };
+    let qualifier = if parameter.read_only { "const " } else { "" };
+    format!("{qualifier}{target} *")
 }
 
 /// 実体にはヘッダーの型を使い、Suzが宣言した通常のC配置との一致を検査する。

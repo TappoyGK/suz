@@ -78,7 +78,7 @@ impl Parser<'_, '_> {
         }
     }
 
-    pub(super) fn parameter(&mut self) -> Result<Parameter, Diagnostic> {
+    pub(super) fn parameter_name(&mut self) -> Result<(String, crate::ast::Location), Diagnostic> {
         let location = self.location();
         let Kind::Ident(name) = self.token().kind else {
             return Err(self.error(
@@ -96,6 +96,11 @@ impl Parser<'_, '_> {
             ));
         }
         self.cursor += 1;
+        Ok((name, location))
+    }
+
+    pub(super) fn parameter(&mut self) -> Result<Parameter, Diagnostic> {
+        let (name, location) = self.parameter_name()?;
         let ty = self.function_parameter_type()?;
         if ty == Type::Void {
             return Err(location.error(
@@ -183,14 +188,14 @@ impl Parser<'_, '_> {
             if self.token().kind != Kind::Ident("const") {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
-                    crate::diagnostic!("ffi.pointer-type", "only *const void is supported"),
+                    crate::diagnostic!("ffi.pointer-type", "typed C pointers are only allowed on extern parameters; use ptr T for Suz pointers"),
                 ));
             }
             self.cursor += 1;
             if self.token().kind != Kind::TypeName("void") {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
-                    crate::diagnostic!("ffi.pointer-type", "only *const void is supported"),
+                    crate::diagnostic!("ffi.pointer-type", "typed C pointers are only allowed on extern parameters; use ptr T for Suz pointers"),
                 ));
             }
             self.cursor += 1;
