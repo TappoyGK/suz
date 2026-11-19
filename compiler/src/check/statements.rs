@@ -512,7 +512,7 @@ fn check_assign(
             },
         ));
     }
-    super::writes::check(value, name, fields)?;
+    super::writes::check(value, name, fields, context.bindings)?;
     let (id, mut ty) = (binding.id, binding.ty);
     let mut indices = Vec::new();
     for name in fields {

@@ -326,6 +326,24 @@ impl<'a> Analysis<'a> {
                     .map(|argument| (argument.ty, self.expr(argument, region, arena)))
                     .collect();
                 if *is_arena {
+                    if let Some(CheckedExpression {
+                        ty,
+                        value:
+                            Value::Receiver {
+                                target,
+                                mutable: true,
+                            },
+                    }) = arguments.first()
+                    {
+                        let place = self.place(target, region, arena);
+                        let updated = self.arena_call(
+                            &shapes,
+                            *ty,
+                            arena.expect("checked arena call"),
+                            *location,
+                        );
+                        self.write(place, updated, *location);
+                    }
                     self.arena_call(
                         &shapes,
                         value.ty,
@@ -371,6 +389,7 @@ impl<'a> Analysis<'a> {
                 Shape::new()
             }
             Value::Closure(_) => Shape::new(), // 本体を独立して検査し、捕捉した参照にも通常関数の借用契約を適用する。
+            Value::Receiver { target, .. } => self.expr(target, region, arena),
             _ => {
                 value.value.visit_constant_children(&mut |child| {
                     self.expr(child, region, arena);

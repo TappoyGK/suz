@@ -8,6 +8,7 @@ use std::{collections::BTreeMap, rc::Rc};
 
 #[derive(Clone)]
 pub(super) struct Signature {
+    pub method: Option<crate::ast::Method>,
     pub arena: bool,
     pub external: bool,
     pub id: usize,

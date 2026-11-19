@@ -328,6 +328,15 @@ impl Parser<'_, '_> {
                     ));
                 };
                 self.cursor += 1;
+                if matches!(self.token().kind, Kind::Symbol("." | "#")) {
+                    return Err(self.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "method.no-fn-value",
+                            "methods cannot be extracted as function values"
+                        ),
+                    ));
+                }
                 if matches!(self.token().kind, Kind::Symbol("(" | "." | "[")) {
                     return Err(self.error(ErrorKind::InvalidSource, crate::diagnostic!("fn.value-mark", "fn applies to a function name only; parenthesize the function value before calling it")));
                 }
@@ -417,7 +426,10 @@ impl Parser<'_, '_> {
                 {
                     target = inner;
                 }
-                if matches!(target.kind, ExpressionKind::Field { .. }) {
+                if matches!(
+                    target.kind,
+                    ExpressionKind::Field { .. } | ExpressionKind::MethodCall { .. }
+                ) {
                     return Err(location.error(
                         ErrorKind::InvalidSource,
                         crate::diagnostic!(
@@ -441,7 +453,7 @@ impl Parser<'_, '_> {
                 self.cursor += 1;
                 constructor(Box::new(self.unary()?))
             }
-            Kind::Ident(name) => {
+            Kind::Ident(name) | Kind::Keyword(name @ "self") => {
                 self.cursor += 1;
                 if self.constant_expression && self.token().kind == Kind::Symbol("(") {
                     return Err(location.error(
@@ -540,7 +552,16 @@ impl Parser<'_, '_> {
         while matches!(
             self.token().kind,
             Kind::Symbol("." | "[" | "(") | Kind::Keyword("with")
-        ) {
+        ) || (self.token().kind == Kind::Symbol("#")
+            && self
+                .tokens
+                .get(self.cursor + 1)
+                .is_some_and(|t| matches!(t.kind, Kind::Ident(_)))
+            && self
+                .tokens
+                .get(self.cursor + 2)
+                .is_some_and(|t| t.kind == Kind::Symbol("(")))
+        {
             if self.token().kind == Kind::Symbol("(") {
                 let location = self.location();
                 if self.constant_expression {
@@ -615,6 +636,7 @@ impl Parser<'_, '_> {
                 continue;
             }
             self.check_height(result.height, self.location())?;
+            let mutable = self.token().kind == Kind::Symbol("#");
             self.cursor += 1;
             let location = self.location();
             let Kind::Ident(name) = self.token().kind else {
@@ -624,6 +646,28 @@ impl Parser<'_, '_> {
                 ));
             };
             self.cursor += 1;
+            if self.token().kind == Kind::Symbol("(") {
+                if self.constant_expression {
+                    return Err(location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "const.expression",
+                            "method calls are not constant expressions"
+                        ),
+                    ));
+                }
+                let arguments = self.list(Self::parenthesized_expression)?;
+                result = self.primary_node(
+                    ExpressionKind::MethodCall {
+                        target: Box::new(result),
+                        name: name.into(),
+                        mutable,
+                        arguments,
+                    },
+                    location,
+                )?;
+                continue;
+            }
             result = self.primary_node(
                 ExpressionKind::Field {
                     target: Box::new(result),

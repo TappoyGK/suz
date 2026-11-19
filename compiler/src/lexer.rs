@@ -23,6 +23,7 @@ const KEYWORDS: &[&str] = &[
     "fix",
     "var",
     "fn",
+    "self",
     "fnshape",
     "static",
     "struct",

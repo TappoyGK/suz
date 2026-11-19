@@ -512,6 +512,7 @@ pub(crate) struct Parameter {
 /// 関数の構文。仮引数・戻り値型・本体の文と、宣言の開始・終了位置を保持する。
 #[derive(Clone)]
 pub(crate) struct Function {
+    pub method: Option<Method>,
     pub arena: bool,
     pub keyword_location: Location,
     pub name: String,
@@ -521,6 +522,13 @@ pub(crate) struct Function {
     pub errors: Vec<ErrorVariant>,
     pub statements: Vec<Statement>,
     pub end: Location,
+}
+
+/// メソッドの受け手。暗黙の第1仮引数selfの型と更新の可否を保持する。
+#[derive(Clone, Copy)]
+pub(crate) struct Method {
+    pub owner: Type,
+    pub mutable: bool,
 }
 
 impl Function {
@@ -833,6 +841,17 @@ pub(crate) struct Capture {
 /// 式の構文ごとの内容。名前・リテラルの綴り・子の式を保持し、意味検査で [`crate::check::ir::Value`] へ変換する。
 #[derive(Clone)]
 pub(crate) enum ExpressionKind {
+    MethodCall {
+        target: Box<Expression>,
+        name: String,
+        mutable: bool,
+        arguments: Vec<Expression>,
+    },
+    /// メソッド呼び出しを通常の呼び出しへ渡す際の受け手。ソースからは直接作らない。
+    Receiver {
+        target: Box<Expression>,
+        mutable: bool,
+    },
     New(Box<Expression>),
     Deref(Box<Expression>),
     Null,

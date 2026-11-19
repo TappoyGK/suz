@@ -6,7 +6,7 @@
 use super::{FixedToken, Parser};
 use crate::{
     Diagnostic, ErrorKind,
-    ast::{Function, Parameter, Type},
+    ast::{Function, Method, Parameter, Type},
     lexer::Kind,
 };
 
@@ -273,16 +273,66 @@ impl Parser<'_, '_> {
         let keyword_location = self.location();
         self.cursor += 1;
         let location = self.location();
-        let Kind::Ident(name) = self.token().kind else {
+        let (Kind::Ident(name) | Kind::TypeName(name)) = self.token().kind else {
             return Err(self.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!("src.ident", "expected a function name"),
             ));
         };
-        super::names::check(super::names::Shape::Value, name, location)?;
-        let name = name.to_owned();
+        let owner_name = name;
+        let ordinary_name = matches!(self.token().kind, Kind::Ident(_));
         self.cursor += 1;
-        let (parameters, result) = if name == "main" {
+        let (name, method) = if matches!(self.token().kind, Kind::Symbol("." | "#")) {
+            let mutable = self.token().kind == Kind::Symbol("#");
+            let owner = self
+                .structs
+                .iter()
+                .position(|s| s.name == owner_name)
+                .map(Type::Struct)
+                .or_else(|| {
+                    self.enums
+                        .iter()
+                        .find(|e| e.name == owner_name && !e.ty.is_error)
+                        .map(|e| Type::Enum(e.ty))
+                })
+                .ok_or_else(|| {
+                    location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "method.target-type",
+                            "methods require a struct or enum declared in this source"
+                        ),
+                    )
+                })?;
+            let owner_token = &self.tokens[self.cursor - 1];
+            let separator = self.token();
+            self.cursor += 1;
+            let Kind::Ident(method_name) = self.token().kind else {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("method.name", "expected a method name"),
+                ));
+            };
+            if owner_token.span.end != separator.span.start
+                || separator.span.end != self.token().span.start
+            {
+                return Err(self.error(ErrorKind::InvalidSource, crate::diagnostic!("method.decl", "method declarations cannot separate the type, receiver symbol and method name")));
+            }
+            super::names::check(super::names::Shape::Value, method_name, self.location())?;
+            let name = format!("{owner_name}.{method_name}");
+            self.cursor += 1;
+            (name, Some(Method { owner, mutable }))
+        } else {
+            if !ordinary_name {
+                return Err(location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("src.ident", "expected a function name"),
+                ));
+            }
+            super::names::check(super::names::Shape::Value, owner_name, location)?;
+            (owner_name.to_owned(), None)
+        };
+        let (mut parameters, result) = if name == "main" {
             if has_main {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
@@ -318,6 +368,16 @@ impl Parser<'_, '_> {
             self.cursor += 1;
             (parameters, self.parse_type()?)
         };
+        if let Some(method) = method {
+            parameters.insert(
+                0,
+                Parameter {
+                    name: "self".into(),
+                    ty: method.owner,
+                    location,
+                },
+            );
+        }
         let errors = self.error_spec()?;
         if name == "main" && !errors.is_empty() {
             return Err(location.error(
@@ -327,6 +387,7 @@ impl Parser<'_, '_> {
         }
         let (statements, end) = self.block()?;
         Ok(Function {
+            method,
             arena: false,
             keyword_location,
             name,

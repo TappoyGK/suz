@@ -38,6 +38,15 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
     #[cfg(test)]
     super::generic::work();
     match &expr.kind {
+        ExpressionKind::MethodCall {
+            target,
+            name,
+            arguments,
+            ..
+        } => super::methods::hint(target, name, arguments, bindings),
+        ExpressionKind::Receiver { target, .. } => {
+            operand_type(target, bindings).map(|t| t.pointee().unwrap_or(t))
+        }
         ExpressionKind::Closure(_) | ExpressionKind::Panic(_) => None,
         ExpressionKind::FunctionValue(name) => {
             let signature = bindings.functions.get(name)?;
@@ -161,7 +170,9 @@ pub(super) fn has_float_source(expr: &Expression, bindings: &Scope) -> bool {
 
 fn has_float_source_inner(expr: &Expression, bindings: &Scope) -> bool {
     match &expr.kind {
-        ExpressionKind::Invoke { .. }
+        ExpressionKind::MethodCall { .. }
+        | ExpressionKind::Receiver { .. }
+        | ExpressionKind::Invoke { .. }
         | ExpressionKind::Name(_)
         | ExpressionKind::Field { .. }
         | ExpressionKind::Cast { .. } => operand_type(expr, bindings).is_some_and(Type::is_float),
@@ -368,6 +379,12 @@ fn expression_inner(
         super::exact::check(expr, inference_hint, bindings, false)?
     } else {
         match &expr.kind {
+            ExpressionKind::MethodCall { .. } => {
+                super::methods::call(expr, inference_hint, bindings, None)?
+            }
+            ExpressionKind::Receiver { target, mutable } => {
+                super::methods::receiver(target, *mutable, bindings)?
+            }
             ExpressionKind::Panic(parts) => super::errors::panic(
                 parts,
                 expr.location,
@@ -513,6 +530,11 @@ fn expression_inner(
                                 "closure.scope",
                                 "outer binding '{name}' must be listed in the capture list"
                             )
+                        } else if name == "self" {
+                            crate::diagnostic!(
+                                "method.self-keyword",
+                                "self is only available in a method or an explicit capture"
+                            )
                         } else {
                             crate::diagnostic!(
                                 "decl.local-scope",
@@ -549,7 +571,8 @@ fn expression_inner(
         ));
     }
     let generic_result = matches!(&expr.kind, ExpressionKind::Call { name, .. }
-        if bindings.functions.get(name).is_some_and(|f| f.result.generic()));
+        if bindings.functions.get(name).is_some_and(|f| f.result.generic()))
+        || super::methods::generic_result(expr, bindings);
     let conversion = required.map(|to| {
         if checked.ty == to {
             (domain::Judgment::Valid, 0)

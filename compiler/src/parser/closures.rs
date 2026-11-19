@@ -50,6 +50,7 @@ impl Parser<'_, '_> {
         Ok(Closure {
             captures,
             function: Function {
+                method: None,
                 arena: false,
                 name: String::new(),
                 keyword_location: location,
@@ -69,7 +70,7 @@ impl Parser<'_, '_> {
         if by_reference {
             self.cursor += 1;
         }
-        let Kind::Ident(name) = self.token().kind else {
+        let (Kind::Ident(name) | Kind::Keyword(name @ "self")) = self.token().kind else {
             return Err(location.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(

@@ -33,6 +33,7 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
         return super::exact::stored(expr, context);
     }
     match expr.value {
+        Value::Receiver { ref target, .. } => expression(target, context),
         Value::New {
             ref value,
             location,

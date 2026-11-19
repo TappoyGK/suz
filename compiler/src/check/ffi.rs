@@ -32,6 +32,7 @@ pub(super) fn signatures(
         signatures.insert(
             function.name.clone(),
             Signature {
+                method: None,
                 arena: false,
                 external: true,
                 id: program.functions.len() + index,

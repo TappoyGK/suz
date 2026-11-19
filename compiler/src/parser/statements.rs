@@ -333,7 +333,9 @@ impl Parser<'_, '_> {
                     initializer: Box::new(initializer),
                 })
             }
-            Kind::Ident(name) if self.assignment_operator().is_some() => {
+            Kind::Ident(name) | Kind::Keyword(name @ "self")
+                if self.assignment_operator().is_some() =>
+            {
                 let operator = self.assignment_operator().unwrap();
                 let name = name.to_owned();
                 let location = self.location();

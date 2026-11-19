@@ -353,3 +353,24 @@ fn nesting_boundary_compiles_and_runs_through_all_commands() {
             .unwrap(),
     );
 }
+
+#[test]
+fn member_calls_count_receiver_and_arguments_below_one_call_node() {
+    let directory = TemporaryDirectory::new();
+    for (receiver, member) in [("C", "get"), ("B", "read")] {
+        for count in [253, 254] {
+            let target = wrap("(", ")", count, receiver);
+            let source = format!(
+                "struct Counter {{ value: i32 }}\nfn Counter.get() -> i32 {{ return self.value }}\nfnshape Read() -> i32\nfn read() -> i32 {{ return 1 }}\nstruct Box {{ read: static fn Read }}\nfix C = Counter {{ value: 1 }}\nfix B = Box {{ read: fn read }}\nfn main() -> u8 {{ fix value = {target}.{member}()\nreturn 0 }}"
+            );
+            fs::write(directory.0.join("member.suz"), source).unwrap();
+            let output = suz(&directory.0, &["check", "member.suz"]);
+            if count == 253 {
+                success(output);
+            } else {
+                assert_eq!(output.status.code(), Some(1), "{output:?}");
+                assert!(String::from_utf8_lossy(&output.stderr).contains("[src.nesting-limit]"));
+            }
+        }
+    }
+}

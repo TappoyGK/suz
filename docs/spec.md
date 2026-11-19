@@ -71,7 +71,7 @@ Suzは次のものを含む。
 **[src.keywords]** 次の語はキーワードである。
 
 ```text
-fix var fn fnshape static struct enum error extern unsafe arena new ptr null let objection
+fix var fn fnshape self static struct enum error extern unsafe arena new ptr null let objection
 if ifexpr elif else while loop for rev in break continue return match matchexpr
 as or not len c_bytes c_byte_len log panic fail ignore recover allow expr with
 true false nan inf
@@ -176,6 +176,7 @@ fix lower = -inf      // f64 の負の無限大
 - `if`・`elif`・`else`・`while`・`loop`・`for`・`rev`の本体、`match`の腕、ブロック文、`allow`のブロックは、それぞれ1つのブロックとして数える。腕の本体を式だけで書く場合も、その式を含むブロックを1段として数える。
 - リテラル、名前、丸括弧、単項・二項演算子、`new`、参照解除の`.`、`len`、`as`・`as%`、`or`、関数呼び出し、構造体リテラル、テンプレート、フィールド参照、切り出し・添字、`with`を、それぞれ1つの式として数える。各オペランド、実引数、初期値、添字・切り出しの境界、テンプレートの埋め込みの式は、その式より1段深い。`with`のコピー元と初期値も、その`with`より1段深い。
 - 書き換え対象の`#p`も参照解除と同じく1段として数え、対象の式pをその1段下とする。
+- メソッド呼び出しは全体で1つの式として数え、受け手と各実引数をその1段下とする。フィールドの関数値を`obj.callback(...)`と呼ぶ場合も同じとする。
 - `fn 関数名` は1つの式として数える。名前で呼ぶ `f(x)` の名前は別の段として数えない。それ以外の呼び出しでは、呼び出し対象の式も呼び出しより1段深い。
 - クロージャは1つの式として数える。本体のブロックはその式より1段深く、本体の文の式はさらにその下とする。本体で数え直さない。キャプチャー一覧の名前と仮引数は数えない。
 - 左結合の並びは演算ごとに1段を数える。比較の連鎖は全体で1つの式とし、各オペランドはその1段下とする。
@@ -1598,7 +1599,7 @@ fn main() -> u8 {
 
 前置の`.`は単項演算子と同じ優先順位で右から結び付く。`..pp`は`.(.pp)`と同じく2段の参照先を読む。`#.pp = 値`は`.pp`が指す実体を更新する。`#`の対象は単項式であり、二項式を対象にするときは括弧が必要である。関数の返すポインタも`.get()`、`#get() = 値`で扱える。
 
-前置の`.`の対象に括弧なしのフィールドアクセスを続ける`.p.field`は認めない。参照解除の後でフィールドを選ぶ場合は`(.p).field`、フィールドのポインタを参照解除する場合は`.(p.field)`と書く。構造体へのポインタの`p.field`は`(.p).field`と同じ意味とする。フィールドの更新は`p#field = 値`または`(.p)#field = 値`と書く。`holder.p#field`の途中の`.`はポインタやフィールドをたどり、最後の`#`が更新するメンバーを指定する。前置の`#`とフィールド指定の`#`を1つの代入先で併用することは認めない。
+前置の`.`の対象に括弧なしのメンバーアクセスを続ける`.p.field`や`.p.method()`は認めない。参照解除の後でフィールドを選ぶ場合は`(.p).field`、フィールドのポインタを参照解除する場合は`.(p.field)`と書く。構造体へのポインタの`p.field`は`(.p).field`と同じ意味とする。フィールドの更新は`p#field = 値`または`(.p)#field = 値`と書く。`holder.p#field`の途中の`.`はポインタやフィールドをたどり、最後の`#`が更新するメンバーを指定する。前置の`#`とフィールド指定の`#`を1つの代入先で併用することは認めない。
 
 代入先を1回評価してから右辺を評価し、右辺がポインタ変数を変更しても確定済みの参照先へ書き込む。複合代入では右辺より先に更新前の値を読む。`#`は書き換えの許可を追加しない。fixのポインタ変数への再代入禁止、参照先への更新、非nullの要求、寿命と借用の制約には既存の規則を適用する。ポインタの算術・比較・添字・型変換・文字列への埋め込みは認めない。ポインタを含む構造体の比較・文字列変換も認めない。
 
@@ -1731,6 +1732,52 @@ fn main() -> u8 {
 ```
 
 この例では、実行順を区別しない解析にouterとinnerの候補が残るため、objectionなしでは保存を拒否する。`outer#next = inner`のように保存先が必ず外側で、保存する参照が必ず内側の非nullの実体を指す場合は、objectionで囲んでも拒否する。
+
+### 8.14 メソッド
+
+**[method.decl]** メソッドはトップレベルに `fn 型名.名前(仮引数, ...) -> 戻り値型 { 本体 }` または `fn 型名#名前(仮引数, ...) -> 戻り値型 { 本体 }` と定義する。受け手は仮引数一覧に書かない。型名、`.`または`#`、メソッド名の間に空白・改行を置いてはならない。戻り値の`or`によるエラー指定と失敗処理には通常の関数と同じ規則を適用する。
+
+**[method.target-type]** 受け手の型は同じソース内で宣言したstructまたはenumとする。組み込み型、error型、ポインタ型そのものへのメソッド定義は認めない。
+
+**[method.name]** メソッド名は [name.value] に従う。同じ型でのメソッド名の重複は、`.`と`#`が違っても認めない。型のフィールド名・列挙子名とメソッド名の重複も認めない。異なる型では同じメソッド名を使える。
+
+**[method.self-keyword]** `self`はキーワードであり、メソッド本体の受け手を表す。変数・仮引数・関数・型・フィールド・列挙子の名前には使えない。メソッドの外での使用は認めない。クロージャで使うには明示的なキャプチャーを要する。
+
+**[method.self-read]** `.`メソッドのselfは受け手の型の不変の値であり、通常の仮引数と同じく呼び出し時の値を受け取る。self自身や、その値に含まれるフィールドへの代入は認めない。selfのフィールドがポインタを保持する場合、そのポインタの参照先まで読み取り専用にするものではない。
+
+**[method.self-write]** `#`メソッドのselfは呼び出し元の受け手そのものを表す。`self = 値`で全体を、`self#field = 値`でフィールドを更新でき、`self#other(...)`で別の書き換えメソッドを呼べる。受け手をコピーして終了時に書き戻す処理ではない。
+
+**[method.self-capture]** `[self]`は作成時のselfを値キャプチャーする。`#`メソッドでは`[var self]`で受け手を参照キャプチャーできる。`.`メソッドのselfや値キャプチャーしたselfの参照キャプチャーは認めない。その他は既存のクロージャの規則に従う。
+
+**[method.call]** `式.名前(実引数, ...)`、`式#名前(実引数, ...)`で呼び出す。宣言と記号が異なる呼び出しは拒否する。構造体または列挙型への`ptr T`も受け手にでき、その参照先へ呼び出す。`ptr? T`はletで非nullを確認してから使う。フィールドに格納した関数値の呼び出しは従来どおり`.`を使う。
+
+**[method.write-target]** `#`メソッドの受け手は、ローカルvar、そのフィールド、参照キャプチャーしたvar、または書き換え可能なポインタの参照先でなければならない。fixの値、通常の仮引数、値キャプチャー、構造体・列挙型の一時値への書き換えメソッド呼び出しは認めない。fixのポインタや関数の返す非nullポインタの参照先は、既存の更新規則に従って受け手にできる。
+
+**[method.eval-order]** 受け手を最初に1回評価し、続いて実引数を左から右へ1回ずつ評価してから本体を実行する。`.`では受け手の値を実引数より先に保持する。`#`では受け手の保存場所を確定し、実引数がポインタを付け替えても確定済みの実体を更新する。
+
+**[method.write-effects]** varが保持する値自身またはその値に含まれるフィールドへの`#`呼び出しは [var.never-reassigned] の再代入として数える。ポインタの参照先の更新は、ポインタ変数への再代入としては数えない。代入の右辺で代入先と重なる受け手への`#`呼び出しは [assign.rhs-write] で拒否する。[for.bound-reference] はメソッドの受け手と実引数にも適用する。
+
+**[method.generic]** 通常関数と同じく、明示した仮引数・戻り値にはint・floatを使える。数値型の推論・具体化は既存の汎用関数の規則に従う。
+
+**[method.arena]** `arena fn 型名.名前(...)`と`arena fn 型名#名前(...)`を認める。受け手の値が保持する参照からたどれる実体と明示した実引数には、既存のarena fnの領域Rの契約を適用する。`#`のselfへの保存も呼び出し元への保存として検査し、呼び出し後は受け手に保存されうる参照を寿命検査へ反映する。通常のメソッドは借用の契約に従い、受け手へポインタを保存することや、ポインタを含む戻り値は認めない。
+
+**[method.no-fn-value]** メソッドを`fn p.name`、`fn Type.name`のように関数値として取り出すことはできない。
+
+```suz
+struct Vec2 { x: i32, y: i32 }
+fn Vec2.length2() -> i32 {
+    return self.x * self.x + self.y * self.y
+}
+fn Vec2#add(other: Vec2) -> void {
+    self#x += other.x
+    self#y += other.y
+}
+fn main() -> u8 {
+    var p = Vec2 { x: 3, y: 4 }
+    p#add(Vec2 { x: 1, y: 2 })
+    return ifexpr p.length2() == 52 { 0 } else { 1 }
+}
+```
 
 ## 9. 実行時の検査
 
@@ -2025,7 +2072,8 @@ ExternFunction   ::= "fn" CNAME ( "as" IDENT )? "(" Parameters? ")" "->" Type
 TopLevelBinding  ::= "fix" IDENT TypeAnnotation? "=" ConstExpression AllowClause?
 TypeAnnotation   ::= ":" Type
 
-FunctionDeclaration ::= "arena"? "fn" IDENT "(" Parameters? ")" "->" ReturnType Block
+FunctionDeclaration ::= "arena"? "fn" MethodReceiver? IDENT "(" Parameters? ")" "->" ReturnType Block
+MethodReceiver   ::= IDENT ( "." | "#" )
 FnShapeDeclaration ::= "fnshape" IDENT "(" FnShapeParameters? ")" "->" ReturnType
 FnShapeParameters ::= Type ( "," Type )* ","?
 Parameters       ::= Parameter ( "," Parameter )* ","?
@@ -2131,12 +2179,12 @@ Product          ::= Cast ( ( "*" | "/" | "%" | "*%" ) Cast )*
 Cast             ::= Unary ( "as%" Type CastHandler? | "as" Type CastHandler? )*
 CastHandler      ::= "or" ( Expression | "return" Expression? | "panic" TEMPLATE )
 Unary            ::= ( "-" | "not" | "~" | "len" | "c_bytes" | "c_byte_len" | "new" | "." ) Unary | "fn" IDENT | Postfix
-Postfix          ::= Primary ( "." IDENT | "[" Index "]" IndexHandler?
+Postfix          ::= Primary ( "." IDENT | "#" IDENT "(" Arguments? ")" | "[" Index "]" IndexHandler?
                              | "(" Arguments? ")"
                              | "with" "{" NL* Initializers "}" )*
 Index            ::= Expression | Expression? ":" Expression?
 IndexHandler     ::= "or" ( Expression | "return" Expression? | "panic" TEMPLATE )
-Primary          ::= Literal | IDENT | FunctionCall | StructLiteral | TEMPLATE
+Primary          ::= "self" | Literal | IDENT | FunctionCall | StructLiteral | TEMPLATE
                    | "(" Expression ")" | IfExpression | MatchExpression | BlockExpression
 Literal          ::= INTEGER | FLOAT | CHAR | "true" | "false" | "nan" | "inf" | "null"
 
