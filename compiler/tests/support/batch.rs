@@ -43,7 +43,7 @@ impl Batch {
         Self::build_with_flags(directory, inputs, workers, &["-O2"])
     }
 
-    fn build_with_flags(
+    pub fn build_with_flags(
         directory: &Path,
         inputs: &[(usize, PathBuf)],
         workers: usize,
@@ -154,12 +154,21 @@ impl Batch {
     }
 
     pub fn run(&self, index: usize) -> Result<Output> {
+        self.run_with_env(index, &[])
+    }
+
+    pub fn run_with_env(&self, index: usize, envs: &[(&str, &str)]) -> Result<Output> {
         if let Some(error) = self.errors.get(&index) {
             return Err(error.clone());
         }
         let executable = self.executable.as_ref().ok_or("no executable cases")?;
         // 同じ例の設定を繰り返す場合も、呼び出しごとに新しいプロセスで実行する。
-        timed_output(Command::new(executable).arg(index.to_string()), &RUN_TIME)
+        let mut command = Command::new(executable);
+        command.arg(index.to_string());
+        for (key, value) in envs {
+            command.env(key, value);
+        }
+        timed_output(&mut command, &RUN_TIME)
             .map_err(|error| format!("could not start case runner: {error}"))
     }
 }
