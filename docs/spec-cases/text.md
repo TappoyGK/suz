@@ -22,7 +22,7 @@ fn main() -> u8 {
     var first = Message { body: make(name) }
     fix copied = first
     name = `World`
-    first.body = make(name)
+    first#body = make(name)
     if copied.body == `Hello, Suz` && first.body == `Hello, World` { return 0 }
     return 1
 }

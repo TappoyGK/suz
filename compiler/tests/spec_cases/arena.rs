@@ -303,30 +303,30 @@ fn main() -> u8 {
     arena {
         fix ptr a = new Node { value: 1, next: null }
         fix ptr b = new Node { value: 2, next: a }
-        a.next = b
-        b.value += 3
+        a#next = b
+        b#value += 3
         let next = a.next {
             if next.value != 5 { return 1 }
-            next.value = 6
+            next#value = 6
         } else { return 2 }
         var ptr selected: ptr? Node = a
         let snapshot = selected {
             selected = b
-            snapshot.value = 7
+            snapshot#value = 7
         }
         if a.value != 7 || b.value != 6 { return 3 }
         fix ptr count = new (3 as i32)
-        *count += 4
-        if *count != 7 { return 4 }
+        #count += 4
+        if .count != 7 { return 4 }
         fix ptr indirect = new count
-        let inner = *indirect { *inner = 9 }
-        if *count != 9 { return 5 }
+        let inner = .indirect { #inner = 9 }
+        if .count != 9 { return 5 }
         var holder = Holder { node: null }
         arena {
             fix ptr alias = a
             holder = Holder { node: alias }
             fix ptr box = new Holder { node: a }
-            let copied = box.node { holder.node = copied }
+            let copied = box.node { holder#node = copied }
         }
         let saved = holder.node { if saved.value != 7 { return 6 } }
         else { return 7 }
@@ -343,8 +343,8 @@ fn main() -> u8 {
 fn arena_rejects_escaping_references_through_aliases_and_copies() {
     for body in [
         "var ptr saved: ptr? Node = null\narena { saved = new Node { next: null } }",
-        "arena { fix ptr outer = new Node { next: null }\narena { fix ptr alias = outer\nalias.next = new Node { next: null } } }",
-        "arena { fix ptr outer = new Node { next: null }\narena { fix ptr inner = new Node { next: null }\n*outer = Node { next: inner } } }",
+        "arena { fix ptr outer = new Node { next: null }\narena { fix ptr alias = outer\nalias#next = new Node { next: null } } }",
+        "arena { fix ptr outer = new Node { next: null }\narena { fix ptr inner = new Node { next: null }\n#outer = Node { next: inner } } }",
         "arena { var box = Box { node: null }\narena { fix ptr inner = new Node { next: null }\nfix copy = Box { node: inner }\nbox = copy } }",
         "var ptr saved: ptr? Node = null\nfor i in 0..<3 { arena { saved = new Node { next: null } } }",
     ] {
@@ -368,11 +368,11 @@ fn arena_rejects_invalid_pointer_operations_and_function_boundaries() {
         ("arena { fix p = new 1 }", "arena.ptr-decl"),
         ("fix ptr p = 1", "arena.ptr-decl"),
         (
-            "arena { var ptr p: ptr? i64 = new 1\nfix n = *p }",
+            "arena { var ptr p: ptr? i64 = new 1\nfix n = .p }",
             "arena.null-deref",
         ),
         (
-            "arena { fix ptr p: ptr? i32 = null\nfix n = *p }",
+            "arena { fix ptr p: ptr? i32 = null\nfix n = .p }",
             "arena.null-deref",
         ),
         ("arena { fix ptr p = new 1\np = new 2 }", "var.fix-assign"),
@@ -401,13 +401,13 @@ arena fn recursive(n: i64) -> ptr? i64 {
     fix ptr p = new n
     if n == 0 { return p }
     fix ptr q = recursive(n -% 1)
-    if *p != n { panic `recursive allocation overwrote its caller` }
+    if .p != n { panic `recursive allocation overwrote its caller` }
     return q
 }
 fn returned() -> i64 {
     arena { fix ptr p = new (13 as i64)
         arena { fix ptr q = new (17 as i64)
-            return *p + *q
+            return .p + .q
         }
     }
 }
@@ -424,7 +424,7 @@ fn forwarded() -> i64 or Err {
 }
 fn early() -> i64 {
     arena { fix ptr p = new (23 as i64)
-        fix n = failed() or return *p
+        fix n = failed() or return .p
         return n
     }
 }
@@ -436,14 +436,14 @@ fn main() -> u8 {
             arena {
                 fix ptr p = recursive(2)
                 fix ptr q = new (71 as i64)
-                let value = p { if *value != 0 { return 6 } }
+                let value = p { if .value != 0 { return 6 } }
             }
             if returned() != 30 { return 1 }
             if early() != 23 { return 2 }
             fix result = forwarded() or error {
                 _ => { arena {
                     fix ptr recovered = new (31 as i64)
-                    recover *recovered
+                    recover .recovered
                 } }
             }
             if result != 31 { return 3 }
@@ -455,11 +455,11 @@ fn main() -> u8 {
                 if i < 999 { continue }
             }
         }
-        if *sentinel != 99 { return 4 }
+        if .sentinel != 99 { return 4 }
         // このループからの脱出では、外側のarenaを回収してはならない。
         loop { break }
         fix ptr second = new (43 as i64)
-        if *sentinel != 99 { return 5 }
+        if .sentinel != 99 { return 5 }
     }
     return 0
 }
@@ -510,7 +510,7 @@ fn arena_evaluates_initializers_once_and_supports_value_blocks() {
         r#"
 struct Pair { value: i32, link: ptr? i32 }
 fn generic(value: int) -> int { arena { fix ptr p = new value
-    return *p } }
+    return .p } }
 fn main() -> u8 {
     arena {
         var calls: i32 = 0
@@ -521,13 +521,13 @@ fn main() -> u8 {
                 calls },
         }
         if calls != 2 || pair.value != 1 { return 1 }
-        let p = pair.link { if *p != 2 { return 2 } }
+        let p = pair.link { if .p != 2 { return 2 } }
         fix ptr outer = expr { fix ptr inner = new (7 as i32)
             inner }
-        let p = outer { *p += expr { calls += 1
+        let p = outer { #p += expr { calls += 1
             3 } }
         if calls != 3 { return 3 }
-        let p = outer { if *p != 10 { return 4 } }
+        let p = outer { if .p != 10 { return 4 } }
         if generic(5 as i16) != 5 { return 5 }
     }
     return 0
@@ -551,11 +551,11 @@ fn arena_rejects_pointer_conversions_captures_and_aggregate_operations() {
         "fix box = Box { p: p }\nlog info `${box}`",
         "fix box = `p: 0` as Box or Box { p: p }",
         "let q = p { q = p }",
-        "let q = p {}\nfix n = *q",
+        "let q = p {}\nfix n = .q",
         "let q = 1 {}",
         "if let q = p {}",
         "let q = p",
-        "let q = p {} else { fix n = *q }",
+        "let q = p {} else { fix n = .q }",
         "let p = p {}",
         "fix n = new nothing()",
     ] {
@@ -587,10 +587,10 @@ fn main() -> u8 {
         arena {
             fix ptr inner = new Node { next: null }
             fix ptr head = new Box { head: inner }
-            fix copy = (*head) with { head: head.head }
+            fix copy = (.head) with { head: head.head }
             fix ptr selected = ifexpr true { outer } else { inner }
             let p = selected {
-                p.next = copy.head
+                p#next = copy.head
             }
         }
     }
@@ -612,21 +612,21 @@ struct First { other: ptr? Second }
 struct Second { other: ptr? First }
 fn generic(value: int) -> int {
     arena { fix ptr p: ptr int = new value
-        return *p }
+        return .p }
 }
 fn main() -> u8 {
     arena {
         fix ptr first = new First { other: null }
         fix ptr second = new Second { other: first }
-        first.other = second
+        first#other = second
         fix ptr n = new (7 as i32)
-        *n += expr { *n = 20
+        #n += expr { #n = 20
             1 }
-        if *n != 8 { return 1 }
+        if .n != 8 { return 1 }
         fix ptr flag = new true
-        if not *flag { return 2 }
+        if not .flag { return 2 }
         fix ptr word = new `hello`
-        if *word != `hello` { return 3 }
+        if .word != `hello` { return 3 }
         if generic(5 as u16) != 5 { return 4 }
     }
     return 0
@@ -635,4 +635,106 @@ fn main() -> u8 {
         "compound.suz",
     );
     assert_eq!(result.status.code(), Some(0), "{result:?}");
+}
+
+#[test]
+fn pointer_access_syntax_rejects_read_targets_and_write_values() {
+    // # は代入先だけ、. は値だけに使う。括弧でもこの区別を消さない。
+    for (body, rule) in [
+        ("fix n = *p", "arena.ptr-operations"),
+        ("*p = 2", "arena.ptr-operations"),
+        ("*p += 2", "arena.ptr-operations"),
+        ("fix n = #p", "arena.ptr-operations"),
+        ("fix n = (#p)", "arena.ptr-operations"),
+        ("#p", "arena.ptr-operations"),
+        ("#p == 1", "arena.ptr-operations"),
+        (".p = 2", "arena.ptr-operations"),
+        ("(.p) += 2", "arena.ptr-operations"),
+        ("((.p)) = 2", "arena.ptr-operations"),
+        ("fix n = .holder.value", "arena.ptr-operations"),
+        (".holder.value = 2", "arena.ptr-operations"),
+        ("holder.value = p", "assign.target"),
+        ("holder#value#x = 1", "assign.target"),
+        ("holder#value.x = 1", "assign.target"),
+        ("fix ptr q = holder#value", "assign.target"),
+        ("holder#value", "arena.ptr-operations"),
+        ("(.holder).value = p", "arena.ptr-operations"),
+        ("##pp = 2", "arena.ptr-operations"),
+        ("#holder#value = p", "arena.ptr-operations"),
+        ("#optional = 2", "arena.null-deref"),
+        ("fix n = .optional", "arena.null-deref"),
+    ] {
+        let source = format!(
+            "struct Holder {{ value: ptr i32 }}\nfn main() -> u8 {{ arena {{\nfix ptr p = new (1 as i32)\nfix ptr optional: ptr? i32 = p\nfix ptr holder = new Holder {{ value: p }}\n{body}\n}}\nreturn 0 }}"
+        );
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert!(
+            error.to_string().contains(&format!("[{rule}]")),
+            "{body}: {error}"
+        );
+    }
+}
+
+#[test]
+fn pointer_access_syntax_counts_the_target_in_the_nesting_limit() {
+    let directory = TemporaryDirectory::new();
+    // mainとarenaの2段、参照解除の1段、名前の1段を除くと括弧は252段まで。
+    for template in ["fix value = .$", "#$ = 2"] {
+        for count in [252, 253] {
+            let operand = format!("{}p{}", "(".repeat(count), ")".repeat(count));
+            let body = template.replace('$', &operand);
+            let source = format!(
+                "fn main() -> u8 {{ arena {{ fix ptr p = new (1 as i32)\n{body}\n}}\nreturn 0 }}"
+            );
+            fs::write(directory.0.join("boundary.suz"), source).unwrap();
+            let result = Command::new(env!("CARGO_BIN_EXE_suz"))
+                .current_dir(&directory.0)
+                .args(["check", "boundary.suz"])
+                .output()
+                .unwrap();
+            if count == 252 {
+                assert!(result.status.success(), "{template}: {result:?}");
+            } else {
+                assert_eq!(result.status.code(), Some(1), "{result:?}");
+                assert!(String::from_utf8_lossy(&result.stderr).contains("[src.nesting-limit]"));
+            }
+        }
+    }
+}
+
+#[test]
+fn pointer_access_diagnostics_explain_how_to_read_and_write() {
+    for (body, rule, hints) in [
+        ("*p = 2", "arena.ptr-operations", &[".p", "#p"][..]),
+        ("fix n = *p", "arena.ptr-operations", &[".p", "#p"][..]),
+        (
+            "fix n = #p",
+            "arena.ptr-operations",
+            &["use .p to read"][..],
+        ),
+        (
+            "fix n = holder#value",
+            "assign.target",
+            &["use target.field to read"][..],
+        ),
+        (
+            "return holder#value",
+            "assign.target",
+            &["use target.field to read"][..],
+        ),
+        (
+            "take(holder#value)",
+            "assign.target",
+            &["use target.field to read"][..],
+        ),
+    ] {
+        let source = format!(
+            "struct Holder {{ value: i32 }}\nfn take(n: i32) -> void {{ return }}\nfn main() -> u8 {{ arena {{\nfix ptr p = new (1 as i32)\nfix holder = Holder {{ value: 1 }}\n{body}\n}}\nreturn 0 }}"
+        );
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(error.rule(), rule, "{body}: {error}");
+        for hint in hints {
+            assert!(error.to_string().contains(hint), "{body}: {error}");
+        }
+    }
 }

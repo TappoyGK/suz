@@ -16,6 +16,22 @@ use crate::{
 impl Parser<'_, '_> {
     pub(super) fn expression(&mut self) -> Result<Expression, Diagnostic> {
         let result = self.expression_before_assignment()?;
+        self.check_value_context()?;
+        Ok(result)
+    }
+
+    // 値式を読み終えた位置で、書き換え対象や代入の続きを拒否する。
+    // 文の解析では、#fieldを代入先として扱う経路とこの検査を分ける。
+    pub(super) fn check_value_context(&self) -> Result<(), Diagnostic> {
+        if self.token().kind == Kind::Symbol("#") {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "assign.target",
+                    "target#field is an assignment target, not a value; use target.field to read the field"
+                ),
+            ));
+        }
         if matches!(
             self.token().kind,
             Kind::Symbol(
@@ -42,7 +58,7 @@ impl Parser<'_, '_> {
                 ),
             ));
         }
-        Ok(result)
+        Ok(())
     }
 
     pub(super) fn expression_before_assignment(&mut self) -> Result<Expression, Diagnostic> {
@@ -279,7 +295,7 @@ impl Parser<'_, '_> {
         Ok(value)
     }
 
-    fn unary(&mut self) -> Result<Expression, Diagnostic> {
+    pub(super) fn unary(&mut self) -> Result<Expression, Diagnostic> {
         self.nested(self.location(), Self::unary_inner)
     }
 
@@ -371,10 +387,49 @@ impl Parser<'_, '_> {
                 self.cursor += 1;
                 ExpressionKind::Bool(value)
             }
-            Kind::Symbol("~" | "*")
-            | Kind::Keyword("len" | "not" | "c_bytes" | "c_byte_len" | "new") => {
+            Kind::Symbol("*") => {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "arena.ptr-operations",
+                        "unary *p is not supported; use .p to read the pointee or #p to assign to it"
+                    ),
+                ));
+            }
+            Kind::Symbol("#") => {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "arena.ptr-operations",
+                        "#p is an assignment target, not a value; use .p to read the pointee"
+                    ),
+                ));
+            }
+            Kind::Symbol(".") => {
+                self.cursor += 1;
+                let operand = self.unary()?;
+                // .p.field は参照解除とフィールド選択の順が読み取りにくい。
+                // Groupで区切った (.p).field / .(p.field) は区別して受け付ける。
+                let mut target = &operand;
+                while let ExpressionKind::Invoke { target: inner, .. }
+                | ExpressionKind::Slice { target: inner, .. }
+                | ExpressionKind::With { target: inner, .. } = &target.kind
+                {
+                    target = inner;
+                }
+                if matches!(target.kind, ExpressionKind::Field { .. }) {
+                    return Err(location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "arena.ptr-operations",
+                            "parenthesize dereference and field access: (.p).field or .(p.field)"
+                        ),
+                    ));
+                }
+                ExpressionKind::Deref(Box::new(operand))
+            }
+            Kind::Symbol("~") | Kind::Keyword("len" | "not" | "c_bytes" | "c_byte_len" | "new") => {
                 let constructor: fn(Box<Expression>) -> ExpressionKind = match self.token().kind {
-                    Kind::Symbol("*") => ExpressionKind::Deref,
                     Kind::Keyword("new") => ExpressionKind::New,
                     Kind::Symbol("~") => ExpressionKind::BitNot,
                     Kind::Keyword("len") => ExpressionKind::Len,

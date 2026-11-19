@@ -6,12 +6,12 @@ fn pointer_types_preserve_nonnull_guarantees_across_calls_fields_and_captures() 
         r#"
 struct State { value: i32 }
 struct Holder { state: ptr State }
-fn update(state: ptr State) -> void { state.value += 1 }
+fn update(state: ptr State) -> void { state#value += 1 }
 fn read(holder: Holder) -> i32 { return holder.state.value }
 fnshape Read() -> i32
 fn invoke(f: fn Read) -> i32 { return f() }
 arena fn identity(value: ptr int) -> ptr int { return value }
-arena fn clear(slot: ptr ptr? i32) -> void { *slot = null }
+arena fn clear(slot: ptr ptr? i32) -> void { #slot = null }
 fn main() -> u8 {
     arena {
         var ptr state = new State { value: 1 }
@@ -21,13 +21,13 @@ fn main() -> u8 {
         if invoke(fn [var state]() -> i32 { return state.value }) != 3 { return 2 }
         fix ptr number = new (9 as i16)
         fix ptr same = identity(number)
-        if *same != 9 { return 3 }
+        if .same != 9 { return 3 }
         fix ptr optional: ptr? i32 = new (7 as i32)
         fix ptr slot = new optional
         clear(slot)
-        let value = *slot { return 4 }
+        let value = .slot { return 4 }
         fix ptr outer: ptr? ptr i16 = new number
-        let inner = outer { if **inner != 9 { return 5 } }
+        let inner = outer { if ..inner != 9 { return 5 } }
     }
     return 0
 }
@@ -60,10 +60,10 @@ fn main() -> u8 {
         let p = matched { if p.value != 7 { return 8 } } else { return 9 }
         let p = nested { if p.value != 7 { return 10 } } else { return 11 }
         fix ptr literal = ifexpr true { new 42 } else { null }
-        let p = literal { if *p != 42 { return 13 } } else { return 14 }
+        let p = literal { if .p != 42 { return 13 } } else { return 14 }
         fix ptr narrow = new (7 as u8)
         fix ptr inferred = ifexpr true { new 3 } else { narrow }
-        if *inferred != 3 { return 15 }
+        if .inferred != 3 { return 15 }
         fix ptr empty: ptr? Node = ifexpr true { null } else { null }
         let p = empty { return 12 }
     }
@@ -77,7 +77,7 @@ fn main() -> u8 {
 
 #[test]
 fn pointer_type_errors_cannot_be_bypassed_by_aliases_or_objection() {
-    let prefix = "struct Node { value: i32 }\nfn take(p: ptr Node) -> void { return }\narena fn clear(p: ptr ptr? Node) -> void { *p = null }\n";
+    let prefix = "struct Node { value: i32 }\nfn take(p: ptr Node) -> void { return }\narena fn clear(p: ptr ptr? Node) -> void { #p = null }\n";
     for body in [
         "fix ptr p: ptr Node = null",
         "var ptr p = new Node { value: 1 }\np = null",
@@ -139,7 +139,7 @@ fn required_initialization_cycles_report_the_fields_and_nullable_edges_break_the
 
 #[test]
 fn objection_proof_uses_member_types_instead_of_initial_values() {
-    let source = b"struct Node { value: i32 }\nstruct Holder { p: ptr Node }\nfn main() -> u8 { arena { fix ptr outer = new Node { value: 1 }\nfix ptr holder = new Holder { p: outer }\narena { fix ptr inner = new Node { value: 2 }\nfix value = Holder { p: inner }\nobjection [claim] { *holder = value } } }\nreturn 0 }";
+    let source = b"struct Node { value: i32 }\nstruct Holder { p: ptr Node }\nfn main() -> u8 { arena { fix ptr outer = new Node { value: 1 }\nfix ptr holder = new Holder { p: outer }\narena { fix ptr inner = new Node { value: 2 }\nfix value = Holder { p: inner }\nobjection [claim] { #holder = value } } }\nreturn 0 }";
     let error = suz::compile(source).unwrap_err();
     assert!(
         error.message().contains("proven lifetime violation"),
@@ -198,7 +198,7 @@ fn let_only_tests_null_for_nullable_inputs() {
         assert_eq!(checks, expected_checks, "{c}");
     }
     // 実行されないelseも通常どおり型検査する。
-    let source = b"fn get(p: ptr i32) -> i32 { let q = p { return *q } else { return true }\nreturn 7 }\nfn main() -> u8 { return 0 }";
+    let source = b"fn get(p: ptr i32) -> i32 { let q = p { return .q } else { return true }\nreturn 7 }\nfn main() -> u8 { return 0 }";
     assert!(suz::compile(source).is_err());
 }
 

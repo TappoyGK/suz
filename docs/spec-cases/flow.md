@@ -41,7 +41,7 @@ struct Point { x: i32 }
 struct Box { point: Point }
 
 fn change(value: Box) -> void {
-    value.point.x = 9
+    value.point#x = 9
 }
 
 fn main() -> u8 { return 0 }
@@ -1769,7 +1769,7 @@ struct Limits { end: u8 }
 fn main() -> u8 {
     var limits = Limits { end: 3 }
     for i in 0..<limits.end {
-        limits.end = 0
+        limits#end = 0
     }
     return 0
 }

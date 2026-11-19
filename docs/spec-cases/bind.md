@@ -15,7 +15,7 @@ struct Point { x: i32 }
 fix ORIGIN = Point { x: 1 }
 
 fn main() -> u8 {
-    ORIGIN.x = 2
+    ORIGIN#x = 2
     return 0
 }
 ```
@@ -369,7 +369,7 @@ struct Point { x: i32 }
 
 fn main() -> u8 {
     fix point = Point { x: 0 }
-    point.x = 1
+    point#x = 1
     return 0
 }
 ```
@@ -400,7 +400,7 @@ struct Box { point: Point }
 
 fn main() -> u8 {
     fix value = Box { point: Point { x: 1 } }
-    value.point.x = 9
+    value.point#x = 9
     return 0
 }
 ```
@@ -616,8 +616,8 @@ struct Point { x: u8, y: u8 }
 
 fn main() -> u8 {
     var point = Point { x: 10, y: 0 }
-    point.x = expr {
-        point.y = 20
+    point#x = expr {
+        point#y = 20
         point.x + 1
     }
     return ifexpr point.x == 11 && point.y == 20 { 0 } else { 1 }
@@ -707,7 +707,7 @@ struct Point { x: u8, y: u8 }
 
 fn main() -> u8 {
     var point = Point { x: 10, y: 0 }
-    point.x = expr {
+    point#x = expr {
         point = Point { x: 20, y: 30 }
         1
     }
@@ -741,7 +741,7 @@ struct Point { x: u8, y: u8 }
 fn main() -> u8 {
     var point = Point { x: 10, y: 0 }
     point = expr {
-        point.x = 20
+        point#x = 20
         Point { x: 1, y: 2 }
     }
     return 0
@@ -833,7 +833,7 @@ fn main() -> u8 {
 ```suz
 fix INITIAL: u8 = 1
 struct State { count: u8 }
-fn update(state: ptr State) -> void { state.count += 1 }
+fn update(state: ptr State) -> void { state#count += 1 }
 fn main() -> u8 {
     arena {
         fix ptr state = new State { count: INITIAL }
