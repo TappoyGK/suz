@@ -2,6 +2,17 @@
 
 利用者に関わる変更をバージョンごとに記載する。
 
+## v0.3.5
+
+- 理由を出力して終了する`panic`文を追加した。（[#80](https://github.com/TappoyGK/suz/issues/80)・[#87](https://github.com/TappoyGK/suz/pull/87)）
+- エラー型と失敗する関数を追加し、呼び出し側で失敗の処理を必須にした。（[#85](https://github.com/TappoyGK/suz/issues/85)・[#89](https://github.com/TappoyGK/suz/pull/89)）
+- `log debug`・`log error`と`--log-level`を追加し、指定レベル未満のログをコード生成から除くようにした。`--log-ignore`で無視した失敗を記録できるようにした。ログとパニックの埋め込みは名前とフィールド参照に限定した。（[#90](https://github.com/TappoyGK/suz/issues/90)・[#91](https://github.com/TappoyGK/suz/pull/91)）
+- `extern`と`unsafe`によるC関数の呼び出しを追加した。外部ヘッダー・オブジェクト・ライブラリの指定と、文字列のバイト列の受け渡しに対応した。（[#92](https://github.com/TappoyGK/suz/issues/92)・[#93](https://github.com/TappoyGK/suz/pull/93)）
+- `arena`・`new`・`arena fn`を追加し、スコープ終了時に実体をまとめて回収できるようにした。参照の寿命を検査し、`objection [理由]`で利用者が寿命を保証する箇所を指定できるようにした。作業領域の初期容量・拡張量・上限も設定できるようにした。（[#94](https://github.com/TappoyGK/suz/issues/94)・[#95](https://github.com/TappoyGK/suz/pull/95)）
+- `ignore: 理由`を`ignore [理由]`に変更し、`allow`・`objection`と理由の規則を統一した。（[#96](https://github.com/TappoyGK/suz/issues/96)・[#100](https://github.com/TappoyGK/suz/pull/100)）
+- `ptr T`を非null、`ptr? T`をnull許容に分け、非nullの参照は`let`なしで使えるようにした。（[#98](https://github.com/TappoyGK/suz/issues/98)・[#101](https://github.com/TappoyGK/suz/pull/101)）
+- トップレベルの`var`と`--deny-global-var`を廃止した。変更可能な状態はarenaに確保し、関数の引数で渡す。（[#98](https://github.com/TappoyGK/suz/issues/98)・[#102](https://github.com/TappoyGK/suz/pull/102)）
+
 ## v0.3.4
 
 - `const`を廃止し、トップレベルの`fix`・`var`を追加した。大域変数への警告と、大域変数を禁止する`--deny-global-var`を追加した。（[#44](https://github.com/TappoyGK/suz/issues/44)・[#67](https://github.com/TappoyGK/suz/pull/67)）
