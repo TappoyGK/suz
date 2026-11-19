@@ -95,33 +95,24 @@ pub(crate) fn scan(
                     {
                         cursor += 1;
                     }
-                    if &source[word_start..cursor] == "objection" {
+                    let word = &source[word_start..cursor];
+                    if matches!(word, "objection" | "ignore") {
                         while matches!(bytes.get(cursor), Some(b' ' | b'\t')) {
                             cursor += 1;
                         }
                         if bytes.get(cursor) == Some(&b'[') {
                             // 理由中の括弧やバッククォートは補間式の構文として数えない。
+                            let kind = if word == "ignore" {
+                                super::reasons::Kind::Ignore
+                            } else {
+                                super::reasons::Kind::Objection
+                            };
                             let reason_column = column + source[..cursor].chars().count();
                             cursor +=
-                                super::objection::scan(&source[cursor..], line, reason_column)?;
+                                super::reasons::scan(&source[cursor..], line, reason_column, kind)?;
                         }
                     }
-                    if &source[word_start..cursor] == "ignore" {
-                        while matches!(bytes.get(cursor), Some(b' ' | b'\t')) {
-                            cursor += 1;
-                        }
-                        if bytes.get(cursor) == Some(&b':') {
-                            // 理由中のバッククォートや開き括弧は構文ではない。
-                            // 閉じ括弧は次の反復で通常どおりブロック終端として処理する。
-                            while bytes
-                                .get(cursor)
-                                .is_some_and(|ch| !matches!(ch, b'\n' | b'}'))
-                            {
-                                cursor += 1;
-                            }
-                        }
-                    }
-                    if &source[word_start..cursor] == "allow" {
+                    if word == "allow" {
                         loop {
                             while matches!(bytes.get(cursor), Some(b' ' | b'\t')) {
                                 cursor += 1;
@@ -130,7 +121,12 @@ pub(crate) fn scan(
                                 break;
                             }
                             let item_column = column + source[..cursor].chars().count();
-                            cursor += super::allows::scan(&source[cursor..], line, item_column)?;
+                            cursor += super::reasons::scan(
+                                &source[cursor..],
+                                line,
+                                item_column,
+                                super::reasons::Kind::Allow,
+                            )?;
                             while matches!(bytes.get(cursor), Some(b' ' | b'\t')) {
                                 cursor += 1;
                             }

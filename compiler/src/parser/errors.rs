@@ -13,7 +13,7 @@ impl Parser<'_, '_> {
         let Kind::IgnoreReason(reason) = self.token().kind else {
             return Err(self.error(
                 ErrorKind::InvalidSource,
-                crate::diagnostic!("err.or-ignore", "ignore requires ': reason'"),
+                crate::diagnostic!("err.or-ignore", "ignore requires [reason]"),
             ));
         };
         let reason = reason.to_owned();

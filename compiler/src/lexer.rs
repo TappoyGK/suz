@@ -4,8 +4,7 @@
 //! 主な対象規則: `[char.literal]`、`[for.range-spacing]`、`[lit.float]`、`[lit.integer]`、`[syntax.grammar]`。
 
 use crate::{Diagnostic, ErrorKind};
-pub(crate) mod allows;
-mod objection;
+mod reasons;
 pub(crate) mod templates;
 use std::ops::Range;
 
@@ -286,23 +285,10 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
                 column = 1;
                 continue;
             }
-            ':' if matches!(tokens.last().map(|t| t.kind), Some(Kind::Keyword("ignore"))) => {
-                let length = rest.find(['\n', '}']).unwrap_or(rest.len());
-                let raw = &rest[1..length];
-                let reason = raw.trim_matches(' ');
-                if reason.is_empty() || raw.chars().any(char::is_control) {
-                    return Err(error(
-                        line,
-                        column,
-                        ErrorKind::InvalidSource,
-                        crate::diagnostic!(
-                            "err.or-ignore",
-                            "ignore requires a non-empty reason without control characters"
-                        ),
-                    ));
-                }
+            '[' if matches!(tokens.last().map(|t| t.kind), Some(Kind::Keyword("ignore"))) => {
+                let length = reasons::scan(rest, line, column, reasons::Kind::Ignore)?;
                 tokens.push(Token {
-                    kind: Kind::IgnoreReason(reason),
+                    kind: Kind::IgnoreReason(rest[1..length - 1].trim_matches(' ')),
                     line,
                     column,
                     span: offset..offset + length,
@@ -319,7 +305,7 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
                         Some(Kind::AllowItem(_))
                     )) =>
             {
-                let length = allows::scan(rest, line, column)?;
+                let length = reasons::scan(rest, line, column, reasons::Kind::Allow)?;
                 tokens.push(Token {
                     kind: Kind::AllowItem(&rest[1..length - 1]),
                     line,
@@ -349,7 +335,7 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
                 .last()
                 .is_some_and(|t| t.kind == Kind::Keyword("objection")) =>
             {
-                let length = objection::scan(rest, line, column)?;
+                let length = reasons::scan(rest, line, column, reasons::Kind::Objection)?;
                 tokens.push(Token {
                     kind: Kind::ObjectionReason,
                     line,

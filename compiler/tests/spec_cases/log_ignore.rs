@@ -6,24 +6,24 @@ const SOURCE: &str = r#"error Err { Bad, Other }
 fn send(ok: bool) -> void or Err { if ok { return }
 fail Err.Bad }
 fn main() -> u8 {
-    send(true) or ignore: success-only
-    send(false) or ignore: literal ` ${ // 日本語
+    send(true) or ignore [success-only]
+    send(false) or ignore [  literal ` ${x} } // 日本語  ]
     send(false) or error {
-        Err.Bad => ignore: selected
-        Err.Other => ignore: unselected
+        Err.Bad => ignore [selected]
+        Err.Other => ignore [unselected]
     }
-    send(true) or error { _ => ignore: success-arm }
+    send(true) or error { _ => ignore [success-arm] }
     send(false) or error { _ => { fix unused = 1 } }
     send(false) or error { _ => {
-        ignore: first
-        ignore: second
+        ignore [first]
+        ignore [second]
         return 0
-        ignore: unreachable
+        ignore [unreachable]
     } }
     return 1
 }
 "#;
-const EXPECTED: &str = "ignore input.suz:6: literal ` ${ // 日本語\nignore input.suz:8: selected\nignore input.suz:14: first\nignore input.suz:15: second\n";
+const EXPECTED: &str = "ignore input.suz:6: literal ` ${x} } // 日本語\nignore input.suz:8: selected\nignore input.suz:14: first\nignore input.suz:15: second\n";
 
 #[test]
 fn ignore_records_only_reached_sites_independently_of_log_level() {
@@ -63,9 +63,9 @@ fn ignore_records_only_reached_sites_independently_of_log_level() {
         assert_eq!(output.stderr, if i == 0 { "" } else { EXPECTED }.as_bytes());
     }
     // 無効時にも理由の空文字・制御文字を検査する。
-    for reason in ["", "bad\treason"] {
+    for reason in ["", "　", "bad\treason", "bad\nreason", "bad\u{7f}reason"] {
         let source = format!(
-            "error Err {{ Bad }}\nfn send() -> void or Err {{ fail Err.Bad }}\nfn main() -> u8 {{ send() or ignore: {reason}\nreturn 0 }}"
+            "error Err {{ Bad }}\nfn send() -> void or Err {{ fail Err.Bad }}\nfn main() -> u8 {{ send() or ignore [ {reason} ]\nreturn 0 }}"
         );
         for enabled in [false, true] {
             let options = CompilationOptions {
@@ -129,4 +129,62 @@ fn cli_ignore_is_shared_and_exported_without_enabling_ordinary_logs() {
     let run = Command::new(exported.join("program")).output().unwrap();
     assert_eq!(run.status.code(), Some(0));
     assert_eq!(run.stderr, EXPECTED.as_bytes());
+}
+
+#[test]
+fn ignore_requires_brackets_and_resumes_parsing_after_them() {
+    let prefix = "error Err { Bad }\nfn send() -> void or Err { fail Err.Bad }\n";
+    for statement in [
+        "send() or ignore: old",
+        "send() or ignore",
+        "send() or ignore [unclosed",
+        "send() or ignore [valid] stray]",
+    ] {
+        let source = format!("{prefix}fn main() -> u8 {{ {statement}\nreturn 0 }}");
+        assert!(
+            suz::check_source(source.as_bytes(), suz::ArithmeticMode::Default).is_err(),
+            "{statement}"
+        );
+    }
+}
+
+#[test]
+fn bracketed_reasons_share_validation_across_all_three_constructs() {
+    for (reason, valid) in [
+        ("  日本語 } // `${x} [  ", true),
+        ("　日本語　", true),
+        ("", false),
+        ("   ", false),
+        ("　", false),
+        ("\u{a0}", false),
+        ("bad\ttext", false),
+        ("bad\ntext", false),
+        ("bad\u{7f}text", false),
+    ] {
+        let bodies = [
+            format!("fix n = 1 + 2 allow [diagnostic.arithmetic:{reason}]"),
+            format!("objection [{reason}] {{ }}"),
+            format!("send() or ignore [{reason}]"),
+        ];
+        for body in bodies {
+            let source = format!(
+                "error Err {{ Bad }}\nfn send() -> void or Err {{ fail Err.Bad }}\nfn main() -> u8 {{ {body}\nreturn 0 }}"
+            );
+            let options = CompilationOptions {
+                arithmetic_mode: suz::ArithmeticMode::Warn,
+                log_allow: true,
+                ..Default::default()
+            };
+            let result = suz::check_source_with_options(source.as_bytes(), &options);
+            assert_eq!(result.is_ok(), valid, "{body}: {result:?}");
+            if valid {
+                for warning in result.unwrap() {
+                    assert_eq!(
+                        warning.allowed_reason.as_deref(),
+                        Some(reason.trim_matches(' '))
+                    );
+                }
+            }
+        }
+    }
 }
