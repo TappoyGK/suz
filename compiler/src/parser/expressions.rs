@@ -700,7 +700,7 @@ impl Parser<'_, '_> {
                     ErrorKind::InvalidSource,
                     crate::diagnostic!(
                         "method.call",
-                        "use . for receiver fields and # only before the called write method; write v.pos#shift(...) instead of v#pos#shift(...)"
+                        "use . to access receiver fields before calling a method"
                     ),
                 ));
             }

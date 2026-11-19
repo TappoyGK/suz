@@ -12,7 +12,12 @@ fn hash_in_receiver_fields_reports_method_call_syntax() {
         );
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.rule(), "method.call", "{call}: {error}");
-        assert!(error.to_string().contains("v.pos#shift(...)"), "{error}");
+        assert!(
+            error
+                .to_string()
+                .contains("use . to access receiver fields before calling a method"),
+            "{error}"
+        );
     }
     // 同じ記号の並びでも、代入先なら既存の代入規則で診断する。
     let error = suz::compile(
