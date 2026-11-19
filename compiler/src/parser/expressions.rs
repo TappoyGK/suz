@@ -16,6 +16,22 @@ use crate::{
 impl Parser<'_, '_> {
     pub(super) fn expression(&mut self) -> Result<Expression, Diagnostic> {
         let result = self.expression_before_assignment()?;
+        self.check_value_context()?;
+        Ok(result)
+    }
+
+    // 値式を読み終えた位置で、書き換え対象や代入の続きを拒否する。
+    // 文の解析では、#fieldを代入先として扱う経路とこの検査を分ける。
+    pub(super) fn check_value_context(&self) -> Result<(), Diagnostic> {
+        if self.token().kind == Kind::Symbol("#") {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "assign.target",
+                    "target#field is an assignment target, not a value; use target.field to read the field"
+                ),
+            ));
+        }
         if matches!(
             self.token().kind,
             Kind::Symbol(
@@ -42,7 +58,7 @@ impl Parser<'_, '_> {
                 ),
             ));
         }
-        Ok(result)
+        Ok(())
     }
 
     pub(super) fn expression_before_assignment(&mut self) -> Result<Expression, Diagnostic> {
@@ -370,6 +386,24 @@ impl Parser<'_, '_> {
                 let value = self.token().kind == Kind::Keyword("true");
                 self.cursor += 1;
                 ExpressionKind::Bool(value)
+            }
+            Kind::Symbol("*") => {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "arena.ptr-operations",
+                        "unary *p is not supported; use .p to read the pointee or #p to assign to it"
+                    ),
+                ));
+            }
+            Kind::Symbol("#") => {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "arena.ptr-operations",
+                        "#p is an assignment target, not a value; use .p to read the pointee"
+                    ),
+                ));
             }
             Kind::Symbol(".") => {
                 self.cursor += 1;

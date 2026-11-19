@@ -590,7 +590,7 @@ var p = Vec2 { x: 0.0, y: 0.0 }
 p#x = 1.0
 ```
 
-この例では、`p.x` への代入によって、`p` は [var.never-reassigned] の条件を満たす。
+この例では、`p#x` への代入によって、`p` は [var.never-reassigned] の条件を満たす。
 
 ```suz
 count =

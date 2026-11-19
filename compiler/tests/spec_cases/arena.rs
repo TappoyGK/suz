@@ -641,11 +641,11 @@ fn main() -> u8 {
 fn pointer_access_syntax_rejects_read_targets_and_write_values() {
     // # は代入先だけ、. は値だけに使う。括弧でもこの区別を消さない。
     for (body, rule) in [
-        ("fix n = *p", "syntax.grammar"),
-        ("*p = 2", "syntax.grammar"),
-        ("*p += 2", "syntax.grammar"),
-        ("fix n = #p", "syntax.grammar"),
-        ("fix n = (#p)", "syntax.grammar"),
+        ("fix n = *p", "arena.ptr-operations"),
+        ("*p = 2", "arena.ptr-operations"),
+        ("*p += 2", "arena.ptr-operations"),
+        ("fix n = #p", "arena.ptr-operations"),
+        ("fix n = (#p)", "arena.ptr-operations"),
         ("#p", "arena.ptr-operations"),
         ("#p == 1", "arena.ptr-operations"),
         (".p = 2", "arena.ptr-operations"),
@@ -656,10 +656,10 @@ fn pointer_access_syntax_rejects_read_targets_and_write_values() {
         ("holder.value = p", "assign.target"),
         ("holder#value#x = 1", "assign.target"),
         ("holder#value.x = 1", "assign.target"),
-        ("fix ptr q = holder#value", "src.statement-end"),
+        ("fix ptr q = holder#value", "assign.target"),
         ("holder#value", "arena.ptr-operations"),
         ("(.holder).value = p", "arena.ptr-operations"),
-        ("##pp = 2", "syntax.grammar"),
+        ("##pp = 2", "arena.ptr-operations"),
         ("#holder#value = p", "arena.ptr-operations"),
         ("#optional = 2", "arena.null-deref"),
         ("fix n = .optional", "arena.null-deref"),
@@ -698,6 +698,43 @@ fn pointer_access_syntax_counts_the_target_in_the_nesting_limit() {
                 assert_eq!(result.status.code(), Some(1), "{result:?}");
                 assert!(String::from_utf8_lossy(&result.stderr).contains("[src.nesting-limit]"));
             }
+        }
+    }
+}
+
+#[test]
+fn pointer_access_diagnostics_explain_how_to_read_and_write() {
+    for (body, rule, hints) in [
+        ("*p = 2", "arena.ptr-operations", &[".p", "#p"][..]),
+        ("fix n = *p", "arena.ptr-operations", &[".p", "#p"][..]),
+        (
+            "fix n = #p",
+            "arena.ptr-operations",
+            &["use .p to read"][..],
+        ),
+        (
+            "fix n = holder#value",
+            "assign.target",
+            &["use target.field to read"][..],
+        ),
+        (
+            "return holder#value",
+            "assign.target",
+            &["use target.field to read"][..],
+        ),
+        (
+            "take(holder#value)",
+            "assign.target",
+            &["use target.field to read"][..],
+        ),
+    ] {
+        let source = format!(
+            "struct Holder {{ value: i32 }}\nfn take(n: i32) -> void {{ return }}\nfn main() -> u8 {{ arena {{\nfix ptr p = new (1 as i32)\nfix holder = Holder {{ value: 1 }}\n{body}\n}}\nreturn 0 }}"
+        );
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(error.rule(), rule, "{body}: {error}");
+        for hint in hints {
+            assert!(error.to_string().contains(hint), "{body}: {error}");
         }
     }
 }

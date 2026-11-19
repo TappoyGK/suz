@@ -420,10 +420,11 @@ impl Parser<'_, '_> {
                 })
             }
             _ => {
-                let target = self.expression()?;
+                let target = self.expression_before_assignment()?;
                 if self.token().kind == Kind::Symbol("#") {
                     self.finish_indirect_statement(target, false)
                 } else {
+                    self.check_value_context()?;
                     Ok(Statement::Expression(target))
                 }
             }
