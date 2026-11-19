@@ -159,7 +159,11 @@ pub(crate) const NUMERIC_COMBINATIONS: usize = 18;
 /// Structの番号は構造体宣言、Functionの番号は共通化した関数値の型を参照する。汎用の型はC生成までに具体化する。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Type {
-    Pointer { leaf: PointerLeaf, depth: usize },
+    Pointer {
+        leaf: PointerLeaf,
+        depth: usize,
+        nullable: [u64; 4],
+    },
     CPointer,
     CInteger(CIntegerType),
     GenericInt,
@@ -203,10 +207,15 @@ pub(crate) enum PointerLeaf {
 impl Type {
     pub fn pointer(self) -> Self {
         let leaf = match self {
-            Self::Pointer { leaf, depth } => {
+            Self::Pointer {
+                leaf,
+                depth,
+                nullable,
+            } => {
                 return Self::Pointer {
                     leaf,
                     depth: depth + 1,
+                    nullable,
                 };
             }
             Self::CPointer => PointerLeaf::CPointer,
@@ -227,16 +236,67 @@ impl Type {
             Self::Symbol => PointerLeaf::Symbol,
             Self::Text => PointerLeaf::Text,
         };
-        Self::Pointer { leaf, depth: 1 }
+        Self::Pointer {
+            leaf,
+            depth: 1,
+            nullable: [0; 4],
+        }
+    }
+    /// null許容の段は末端から数える。newで外側に非nullの段を追加しても位置は変わらない。
+    pub fn is_nullable(self) -> bool {
+        matches!(self, Self::Pointer { depth, nullable, .. } if depth <= 256 && nullable[(depth - 1) / 64] & (1 << ((depth - 1) % 64)) != 0)
+    }
+    pub fn is_nonnull(self) -> bool {
+        self.pointee().is_some() && !self.is_nullable()
+    }
+    pub fn with_nullable(self, enabled: bool) -> Self {
+        let Self::Pointer {
+            leaf,
+            depth,
+            mut nullable,
+        } = self
+        else {
+            return self;
+        };
+        assert!(
+            depth <= 256 || !enabled,
+            "nullable pointer nesting is checked before construction"
+        );
+        if depth <= 256 {
+            let bit = 1 << ((depth - 1) % 64);
+            if enabled {
+                nullable[(depth - 1) / 64] |= bit;
+            } else {
+                nullable[(depth - 1) / 64] &= !bit;
+            }
+        }
+        Self::Pointer {
+            leaf,
+            depth,
+            nullable,
+        }
+    }
+    /// 外側のnull許容性だけを広げる。参照先の型は変更しない。
+    pub fn lifts_to(self, to: Self) -> bool {
+        self.is_nonnull() && to.is_nullable() && self.pointee() == to.pointee()
     }
     pub fn pointee(self) -> Option<Self> {
-        let Self::Pointer { leaf, depth } = self else {
+        let Self::Pointer {
+            leaf,
+            depth,
+            mut nullable,
+        } = self
+        else {
             return None;
         };
+        if depth <= 256 {
+            nullable[(depth - 1) / 64] &= !(1 << ((depth - 1) % 64));
+        }
         if depth > 1 {
             return Some(Self::Pointer {
                 leaf,
                 depth: depth - 1,
+                nullable,
             });
         }
         Some(match leaf {
@@ -347,7 +407,13 @@ impl Type {
     }
     pub fn name(self) -> &'static str {
         match self {
-            Self::Pointer { .. } => "ptr",
+            Self::Pointer { .. } => {
+                if self.is_nullable() {
+                    "ptr?"
+                } else {
+                    "ptr"
+                }
+            }
             Self::CPointer => "*const void",
             Self::CInteger(ty) => ty.name(),
             Self::Exact => "exact integer",

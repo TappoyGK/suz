@@ -32,23 +32,35 @@ fn emits_each_used_substitution_once_and_omits_unused_templates() {
 fn nested_value_blocks_and_elif_branches_obey_a_traversal_budget() {
     // マシンの速度ではなく検査器の訪問回数を数える。
     // 指数的に処理が増える退行は、テストが停止しなくなる前に失敗させる。
-    super::generic::with_work_budget(4000, || {
-        let mut value = "1".to_owned();
-        for i in 0..30 {
-            value = format!("expr {{ fix x{i} = {value}\nx{i} }}");
-        }
-        crate::compile(format!("fn main() -> u8 {{ fix n = {value}\nreturn 0 }}").as_bytes())
-            .unwrap();
-        let mut body = "return n".to_owned();
-        for _ in 0..30 {
-            body =
-                format!("if n == 0 {{ {body} }} elif n < 1000 {{ return n }} else {{ return n }}");
-        }
-        crate::compile(
-            format!("fn f(n: int) -> int {{ {body} }}\nfn main() -> u8 {{ return 0 }}").as_bytes(),
-        )
+    // 深い構文の検査はCLIと同じスタック条件で行う。
+    std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(|| {
+            super::generic::with_work_budget(4000, || {
+                let mut value = "1".to_owned();
+                for i in 0..30 {
+                    value = format!("expr {{ fix x{i} = {value}\nx{i} }}");
+                }
+                crate::compile(
+                    format!("fn main() -> u8 {{ fix n = {value}\nreturn 0 }}").as_bytes(),
+                )
+                .unwrap();
+                let mut body = "return n".to_owned();
+                for _ in 0..30 {
+                    body = format!(
+                        "if n == 0 {{ {body} }} elif n < 1000 {{ return n }} else {{ return n }}"
+                    );
+                }
+                crate::compile(
+                    format!("fn f(n: int) -> int {{ {body} }}\nfn main() -> u8 {{ return 0 }}")
+                        .as_bytes(),
+                )
+                .unwrap();
+            });
+        })
+        .unwrap()
+        .join()
         .unwrap();
-    });
 }
 
 #[test]

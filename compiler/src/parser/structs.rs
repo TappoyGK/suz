@@ -267,5 +267,72 @@ pub(super) fn collect(
     for id in 0..declarations.len() {
         visit(id, &declarations, &mut states)?;
     }
+    // nullで切れる辺を除き、初期化に既存の実体が必須となる依存だけを調べる。
+    // 値のフィールドも含めるため、構造体で包んでも非nullの循環を隠せない。
+    let dependencies: Vec<Vec<_>> = declarations
+        .iter()
+        .map(|decl| {
+            decl.fields
+                .iter()
+                .filter_map(|field| {
+                    let mut ty = field.ty;
+                    while let Some(inner) = ty.pointee() {
+                        if ty.is_nullable() {
+                            return None;
+                        }
+                        ty = inner;
+                    }
+                    if let Type::Struct(child) = ty {
+                        Some((child, field))
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        })
+        .collect();
+    let mut states = vec![0; declarations.len()];
+    for root in 0..declarations.len() {
+        if states[root] != 0 {
+            continue;
+        }
+        states[root] = 1;
+        let mut stack = vec![(root, 0)];
+        while let Some(&mut (id, ref mut next)) = stack.last_mut() {
+            if *next == dependencies[id].len() {
+                states[id] = 2;
+                stack.pop();
+                continue;
+            }
+            let (child, field) = dependencies[id][*next];
+            *next += 1;
+            if states[child] == 1 {
+                let start = stack.iter().position(|&(id, _)| id == child).unwrap();
+                let fields = stack[start..]
+                    .iter()
+                    .map(|&(id, next)| {
+                        format!(
+                            "{}.{}",
+                            declarations[id].name,
+                            dependencies[id][next - 1].1.name
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" -> ");
+                return Err(field.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "arena.recursive-struct",
+                        "non-null initialization cycle: {}",
+                        fields
+                    ),
+                ));
+            }
+            if states[child] == 0 {
+                states[child] = 1;
+                stack.push((child, 0));
+            }
+        }
+    }
     Ok(declarations)
 }

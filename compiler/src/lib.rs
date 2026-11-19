@@ -310,9 +310,10 @@ mod tests {
     #[test]
     #[cfg(target_pointer_width = "64")]
     fn statement_storage_stays_within_budget() {
-        // メモリ効率を維持するため、全ての文の格納サイズが再び肥大化する変更を検出する。
-        assert!(std::mem::size_of::<ast::Statement>() <= 200);
-        assert!(std::mem::size_of::<check::ir::CheckedStatement>() <= 208);
+        // 型は256段までのnull許容性を32バイトで保持する。
+        // この増分を含む予算で、文の格納サイズの意図しない肥大化を検出する。
+        assert!(std::mem::size_of::<ast::Statement>() <= 232);
+        assert!(std::mem::size_of::<check::ir::CheckedStatement>() <= 224);
     }
 
     #[test]

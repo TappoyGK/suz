@@ -149,21 +149,25 @@ impl Parser<'_, '_> {
 
     // 戻り値に続くエラー指定と、変換に続くorハンドラーは呼び出し側で解析する。
     fn type_atom(&mut self) -> Result<Type, Diagnostic> {
-        let mut depth = 0;
+        let mut layers = Vec::new();
         while self.token().kind == Kind::Keyword("ptr") {
-            depth += 1;
-            self.check_height(depth, self.location())?;
+            self.check_height(layers.len() + 1, self.location())?;
             self.cursor += 1;
+            let nullable = self.token().kind == Kind::Symbol("?");
+            if nullable {
+                self.cursor += 1;
+            }
+            layers.push(nullable);
         }
         let mut ty = self.type_leaf()?;
-        if depth > 0 && (ty == Type::Void || matches!(ty, Type::Function(_))) {
+        if !layers.is_empty() && (ty == Type::Void || matches!(ty, Type::Function(_))) {
             return Err(self.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!("arena.ptr-type", "pointer requires a stored value type"),
             ));
         }
-        for _ in 0..depth {
-            ty = ty.pointer();
+        for nullable in layers.into_iter().rev() {
+            ty = ty.pointer().with_nullable(nullable);
         }
         Ok(ty)
     }

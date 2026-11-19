@@ -91,17 +91,18 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
             blocks::operand_type(statements, value, bindings)
         }
         ExpressionKind::Match { arms, .. } => {
-            joined_type(arms.iter().map(|arm| operand_type(&arm.body, bindings)))
+            branch_type(arms.iter().map(|arm| &arm.body), bindings)
         }
         ExpressionKind::Cast { target, .. } => Some(bindings.resolve_type(*target)),
         ExpressionKind::If {
             branches,
             otherwise,
-        } => joined_type(
+        } => branch_type(
             branches
                 .iter()
-                .map(|(_, value)| operand_type(value, bindings))
-                .chain(std::iter::once(operand_type(otherwise, bindings))),
+                .map(|(_, value)| value)
+                .chain(std::iter::once(otherwise.as_ref())),
+            bindings,
         ),
         ExpressionKind::Char(_) => Some(Type::Char),
         ExpressionKind::Integer { .. } | ExpressionKind::Float(_) => None,
@@ -321,6 +322,7 @@ enum Widening {
 impl Widening {
     fn accepts(self, from: Type, to: Type) -> bool {
         from == to
+            || from.lifts_to(to)
             || (match self {
                 Self::None => false,
                 Self::All => true,
@@ -544,6 +546,12 @@ fn expression_inner(
         }
     };
 
+    if matches!(checked.ty, Type::Pointer { depth, .. } if depth > 256) {
+        return Err(expr.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!("arena.ptr-type", "pointer type nesting exceeds 256"),
+        ));
+    }
     let generic_result = matches!(&expr.kind, ExpressionKind::Call { name, .. }
         if bindings.functions.get(name).is_some_and(|f| f.result.generic()));
     let conversion = required.map(|to| {
@@ -639,6 +647,63 @@ fn conversion_error(
     )
 }
 
+// 他の分岐にも型の手がかりがなければ、newの初期値に通常の既定型を使う。
+// 既知の分岐がある場合は先にそちらを使い、数値リテラルの文脈依存を保つ。
+fn allocation_type(value: &Expression, bindings: &Scope) -> Option<Type> {
+    match &value.kind {
+        ExpressionKind::New(inner) => Some(
+            operand_type(inner, bindings)
+                .or_else(|| allocation_type(inner, bindings))
+                .unwrap_or_else(|| default_type(inner, bindings))
+                .pointer(),
+        ),
+        ExpressionKind::Group(inner) | ExpressionKind::Block { value: inner, .. } => {
+            allocation_type(inner, bindings)
+        }
+        _ => None,
+    }
+}
+
+fn has_null_branch(value: &Expression) -> bool {
+    match &value.kind {
+        ExpressionKind::Null => true,
+        ExpressionKind::Group(inner) | ExpressionKind::Block { value: inner, .. } => {
+            has_null_branch(inner)
+        }
+        ExpressionKind::If {
+            branches,
+            otherwise,
+        } => branches.iter().any(|(_, v)| has_null_branch(v)) || has_null_branch(otherwise),
+        ExpressionKind::Match { arms, .. } => arms.iter().any(|a| has_null_branch(&a.body)),
+        _ => false,
+    }
+}
+
+// nullの分岐には、他の分岐から決めた参照先の型を要求する。
+fn branch_type<'a>(
+    values: impl Iterator<Item = &'a Expression> + Clone,
+    bindings: &Scope,
+) -> Option<Type> {
+    let ty = joined_type(values.clone().map(|v| operand_type(v, bindings))).or_else(|| {
+        let mut result: Option<Type> = None;
+        for ty in values.clone().filter_map(|v| allocation_type(v, bindings)) {
+            if result.is_some_and(|previous| previous != ty) {
+                return None;
+            }
+            result = Some(ty);
+        }
+        result
+    })?;
+    if ty.pointee().is_some() && values.clone().any(has_null_branch) {
+        if matches!(ty, Type::Pointer { depth, .. } if depth > 256) {
+            return None;
+        }
+        Some(ty.with_nullable(true))
+    } else {
+        Some(ty)
+    }
+}
+
 pub(super) fn joined_type(types: impl Iterator<Item = Option<Type>>) -> Option<Type> {
     types.flatten().reduce(joined_or_first)
 }
@@ -646,6 +711,12 @@ pub(super) fn joined_type(types: impl Iterator<Item = Option<Type>>) -> Option<T
 // 代替の型選択も型の代入ごとに適用する。共通型がなくても、
 // 先頭オペランドの型への通常の変換判定まで進む。
 fn joined_or_first(a: Type, b: Type) -> Type {
+    if a.lifts_to(b) {
+        return b;
+    }
+    if b.lifts_to(a) {
+        return a;
+    }
     if a.symbolic() || b.symbolic() {
         return domain::from_types(std::array::from_fn(|i| {
             let (a, b) = (domain::at(a, i)?, domain::at(b, i)?);

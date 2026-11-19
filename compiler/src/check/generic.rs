@@ -29,7 +29,10 @@ pub(super) struct GenericTypes {
 impl GenericTypes {
     pub fn resolve(self, ty: Type) -> Type {
         match ty {
-            Type::Pointer { .. } => self.resolve(ty.pointee().unwrap()).pointer(),
+            Type::Pointer { .. } => self
+                .resolve(ty.pointee().unwrap())
+                .pointer()
+                .with_nullable(ty.is_nullable()),
             Type::GenericInt => Type::Integer(self.int.expect("int declared in signature")),
             Type::GenericFloat => Type::Float(self.float.expect("float declared in signature")),
             _ => ty,
@@ -142,7 +145,10 @@ pub(super) struct ResolvedTypes {
 impl ResolvedTypes {
     pub fn resolve(&self, ty: Type) -> Type {
         match ty {
-            Type::Pointer { .. } => self.resolve(ty.pointee().unwrap()).pointer(),
+            Type::Pointer { .. } => self
+                .resolve(ty.pointee().unwrap())
+                .pointer()
+                .with_nullable(ty.is_nullable()),
             Type::GenericInt => self.int.unwrap(),
             Type::GenericFloat => self.float.unwrap(),
             _ => ty,
@@ -287,10 +293,20 @@ pub(super) fn call_operand_type(
     let mut types = Vec::new();
     candidates(signature, arguments, family, scope, &mut types);
     let mut result = expression::joined_type(types.into_iter().map(Some))?;
-    if let Type::Pointer { depth, .. } = signature.result {
-        for _ in 0..depth {
-            result = result.pointer();
-        }
+    if let Type::Pointer {
+        leaf: _,
+        depth,
+        nullable,
+    } = signature.result
+    {
+        let Type::Pointer { leaf, .. } = result.pointer() else {
+            unreachable!()
+        };
+        result = Type::Pointer {
+            leaf,
+            depth,
+            nullable,
+        };
     }
     Some(result)
 }
