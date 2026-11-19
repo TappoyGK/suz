@@ -345,7 +345,7 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
                 continuation = false;
                 continue;
             }
-            '"' if tokens
+            '[' if tokens
                 .last()
                 .is_some_and(|t| t.kind == Kind::Keyword("objection")) =>
             {

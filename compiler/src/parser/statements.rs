@@ -257,7 +257,7 @@ impl Parser<'_, '_> {
                         ErrorKind::InvalidSource,
                         crate::diagnostic!(
                             "arena.objection-reason",
-                            "objection requires a quoted non-empty reason"
+                            "objection requires a non-empty reason in brackets"
                         ),
                     ));
                 }

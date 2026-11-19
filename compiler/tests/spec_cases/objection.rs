@@ -11,7 +11,7 @@ fn connect(flag: bool) -> void {
             fix ptr inner = new Node { next: null }
             fix ptr destination = ifexpr flag { outer } else { inner }
             fix ptr source = ifexpr flag { outer } else { inner }
-            objection "both choices use the same flag and therefore the same object" {
+            objection [both choices use the same flag and therefore the same object] {
                 if let p = destination { p.next = source }
             }
         }
@@ -38,7 +38,7 @@ fn main() -> u8 {
             fix ptr inner = new Node { v: 2, next: null }
             var ptr selected = outer
             selected = inner
-            objection "selected was replaced by inner" {
+            objection [selected was replaced by inner] {
                 if let p = selected { p.next = inner }
             }
             if let p = inner.next { if p.v != 2 { return 1 } }
@@ -49,7 +49,7 @@ fn main() -> u8 {
     return 0
 }
 "#;
-    let rejected = source.replace("objection \"selected was replaced by inner\"", "");
+    let rejected = source.replace("objection [selected was replaced by inner]", "");
     assert!(
         suz::compile(rejected.as_bytes())
             .unwrap_err()
@@ -78,7 +78,7 @@ fn objection_never_removes_proven_lifetime_violations() {
         "fix holder = Node { next: inner }\n*outer = holder",
     ] {
         let source = format!(
-            "struct Node {{ next: ptr Node }}\nfn main() -> u8 {{ arena {{ var ptr saved: ptr Node = null\nfix ptr outer = new Node {{ next: null }}\narena {{ fix ptr inner = new Node {{ next: null }}\nobjection \"claimed safety\" {{ {operation} }}\n}}\n}}\nreturn 0 }}"
+            "struct Node {{ next: ptr Node }}\nfn main() -> u8 {{ arena {{ var ptr saved: ptr Node = null\nfix ptr outer = new Node {{ next: null }}\narena {{ fix ptr inner = new Node {{ next: null }}\nobjection [claimed safety] {{ {operation} }}\n}}\n}}\nreturn 0 }}"
         );
         // savedを使わない例でもvarの再代入規則を満たす。
         let source = source.replace(
@@ -96,7 +96,7 @@ fn objection_never_removes_proven_lifetime_violations() {
         );
         assert_eq!(error.related.len(), 2);
     }
-    let source = b"arena fn bad() -> ptr i32 { arena { objection \"claim\" { return new (1 as i32) } } }\nfn main() -> u8 { return 0 }";
+    let source = b"arena fn bad() -> ptr i32 { arena { objection [claim] { return new (1 as i32) } } }\nfn main() -> u8 { return 0 }";
     assert!(
         suz::compile(source)
             .unwrap_err()
@@ -115,7 +115,7 @@ fn main() -> u8 {
         arena {
             fix ptr inner = new Node { next: null }
             fix ptr maybe: ptr Node = ifexpr true { null } else { inner }
-            objection "the true branch yields null" { saved = maybe }
+            objection [the true branch yields null] { saved = maybe }
         }
     }
     return 0
@@ -125,7 +125,7 @@ fn main() -> u8 {
         compile_and_run_c23(source, "nullable.suz").status.code(),
         Some(0)
     );
-    let source = source.replace("objection \"the true branch yields null\"", "");
+    let source = source.replace("objection [the true branch yields null]", "");
     let error = suz::compile(source.as_bytes()).unwrap_err();
     assert!(error.to_string().contains("[arena.store]"), "{error}");
     assert!(!error.message().contains("proven"), "{error}");
@@ -142,8 +142,8 @@ fn main() -> u8 {
             fix ptr inner = new Node { next: null }
             var ptr selected = outer
             selected = inner
-            objection "selected is inner" {
-                objection "same guarantee" {
+            objection [selected is inner] {
+                objection [same guarantee] {
                     if let p = selected { p.next = inner }
                 }
             }
@@ -161,38 +161,38 @@ fn main() -> u8 {
 fn objection_does_not_override_explicit_contracts_or_callee_checks() {
     for (source, rule) in [
         (
-            "fn change(p: ptr ptr i32) -> void { objection \"claim\" { if let q = p { *q = null } } }\nfn main() -> u8 { return 0 }",
+            "fn change(p: ptr ptr i32) -> void { objection [claim] { if let q = p { *q = null } } }\nfn main() -> u8 { return 0 }",
             "arena.parameter",
         ),
         (
-            "fn bad() -> ptr i32 { objection \"claim\" { return null } }\nfn main() -> u8 { return 0 }",
+            "fn bad() -> ptr i32 { objection [claim] { return null } }\nfn main() -> u8 { return 0 }",
             "arena.parameter",
         ),
         (
-            "arena fn make() -> ptr i32 { return new (1 as i32) }\nfn main() -> u8 { objection \"claim\" { make() }\nreturn 0 }",
+            "arena fn make() -> ptr i32 { return new (1 as i32) }\nfn main() -> u8 { objection [claim] { make() }\nreturn 0 }",
             "arena.fn-call",
         ),
         (
-            "fn main() -> u8 { objection \"claim\" { fix ptr p: ptr i32 = null\nfix n = *p }\nreturn 0 }",
+            "fn main() -> u8 { objection [claim] { fix ptr p: ptr i32 = null\nfix n = *p }\nreturn 0 }",
             "arena.null-deref",
         ),
         (
-            "fn bad(p: ptr ptr i32) -> void { if let q = p { *q = null } }\nfn main() -> u8 { objection \"claim\" { bad(null) }\nreturn 0 }",
+            "fn bad(p: ptr ptr i32) -> void { if let q = p { *q = null } }\nfn main() -> u8 { objection [claim] { bad(null) }\nreturn 0 }",
             "arena.parameter",
         ),
         (
-            "arena fn bad(flag: bool) -> ptr i32 { arena { fix ptr p: ptr i32 = ifexpr flag { new (1 as i32) } else { null }\nreturn p } }\nfn main() -> u8 { arena { objection \"caller guarantee\" { bad(false) } }\nreturn 0 }",
+            "arena fn bad(flag: bool) -> ptr i32 { arena { fix ptr p: ptr i32 = ifexpr flag { new (1 as i32) } else { null }\nreturn p } }\nfn main() -> u8 { arena { objection [caller guarantee] { bad(false) } }\nreturn 0 }",
             "arena.store",
         ),
         (
-            "fnshape Act() -> void\nfn run(f: fn Act) -> void { f() }\nfn main() -> u8 { objection \"caller guarantee\" { run(fn []() -> void { arena { var ptr saved: ptr i32 = null\narena { fix ptr p: ptr i32 = ifexpr true { null } else { new (1 as i32) }\nsaved = p } } }) }\nreturn 0 }",
+            "fnshape Act() -> void\nfn run(f: fn Act) -> void { f() }\nfn main() -> u8 { objection [caller guarantee] { run(fn []() -> void { arena { var ptr saved: ptr i32 = null\narena { fix ptr p: ptr i32 = ifexpr true { null } else { new (1 as i32) }\nsaved = p } } }) }\nreturn 0 }",
             "arena.store",
         ),
     ] {
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert!(error.to_string().contains(&format!("[{rule}]")), "{error}");
     }
-    let source = "fn main() -> u8 { objection \"claim\" { fix n: bool = 1 }\nreturn 0 }";
+    let source = "fn main() -> u8 { objection [claim] { fix n: bool = 1 }\nreturn 0 }";
     assert!(suz::compile(source.as_bytes()).is_err());
 }
 
@@ -200,19 +200,21 @@ fn objection_does_not_override_explicit_contracts_or_callee_checks() {
 fn objection_requires_a_literal_reason_and_does_not_generate_runtime_text() {
     for reason in [
         "",
-        "\"\"",
-        "\"   \"",
-        "\"　\"",
+        "[]",
+        "[   ]",
+        "[　]",
         "name",
         "`template`",
-        "\"line\nbreak\"",
-        "\"bad\\n\"",
-        "\"unterminated",
+        "\"old syntax\"",
+        "[line\nbreak]",
+        "[tab\t]",
+        "[unclosed",
+        "[ends]extra]",
     ] {
         let source = format!("fn main() -> u8 {{ objection {reason} {{ return 0 }} }}");
         assert!(suz::compile(source.as_bytes()).is_err(), "{reason}");
     }
-    let annotation = r#"objection "日本語 \\ path and \"quote\" ${not_an_expression}""#;
+    let annotation = r#"objection [日本語 \n path and "quote" ${not_an_expression} // { `]"#;
     let source = format!("fn main() -> u8 {{ {annotation} {{ return 0 }} }}");
     let plain = source.replace(annotation, &" ".repeat(annotation.chars().count()));
     assert_eq!(
@@ -226,7 +228,7 @@ fn objection_reason_inside_interpolation_is_not_template_syntax() {
     let source = r#"fnshape Number() -> u8
 fn value(f: fn Number) -> u8 { return f() }
 fn main() -> u8 {
-    fix message = `${value(fn []() -> u8 { objection "} ` ${ and { are annotation text" { return 42 } })}`
+    fix message = `${value(fn []() -> u8 { objection [} ` ${ and { are annotation text] { return 42 } })}`
     log info `${message}`
     return 0
 }"#;

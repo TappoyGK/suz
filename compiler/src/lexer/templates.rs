@@ -99,7 +99,7 @@ pub(crate) fn scan(
                         while matches!(bytes.get(cursor), Some(b' ' | b'\t')) {
                             cursor += 1;
                         }
-                        if bytes.get(cursor) == Some(&b'"') {
+                        if bytes.get(cursor) == Some(&b'[') {
                             // 理由中の括弧やバッククォートは補間式の構文として数えない。
                             let reason_column = column + source[..cursor].chars().count();
                             cursor +=

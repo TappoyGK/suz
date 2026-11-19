@@ -1680,9 +1680,9 @@ fn main() -> u8 {
 
 #### 理由付きの寿命保証
 
-**[arena.objection]** `objection "理由" { 文 ... }` は、ブロック内の保存・返却について、コンパイラが寿命の安全性を証明できない場合に、プログラマーの保証によって拒否を解除する文である。通常のブロックと同じスコープを作り、入れ子にできる。
+**[arena.objection]** `objection [理由] { 文 ... }` は、ブロック内の保存・返却について、コンパイラが寿命の安全性を証明できない場合に、プログラマーの保証によって拒否を解除する文である。通常のブロックと同じスコープを作り、入れ子にできる。
 
-**[arena.objection-reason]** 理由は二重引用符で囲むリテラルを必須とする。空文字列とUnicodeの空白文字だけの理由は拒否する。ソース上の1行に書き、制御文字を含められない。`\"`は引用符、`\\`はバックスラッシュを表し、それ以外のエスケープは使えない。埋め込みはなく、`${...}`も理由の文字として読む。理由は式ではなく、実行時に評価せず、文字列プールにも登録しない。
+**[arena.objection-reason]** 理由は `[` から最初の `]` までに書く説明文を必須とする。エスケープと埋め込みはなく、引用符・バッククォート・`${`・`//`・開き括弧も文字として扱う。理由に `]` は含められない。空またはUnicodeの空白文字だけの理由と、制御文字（U+0000からU+001F、U+007F）を含む理由は拒否する。改行も制御文字なので、理由はソース上の1行に収まる。理由は式ではなく、実行時に評価せず、文字列プールにも登録しない。
 
 **[arena.objection-scope]** 解除できるのは [arena.store] の未証明の寿命違反だけである。保存する参照が必ず非nullで、保存先と参照先の候補の全組が寿命の条件に違反する場合は、証明済みとして拒否を維持する。いずれかの候補集合が空なら、この証明には使わない。構造体はポインタを含む各メンバーについて判定する。診断には証明済みか、違反する可能性があるだけかを示す。
 
@@ -1702,7 +1702,7 @@ fn main() -> u8 {
             fix ptr inner = new Node { next: null }
             var ptr selected = outer
             selected = inner
-            objection "selectedをinnerへ差し替えたので、保存先も参照先も内側のarenaに属する" {
+            objection [selectedをinnerへ差し替えたので、保存先も参照先も内側のarenaに属する] {
                 if let p = selected { p.next = inner }
             }
         }
@@ -2078,7 +2078,7 @@ AllowClause      ::= "allow" AllowItem ( "," AllowItem )*
 AllowItem        ::= ALLOW_ITEM
 ```
 
-`OBJECTION_REASON`は [arena.objection-reason] の二重引用符付きリテラルである。
+`OBJECTION_REASON`は [arena.objection-reason] の角括弧で囲んだ理由である。
 
 `VariableDeclaration` はブロック内の宣言を表す。トップレベルの宣言は A.3 の `TopLevelBinding` で表す。通常の代入先には [assign.target] を適用する。ポインタを通した更新には [arena.ptr-operations] を適用し、参照先が書き込み可能な場所であることを要求する。
 
