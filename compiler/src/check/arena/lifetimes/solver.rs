@@ -2,9 +2,11 @@
 //! 間接参照の参照先が増えたときはコピー辺を追加し、それ以降の更新も追跡する。
 use super::{Analysis, Constraint, Node, Place};
 use std::collections::{BTreeSet, VecDeque};
+mod components;
 
 #[derive(Default)]
 struct Worklist {
+    representative: Vec<Node>,
     // srcの候補が増えると、copies[src]にある各ノードへ同じ増分を渡す。
     copies: Vec<BTreeSet<Node>>,
     // ポインタの候補から保存場所を解決する必要がある制約の番号。
@@ -18,6 +20,8 @@ struct Worklist {
 
 impl Worklist {
     fn resize(&mut self, count: usize) {
+        // 間接参照で後から作るフィールドは独立したノードとして追加する。
+        self.representative.extend(self.representative.len()..count);
         self.copies.resize_with(count, BTreeSet::new);
         self.indirect.resize_with(count, Vec::new);
         self.pending.resize_with(count, Vec::new);
@@ -26,6 +30,7 @@ impl Worklist {
 
     fn add(&mut self, analysis: &mut Analysis<'_>, dst: Node, values: &[Node]) {
         self.resize(analysis.targets.len());
+        let dst = self.representative[dst];
         for &value in values {
             #[cfg(test)]
             {
@@ -52,6 +57,8 @@ impl Worklist {
 
     fn copy(&mut self, analysis: &mut Analysis<'_>, dst: Node, src: Node) {
         self.resize(analysis.targets.len());
+        let dst = self.representative[dst];
+        let src = self.representative[src];
         if dst == src || !self.copies[src].insert(dst) {
             return;
         }
@@ -71,7 +78,15 @@ impl Worklist {
     }
 
     fn run(&mut self, analysis: &mut Analysis<'_>, constraints: &[Constraint]) {
+        self.representative = components::representatives(analysis, constraints);
         self.resize(analysis.targets.len());
+        for node in 0..analysis.targets.len() {
+            let representative = self.representative[node];
+            if representative != node {
+                let initial = std::mem::take(&mut analysis.targets[node]);
+                analysis.targets[representative].extend(initial);
+            }
+        }
         // newが作った初期候補をキューへ載せる。nullには候補がない。
         for (node, targets) in analysis.targets.iter().enumerate() {
             if !targets.is_empty() {
@@ -92,7 +107,9 @@ impl Worklist {
             };
             match place {
                 Place::Direct(cell) => self.connect(analysis, constraint, *cell),
-                Place::Indirect(pointer, _) => self.indirect[*pointer].push(index),
+                Place::Indirect(pointer, _) => {
+                    self.indirect[self.representative[*pointer]].push(index)
+                }
             }
         }
         while let Some(node) = self.queue.pop_front() {
@@ -122,6 +139,13 @@ impl Worklist {
                     let cell = analysis.project(target, path);
                     self.connect(analysis, constraint, cell);
                 }
+            }
+        }
+        // 保存位置や診断は元のノードを使う。収束した集合を戻して解析の外へ影響を出さない。
+        for node in 0..analysis.targets.len() {
+            let representative = self.representative[node];
+            if representative != node {
+                analysis.targets[node] = analysis.targets[representative].clone();
             }
         }
     }

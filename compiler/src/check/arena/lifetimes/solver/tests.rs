@@ -167,6 +167,84 @@ fn reverse_copy_cycle_propagates_each_candidate_without_rescanning_old_sets() {
 }
 
 #[test]
+fn mixed_arena_cycles_do_not_repeat_store_candidates_for_each_read() {
+    let scope = Scope::default();
+    for count in [32, 64] {
+        let mut analysis = fixture(&scope, 2 * count);
+        let inner = analysis.region(0, HERE);
+        for cell in count..2 * count {
+            analysis.cells.get_mut(&cell).unwrap().region = inner;
+        }
+        let outer_values = 2 * count;
+        let inner_values = 3 * count;
+        let mut constraints = Vec::new();
+        for i in 0..count {
+            constraints.push(Constraint::Copy(
+                outer_values + i,
+                outer_values + (i + 1) % count,
+            ));
+            constraints.push(Constraint::Copy(
+                inner_values + i,
+                inner_values + (i + 1) % count,
+            ));
+        }
+        constraints.push(Constraint::Copy(outer_values, inner_values));
+        for i in 0..5 * count {
+            // if letのスナップショットと、保存元の変数を毎回読み出す形を再現する。
+            let snapshot = analysis.cell(inner, HERE, Type::Void);
+            let pointer = analysis.node();
+            let value = analysis.node();
+            constraints.push(Constraint::Store(
+                Place::Direct(snapshot),
+                outer_values + i % count,
+                HERE,
+            ));
+            constraints.push(Constraint::Load(pointer, Place::Direct(snapshot)));
+            constraints.push(Constraint::Copy(value, inner_values + i % count));
+            constraints.push(Constraint::Store(
+                Place::Indirect(pointer, vec![0]),
+                value,
+                HERE,
+            ));
+        }
+        let mut work = Worklist::default();
+        work.run(&mut analysis, &constraints);
+        for cell in 0..2 * count {
+            let field = analysis.project(cell, &[0]);
+            assert_eq!(analysis.targets[field], (count..2 * count).collect());
+        }
+        assert!(
+            work.propagated <= 30 * count * count,
+            "{} for {count}",
+            work.propagated
+        );
+    }
+}
+
+#[test]
+fn aliases_of_filtered_values_preserve_the_region_filter() {
+    let scope = Scope::default();
+    let mut actual = fixture(&scope, 2);
+    let mut expected = fixture(&scope, 2);
+    for analysis in [&mut actual, &mut expected] {
+        analysis.cells.get_mut(&1).unwrap().region = 1;
+        let filtered = analysis.node();
+        analysis.call_regions.insert(filtered, 0);
+        analysis.node();
+    }
+    let constraints = [
+        Constraint::Copy(4, 2),
+        Constraint::Copy(4, 3),
+        Constraint::Copy(5, 4),
+        Constraint::Copy(4, 5),
+    ];
+    Worklist::default().run(&mut actual, &constraints);
+    reference(&mut expected, &constraints);
+    assert_eq!(actual.targets, expected.targets);
+    assert_eq!(actual.targets[5], BTreeSet::from([0]));
+}
+
+#[test]
 fn connected_arena_calls_do_not_repeat_dense_propagation_per_call() {
     use crate::ast::{StructDeclaration, StructField};
     let ty = Type::Struct(0);
