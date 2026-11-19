@@ -46,9 +46,8 @@ extern "bytes.h" {
     fn retained() -> _int
 }
 struct Data { pointer: *const void, size: _size_t }
-var CALLS: i32 = 0
-fn message() -> symbol { CALLS += 1
-return `Aあ\0B` }
+fnshape Message() -> symbol
+fn message(make: fn Message) -> symbol { return make() }
 fn make_data(value: i32) -> Data {
     fix message_text = `x${value}`
     unsafe { return Data { pointer: c_bytes message_text, size: c_byte_len message_text } }
@@ -57,13 +56,17 @@ fn forward(pointer: *const void) -> *const void { return pointer }
 fnshape Get() -> *const void
 fn get(f: fn Get) -> *const void { return f() }
 fn main() -> u8 {
-    fix original = message()
+    var calls: i32 = 0
+    fix original = message(fn [var calls]() -> symbol { calls += 1
+return `Aあ\0B` })
     fix part = original[1:3] or return 1
     if c_byte_len original != 6 || c_byte_len part != 4 || len original != 4 { return 2 }
     unsafe {
         if identity(c_bytes original, c_byte_len original) != 1 { return 3 }
         if view(c_bytes original, c_byte_len original, c_bytes part, c_byte_len part) != 1 { return 4 }
-        if identity(c_bytes message(), c_byte_len message()) != 1 || CALLS != 3 { return 5 }
+        if identity(c_bytes message(fn [var calls]() -> symbol { calls += 1
+return `Aあ\0B` }), c_byte_len message(fn [var calls]() -> symbol { calls += 1
+return `Aあ\0B` })) != 1 || calls != 3 { return 5 }
         fix stored = make_data(42)
         fix pointer = forward(stored.pointer)
         var current = c_bytes original
@@ -221,7 +224,6 @@ fix N: _size_t = c_byte_len T",
         "fix N = (5 as _int or 0) == 5",
         "struct Item { n: _int }
 fix N = Item { n: 5 }",
-        "var N: _int = 5",
     ] {
         let source = format!(
             "{declaration}

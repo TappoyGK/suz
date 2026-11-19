@@ -232,7 +232,7 @@ fn error_diagnostics_distinguish_type_context_and_declared_set() {
     let prefix = "error Err { Bad, Other }\nenum Choice: u8 { Bad }\n";
     for (declaration, rule, message) in [
         (
-            "var X: u8 or Err = 1",
+            "fix X: u8 or Err = 1",
             "err.no-first-class",
             "only allowed on",
         ),

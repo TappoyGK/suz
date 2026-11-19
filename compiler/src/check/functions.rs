@@ -55,7 +55,7 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
         ))),
         ..Scope::default()
     };
-    let (globals, mut warnings, initializers) =
+    let (globals, mut warnings) =
         declarations::resolve(&program.bindings, &program.enums, &program.structs, scope)?;
     let mut functions = Vec::new();
     check_instances(program, &globals, &mut functions, &mut warnings)?;
@@ -75,19 +75,6 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
         functions.push(checked);
         warnings.extend(found);
     }
-    // 全関数（未使用の汎用関数を含む）の検査後に、大域変数への構文上の代入を確認する。
-    for declaration in program.bindings.iter().filter(|d| d.mutable) {
-        if !globals.globals[&declaration.name].assigned.get() {
-            return Err(declaration.location.error(
-                ErrorKind::InvalidSource,
-                crate::diagnostic!(
-                    "var.never-reassigned",
-                    "global var '{}' is never reassigned; declare it with fix",
-                    declaration.name
-                ),
-            ));
-        }
-    }
     warnings.sort_by_key(|l| (l.line, l.column));
     // 整数演算の箇所は汎用検査と具体化の両方で集まるため、ソースの演算ごとに一度だけ報告する。
     // 比較・除算の候補は汎用検査からだけ集まる。
@@ -96,13 +83,6 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
         externs: program.externs.clone(),
         external_base: program.functions.len(),
         function_types: globals.function_types.borrow().clone(),
-        globals: initializers,
-        global_warnings: program
-            .bindings
-            .iter()
-            .filter(|d| d.mutable)
-            .map(|d| d.location)
-            .collect(),
         division_warnings: globals
             .outputs
             .divisions
@@ -372,7 +352,6 @@ pub(super) fn check_with_captures(
             parameter.name.clone(),
             Binding {
                 id: parameter_id,
-                global: false,
                 ty: parameter_type,
                 mutable: false,
                 parameter: true,

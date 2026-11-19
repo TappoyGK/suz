@@ -10,7 +10,6 @@ fnshape Visit(Node) -> i32
 struct Node { value: i32, visit: static fn Visit }
 struct Holder { action: static fn Alias }
 fix ID: static fn Transform = fn identity
-var CURRENT: static fn Transform = fn identity
 fn identity(x: int) -> int { return x }
 fn twice(x: i32) -> i32 { return x * 2 }
 fn truth(x: bool) -> bool { return x }
@@ -25,6 +24,7 @@ fn returned() -> static fn Transform {
     return fn twice
 }
 fn main() -> u8 {
+    var current: static fn Transform = fn identity
     var inferred_bool = fn truth
     inferred_bool = fn opposite
     if inferred_bool(true) { return 7 }
@@ -32,14 +32,14 @@ fn main() -> u8 {
     fix copy = inferred
     var local = inferred
     local = fn identity
-    CURRENT = fn twice
+    current = fn twice
     fix chooser: static fn Choose = fn choose
     fix holder = Holder { action: fn identity }
     fix changed = holder with { action: fn twice }
     fix node = Node { value: 7, visit: fn visit_node }
     fix selected: static fn Transform = matchexpr 0 { _ => fn identity }
     fix blocked: static fn Transform = expr { (fn identity) }
-    if ID(3) != 3 || CURRENT(3) != 6 || copy(3) != 6 || local(3) != 3 { return 1 }
+    if ID(3) != 3 || current(3) != 6 || copy(3) != 6 || local(3) != 3 { return 1 }
     if chooser(true)(3) != 3 || choose(false)(3) != 6 { return 2 }
     if holder.action(3) != 3 || changed.action(3) != 6 || node.visit(node) != 7 { return 3 }
     if apply(fn identity, 3) != 3 || selected(3) != 3 || blocked(3) != 3 { return 4 }
@@ -56,32 +56,33 @@ fn main() -> u8 {
 #[test]
 fn function_values_capture_the_target_before_evaluating_arguments() {
     let source = r#"
-fnshape Pair(i32, i32) -> i32
+fnshape Pair(ptr State, i32, i32) -> i32
 struct Holder { action: static fn Pair }
-var CURRENT: static fn Pair = fn first
-var HOLDER = Holder { action: fn first }
-var TRACE: i32 = 0
-fn first(a: i32, b: i32) -> i32 { TRACE = TRACE * 10 + 4
+struct State { current: static fn Pair, holder: Holder, trace: i32 }
+fn first(state: ptr State, a: i32, b: i32) -> i32 { state.trace = state.trace * 10 + 4
 return a * 10 + b }
-fn second(a: i32, b: i32) -> i32 { return 99 }
-fn pick() -> static fn Pair { TRACE = TRACE * 10 + 1
-return CURRENT }
-fn change() -> i32 { TRACE = TRACE * 10 + 2
-CURRENT = fn second
-HOLDER.action = fn second
+fn second(state: ptr State, a: i32, b: i32) -> i32 { return 99 }
+fn pick(state: ptr State) -> static fn Pair { state.trace = state.trace * 10 + 1
+return state.current }
+fn change(state: ptr State) -> i32 { state.trace = state.trace * 10 + 2
+state.current = fn second
+state.holder.action = fn second
 return 2 }
-fn next() -> i32 { TRACE = TRACE * 10 + 3
+fn next(state: ptr State) -> i32 { state.trace = state.trace * 10 + 3
 return 3 }
 fn main() -> u8 {
-    if pick()(change(), next()) != 23 || TRACE != 1234 { return 1 }
-    TRACE = 0
-    HOLDER.action = fn first
-    if HOLDER.action(change(), next()) != 23 || TRACE != 234 { return 2 }
+    arena {
+    fix ptr state = new State { current: fn first, holder: Holder { action: fn first }, trace: 0 }
+    if pick(state)(state, change(state), next(state)) != 23 || state.trace != 1234 { return 1 }
+    state.trace = 0
+    state.holder.action = fn first
+    if state.holder.action(state, change(state), next(state)) != 23 || state.trace != 234 { return 2 }
     var local: static fn Pair = fn first
-    fix result = local(expr { local = fn second
+    fix result = local(state, expr { local = fn second
         2 }, 3)
-    if result != 23 || local(2, 3) != 99 { return 3 }
+    if result != 23 || local(state, 2, 3) != 99 { return 3 }
     return 0
+    }
 }
 "#;
     let output = compile_and_run_c23(source, "function-order.suz");
@@ -448,16 +449,8 @@ fnshape Action() -> void
 fnshape Make() -> Item
 struct Item { value: i32 }
 struct Holder { action: static fn Transform }
-var CURRENT: static fn Transform = fn identity
-var HOLDER = Holder { action: fn identity }
-var TRACE: i32 = 0
 fn identity(n: int) -> int { return n }
 fn twice(n: i32) -> i32 { return n * 2 }
-fn pick() -> static fn Transform { TRACE += 1
-return CURRENT }
-fn change() -> i32 { CURRENT = fn twice
-HOLDER.action = fn twice
-return 3 }
 fn apply(action: fn Transform, n: i32) -> i32 { return action(n) }
 fn forward(action: fn Alias, n: i32) -> i32 { return apply(action, n) }
 fn generic_forward(action: fn Transform, n: int) -> int { action(1)
@@ -468,21 +461,28 @@ fn again(action: fn Transform, n: i32) -> i32 {
     return again(action, n - 1)
 }
 fn run(action: fn Action) -> void { action() }
-fn tick() -> void { TRACE += 10 }
 fn make() -> Item { return Item { value: 7 } }
 fn create(action: fn Make) -> Item { return action() }
 fn main() -> u8 {
+    var current: static fn Transform = fn identity
+    var holder = Holder { action: fn identity }
+    var trace: i32 = 0
     if generic_forward(fn identity, 3) != 3 { return 8 }
-    if forward(pick(), change()) != 3 || TRACE != 1 { return 1 }
-    HOLDER.action = fn identity
-    if apply(HOLDER.action, change()) != 3 { return 2 }
-    if pair(fn identity, CURRENT, 3) != 9 { return 3 }
+    if forward(expr { trace += 1
+current }, expr { current = fn twice
+holder.action = fn twice
+3 }) != 3 || trace != 1 { return 1 }
+    holder.action = fn identity
+    if apply(holder.action, expr { current = fn twice
+holder.action = fn twice
+3 }) != 3 { return 2 }
+    if pair(fn identity, current, 3) != 9 { return 3 }
     if again(fn identity, 3) != 3 { return 4 }
     // 関数名から推論した型でも、呼び出し専用の仮引数へ変換できる。
     fix indirect = fn apply
     if indirect(fn identity, 4) != 4 { return 5 }
-    run(fn tick)
-    if TRACE != 11 || create(fn make).value != 7 { return 6 }
+    run(fn [var trace]() -> void { trace += 10 })
+    if trace != 11 || create(fn make).value != 7 { return 6 }
     for i in 0..<10 {
         if forward(ifexpr i == 0 { fn identity } else { fn twice }, 3) != ifexpr i == 0 { 3 } else { 6 } { return 7 }
     }
@@ -506,7 +506,6 @@ fn call_only_functions_reject_storage_and_non_parameter_annotations() {
     let prelude = "fnshape Transform(i32) -> i32\nfn fixed(n: i32) -> i32 { return n }\nfn apply(f: fn Transform) -> void { f(1) }\nfn save(f: static fn Transform) -> void {}\n";
     for source in [
         "fix BAD: fn Transform = fn fixed",
-        "var BAD: fn Transform = fn fixed",
         "struct Bad { f: fn Transform }",
         "fnshape Bad() -> fn Transform",
         "fn bad() -> fn Transform { return fn fixed }",

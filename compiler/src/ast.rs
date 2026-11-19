@@ -455,9 +455,8 @@ pub(crate) struct FieldInitializer {
     pub location: Location,
 }
 
-/// トップレベルのfix・varの宣言。省略可能な型注釈と、まだ評価していない初期化式。
+/// トップレベルのfixの宣言。省略可能な型注釈と、まだ評価していない初期化式。
 pub(crate) struct TopLevelBinding {
-    pub mutable: bool,
     pub name: String,
     pub location: Location,
     pub annotation: Option<Type>,

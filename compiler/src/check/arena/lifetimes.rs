@@ -448,12 +448,10 @@ impl<'a> Analysis<'a> {
                     fields,
                     value,
                     location,
-                    global,
                     ..
                 } => {
                     let value = self.expr(value, region, arena);
                     if !value.is_empty() {
-                        assert!(!global, "global pointer types are rejected");
                         let target = self.project(self.locals[id], fields);
                         self.write(Place::Direct(target), value, *location);
                     }

@@ -161,7 +161,6 @@ struct Player { pos: Position }
 enum State: u8 { Ready }
 error Problem { Missing }
 fix CONSTANT = 6
-var GLOBAL: u8 = 7
 fnshape Show() -> void
 fn invoke(f: fn Show) -> void { f() }
 fn show(parameter: u8) -> void {
@@ -170,13 +169,12 @@ fn show(parameter: u8) -> void {
     info = 3
     fix warn = Player { pos: Position { x: 4 } }
     log debug `${debug} ${info} ${warn.pos.x} ${parameter}`
-    log info `${CONSTANT} ${GLOBAL} ${State.Ready} ${Problem.Missing}`
+    log info `${CONSTANT} ${State.Ready} ${Problem.Missing}`
     for i in 0..<1 { log warn `${i}` }
     invoke(fn [debug, var info]() -> void { log error `${debug} ${info}` })
     log info `continued`
 }
 fn main() -> u8 {
-    GLOBAL = 7
     show(5)
     return 0
 }
@@ -201,12 +199,12 @@ fn main() -> u8 {
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("debug levels.suz:15: 1 3 4 5\n"),
+        stderr.contains("debug levels.suz:14: 1 3 4 5\n"),
         "{stderr}"
     );
-    assert!(stderr.contains(": 6 7 Ready Missing\n"), "{stderr}");
-    assert!(stderr.contains("warn levels.suz:17: 0\n"), "{stderr}");
-    assert!(stderr.contains("error levels.suz:18: 1 3\n"), "{stderr}");
+    assert!(stderr.contains(": 6 Ready Missing\n"), "{stderr}");
+    assert!(stderr.contains("warn levels.suz:16: 0\n"), "{stderr}");
+    assert!(stderr.contains("error levels.suz:17: 1 3\n"), "{stderr}");
     assert!(stderr.ends_with(": continued\n"), "{stderr}");
 }
 

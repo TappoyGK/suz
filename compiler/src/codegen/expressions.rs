@@ -556,7 +556,6 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             result
         }
         Value::Local(id) => context.local(id),
-        Value::Global(id) => format!("suz_global_{id}"),
         Value::Integer { value, .. } if value == i64::MIN as i128 => {
             "(-INT64_C(9223372036854775807) - INT64_C(1))".into()
         }
