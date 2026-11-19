@@ -201,3 +201,44 @@ fn let_only_tests_null_for_nullable_inputs() {
     let source = b"fn get(p: ptr i32) -> i32 { let q = p { return *q } else { return true }\nreturn 7 }\nfn main() -> u8 { return 0 }";
     assert!(suz::compile(source).is_err());
 }
+
+#[test]
+fn deep_pointer_assignments_cannot_change_inner_nullability() {
+    // 62/63段目を内側に持つ型で、型表現の違いが代入の許否を変えないことを確認する。
+    // 末端から数えた段を、ソースでは最外側から並べる。
+    fn pointer_type(depth: usize, nullable_layer: usize) -> String {
+        let mut ty = String::new();
+        for layer in (1..=depth).rev() {
+            ty.push_str(if layer == nullable_layer {
+                "ptr? "
+            } else {
+                "ptr "
+            });
+        }
+        ty.push_str("i32");
+        ty
+    }
+    for depth in [63, 64, 128, 256] {
+        let mut layers = vec![0, 62, 63, depth];
+        layers.dedup();
+        for &from_layer in &layers {
+            for &to_layer in &layers {
+                let from = pointer_type(depth, from_layer);
+                let to = pointer_type(depth, to_layer);
+                let source = format!(
+                    "fn take(p: {from}) -> void {{ fix ptr q: {to} = p }}\nfn main() -> u8 {{ return 0 }}"
+                );
+                let result = suz::check_source(source.as_bytes(), suz::ArithmeticMode::Default);
+                if from_layer == to_layer || (from_layer == 0 && to_layer == depth) {
+                    result.unwrap();
+                } else {
+                    let error = result.unwrap_err();
+                    assert!(
+                        error.message().contains("[type.expected]"),
+                        "depth={depth}, from={from_layer}, to={to_layer}: {error}"
+                    );
+                }
+            }
+        }
+    }
+}

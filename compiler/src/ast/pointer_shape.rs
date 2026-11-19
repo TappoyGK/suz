@@ -129,6 +129,39 @@ impl PointerShape {
 mod tests {
     use super::*;
     #[test]
+    fn different_nullable_layers_remain_distinct_across_storage_boundaries() {
+        // 段は末端から数える。表現が切り替わる62/63段でも、違う段のnull許容性を混同しない。
+        for depth in [61, 62, 63, 64, 128, 256] {
+            let mut layers = vec![0, 1, 62, 63, depth]; // 0は全段が非nullの形。
+            layers.retain(|&layer| layer <= depth);
+            layers.sort_unstable();
+            layers.dedup();
+            let shapes: Vec<_> = layers
+                .iter()
+                .map(|&nullable_layer| {
+                    let mut shape = PointerShape::new();
+                    for layer in 1..=depth {
+                        if layer > 1 {
+                            shape = shape.push();
+                        }
+                        shape = shape.with_nullable(layer == nullable_layer);
+                    }
+                    shape
+                })
+                .collect();
+            for (i, shape) in shapes.iter().enumerate() {
+                for (j, other) in shapes.iter().enumerate().skip(i + 1) {
+                    assert_ne!(
+                        shape, other,
+                        "depth={depth}, nullable layers={} and {}",
+                        layers[i], layers[j]
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn nullability_survives_deep_pointer_round_trips() {
         let mut shape = PointerShape::new();
         let mut levels = Vec::new();
