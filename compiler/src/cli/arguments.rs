@@ -47,7 +47,7 @@ pub struct Options {
     pub deny_global_var: bool,
     pub mode: suz::ArithmeticMode,
     pub text_pool_limit: suz::TextPoolLimit,
-    pub arena_limit: suz::ArenaLimit,
+    pub arena: suz::ArenaOptions,
 }
 
 fn invalid(message: impl std::fmt::Display) -> Failure {
@@ -86,7 +86,7 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
     let mut environment = None;
     let mut mode = None;
     let mut text_pool_limit = None;
-    let mut arena_limit = None;
+    let mut arena_sizes = [None; 3];
     let mut force = false;
     let mut log_allow = false;
     let mut log_ignore = false;
@@ -179,18 +179,30 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
                     }
                     continue;
                 }
-                Some("--arena-limit") if command != Command::Check => {
-                    let error = |message| Failure::tool(2, "tool.arena-capacity", message);
-                    if arena_limit.is_some() {
-                        return Err(error("duplicate --arena-limit option"));
+                Some(name @ ("--arena-initial" | "--arena-grow" | "--arena-limit"))
+                    if command != Command::Check =>
+                {
+                    let error = |message: String| Failure::tool(2, "tool.arena-capacity", message);
+                    let index = match name {
+                        "--arena-initial" => 0,
+                        "--arena-grow" => 1,
+                        _ => 2,
+                    };
+                    if arena_sizes[index].is_some() {
+                        return Err(error(format!("duplicate {name} option")));
                     }
                     let value = args
                         .next()
-                        .ok_or_else(|| error("expected SIZE after --arena-limit"))?;
-                    let bytes = value.to_str().and_then(parse_byte_count).ok_or_else(|| {
-                        error("expected a positive byte count or K/M/G suffix for --arena-limit")
-                    })?;
-                    arena_limit = Some(suz::ArenaLimit(bytes));
+                        .ok_or_else(|| error(format!("expected SIZE after {name}")))?;
+                    let bytes = match value.to_str() {
+                        Some("unlimited") if index == 2 => 0,
+                        Some("0") if index != 2 => 0,
+                        Some(value) => parse_byte_count(value)
+                            .map(|n| n.get())
+                            .ok_or_else(|| error(format!("invalid byte count for {name}")))?,
+                        None => return Err(error(format!("invalid byte count for {name}"))),
+                    };
+                    arena_sizes[index] = Some(bytes);
                     continue;
                 }
                 Some("--text-pool-limit") if command != Command::Check => {
@@ -255,7 +267,11 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
         deny_global_var,
         mode: mode.unwrap_or_default(),
         text_pool_limit: text_pool_limit.unwrap_or_default(),
-        arena_limit: arena_limit.unwrap_or_default(),
+        arena: suz::ArenaOptions {
+            initial: arena_sizes[0].unwrap_or(suz::ArenaOptions::default().initial),
+            grow: arena_sizes[1].unwrap_or(suz::ArenaOptions::default().grow),
+            limit: arena_sizes[2].and_then(std::num::NonZeroU64::new),
+        },
     }))
 }
 

@@ -124,12 +124,20 @@ impl TextPoolLimit {
     }
 }
 
-/// 作業領域の固定容量。0と無制限は認めず、既定値は1 GiBとする。
+/// 作業領域の初期容量・追加容量・総容量の上限。0の初期容量は遅延確保、0の追加容量は拡張禁止。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ArenaLimit(pub NonZeroU64);
-impl Default for ArenaLimit {
+pub struct ArenaOptions {
+    pub initial: u64,
+    pub grow: u64,
+    pub limit: Option<NonZeroU64>,
+}
+impl Default for ArenaOptions {
     fn default() -> Self {
-        Self(NonZeroU64::new(1_073_741_824).unwrap())
+        Self {
+            initial: 64 * 1024 * 1024,
+            grow: 64 * 1024 * 1024,
+            limit: None,
+        }
     }
 }
 
@@ -178,7 +186,7 @@ pub struct CompilationOptions {
     pub deny_global_var: bool,
     pub arithmetic_mode: ArithmeticMode,
     pub text_pool_limit: TextPoolLimit,
-    pub arena_limit: ArenaLimit,
+    pub arena: ArenaOptions,
 }
 
 #[derive(Debug)]
@@ -232,7 +240,7 @@ pub fn compile_with_options(
             &checked,
             source_name,
             options.text_pool_limit,
-            options.arena_limit,
+            options.arena,
             options.log_level,
             options.log_ignore,
         ),

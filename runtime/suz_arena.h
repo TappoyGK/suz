@@ -6,48 +6,88 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* コンパイラ内部のAPI。使用位置の保存・復帰は生成Cでusedを読み書きする。
-   復帰先は現在の使用位置以下の、対応する領域進入時の値でなければならない。
-   生存する参照の検査はコンパイラが行い、ランタイムは参照をたどらない。 */
+/* ブロックを追加しても既存の実体を移動しない。currentより後ろは回収済みで再利用できる。
+   容量の上限は管理情報を除く全ブロックの合計に適用し、整列の余白も容量を消費する。 */
+typedef struct suz_arena_chunk {
+    struct suz_arena_chunk *next;
+    size_t capacity;
+    alignas(max_align_t) unsigned char bytes[];
+} suz_arena_chunk;
 typedef struct {
     unsigned char *bytes;
     size_t capacity;
     size_t used;
+    suz_arena_chunk *current;
+    suz_arena_chunk *first;
+    uint64_t total;
+    uint64_t grow;
+    uint64_t limit; /* 0は無制限。 */
 } suz_arena_state;
 extern suz_arena_state suz_arena;
 
-/* arenaを使うプログラムだけが、Suzのmainより前に1回呼ぶ。
-   capacityは1以上。環境層から確保した領域はプロセス終了まで保持する。 */
-void suz_arena_init(uint64_t capacity, const char *source, size_t line, size_t column);
+#if defined(SUZ_ARENA_GROW) && SUZ_ARENA_GROW == 0
+/* 拡張禁止の生成Cではブロックが変わらないため、使用位置だけを保存する。 */
+typedef size_t suz_arena_mark;
+#else
+typedef struct {
+    suz_arena_chunk *chunk;
+    size_t used;
+} suz_arena_mark;
+#endif
 
-/* 診断は失敗時だけ別の翻訳単位で実行し、通常の確保に呼び出しを残さない。 */
+/* arenaを使うプログラムだけがmainの前に呼ぶ。initial=0なら最初の要求まで確保しない。
+   grow=0は追加確保禁止。初期容量は有限のlimitを超えないように抑える。 */
+void suz_arena_init(uint64_t initial, uint64_t grow, uint64_t limit, const char *source, size_t line, size_t column);
 _Noreturn __attribute__((cold)) void suz_arena_overflow(const char *source, size_t line, size_t column);
-_Noreturn __attribute__((cold)) void suz_arena_capacity_exceeded(size_t additional, const char *source, size_t line, size_t column);
+_Noreturn __attribute__((cold)) void suz_arena_capacity_exceeded(size_t size, const char *source, size_t line, size_t column);
+/* 現在のブロックに入らない実体は、回収済みのブロックか新しいブロックの先頭に置く。 */
+void *suz_arena_expand(size_t size, const char *source, size_t line, size_t column);
 
-/* 生成Cは初期化後に、size > 0と型のalignof（2のべき乗、max_align_t以下）を渡す。
-   初期値は呼び出し前に評価済み。常時インライン化し、整列とサイズを定数として最適化できるようにする。 */
+/* 初期値は呼出し前に評価済み。size>0、alignmentは2のべき乗でmax_align_t以下。 */
 static inline __attribute__((always_inline)) void *suz_arena_alloc(size_t size, size_t alignment, const char *source, size_t line, size_t column) {
-    /* 基底アドレスはmax_align_tに整列済み。符号なしの剰余算術で余白を求め、
-       最適化なしでも割り算を行わない。size_tの加算のあふれは後続の検査で拒否する。 */
     size_t padding = (-suz_arena.used) & (alignment - 1);
     size_t additional, end;
+#if defined(SUZ_ARENA_GROW) && SUZ_ARENA_GROW == 0
+    /* 設定が固定なら、失敗経路から戻らないことまでCコンパイラへ伝える。
+       確保ごとの外部呼出しやブロックの再読込みを通常経路に残さない。 */
     if (__builtin_expect(ckd_add(&additional, padding, size) || ckd_add(&end, suz_arena.used, additional), 0)) {
         suz_arena_overflow(source, line, column);
     }
     if (__builtin_expect(end > suz_arena.capacity, 0)) {
-        suz_arena_capacity_exceeded(additional, source, line, column);
+        suz_arena_capacity_exceeded(size, source, line, column);
     }
-    /* 検査が完了するまで使用位置を変えず、範囲外のポインタも作らない。 */
+#else
+    /* 現在のブロック内の加算があふれても、新しいブロックなら収まる場合がある。 */
+    if (__builtin_expect(ckd_add(&additional, padding, size) || ckd_add(&end, suz_arena.used, additional) || end > suz_arena.capacity, 0)) {
+        return suz_arena_expand(size, source, line, column);
+    }
+#endif
     void *result = suz_arena.bytes + suz_arena.used + padding;
     suz_arena.used = end;
     return result;
 }
 
-/* Clangのcleanupは通常終了・return・break・continue・外向きgotoで働く。
-   戻り値を評価してから回収し、パニックによるプロセス終了には回収を要求しない。
-   最適化なしでも復帰だけの関数呼び出しを残さない。 */
-static inline __attribute__((always_inline)) void suz_arena_restore(size_t *mark) {
+static inline __attribute__((always_inline)) suz_arena_mark suz_arena_save(void) {
+#if defined(SUZ_ARENA_GROW) && SUZ_ARENA_GROW == 0
+    return suz_arena.used;
+#else
+    return (suz_arena_mark){suz_arena.current, suz_arena.used};
+#endif
+}
+
+/* cleanupは通常終了・return・break・continue・外向きgotoに適用する。
+   内容の消去や解放は行わず、保存したブロックと使用位置へ戻す。 */
+static inline __attribute__((always_inline)) void suz_arena_restore(suz_arena_mark *mark) {
+#if defined(SUZ_ARENA_GROW) && SUZ_ARENA_GROW == 0
     suz_arena.used = *mark;
+#else
+    if (__builtin_expect(suz_arena.current != mark->chunk, 0)) {
+        suz_arena.current = mark->chunk;
+        suz_arena.bytes = mark->chunk ? mark->chunk->bytes : NULL;
+        suz_arena.capacity = mark->chunk ? mark->chunk->capacity : 0;
+    }
+    suz_arena.used = mark->used;
+#endif
 }
 
 #endif

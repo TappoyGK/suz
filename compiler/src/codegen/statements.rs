@@ -22,7 +22,7 @@ pub(super) fn emit_block(
                 context.uses_arena = true;
                 let id = *next_assignment;
                 *next_assignment += 1;
-                writeln!(c, "{indent}{{\n{indent}    size_t suz_arena_mark_{id} __attribute__((cleanup(suz_arena_restore))) = suz_arena.used;").unwrap();
+                writeln!(c, "{indent}{{\n{indent}    suz_arena_mark suz_arena_mark_{id} __attribute__((cleanup(suz_arena_restore))) = suz_arena_save();").unwrap();
                 emit_block(c, body, depth + 1, next_assignment, context);
                 writeln!(c, "{indent}}}").unwrap();
             }

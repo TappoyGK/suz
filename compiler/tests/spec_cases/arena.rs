@@ -29,10 +29,20 @@ fn arena_runtime_aligns_rewinds_and_checks_before_mutation() {
         assert!(built.status.success(), "{built:?}");
         for (mode, code, message) in [
             ("success", 0, ""),
+            ("growth", 0, ""),
+            ("growth-unlimited", 0, ""),
+            ("lazy", 0, ""),
+            ("zero-fixed", 101, "arena capacity exceeded"),
+            ("limit", 101, "reserved=128, limit=140"),
+            (
+                "grow-failure",
+                101,
+                "arena.suz:8:5: arena allocation failed: requested=128",
+            ),
             (
                 "capacity",
                 101,
-                "arena.suz:8:5: arena capacity exceeded: limit=9, used=1, additional=9 [rt.arena-allocation]",
+                "arena.suz:8:5: arena capacity exceeded: reserved=9, limit=unlimited, grow=0, requested=2 [rt.arena-allocation]",
             ),
             (
                 "padding-overflow",
@@ -67,12 +77,13 @@ fn arena_capacity_cli_and_export_preserve_setting_without_allocating() {
     fs::write(&source, "fn main() -> u8 { return 0 }").unwrap();
     let binary = env!("CARGO_BIN_EXE_suz");
     for (index, value, bytes) in [
-        (0, None, 1_073_741_824_u64),
+        (0, None, 0_u64),
         (1, Some("1"), 1),
         (2, Some("2K"), 2048),
         (3, Some("3M"), 3_145_728),
         (4, Some("2G"), 2_147_483_648),
         (5, Some("18446744073709551615"), u64::MAX),
+        (6, Some("unlimited"), 0),
     ] {
         let output_dir = directory.0.join(format!("export-{index}"));
         let mut command = Command::new(binary);
@@ -91,13 +102,13 @@ fn arena_capacity_cli_and_export_preserve_setting_without_allocating() {
         assert!(generated.contains(&format!("#define SUZ_ARENA_LIMIT UINT64_C({bytes})")));
         assert!(!generated.contains("suz_arena_init("));
         if index == 2 {
-            // 構文が未公開の段階でも、出力物だけでランタイムと設定を使えることを確かめる。
+            // エクスポートした設定で、初期容量が上限に抑えられることを確認する。
             let harness = format!(
                 r#"#define main unused_suz_main
 {generated}
 #undef main
 #include "suz_arena.h"
-int main(void) {{ suz_arena_init(SUZ_ARENA_LIMIT, "test", 1, 1); return suz_arena.capacity == 2048 ? 0 : 1; }}
+int main(void) {{ suz_arena_init(SUZ_ARENA_INITIAL, SUZ_ARENA_GROW, SUZ_ARENA_LIMIT, "test", 1, 1); return suz_arena.capacity == 2048 ? 0 : 1; }}
 "#
             );
             fs::write(&program, harness).unwrap();
@@ -158,7 +169,6 @@ fn arena_capacity_rejects_invalid_and_duplicate_values() {
             "+1",
             "1k",
             "1.5M",
-            "unlimited",
             "1Gx",
             "18446744073709551616",
             "17179869184G",
@@ -189,6 +199,98 @@ fn arena_capacity_rejects_invalid_and_duplicate_values() {
         .unwrap();
     assert_eq!(result.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&result.stderr).contains("[tool.arguments]"));
+}
+
+#[test]
+fn arena_initial_and_growth_settings_are_validated_and_exported() {
+    let directory = TemporaryDirectory::new();
+    let source = directory.0.join("main.suz");
+    fs::write(
+        &source,
+        "fn main() -> u8 { arena { fix ptr n = new 1 }\nreturn 0 }",
+    )
+    .unwrap();
+    let binary = env!("CARGO_BIN_EXE_suz");
+    for (index, flags, initial, grow, limit) in [
+        (0, vec![], 67_108_864_u64, 67_108_864_u64, 0_u64),
+        (
+            1,
+            vec![
+                "--arena-initial",
+                "0",
+                "--arena-grow",
+                "2K",
+                "--arena-limit",
+                "3M",
+            ],
+            0,
+            2048,
+            3_145_728,
+        ),
+        (
+            2,
+            vec![
+                "--arena-initial",
+                "2G",
+                "--arena-grow",
+                "0",
+                "--arena-limit",
+                "unlimited",
+            ],
+            2_147_483_648,
+            0,
+            0,
+        ),
+    ] {
+        let output = directory.0.join(format!("export-{index}"));
+        let result = Command::new(binary)
+            .arg("emit-c")
+            .arg(&source)
+            .arg("-o")
+            .arg(&output)
+            .args(flags)
+            .output()
+            .unwrap();
+        assert!(result.status.success(), "{result:?}");
+        let c = fs::read_to_string(output.join("program.c")).unwrap();
+        for (name, value) in [("INITIAL", initial), ("GROW", grow), ("LIMIT", limit)] {
+            assert!(c.contains(&format!("#define SUZ_ARENA_{name} UINT64_C({value})")));
+        }
+        assert!(c.contains("suz_arena_init(SUZ_ARENA_INITIAL, SUZ_ARENA_GROW, SUZ_ARENA_LIMIT,"));
+    }
+    for option in ["--arena-initial", "--arena-grow"] {
+        for verb in ["build", "run", "emit-c"] {
+            for value in [
+                "",
+                "-1",
+                "1k",
+                "unlimited",
+                "18446744073709551616",
+                "17179869184G",
+            ] {
+                let result = Command::new(binary)
+                    .args([verb, "missing.suz", option, value])
+                    .output()
+                    .unwrap();
+                assert_eq!(result.status.code(), Some(2));
+                assert!(String::from_utf8_lossy(&result.stderr).contains("[tool.arena-capacity]"));
+            }
+            for args in [
+                vec![verb, "missing.suz", option],
+                vec![verb, "missing.suz", option, "0", option, "1"],
+            ] {
+                let result = Command::new(binary).args(args).output().unwrap();
+                assert_eq!(result.status.code(), Some(2));
+                assert!(String::from_utf8_lossy(&result.stderr).contains("[tool.arena-capacity]"));
+            }
+        }
+        let result = Command::new(binary)
+            .args(["check", "missing.suz", option, "0"])
+            .output()
+            .unwrap();
+        assert_eq!(result.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&result.stderr).contains("[tool.arguments]"));
+    }
 }
 
 #[test]
@@ -351,18 +453,39 @@ fn main() -> u8 {
 "#,
     )
     .unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_suz"))
-        .arg("run")
-        .arg(&source)
-        .args(["--arena-limit", "64"])
-        .output()
-        .unwrap();
-    assert_eq!(
-        result.status.code(),
-        Some(0),
-        "{}",
-        String::from_utf8_lossy(&result.stderr)
-    );
+    for flags in [
+        vec!["--arena-limit", "64"],
+        vec!["--arena-limit", "64", "--arena-grow", "0"],
+        vec![
+            "--arena-initial",
+            "8",
+            "--arena-grow",
+            "8",
+            "--arena-limit",
+            "64",
+        ],
+        vec![
+            "--arena-initial",
+            "0",
+            "--arena-grow",
+            "8",
+            "--arena-limit",
+            "64",
+        ],
+    ] {
+        let result = Command::new(env!("CARGO_BIN_EXE_suz"))
+            .arg("run")
+            .arg(&source)
+            .args(&flags)
+            .output()
+            .unwrap();
+        assert_eq!(
+            result.status.code(),
+            Some(0),
+            "{flags:?}: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
 }
 
 #[test]

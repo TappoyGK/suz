@@ -83,7 +83,7 @@ pub(crate) fn generate(
     program: &CheckedProgram,
     source_name: &str,
     text_pool_limit: crate::TextPoolLimit,
-    arena_limit: crate::ArenaLimit,
+    arena: crate::ArenaOptions,
     log_level: crate::LogLevel,
     log_ignore: bool,
 ) -> String {
@@ -100,12 +100,13 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
 
 "#,
     );
-    writeln!(
-        c,
-        "#define SUZ_ARENA_LIMIT UINT64_C({})",
-        arena_limit.0.get()
-    )
-    .unwrap();
+    for (name, value) in [
+        ("INITIAL", arena.initial),
+        ("GROW", arena.grow),
+        ("LIMIT", arena.limit.map_or(0, |n| n.get())),
+    ] {
+        writeln!(c, "#define SUZ_ARENA_{name} UINT64_C({value})").unwrap();
+    }
     let mut context = ExpressionContext {
         log_level,
         log_ignore,
@@ -188,7 +189,7 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
         text_init.insert_str(
             0,
             &format!(
-                "    suz_arena_init(SUZ_ARENA_LIMIT, {}, {}, {});\n",
+                "    suz_arena_init(SUZ_ARENA_INITIAL, SUZ_ARENA_GROW, SUZ_ARENA_LIMIT, {}, {}, {});\n",
                 expressions::c_string(source_name),
                 program.main_location.line,
                 program.main_location.column

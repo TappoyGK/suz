@@ -39,7 +39,7 @@ pub fn text(command: Option<Command>) -> String {
     }
     if command != Some(Command::Check) {
         text.push_str(
-            "  --arena-limit SIZE             Arena byte capacity; K/M/G (default: 1G)\n  --text-pool-limit SIZE         Pool byte limit; K/M/G or unlimited (default: 1G)\n",
+            "  --arena-initial SIZE           Initial arena bytes; 0 or K/M/G (default: 64M)\n  --arena-grow SIZE              Arena growth bytes; 0 disables growth (default: 64M)\n  --arena-limit SIZE             Total arena bytes; K/M/G or unlimited (default: unlimited)\n  --text-pool-limit SIZE         Pool byte limit; K/M/G or unlimited (default: 1G)\n",
         );
     }
     if command.is_none() || command == Some(Command::Build) {

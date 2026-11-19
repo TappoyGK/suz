@@ -84,7 +84,7 @@ pub fn run() -> Result<Outcome> {
                     format!("internal error: {}:{error}", options.input.display()),
                 ),
             };
-            let compilation_options = suz::CompilationOptions { log_level: options.log_level, log_ignore: options.log_ignore, arithmetic_mode: options.mode, text_pool_limit: options.text_pool_limit, arena_limit: options.arena_limit, log_allow: options.log_allow, deny_global_var: options.deny_global_var };
+            let compilation_options = suz::CompilationOptions { log_level: options.log_level, log_ignore: options.log_ignore, arithmetic_mode: options.mode, text_pool_limit: options.text_pool_limit, arena: options.arena, log_allow: options.log_allow, deny_global_var: options.deny_global_var };
             let (c, warnings) = if options.command == Command::Check {
                 (
                     None,
