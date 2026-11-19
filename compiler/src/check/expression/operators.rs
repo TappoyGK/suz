@@ -27,6 +27,14 @@ pub(super) fn check(
                 call = inner;
             }
             match &call.kind {
+                ExpressionKind::MethodCall { .. } => {
+                    return super::super::methods::call(
+                        call,
+                        expected,
+                        bindings,
+                        fallback.as_ref(),
+                    );
+                }
                 ExpressionKind::Call { name, arguments } => {
                     return super::super::functions::call(
                         call,

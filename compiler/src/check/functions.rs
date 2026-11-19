@@ -20,6 +20,23 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     super::generic::validate(program)?;
     let mut signatures = BTreeMap::new();
     for (id, function) in program.functions.iter().enumerate() {
+        if let Some(method) = function.method {
+            let member = function.name.rsplit('.').next().unwrap();
+            let collision = match method.owner {
+                Type::Struct(id) => program.structs[id].fields.iter().any(|f| f.name == member),
+                Type::Enum(ty) => program.enums[ty.id].variants.iter().any(|v| v == member),
+                _ => unreachable!(),
+            };
+            if collision || signatures.contains_key(&function.name) {
+                return Err(function.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "method.name",
+                        "method name conflicts with a field, variant or another method"
+                    ),
+                ));
+            }
+        }
         if signatures.contains_key(&function.name)
             || program.bindings.iter().any(|c| c.name == function.name)
             || program.enums.iter().any(|e| e.name == function.name)
@@ -34,6 +51,7 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
         signatures.insert(
             function.name.clone(),
             Signature {
+                method: function.method,
                 arena: function.arena,
                 external: false,
                 id,
@@ -287,7 +305,14 @@ pub(super) fn check_function(
     scope: Scope,
     id: usize,
 ) -> Result<(CheckedFunction, Vec<crate::ast::Location>), Diagnostic> {
-    check_with_captures(function, scope, id, &BTreeMap::new())
+    let mut references = BTreeMap::new();
+    if let Some(method) = function.method.filter(|m| m.mutable) {
+        references.insert(
+            "self".into(),
+            Binding::local(0, method.owner, true, false, function.location),
+        );
+    }
+    check_with_captures(function, scope, id, &references)
 }
 
 // 参照キャプチャーは外側の束縛への別名。未代入の判定は外側のスコープで行い、
@@ -380,6 +405,7 @@ pub(super) fn check_with_captures(
     warnings.extend(diagnostics::unhandled_arithmetic(&statements));
     Ok((
         CheckedFunction {
+            mutable_receiver: function.method.is_some_and(|m| m.mutable),
             id,
             parameters: function
                 .parameters

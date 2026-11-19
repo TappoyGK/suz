@@ -68,6 +68,8 @@ mod log_filter;
 mod logs;
 #[path = "spec_cases/matches.rs"]
 mod matches;
+#[path = "spec_cases/methods.rs"]
+mod methods;
 #[path = "spec_cases/names.rs"]
 mod names;
 #[path = "spec_cases/native_cli.rs"]

@@ -17,6 +17,7 @@ mod functions;
 mod generic;
 pub(crate) mod ir;
 mod matches;
+mod methods;
 mod ranges;
 mod scope;
 mod statements;
