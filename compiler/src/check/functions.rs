@@ -34,6 +34,7 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
         signatures.insert(
             function.name.clone(),
             Signature {
+                arena: function.arena,
                 external: false,
                 id,
                 parameters: function.parameters.iter().map(|p| p.ty).collect(),
@@ -306,7 +307,7 @@ pub(super) fn check_function(
     scope: Scope,
     id: usize,
 ) -> Result<(CheckedFunction, Vec<crate::ast::Location>), Diagnostic> {
-    check_with_captures(function, scope, id, &BTreeMap::new())
+    check_with_captures(function, scope, id, &BTreeMap::new(), &Default::default())
 }
 
 // 参照キャプチャーは外側の束縛への別名。未代入の判定は外側のスコープで行い、
@@ -316,9 +317,22 @@ pub(super) fn check_with_captures(
     mut scope: Scope,
     id: usize,
     references: &BTreeMap<String, Binding>,
+    nonnull_captures: &std::collections::BTreeSet<usize>,
 ) -> Result<(CheckedFunction, Vec<crate::ast::Location>), Diagnostic> {
     control::validate_return_positions(&function.statements)?;
     scope.unsafe_block = false;
+    scope.arena_depth = usize::from(function.arena);
+    scope.arena_used = Default::default();
+    scope.nonnull = nonnull_captures.clone();
+    if !function.arena && super::arena::contains(function.result, &scope) {
+        return Err(function.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "arena.parameter",
+                "only arena fn can return values containing arena pointers"
+            ),
+        ));
+    }
     scope.recovery = None;
     scope.loop_depth = 0;
     let mut warnings = Vec::new();
@@ -384,6 +398,7 @@ pub(super) fn check_with_captures(
             binding.assigned.set(true);
         }
     }
+    super::arena::check_lifetimes(&statements, &scope, function, references)?;
     control::check_return_shape(function)?;
     warnings.extend(diagnostics::unhandled_arithmetic(&statements));
     Ok((
@@ -431,6 +446,15 @@ pub(super) fn call(
             },
         )
     })?;
+    if signature.arena && scope.arena_depth == 0 {
+        return Err(expr.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "arena.fn-call",
+                "arena fn requires an enclosing arena or arena fn"
+            ),
+        ));
+    }
     if signature.external && !scope.unsafe_block {
         return Err(expr.location.error(
             ErrorKind::InvalidSource,
@@ -477,7 +501,12 @@ pub(super) fn call(
     super::errors::finish(
         CheckedExpression {
             ty: concrete(signature.result),
-            value: Value::Call { id, arguments },
+            value: Value::Call {
+                id,
+                arguments,
+                arena: signature.arena,
+                location: expr.location,
+            },
         },
         &signature.errors,
         handler,

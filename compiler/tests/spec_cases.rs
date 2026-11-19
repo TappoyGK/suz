@@ -1,5 +1,9 @@
 #[path = "spec_cases/allows.rs"]
 mod allows;
+#[path = "spec_cases/arena.rs"]
+mod arena;
+#[path = "spec_cases/arena_functions.rs"]
+mod arena_functions;
 #[path = "spec_cases/arithmetic.rs"]
 mod arithmetic;
 #[path = "spec_cases/arithmetic_handlers.rs"]
@@ -278,3 +282,6 @@ mod errors;
 
 #[path = "spec_cases/log_ignore.rs"]
 mod log_ignore;
+
+#[path = "spec_cases/objection.rs"]
+mod objection;

@@ -5,10 +5,17 @@
 
 use crate::{Diagnostic, ErrorKind};
 pub(crate) mod allows;
+mod objection;
 pub(crate) mod templates;
 use std::ops::Range;
 
 const KEYWORDS: &[&str] = &[
+    "arena",
+    "objection",
+    "new",
+    "ptr",
+    "null",
+    "let",
     "extern",
     "c_bytes",
     "c_byte_len",
@@ -66,6 +73,7 @@ const SYMBOLS: &[&str] = &[
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Kind<'a> {
     Header(&'a str),
+    ObjectionReason,
     IgnoreReason(&'a str),
     AllowItem(&'a str),
     Char(u32),
@@ -328,6 +336,22 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
                     .map_err(|message| error(line, column, ErrorKind::InvalidSource, message))?;
                 tokens.push(Token {
                     kind: Kind::Char(value),
+                    line,
+                    column,
+                    span: offset..offset + length,
+                });
+                offset += length;
+                column += rest[..length].chars().count();
+                continuation = false;
+                continue;
+            }
+            '[' if tokens
+                .last()
+                .is_some_and(|t| t.kind == Kind::Keyword("objection")) =>
+            {
+                let length = objection::scan(rest, line, column)?;
+                tokens.push(Token {
+                    kind: Kind::ObjectionReason,
                     line,
                     column,
                     span: offset..offset + length,

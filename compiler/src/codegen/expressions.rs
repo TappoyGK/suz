@@ -33,6 +33,13 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
         return super::exact::stored(expr, context);
     }
     match expr.value {
+        Value::New {
+            ref value,
+            location,
+        } => super::arena::allocate(value, expr.ty, location, context),
+        Value::Deref(ref value) => format!("(*({}))", expression(value, context)),
+        Value::NonNull(ref value) => format!("({} != NULL)", expression(value, context)),
+        Value::Null => "NULL".into(),
         Value::CBytes(ref operand) => super::ffi::bytes(operand, context),
         Value::CByteLen {
             ref operand,
@@ -55,6 +62,7 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
         Value::Invoke {
             ref target,
             ref arguments,
+            ..
         } => super::functions::invoke(target, arguments, context, None),
         Value::GenericNumericLiteral { .. } => {
             unreachable!("generic values are substituted before code generation")
@@ -136,7 +144,9 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             format!("({}).suz_field_{index}", expression(target, context))
         }
         Value::Void => String::new(),
-        Value::Call { id, ref arguments } => super::functions::call(id, arguments, context, None),
+        Value::Call {
+            id, ref arguments, ..
+        } => super::functions::call(id, arguments, context, None),
         Value::Block {
             ref statements,
             ref value,
@@ -154,7 +164,7 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             }
             let fallback = match handler {
                 Some(CheckedHandler::Value(value)) => expression(value, context),
-                Some(CheckedHandler::Return(_)) => {
+                Some(CheckedHandler::Return { .. }) => {
                     unreachable!("failure returns must be lowered to statements")
                 }
                 None => {

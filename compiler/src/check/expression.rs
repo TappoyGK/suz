@@ -58,6 +58,9 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
             Some(bindings.function_types.borrow()[id].result)
         }
         ExpressionKind::Slice { index, .. } => Some(if *index { Type::Char } else { Type::Text }),
+        ExpressionKind::New(value) => operand_type(value, bindings).map(Type::pointer),
+        ExpressionKind::Deref(value) => operand_type(value, bindings).and_then(Type::pointee),
+        ExpressionKind::Null => None,
         ExpressionKind::CBytes(_) => Some(Type::CPointer),
         ExpressionKind::CByteLen(_) => Some(Type::CInteger(crate::ast::CIntegerType::Size)),
         ExpressionKind::Len(_) => Some(Type::Integer(IntegerType::Len)),
@@ -65,7 +68,8 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
         ExpressionKind::Struct { id, .. } => Some(Type::Struct(*id)),
         ExpressionKind::With { target, .. } => operand_type(target, bindings),
         ExpressionKind::Field { target, name } => {
-            let Type::Struct(id) = operand_type(target, bindings)? else {
+            let known = operand_type(target, bindings)?;
+            let Type::Struct(id) = known.pointee().unwrap_or(known) else {
                 return None;
             };
             bindings.structs[id]
@@ -428,6 +432,9 @@ fn expression_inner(
             }
             ExpressionKind::Block { statements, value } => {
                 blocks::check(statements, value, inference_hint, bindings)?
+            }
+            ExpressionKind::New(_) | ExpressionKind::Deref(_) | ExpressionKind::Null => {
+                super::arena::expression(expr, required, bindings)?
             }
             ExpressionKind::CBytes(inner) | ExpressionKind::CByteLen(inner) => {
                 super::ffi::bytes(expr, inner, bindings)?

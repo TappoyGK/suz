@@ -64,7 +64,8 @@ pub(super) fn dependencies(
         }
         ExpressionKind::Field { target, .. } => dependencies(target, names)?,
         ExpressionKind::Name(name) => names.push((name.clone(), expr.location)),
-        ExpressionKind::FunctionValue(_)
+        ExpressionKind::Null
+        | ExpressionKind::FunctionValue(_)
         | ExpressionKind::Integer { .. }
         | ExpressionKind::Float(_)
         | ExpressionKind::Char(_)
@@ -72,6 +73,8 @@ pub(super) fn dependencies(
         | ExpressionKind::Variant { .. } => {}
         ExpressionKind::Group(inner)
         | ExpressionKind::Negate(inner)
+        | ExpressionKind::New(inner)
+        | ExpressionKind::Deref(inner)
         | ExpressionKind::CBytes(inner)
         | ExpressionKind::CByteLen(inner)
         | ExpressionKind::Len(inner)
@@ -210,6 +213,12 @@ impl Resolver<'_> {
             declaration.annotation,
             &self.bindings,
         )?;
+        if super::arena::contains(checked.ty, &self.bindings) {
+            return Err(declaration.location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("arena.store", "arena pointers cannot be stored globally"),
+            ));
+        }
         if super::ffi::uses_c_environment(&checked) {
             return Err(declaration.initializer.location.error(
                 ErrorKind::InvalidSource,

@@ -246,7 +246,30 @@ impl Parser<'_, '_> {
                     Statement::Continue(location)
                 })
             }
+            Kind::Keyword("let") => self.let_statement(),
             Kind::Keyword("if") => self.if_statement(),
+            Kind::Keyword("objection") => {
+                self.cursor += 1;
+                if self.token().kind != Kind::ObjectionReason {
+                    return Err(self.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "arena.objection-reason",
+                            "objection requires a non-empty reason in brackets"
+                        ),
+                    ));
+                }
+                self.cursor += 1;
+                let (body, _) = self.block()?;
+                Ok(Statement::Objection(body))
+            }
+            Kind::Keyword("arena") => {
+                self.cursor += 1;
+                let (body, end) = self.block()?;
+                Ok(Statement::Arena { body, end })
+            }
+            Kind::Symbol("*" | "(") => self.indirect_statement(),
+
             Kind::Keyword("elif" | "else") => Err(self.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!("if.elif", "unexpected branch clause"),
@@ -258,6 +281,10 @@ impl Parser<'_, '_> {
             Kind::Keyword("fix" | "var") => {
                 let mutable = self.token().kind == Kind::Keyword("var");
                 self.cursor += 1;
+                let pointer = self.token().kind == Kind::Keyword("ptr");
+                if pointer {
+                    self.cursor += 1;
+                }
                 let location = self.location();
                 let name = match self.token().kind {
                     Kind::Ident(name) => name.to_owned(),
@@ -298,11 +325,12 @@ impl Parser<'_, '_> {
                 self.cursor += 1;
                 let initializer = self.expression()?;
                 Ok(Statement::Binding {
+                    pointer,
                     mutable,
                     name,
                     location,
                     annotation,
-                    initializer,
+                    initializer: Box::new(initializer),
                 })
             }
             Kind::Ident(name) if self.assignment_operator().is_some() => {

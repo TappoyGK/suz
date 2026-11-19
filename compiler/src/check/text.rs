@@ -30,6 +30,7 @@ pub(super) fn parts(
                             | Type::Function(_)
                             | Type::Void
                             | Type::Struct(_)
+                            | Type::Pointer { .. }
                             | Type::CPointer
                             | Type::CInteger(_)
                     ) {

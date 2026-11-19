@@ -63,25 +63,31 @@ fn generated_bool_values_preserve_negation_and_copies() {
                 result: Type::Bool,
                 statements: vec![
                     CheckedStatement::Binding {
+                        location: crate::ast::Location { line: 1, column: 1 },
                         mutable: true,
                         id: 0,
                         ty: Type::Bool,
-                        initializer: boolean(Value::Bool(true)),
+                        initializer: Box::new(boolean(Value::Bool(true))),
                     },
                     CheckedStatement::Binding {
+                        location: crate::ast::Location { line: 1, column: 1 },
                         mutable: false,
                         id: 1,
                         ty: Type::Bool,
-                        initializer: boolean(Value::Local(0)),
+                        initializer: Box::new(boolean(Value::Local(0))),
                     },
                     CheckedStatement::Assign {
+                        location: crate::ast::Location { line: 1, column: 1 },
                         global: false,
                         fields: Vec::new(),
                         id: 0,
                         ty: Type::Bool,
-                        value: boolean(not(Value::Local(0))),
+                        value: Box::new(boolean(not(Value::Local(0)))),
                     },
-                    CheckedStatement::Return(boolean(value)),
+                    CheckedStatement::Return {
+                        value: boolean(value),
+                        location: crate::ast::Location { line: 1, column: 1 },
+                    },
                 ],
             }],
         };
@@ -93,6 +99,7 @@ fn generated_bool_values_preserve_negation_and_copies() {
                 &program,
                 "test.suz",
                 crate::TextPoolLimit::default(),
+                crate::ArenaOptions::default(),
                 crate::LogLevel::default(),
                 false,
             ),
@@ -246,7 +253,10 @@ fn comparison_codegen_sequences_and_reuses_operands() {
                 id: 0,
                 parameters: Vec::new(),
                 result: Type::Bool,
-                statements: vec![CheckedStatement::Return(expr)],
+                statements: vec![CheckedStatement::Return {
+                    value: expr,
+                    location: crate::ast::Location { line: 1, column: 1 },
+                }],
             }],
         };
         // ローカルの読み取りの記録は、C生成のテスト用コードだけに入れる。
@@ -271,6 +281,7 @@ return result != {expected} || trace != {trace};
                 &program,
                 "test.suz",
                 crate::TextPoolLimit::default(),
+                crate::ArenaOptions::default(),
                 crate::LogLevel::default(),
                 false
             )

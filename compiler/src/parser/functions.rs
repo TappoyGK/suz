@@ -149,6 +149,26 @@ impl Parser<'_, '_> {
 
     // 戻り値に続くエラー指定と、変換に続くorハンドラーは呼び出し側で解析する。
     fn type_atom(&mut self) -> Result<Type, Diagnostic> {
+        let mut depth = 0;
+        while self.token().kind == Kind::Keyword("ptr") {
+            depth += 1;
+            self.check_height(depth, self.location())?;
+            self.cursor += 1;
+        }
+        let mut ty = self.type_leaf()?;
+        if depth > 0 && (ty == Type::Void || matches!(ty, Type::Function(_))) {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("arena.ptr-type", "pointer requires a stored value type"),
+            ));
+        }
+        for _ in 0..depth {
+            ty = ty.pointer();
+        }
+        Ok(ty)
+    }
+
+    fn type_leaf(&mut self) -> Result<Type, Diagnostic> {
         if self.token().kind == Kind::Symbol("*") {
             self.cursor += 1;
             if self.token().kind != Kind::Ident("const") {
@@ -298,6 +318,7 @@ impl Parser<'_, '_> {
         }
         let (statements, end) = self.block()?;
         Ok(Function {
+            arena: false,
             keyword_location,
             name,
             location,

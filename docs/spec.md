@@ -69,7 +69,7 @@ Suzは次のものを含む。
 **[src.keywords]** 次の語はキーワードである。
 
 ```text
-fix var fn fnshape static struct enum error extern unsafe
+fix var fn fnshape static struct enum error extern unsafe arena new ptr null let objection
 if ifexpr elif else while loop for rev in break continue return match matchexpr
 as or not len c_bytes c_byte_len log panic fail ignore recover allow expr with
 true false nan inf
@@ -172,7 +172,7 @@ fix lower = -inf      // f64 の負の無限大
 
 - 文自体は数えない。文に書いた式とブロックは、その文を含むブロックより1段深い。条件、`match`の対象とパターン、`for`・`rev`の反復対象と範囲の両端も同じであり、範囲演算子は別の段として数えない。
 - `if`・`elif`・`else`・`while`・`loop`・`for`・`rev`の本体、`match`の腕、ブロック文、`allow`のブロックは、それぞれ1つのブロックとして数える。腕の本体を式だけで書く場合も、その式を含むブロックを1段として数える。
-- リテラル、名前、丸括弧、単項・二項演算子、`len`、`as`・`as%`、`or`、関数呼び出し、構造体リテラル、テンプレート、フィールド参照、切り出し・添字、`with`を、それぞれ1つの式として数える。各オペランド、実引数、初期値、添字・切り出しの境界、テンプレートの埋め込みの式は、その式より1段深い。`with`のコピー元と初期値も、その`with`より1段深い。
+- リテラル、名前、丸括弧、単項・二項演算子、`new`、参照解除の`*`、`len`、`as`・`as%`、`or`、関数呼び出し、構造体リテラル、テンプレート、フィールド参照、切り出し・添字、`with`を、それぞれ1つの式として数える。各オペランド、実引数、初期値、添字・切り出しの境界、テンプレートの埋め込みの式は、その式より1段深い。`with`のコピー元と初期値も、その`with`より1段深い。
 - `fn 関数名` は1つの式として数える。名前で呼ぶ `f(x)` の名前は別の段として数えない。それ以外の呼び出しでは、呼び出し対象の式も呼び出しより1段深い。
 - クロージャは1つの式として数える。本体のブロックはその式より1段深く、本体の文の式はさらにその下とする。本体で数え直さない。キャプチャー一覧の名前と仮引数は数えない。
 - 左結合の並びは演算ごとに1段を数える。比較の連鎖は全体で1つの式とし、各オペランドはその1段下とする。
@@ -374,7 +374,7 @@ fn make_range(lo: u8, hi: u16) -> Range {
 
 **[struct.access]** フィールドは `値.フィールド名` で参照する。変更可能な変数のフィールドには代入できる。存在しないフィールドの参照はコンパイルエラーである。
 
-**[struct.recursion]** 構造体は、直接・間接を問わず、自分自身をフィールドの値として含められない。そのような型の宣言はコンパイルエラーである。
+**[struct.recursion]** 構造体は、直接・間接を問わず、自分自身をフィールドの値として含められない。そのような型の宣言はコンパイルエラーである。ポインタを介する循環は [arena.recursive-struct] に従って認める。
 
 **[struct.with]** `式 with { 初期値, ... }` は、左の式の値をコピーし、書いたフィールドを初期値の値に差し替えた値を結果とする。結果の型は、左の式の構造体型である。書かなかったフィールドには、初期値の評価を始める前に保存した左の式の値を使う。`with` 自体は、コピー元の変数へ代入しない。
 
@@ -709,7 +709,7 @@ if not ready {
 | 順位 | 演算 |
 |---|---|
 | 1 | 関数呼び出し、フィールド参照、切り出し・添字の `[ ]` |
-| 2 | 単項 `-` `not` `~` `len` |
+| 2 | 単項 `-` `not` `~` `len` `new` `*` |
 | 3 | `as` `as%` |
 | 4 | `*` `/` `%` `*%` |
 | 5 | `+` `-` `+%` `-%` |
@@ -1546,7 +1546,7 @@ fn main() -> u8 {
 
 ### 8.12 Cへのバイト列の受け渡し
 
-**[ffi.pointer-type]** `*const void`はCの`const void *`に対応し、Suzが管理する不変のバイト列を指す。ポインタを作る操作は`c_bytes`だけとする。ローカルの`fix`・`var`、通常のSuz関数の仮引数・戻り値、構造体のフィールドに保持・コピーできる。保持・受け渡し自体にunsafeは不要である。externでは引数だけに使え、ポインタを返すC関数は宣言できない。その他のポインタ型は認めない。この型表記内の`const`は修飾語であり、予約語には追加しない。
+**[ffi.pointer-type]** `*const void`はCの`const void *`に対応し、Suzが管理する不変のバイト列を指す。ポインタを作る操作は`c_bytes`だけとする。ローカルの`fix`・`var`、通常のSuz関数の仮引数・戻り値、構造体のフィールドに保持・コピーできる。保持・受け渡し自体にunsafeは不要である。externでは引数だけに使え、ポインタを返すC関数は宣言できない。externで使えるポインタ型はこれだけとする。Suz内の `ptr T` は8.13節に従い、Cとの間では受け渡せない。この型表記内の`const`は修飾語であり、予約語には追加しない。
 
 **[ffi.pointer-operations]** ポインタの比較・算術・ビット演算・型変換・テンプレートへの埋め込み・参照先の読み書きは認めない。ポインタを含む構造体の比較や、文字列からその構造体への変換も認めない。整数や文字列値からの暗黙変換、NULLリテラルもない。
 
@@ -1572,6 +1572,146 @@ fn main() -> u8 {
 ```
 
 この例の`output.h`と`output_bytes`の実体はCライブラリ側が提供する。両方の操作へ同じ値を渡すため、メッセージを一度`msg`へ束縛している。
+
+### 8.13 作業領域とポインタ
+
+**[arena.block]** `arena { 文 ... }` は、実体を一時的に置く作業領域と寿命の境界を作る文である。通常のブロックと同じスコープを作り、入れ子にできる。既存の変数宣言の保存場所は変えない。
+
+**[arena.new]** `new 式` は、現在の関数内でその位置を字句的に囲む最内側のarenaへ実体を確保し、`ptr T`を返す。Tは初期値の型である。関数内にそのようなarenaがない場合、`arena fn`では呼び出し元の領域Rへ確保し、通常関数ではコンパイルエラーとする。
+
+**[arena.new-value]** 初期値には保存できる任意の型の値を使える。`void`と呼び出し専用の`fn`型は使えない。既存の変数のアドレスを取得する構文は設けない。`new`と参照解除の`*`は`len`と同じ優先順位で、定数式には含めない。
+
+**[arena.new-order]** 初期値を1回評価し、その後で整列・サイズ・容量を検査して確保し、評価済みの値を格納する。初期値の評価中の確保が先に完了する。失敗時は [rt.arena-allocation] に従う。
+
+**[arena.ptr-type]** ポインタ型は`ptr T`と書く。`ptr ptr T`も認める。コピーは同じ実体を指すポインタ値のコピーであり、実体を複製しない。
+
+**[arena.ptr-decl]** ローカルのポインタ変数は`fix ptr 名前[: ptr T] = 式`または`var ptr 名前[: ptr T] = 式`と宣言する。`ptr`のない宣言でポインタを保持すること、`ptr`を付けた宣言で別の型の値を保持することはできない。必ず初期化する。fixはポインタの再代入を禁じ、varは許す。どちらも参照先の更新は禁じない。
+
+**[arena.ptr-operations]** `*p`は参照先の読み出し、`*p = 値`と`*p += 値`などは更新である。構造体へのポインタの`p.field`は`(*p).field`と同じ意味とする。代入先を1回評価してから右辺を評価する。複合代入では右辺より先に更新前の値を読む。ポインタの算術・比較・添字・型変換・文字列への埋め込みは認めない。ポインタを含む構造体の比較・文字列変換も認めない。
+
+**[arena.null]** `null`は実体を指さないポインタである。要求されるポインタ型が分かる位置だけに書ける。`var ptr p: ptr Node = null`は有効で、`var ptr p = null`は型が決まらないためエラーとする。nullは参照先の領域や寿命を持たない。
+
+**[arena.let]** `let 名前 = 式 { 文 ... } else { 文 ... }`はポインタ式を1回評価し、非nullならその参照を本体内だけ有効な不変の名前へ束縛する。nullならelse側を実行する。elseは省略できる。束縛したポインタは元の変数やフィールドの変更後も取得時の参照を保持する。参照先の更新は許す。名前には通常の命名規則とシャドーイング禁止を適用する。
+
+**[arena.null-deref]** nullの可能性が残るポインタの参照解除・フィールドアクセスは禁止する。`new`、`let`の束縛、および既に非nullと保証された値で初期化した`fix ptr`は非nullとする。値捕捉したポインタには、捕捉時に保証された非null性を引き継ぐ。通常の仮引数と参照捕捉にはこの保証を与えない。変更可能な変数やフィールドは、以前の初期値だけを根拠に非nullとは扱わない。
+
+```suz
+struct Node { value: i32, next: ptr Node }
+fn main() -> u8 {
+    arena {
+        fix ptr a = new Node { value: 1, next: null }
+        fix ptr b = new Node { value: 2, next: a }
+        a.next = b
+        let next = a.next { next.value += 1 }
+    }
+    return 0
+}
+```
+
+**[arena.recursive-struct]** ポインタを介する自己参照・相互参照の構造体を認める。構造体の値を直接含む循環は、実体のサイズが決まらないため禁止する。
+
+**[arena.exit]** 通常終了、`return`、`fail`、`recover`、`break`、`continue`でarenaを抜けると、そのarenaの開始時の使用位置へ戻す。複数のarenaを抜ける場合は内側から回収する。領域を抜けない移動では回収しない。returnやrecoverで渡す値は回収前に評価する。
+
+**[arena.resources]** 回収するのはメモリだけである。個別の解放、実体の移動、実体ごとの終了処理は行わない。容量が足りない場合は [rt.arena-storage] に従って別のブロックを追加する。ファイルなどの資源を閉じる処理は含まない。
+
+**[arena.lifetime]** 実体の寿命は確保先のarenaで決まり、参照のコピーでは延びない。領域の終了後に利用できる場所へ参照を残してはならない。
+
+**[arena.store]** 保存する参照の実体は、保存先以上に長生きしなければならない。同じ領域や内側への保存は許す。内側でコピーした外側の参照も、保存先以上に長生きするなら外側へ保存できる。判定には変数または書き込み先の実体の寿命を使い、書き込みに使う別名の宣言位置と取り違えない。内側の参照を外側へ保存することは禁止する。nullの保存には参照先の寿命検査を要しない。
+
+**[arena.aggregate]** 構造体内の参照にも再帰的に同じ制約を適用する。構造体のコピー・全体の上書き・フィールドの更新・別名経由の更新で制約を回避できない。同じarena内では循環参照を作れる。回収時に参照をたどる必要はない。
+
+**[arena.region-shape]** 検査では確保箇所ごとの領域と、変数・実体内の参照先の候補集合を使う。通常のブロック内の保存場所の寿命も区別する。コピーと別名経由の読み書きによる候補の追加を、集合が変わらなくなるまで繰り返す。候補のいずれかが寿命の条件を満たさなければ保存を拒否する。分岐の相関や上書きで候補を絞らないため、安全な保存も拒否することがある。同じarena構文を反復しても、前の反復の参照を次へ残すことはできない。
+
+寿命の診断は保存位置を指し、参照先の確保位置とarenaの終了位置を併記する。構造体内の保存では該当するフィールド名も示す。
+
+#### 関数への受け渡し
+
+**[arena.parameter]** 通常関数は、引数の`ptr T`や構造体内の参照を、呼び出し中だけ借りる。参照先の読み出し、参照を含まない値への更新、ローカル変数への参照のコピー、通常関数への転送を許す。ポインタを含む戻り値型は禁止する。`null`を返す場合も例外にはしない。トップレベル変数へのポインタまたはそれを含む値の保持も禁止する。
+
+**[arena.parameter-regions]** 各引数に含まれる参照先は未知の領域に属するものとして扱い、引数同士が同じ領域にあるとは仮定しない。引数から参照をたどって到達する実体にも借用の制約を適用する。借りた実体へポインタを保存することは禁止する。`null`の代入、構造体全体の上書き、別名を経由する更新も同じである。参照を含まないメンバーの更新は許す。
+
+**[arena.function-check]** 借用の契約は関数定義で検査する。実引数の寿命に応じて保存・返却の許可を変えない。関数値やクロージャも同じ契約を持つ。値捕捉したポインタは借りた参照として利用できる。参照捕捉した変数へのポインタの再代入は、呼び出し元への保存として禁止する。externにはSuzのポインタやそれを含む値を渡せない。
+
+**[arena.call-allocation]** 通常関数は自分の本体で開いたarenaにだけ確保できる。実行時には呼び出し元の領域の内側に積まれ、そのarenaを抜けると回収される。クロージャは、宣言位置を囲むarenaを確保先として引き継がない。
+
+```suz
+fn increment(p: ptr i32) -> void {
+    let value = p { *value += 1 }
+}
+
+fn main() -> u8 {
+    arena {
+        fix ptr count = new (0 as i32)
+        increment(count)
+        if *count != 1 { return 1 }
+    }
+    return 0
+}
+```
+
+**[arena.fn]** `arena fn 名前(...) -> 型 { ... }` は、呼び出し元の1つの領域Rで動くトップレベル関数である。引数から参照をたどって到達する実体はすべてRに属するとして本体を検査する。本体内に開いたarenaの外での`new`はRへ確保する。Rの実体への参照を、別のRの実体へ保存したり、戻り値に含めたりできる。戻り値が構造体の場合も同じである。本体内で開いたarenaの参照をRへ保存・返却することは禁止する。Rは型や引数に記述しない。`main`を`arena fn`にはできない。
+
+**[arena.fn-call]** 呼び出し位置を囲む最内側のarenaをRとする。`arena fn`の本体で、その本体内に開いたarenaの外から呼ぶ場合は、呼び出し元のRを使う。それ以外の、確保先の領域がない位置からは呼び出せない。実引数から、ポインタや構造体のメンバーを推移的にたどって到達しうるすべての実体がRに属さなければならない。`null`は到達先を持たない。R内の構造体でも、そのメンバーが外側の実体を参照していれば渡せない。
+
+呼び出し後の寿命検査では、呼び出し先が引数から到達可能なRの実体と新たにRへ確保した実体を、型の合う参照先として保存・返却しうるものとする。呼び出し先の本体が現在何を書き換えているかには依存しない。呼び出し後に引数のメンバーを読み出す場合も、この変更の候補を含める。候補集合には [arena.region-shape] の保守的な判定を適用する。
+
+**[arena.fn-exit]** `arena fn`の呼び出し自体はRを新設せず、復帰時にもRを回収しない。本体内で開いたarenaは [arena.exit] に従って回収する。Rへの確保は実行時の現在の使用位置を進めるだけなので、隠れた領域引数は加えない。
+
+**[arena.fn-value]** `arena fn`は関数値にもextern宣言にもできない。
+
+```suz
+struct Node { value: i32, next: ptr Node }
+
+arena fn prepend(value: i32, tail: ptr Node) -> ptr Node {
+    return new Node { value: value, next: tail }
+}
+
+fn main() -> u8 {
+    arena {
+        fix ptr first = prepend(1, null)
+        fix ptr second = prepend(2, first)
+        let p = second { if p.value != 2 { return 1 } }
+    }
+    return 0
+}
+```
+
+通常関数・`arena fn`ともに、シグネチャの`ptr int`・`ptr float`は汎用数値型を宣言する。参照先の具体型を推論に使うが、数値の幅の拡大をポインタの変換には適用しない。例えば`ptr i16`を`ptr i32`として渡せない。
+
+#### 理由付きの寿命保証
+
+**[arena.objection]** `objection [理由] { 文 ... }` は、ブロック内の保存・返却について、コンパイラが寿命の安全性を証明できない場合に、プログラマーの保証によって拒否を解除する文である。通常のブロックと同じスコープを作り、入れ子にできる。
+
+**[arena.objection-reason]** 理由は `[` から最初の `]` までに書く説明文を必須とする。エスケープと埋め込みはなく、引用符・バッククォート・`${`・`//`・開き括弧も文字として扱う。理由に `]` は含められない。空またはUnicodeの空白文字だけの理由と、制御文字（U+0000からU+001F、U+007F）を含む理由は拒否する。改行も制御文字なので、理由はソース上の1行に収まる。理由は式ではなく、実行時に評価せず、文字列プールにも登録しない。
+
+**[arena.objection-scope]** 解除できるのは [arena.store] の未証明の寿命違反だけである。保存する参照が必ず非nullで、保存先と参照先の候補の全組が寿命の条件に違反する場合は、証明済みとして拒否を維持する。いずれかの候補集合が空なら、この証明には使わない。構造体はポインタを含む各メンバーについて判定する。診断には証明済みか、違反する可能性があるだけかを示す。
+
+非nullの証明には、`new`、非nullの値で初期化した不変のポインタ変数、`let`の本体の束縛、非null性を引き継いだ値捕捉を使う。`ifexpr`・`matchexpr`の結果は全分岐で非nullの場合にだけ証明できる。不変の構造体の値では、初期値から各ポインタメンバーの非null性も引き継ぐ。変更可能な変数や、ポインタ経由の可変フィールドの読み出しは、参照先候補にnullが現れないことだけを根拠に非nullとは扱わない。
+
+構文・型・初期化・null参照解除のエラー、通常関数の参照保存・返却禁止、[arena.fn-call] の領域の一致など、明示的な制約は解除しない。指定は字句上のブロック内の操作だけに適用し、呼び出した関数やクロージャの定義には引き継がない。ブロック内の更新は解析から除外せず、後続の候補にも反映する。
+
+**[arena.objection-responsibility]** 理由には、安全だと判断した根拠を書く。コンパイラは文章の正しさを証明しない。実行時検査を追加せず、領域の寿命や回収時点も変えない。プログラマーの保証が誤っていれば、回収済みの実体への参照が起こり得る。objectionを含むプログラムの寿命の安全性は、この保証が正しいことを前提とする。
+
+```suz
+struct Node { next: ptr Node }
+
+fn main() -> u8 {
+    arena {
+        fix ptr outer = new Node { next: null }
+        arena {
+            fix ptr inner = new Node { next: null }
+            var ptr selected = outer
+            selected = inner
+            objection [selectedをinnerへ差し替えたので、保存先も参照先も内側のarenaに属する] {
+                let p = selected { p.next = inner }
+            }
+        }
+    }
+    return 0
+}
+```
+
+この例では、実行順を区別しない解析にouterとinnerの候補が残るため、objectionなしでは保存を拒否する。`outer.next = inner`のように保存先が必ず外側で、保存する参照が必ず内側の非nullの実体を指す場合は、objectionで囲んでも拒否する。
 
 ## 9. 実行時の検査
 
@@ -1648,6 +1788,16 @@ fix b = top + 1     // パニックする
 **[rt.symbol-allocation]** テキストプールの上限を超える追加確保が必要な場合、または文字列本体・検索用管理領域・一時領域を確保できない場合はパニックする。必要なバイト数が表現可能な範囲を超える場合も同じとする。計算をラップさせたり、途中までの文字列を成功した値として返したりしない。
 
 **[rt.symbol-location]** 実行中の `symbol` 生成の失敗は、生成元のテンプレートの開くバッククォートの位置を示す。`symbol` または `text` からの変換処理で資源不足が起きた場合は、その `as` または `as%` の位置を示す。埋め込み式の評価中も、失敗した生成・変換の位置を使う。プールの初期化の失敗は、`main` 宣言の `fn` の位置を示す。診断と終了コードは [rt.panic] に従う。
+
+### 9.7 作業領域のメモリ
+
+**[rt.arena-storage]** 作業領域arenaには、呼び出しスタックと別に確保するメモリのブロックを使う。初期容量・追加容量・総容量上限は [tool.arena-capacity] で指定する。arenaを使うプログラムだけが、利用者のmainより前に初期容量を確保する。初期容量0では起動時に確保しない。現在のブロックに要求が収まらない場合は、回収済みのブロックを再利用し、それでも足りなければ別のブロックを追加する。生存する実体は移動せず、既存の参照は有効なままとする。
+
+**[rt.arena-allocation]** 実体を確保するときは型のアラインメントに必要な余白とサイズを検査する。各実体は1つのブロックに連続して配置する。現在のブロックに収まらなければ別のブロックの先頭で確保を試みる。単一要求と管理情報のサイズ計算のあふれ、拡張禁止、総容量上限の超過は確保位置でパニックする。環境層の確保失敗は [rt.arena-storage] の診断で要求容量を示す。起動時の失敗ではmainを実行せず、実行中の失敗ではその確保位置を示す。診断のために追加の動的確保を要求しない。
+
+失敗時は既存の実体と使用位置を保ち、範囲外へ書き込まない。上限ちょうどの確保は許す。容量超過の診断には確保済み総容量・上限・追加容量の設定・単一要求サイズを示し、計算のあふれと環境層の確保失敗を区別する。
+
+入れ子の領域は同じブロック列を使う。進入時のブロックと使用位置へ戻すことで、その領域の実体と余白をまとめて回収する。追加したブロックもプロセス終了まで保持して再利用し、領域退出時には環境層へ解放しない。個別の終了処理は行わず、外側の実体は移動しない。この容量は呼び出しスタックの上限ではない。
 
 ## 10. ログ
 
@@ -1861,7 +2011,7 @@ ExternFunction   ::= "fn" CNAME ( "as" IDENT )? "(" Parameters? ")" "->" Type
 TopLevelBinding  ::= ( "fix" | "var" ) IDENT TypeAnnotation? "=" ConstExpression AllowClause?
 TypeAnnotation   ::= ":" Type
 
-FunctionDeclaration ::= "fn" IDENT "(" Parameters? ")" "->" ReturnType Block
+FunctionDeclaration ::= "arena"? "fn" IDENT "(" Parameters? ")" "->" ReturnType Block
 FnShapeDeclaration ::= "fnshape" IDENT "(" FnShapeParameters? ")" "->" ReturnType
 FnShapeParameters ::= Type ( "," Type )* ","?
 Parameters       ::= Parameter ( "," Parameter )* ","?
@@ -1880,7 +2030,7 @@ ErrorSpecItem    ::= IDENT ( "." IDENT )?
 Variants         ::= IDENT ( "," NL* IDENT )* ","? NL*
 
 Type             ::= IntegerType | "len_t" | "f32" | "f64" | "bool" | "char" | "symbol" | "text" | "void"
-                   | "int" | "float" | IDENT | "static" "fn" IDENT | "fn" IDENT | CIntegerType | "*" "const" "void"
+                   | "ptr" Type | "int" | "float" | IDENT | "static" "fn" IDENT | "fn" IDENT | CIntegerType | "*" "const" "void"
 CIntegerType     ::= "_int" | "_uint" | "_long" | "_ulong" | "_size_t" | "_char"
 IntegerType      ::= "i8" | "i16" | "i32" | "i64"
                    | "u8" | "u16" | "u32" | "u64"
@@ -1902,12 +2052,14 @@ Statement        ::= ( VariableDeclaration | Assignment | ReturnStatement
                      | "break" | "continue" | LogStatement | Expression ) AllowClause?
                    | WhileStatement | LoopStatement | ForStatement | RevStatement
                    | IfStatement | MatchStatement | Block | AllowStatement | PanicStatement | FailStatement
-                   | RecoverStatement | IgnoreStatement | "unsafe" Block
+                   | RecoverStatement | IgnoreStatement | "unsafe" Block | "arena" Block | LetStatement
+                   | "objection" OBJECTION_REASON Block
 
-VariableDeclaration ::= ( "fix" | "var" ) IDENT TypeAnnotation?
+VariableDeclaration ::= ( "fix" | "var" ) "ptr"? IDENT TypeAnnotation?
                         "=" Expression
 Assignment       ::= AssignmentTarget AssignmentOperator Expression
-AssignmentTarget ::= IDENT ( "." IDENT )*
+AssignmentTarget ::= IDENT ( "." IDENT )* | "*" Unary | "(" Expression ")" ( "." IDENT )*
+LetStatement     ::= "let" IDENT "=" Condition Block ( NL* "else" Block )?
 AssignmentOperator ::= "=" | "+=" | "-=" | "*=" | "/=" | "%="
                      | "+%=" | "-%=" | "*%=" | "&=" | "|=" | "^="
                      | "<<=" | ">>="
@@ -1928,7 +2080,9 @@ AllowClause      ::= "allow" AllowItem ( "," AllowItem )*
 AllowItem        ::= ALLOW_ITEM
 ```
 
-`VariableDeclaration` はブロック内の宣言を表す。トップレベルの宣言は A.3 の `TopLevelBinding` で表す。`AssignmentTarget` の先頭の `IDENT` は、[assign.target] に従い、ブロック内またはトップレベルの `var` の名前として解決する。
+`OBJECTION_REASON`は [arena.objection-reason] の角括弧で囲んだ理由である。
+
+`VariableDeclaration` はブロック内の宣言を表す。トップレベルの宣言は A.3 の `TopLevelBinding` で表す。通常の代入先には [assign.target] を適用する。ポインタを通した更新には [arena.ptr-operations] を適用し、参照先が書き込み可能な場所であることを要求する。
 
 `IGNORE_REASON` は [err.or-ignore] のコロンと理由を表す。`RecoverStatement` と `IgnoreStatement` の記述位置には [err.recover]・[err.or-error] を適用する。
 
@@ -1962,7 +2116,7 @@ Sum              ::= Product ( ( "+" | "-" | "+%" | "-%" ) Product )*
 Product          ::= Cast ( ( "*" | "/" | "%" | "*%" ) Cast )*
 Cast             ::= Unary ( "as%" Type CastHandler? | "as" Type CastHandler? )*
 CastHandler      ::= "or" ( Expression | "return" Expression? | "panic" TEMPLATE )
-Unary            ::= ( "-" | "not" | "~" | "len" | "c_bytes" | "c_byte_len" ) Unary | "fn" IDENT | Postfix
+Unary            ::= ( "-" | "not" | "~" | "len" | "c_bytes" | "c_byte_len" | "new" | "*" ) Unary | "fn" IDENT | Postfix
 Postfix          ::= Primary ( "." IDENT | "[" Index "]" IndexHandler?
                              | "(" Arguments? ")"
                              | "with" "{" NL* Initializers "}" )*
@@ -1970,7 +2124,7 @@ Index            ::= Expression | Expression? ":" Expression?
 IndexHandler     ::= "or" ( Expression | "return" Expression? | "panic" TEMPLATE )
 Primary          ::= Literal | IDENT | FunctionCall | StructLiteral | TEMPLATE
                    | "(" Expression ")" | IfExpression | MatchExpression | BlockExpression
-Literal          ::= INTEGER | FLOAT | CHAR | "true" | "false" | "nan" | "inf"
+Literal          ::= INTEGER | FLOAT | CHAR | "true" | "false" | "nan" | "inf" | "null"
 
 FunctionCall     ::= IDENT "(" Arguments? ")"
 Arguments        ::= Argument ( "," Argument )* ","?

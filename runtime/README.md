@@ -4,6 +4,7 @@
 
 | ファイル | 責務 |
 |---|---|
+| `suz_arena.h`・`suz_arena.c` | 作業領域の初期・追加確保、整列・容量検査、ブロックと使用位置の保持 |
 | `suz_config.h` | Cの型・評価精度・浮動小数点設定の検査 |
 | `suz_runtime.h`・`suz_runtime.c` | 起動時の浮動小数点環境の初期化、整数演算の検査、ログとパニック診断の組み立て |
 | `suz_format_float.c` | コンパイラと生成プログラムで共有する浮動小数点の表示形式と数値による境界判定 |
@@ -105,3 +106,6 @@ cargo test --test spec_cases symbol_runtime::
 - 使用バージョン（固定コミット）：[`4c0618b0e44f7ef027ebae05d2cc7812048f7c8f`](https://github.com/ulfjack/ryu/tree/4c0618b0e44f7ef027ebae05d2cc7812048f7c8f)
 
 同梱範囲とライセンスは [third_party/ryu/README.md](third_party/ryu/README.md) に記載する。
+
+
+arenaの内部APIは `suz_arena.h` に定める。`suz_arena_init` は使用するプログラムだけが起動時に1回呼ぶ。`suz_arena_alloc` の成功後に初期値を格納する。生成Cは領域進入時に `suz_arena_save` でブロックと使用位置を保存し、退出時に `suz_arena_restore` で戻す。追加ブロックは既存の実体を動かさずに確保し、回収後も再利用する。これはメモリを再利用するための内部操作であり、寿命検査の代わりにはならない。

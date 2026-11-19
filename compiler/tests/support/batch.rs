@@ -131,6 +131,7 @@ impl Batch {
         if needs_runtime {
             command
                 .arg(runtime.join("suz_runtime.c"))
+                .arg(runtime.join("suz_arena.c"))
                 .arg(runtime.join("suz_text.c"))
                 .arg(runtime.join("suz_parse.c"))
                 .arg("-lm")

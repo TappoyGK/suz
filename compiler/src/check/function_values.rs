@@ -41,6 +41,15 @@ pub(super) fn value(
         .get(name)
         .filter(|_| name != "main")
         .ok_or_else(error)?;
+    if signature.arena {
+        return Err(expr.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "arena.fn-value",
+                "arena fn cannot be used as a function value"
+            ),
+        ));
+    }
     if signature.external {
         return Err(expr.location.error(
             ErrorKind::InvalidSource,
@@ -80,6 +89,11 @@ pub(super) fn value(
             .chain([&signature.result])
             .zip(required.parameters.iter().chain([&required.result]))
         {
+            let (mut from, mut to) = (from, to);
+            while let (Some(a), Some(b)) = (from.pointee(), to.pointee()) {
+                from = a;
+                to = b;
+            }
             match (from, to) {
                 (Type::GenericInt, Type::Integer(ty)) => {
                     if types.int.is_some_and(|old| old != ty) {
@@ -159,6 +173,15 @@ pub(super) fn invoke(
         ));
     };
     let signature = scope.function_types.borrow()[id].clone();
+    if super::arena::contains(signature.result, scope) {
+        return Err(expr.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "arena.parameter",
+                "ordinary function values cannot return arena pointers"
+            ),
+        ));
+    }
     if arguments.len() != signature.parameters.len() {
         return Err(expr.location.error(
             ErrorKind::InvalidSource,
@@ -177,6 +200,7 @@ pub(super) fn invoke(
         CheckedExpression {
             ty: signature.result,
             value: Value::Invoke {
+                location: expr.location,
                 target: Box::new(target),
                 arguments,
             },

@@ -531,7 +531,11 @@ pub(super) fn cast(
                 operand: Box::new(operand),
                 fallback: Box::new(super::expression::coerced(v, Some(target), bindings)?),
             },
-            FailureHandler::Return { value, .. } => Value::CastReturn {
+            FailureHandler::Return {
+                value,
+                location: return_location,
+            } => Value::CastReturn {
+                return_location: *return_location,
                 location,
                 wrap: false,
                 operand: Box::new(operand),

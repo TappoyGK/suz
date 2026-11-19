@@ -2,6 +2,7 @@
 //!
 //! 利用元: [`crate::compile_with_options`]。
 
+mod arena;
 mod arithmetic;
 mod blocks;
 mod casts;
@@ -33,6 +34,7 @@ struct RecoveryTarget {
 
 #[derive(Default)]
 struct ExpressionContext {
+    uses_arena: bool,
     uses_c_byte_len: bool,
     uses_c_integer: bool,
     uses_c_pointer: bool,
@@ -81,6 +83,7 @@ pub(crate) fn generate(
     program: &CheckedProgram,
     source_name: &str,
     text_pool_limit: crate::TextPoolLimit,
+    arena: crate::ArenaOptions,
     log_level: crate::LogLevel,
     log_ignore: bool,
 ) -> String {
@@ -97,6 +100,13 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
 
 "#,
     );
+    for (name, value) in [
+        ("INITIAL", arena.initial),
+        ("GROW", arena.grow),
+        ("LIMIT", arena.limit.map_or(0, |n| n.get())),
+    ] {
+        writeln!(c, "#define SUZ_ARENA_{name} UINT64_C({value})").unwrap();
+    }
     let mut context = ExpressionContext {
         log_level,
         log_ignore,
@@ -140,6 +150,9 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
         .iter()
         .map(|function| functions::emit(function, &mut context))
         .collect();
+    if context.uses_arena {
+        c.push_str("#include \"suz_arena.h\"\n");
+    }
     ffi::checks(&mut c, program, &context);
     ffi::declarations(&mut c, program);
     text_structure::prepare(&mut context);
@@ -172,6 +185,17 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
     } else {
         String::new()
     };
+    if context.uses_arena {
+        text_init.insert_str(
+            0,
+            &format!(
+                "    suz_arena_init(SUZ_ARENA_INITIAL, SUZ_ARENA_GROW, SUZ_ARENA_LIMIT, {}, {}, {});\n",
+                expressions::c_string(source_name),
+                program.main_location.line,
+                program.main_location.column
+            ),
+        );
+    }
     for (value, id) in &context.text_literals {
         writeln!(text_init, "    suz_text_constant_{id} = suz_text_intern(suz_text_literal_{id}, UINT64_C({}), true, {});", value.len(), text::position(program.main_location, &context)).unwrap();
     }

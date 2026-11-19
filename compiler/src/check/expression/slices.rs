@@ -66,9 +66,10 @@ pub(super) fn check(expr: &Expression, bindings: &Scope) -> Result<CheckedExpres
             Some(FailureHandler::Value(value)) => Some(CheckedHandler::Value(Box::new(
                 expression(value, Some(ty), bindings)?,
             ))),
-            Some(FailureHandler::Return { value, .. }) => Some(CheckedHandler::Return(Box::new(
-                crate::check::functions::return_value(value, bindings)?,
-            ))),
+            Some(FailureHandler::Return { value, location }) => Some(CheckedHandler::Return {
+                value: Box::new(crate::check::functions::return_value(value, bindings)?),
+                location: *location,
+            }),
             None => None,
         };
     Ok(CheckedExpression {

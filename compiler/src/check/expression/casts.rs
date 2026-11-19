@@ -42,10 +42,21 @@ pub(in crate::check) fn check(
                 }
             }
             let operand = super::super::exact::use_value(operand, bindings)?;
-            if operand.ty == Type::CPointer || target == Type::CPointer {
+            if operand.ty.pointee().is_some()
+                || target.pointee().is_some()
+                || operand.ty == Type::CPointer
+                || target == Type::CPointer
+            {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
-                    crate::diagnostic!("ffi.pointer-operations", "pointer values cannot be cast"),
+                    if operand.ty.pointee().is_some() || target.pointee().is_some() {
+                        crate::diagnostic!("arena.ptr-operations", "pointer values cannot be cast")
+                    } else {
+                        crate::diagnostic!(
+                            "ffi.pointer-operations",
+                            "pointer values cannot be cast"
+                        )
+                    },
                 ));
             }
             if matches!(operand.ty, Type::CInteger(_)) || matches!(target, Type::CInteger(_)) {
@@ -113,6 +124,7 @@ pub(in crate::check) fn check(
                 if !valid
                     || bindings.contains_function(target)
                     || crate::check::ffi::contains_c_type(target, bindings)
+                    || crate::check::arena::contains(target, bindings)
                 {
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
@@ -193,11 +205,16 @@ pub(in crate::check) fn check(
                 let safe = conversion_safety(operand.ty, target).unwrap_or(false);
                 require_handler(&operand, target, safe, expr.location, bindings)?;
             }
-            if let Some(FailureHandler::Return { value, .. }) = fallback {
+            if let Some(FailureHandler::Return {
+                value,
+                location: return_location,
+            }) = fallback
+            {
                 let return_value = crate::check::functions::return_value(value, bindings)?;
                 let checked = CheckedExpression {
                     ty: target,
                     value: Value::CastReturn {
+                        return_location: *return_location,
                         location: expr.location,
                         wrap: *wrap,
                         operand: Box::new(operand),

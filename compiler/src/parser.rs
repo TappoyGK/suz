@@ -4,6 +4,7 @@
 //! 主な対象規則: `[const.decl]`、`[decl.location]`、`[decl.top-level]`、`[fn.return]`、`[for.range]`、`[prog.main]`。
 
 mod allows;
+mod arena;
 mod branches;
 mod closures;
 mod enums;
@@ -188,6 +189,25 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
                     .find(|decl| decl.start == p.cursor)
                     .unwrap()
                     .end;
+            }
+            Kind::Keyword("arena") => {
+                let location = p.location();
+                p.cursor += 1;
+                if p.token().kind != Kind::Keyword("fn") {
+                    return Err(location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!("arena.fn", "expected arena fn at top level"),
+                    ));
+                }
+                let mut function = p.function(main)?;
+                if function.name == "main" {
+                    return Err(location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!("arena.fn", "main cannot be an arena fn"),
+                    ));
+                }
+                function.arena = true;
+                functions.push(function);
             }
             Kind::Keyword("fn") => {
                 let function = p.function(main)?;

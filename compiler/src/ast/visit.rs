@@ -77,7 +77,7 @@ pub(crate) fn walk_expression<V: Visitor + ?Sized>(
                 visitor.expression(argument)?;
             }
         }
-        ExpressionKind::Void | ExpressionKind::Variant { .. } => {}
+        ExpressionKind::Null | ExpressionKind::Void | ExpressionKind::Variant { .. } => {}
         ExpressionKind::Block { statements, value } => visitor.scope(statements, Some(value))?,
         ExpressionKind::If {
             branches,
@@ -107,6 +107,8 @@ pub(crate) fn walk_expression<V: Visitor + ?Sized>(
         }
         ExpressionKind::Group(inner)
         | ExpressionKind::Negate(inner)
+        | ExpressionKind::New(inner)
+        | ExpressionKind::Deref(inner)
         | ExpressionKind::CBytes(inner)
         | ExpressionKind::CByteLen(inner)
         | ExpressionKind::Len(inner)
@@ -136,6 +138,20 @@ pub(crate) fn walk_statement<V: Visitor + ?Sized>(
     statement: &Statement,
 ) -> Result<(), Diagnostic> {
     match statement {
+        Statement::Let {
+            value,
+            body,
+            otherwise,
+            ..
+        } => {
+            visitor.expression(value)?;
+            visitor.scope(body, None)?;
+            visitor.scope(otherwise, None)?;
+        }
+        Statement::Store { target, value, .. } => {
+            visitor.expression(target)?;
+            visitor.expression(value)?;
+        }
         Statement::Binding { initializer, .. } => visitor.expression(initializer)?,
         Statement::Assign { value, .. }
         | Statement::Return(value)
@@ -149,7 +165,10 @@ pub(crate) fn walk_statement<V: Visitor + ?Sized>(
                 }
             }
         }
-        Statement::Block(body) | Statement::Unsafe(body) => visitor.scope(body, None)?,
+        Statement::Arena { body, .. }
+        | Statement::Block(body)
+        | Statement::Unsafe(body)
+        | Statement::Objection(body) => visitor.scope(body, None)?,
         Statement::Loop { condition, body } => {
             if let Some(condition) = condition {
                 visitor.expression(condition)?;

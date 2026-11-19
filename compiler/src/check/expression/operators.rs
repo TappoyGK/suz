@@ -98,9 +98,10 @@ pub(super) fn check(
                     FailureHandler::Value(value) => CheckedHandler::Value(Box::new(
                         super::coerced(value, Some(checked.ty), bindings)?,
                     )),
-                    FailureHandler::Return { value, .. } => CheckedHandler::Return(Box::new(
-                        crate::check::functions::return_value(value, bindings)?,
-                    )),
+                    FailureHandler::Return { value, location } => CheckedHandler::Return {
+                        value: Box::new(crate::check::functions::return_value(value, bindings)?),
+                        location: *location,
+                    },
                 });
             checked
         }
@@ -356,10 +357,17 @@ pub(super) fn check(
             if crate::check::ffi::contains_pointer(ty, bindings) {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
-                    crate::diagnostic!(
-                        "ffi.pointer-operations",
-                        "pointer values cannot be compared"
-                    ),
+                    if crate::check::arena::contains(ty, bindings) {
+                        crate::diagnostic!(
+                            "arena.ptr-operations",
+                            "pointer values cannot be compared"
+                        )
+                    } else {
+                        crate::diagnostic!(
+                            "ffi.pointer-operations",
+                            "pointer values cannot be compared"
+                        )
+                    },
                 ));
             }
             if bindings.contains_function(ty) {

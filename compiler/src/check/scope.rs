@@ -8,6 +8,7 @@ use std::{collections::BTreeMap, rc::Rc};
 
 #[derive(Clone)]
 pub(super) struct Signature {
+    pub arena: bool,
     pub external: bool,
     pub id: usize,
     pub parameters: Vec<Type>,
@@ -20,10 +21,10 @@ impl Signature {
         self.parameters
             .iter()
             .chain([&self.result])
-            .any(|ty| super::generic::Family::of(*ty) == Some(family))
+            .any(|ty| super::generic::Family::of(ty.leaf()) == Some(family))
     }
     pub fn is_generic(&self) -> bool {
-        self.result.generic() || self.parameters.iter().any(|t| t.generic())
+        self.result.leaf().generic() || self.parameters.iter().any(|t| t.leaf().generic())
     }
 }
 
@@ -45,6 +46,9 @@ pub(super) enum Mode {
 
 #[derive(Clone)]
 pub(super) struct Scope {
+    pub arena_depth: usize,
+    pub arena_used: Rc<std::cell::Cell<bool>>,
+    pub nonnull: std::collections::BTreeSet<usize>,
     pub unsafe_block: bool,
     // 最も内側のerror腕の成功型。関数の戻り値型とは独立し、クロージャ境界で解除する。
     pub recovery: Option<Type>,
@@ -121,6 +125,7 @@ impl Scope {
 
     pub fn type_name(&self, ty: Type) -> String {
         match ty {
+            Type::Pointer { .. } => format!("ptr {}", self.type_name(ty.pointee().unwrap())),
             Type::Enum(ty) => self.enums[ty.id].name.clone(),
             Type::Struct(id) => self.structs[id].name.clone(),
             Type::StaticFunction(id) | Type::Function(id) => {
@@ -158,6 +163,9 @@ impl Scope {
 impl Default for Scope {
     fn default() -> Self {
         Self {
+            arena_depth: 0,
+            arena_used: Default::default(),
+            nonnull: Default::default(),
             unsafe_block: false,
             recovery: None,
             loop_depth: 0,

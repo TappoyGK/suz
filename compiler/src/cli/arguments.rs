@@ -47,6 +47,7 @@ pub struct Options {
     pub deny_global_var: bool,
     pub mode: suz::ArithmeticMode,
     pub text_pool_limit: suz::TextPoolLimit,
+    pub arena: suz::ArenaOptions,
 }
 
 fn invalid(message: impl std::fmt::Display) -> Failure {
@@ -85,6 +86,7 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
     let mut environment = None;
     let mut mode = None;
     let mut text_pool_limit = None;
+    let mut arena_sizes = [None; 3];
     let mut force = false;
     let mut log_allow = false;
     let mut log_ignore = false;
@@ -177,6 +179,32 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
                     }
                     continue;
                 }
+                Some(name @ ("--arena-initial" | "--arena-grow" | "--arena-limit"))
+                    if command != Command::Check =>
+                {
+                    let error = |message: String| Failure::tool(2, "tool.arena-capacity", message);
+                    let index = match name {
+                        "--arena-initial" => 0,
+                        "--arena-grow" => 1,
+                        _ => 2,
+                    };
+                    if arena_sizes[index].is_some() {
+                        return Err(error(format!("duplicate {name} option")));
+                    }
+                    let value = args
+                        .next()
+                        .ok_or_else(|| error(format!("expected SIZE after {name}")))?;
+                    let bytes = match value.to_str() {
+                        Some("unlimited") if index == 2 => 0,
+                        Some("0") if index != 2 => 0,
+                        Some(value) => parse_byte_count(value)
+                            .map(|n| n.get())
+                            .ok_or_else(|| error(format!("invalid byte count for {name}")))?,
+                        None => return Err(error(format!("invalid byte count for {name}"))),
+                    };
+                    arena_sizes[index] = Some(bytes);
+                    continue;
+                }
                 Some("--text-pool-limit") if command != Command::Check => {
                     if text_pool_limit.is_some() {
                         return Err(pool_size_error("duplicate --text-pool-limit option"));
@@ -239,6 +267,11 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
         deny_global_var,
         mode: mode.unwrap_or_default(),
         text_pool_limit: text_pool_limit.unwrap_or_default(),
+        arena: suz::ArenaOptions {
+            initial: arena_sizes[0].unwrap_or(suz::ArenaOptions::default().initial),
+            grow: arena_sizes[1].unwrap_or(suz::ArenaOptions::default().grow),
+            limit: arena_sizes[2].and_then(std::num::NonZeroU64::new),
+        },
     }))
 }
 
@@ -272,6 +305,13 @@ fn parse_pool_limit(value: &std::ffi::OsStr) -> Result<suz::TextPoolLimit> {
     if value == "unlimited" {
         return Ok(suz::TextPoolLimit::Unlimited);
     }
+    parse_byte_count(value)
+        .map(suz::TextPoolLimit::Bytes)
+        .ok_or_else(error)
+}
+
+/// 両方の容量指定で共通の、正のバイト数と二進接頭辞だけを解析する。
+fn parse_byte_count(value: &str) -> Option<std::num::NonZeroU64> {
     let (digits, multiplier) = match value.as_bytes().last() {
         Some(b'K') => (&value[..value.len() - 1], 1_024_u64),
         Some(b'M') => (&value[..value.len() - 1], 1_048_576_u64),
@@ -279,13 +319,11 @@ fn parse_pool_limit(value: &std::ffi::OsStr) -> Result<suz::TextPoolLimit> {
         _ => (value, 1),
     };
     if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
-        return Err(error());
+        return None;
     }
-    let bytes = digits
+    digits
         .parse::<u64>()
         .ok()
         .and_then(|number| number.checked_mul(multiplier))
         .and_then(std::num::NonZeroU64::new)
-        .ok_or_else(error)?;
-    Ok(suz::TextPoolLimit::Bytes(bytes))
 }

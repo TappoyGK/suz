@@ -159,6 +159,7 @@ pub(crate) const NUMERIC_COMBINATIONS: usize = 18;
 /// Structの番号は構造体宣言、Functionの番号は共通化した関数値の型を参照する。汎用の型はC生成までに具体化する。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Type {
+    Pointer { leaf: PointerLeaf, depth: usize },
     CPointer,
     CInteger(CIntegerType),
     GenericInt,
@@ -178,7 +179,96 @@ pub(crate) enum Type {
     Text,
 }
 
+/// ポインタの末端の値型。間接参照の段数を別に持ち、型をヒープへ確保しない。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PointerLeaf {
+    CPointer,
+    CInteger(CIntegerType),
+    GenericInt,
+    GenericFloat,
+    Numeric([Option<ScalarType>; NUMERIC_COMBINATIONS]),
+    Exact,
+    Struct(usize),
+    StaticFunction(usize),
+    Function(usize),
+    Enum(EnumType),
+    Void,
+    Float(FloatType),
+    Integer(IntegerType),
+    Bool,
+    Char,
+    Symbol,
+    Text,
+}
 impl Type {
+    pub fn pointer(self) -> Self {
+        let leaf = match self {
+            Self::Pointer { leaf, depth } => {
+                return Self::Pointer {
+                    leaf,
+                    depth: depth + 1,
+                };
+            }
+            Self::CPointer => PointerLeaf::CPointer,
+            Self::CInteger(v) => PointerLeaf::CInteger(v),
+            Self::GenericInt => PointerLeaf::GenericInt,
+            Self::GenericFloat => PointerLeaf::GenericFloat,
+            Self::Numeric(v) => PointerLeaf::Numeric(v),
+            Self::Exact => PointerLeaf::Exact,
+            Self::Struct(v) => PointerLeaf::Struct(v),
+            Self::StaticFunction(v) => PointerLeaf::StaticFunction(v),
+            Self::Function(v) => PointerLeaf::Function(v),
+            Self::Enum(v) => PointerLeaf::Enum(v),
+            Self::Void => PointerLeaf::Void,
+            Self::Float(v) => PointerLeaf::Float(v),
+            Self::Integer(v) => PointerLeaf::Integer(v),
+            Self::Bool => PointerLeaf::Bool,
+            Self::Char => PointerLeaf::Char,
+            Self::Symbol => PointerLeaf::Symbol,
+            Self::Text => PointerLeaf::Text,
+        };
+        Self::Pointer { leaf, depth: 1 }
+    }
+    pub fn pointee(self) -> Option<Self> {
+        let Self::Pointer { leaf, depth } = self else {
+            return None;
+        };
+        if depth > 1 {
+            return Some(Self::Pointer {
+                leaf,
+                depth: depth - 1,
+            });
+        }
+        Some(match leaf {
+            PointerLeaf::CPointer => Self::CPointer,
+            PointerLeaf::CInteger(v) => Self::CInteger(v),
+            PointerLeaf::GenericInt => Self::GenericInt,
+            PointerLeaf::GenericFloat => Self::GenericFloat,
+            PointerLeaf::Numeric(v) => Self::Numeric(v),
+            PointerLeaf::Exact => Self::Exact,
+            PointerLeaf::Struct(v) => Self::Struct(v),
+            PointerLeaf::StaticFunction(v) => Self::StaticFunction(v),
+            PointerLeaf::Function(v) => Self::Function(v),
+            PointerLeaf::Enum(v) => Self::Enum(v),
+            PointerLeaf::Void => Self::Void,
+            PointerLeaf::Float(v) => Self::Float(v),
+            PointerLeaf::Integer(v) => Self::Integer(v),
+            PointerLeaf::Bool => Self::Bool,
+            PointerLeaf::Char => Self::Char,
+            PointerLeaf::Symbol => Self::Symbol,
+            PointerLeaf::Text => Self::Text,
+        })
+    }
+}
+
+impl Type {
+    /// ポインタの深さを除いた型。汎用数値型と関数型の宣言を調べるときに使う。
+    pub fn leaf(mut self) -> Self {
+        while let Some(inner) = self.pointee() {
+            self = inner;
+        }
+        self
+    }
     pub fn generic(self) -> bool {
         matches!(self, Self::GenericInt | Self::GenericFloat)
     }
@@ -257,6 +347,7 @@ impl Type {
     }
     pub fn name(self) -> &'static str {
         match self {
+            Self::Pointer { .. } => "ptr",
             Self::CPointer => "*const void",
             Self::CInteger(ty) => ty.name(),
             Self::Exact => "exact integer",
@@ -283,6 +374,7 @@ impl Type {
     }
     pub fn c_name(self) -> String {
         match self {
+            Self::Pointer { .. } => format!("typeof({} *)", self.pointee().unwrap().c_name()),
             Self::CPointer => "suz_ffi_bytes".into(),
             Self::CInteger(ty) => ty.c_name().into(),
             Self::Exact => "suz_exact".into(),
@@ -388,6 +480,7 @@ pub(crate) struct Parameter {
 /// 関数の構文。仮引数・戻り値型・本体の文と、宣言の開始・終了位置を保持する。
 #[derive(Clone)]
 pub(crate) struct Function {
+    pub arena: bool,
     pub keyword_location: Location,
     pub name: String,
     pub location: Location,
@@ -400,7 +493,11 @@ pub(crate) struct Function {
 
 impl Function {
     pub fn declares_numeric(&self, ty: Type) -> bool {
-        self.result == ty || self.parameters.iter().any(|parameter| parameter.ty == ty)
+        self.result.leaf() == ty
+            || self
+                .parameters
+                .iter()
+                .any(|parameter| parameter.ty.leaf() == ty)
     }
 }
 
@@ -426,7 +523,26 @@ pub(crate) enum LogLevel {
 /// 構文解析済みの文。束縛やフィールドの参照はまだソース上の名前で保持する。
 #[derive(Clone)]
 pub(crate) enum Statement {
+    Arena {
+        body: Vec<Statement>,
+        end: Location,
+    },
+    Let {
+        name: String,
+        location: Location,
+        value: Box<Expression>,
+        body: Vec<Statement>,
+        otherwise: Vec<Statement>,
+    },
+    Store {
+        target: Box<Expression>,
+        value: Box<Expression>,
+        operator: Option<BinaryOperator>,
+        location: Location,
+    },
+
     Unsafe(Vec<Statement>),
+    Objection(Vec<Statement>),
     Log {
         level: LogLevel,
         parts: Vec<TemplatePart<Expression>>,
@@ -460,11 +576,13 @@ pub(crate) enum Statement {
     },
     Block(Vec<Statement>),
     Binding {
+        pointer: bool,
         mutable: bool,
         name: String,
         location: Location,
         annotation: Option<Type>,
-        initializer: Expression,
+        // 型とソース位置の追加で全ての文が肥大化しないよう、初期値を別に保持する。
+        initializer: Box<Expression>,
     },
     Assign {
         compound: bool,
@@ -683,6 +801,9 @@ pub(crate) struct Capture {
 /// 式の構文ごとの内容。名前・リテラルの綴り・子の式を保持し、意味検査で [`crate::check::ir::Value`] へ変換する。
 #[derive(Clone)]
 pub(crate) enum ExpressionKind {
+    New(Box<Expression>),
+    Deref(Box<Expression>),
+    Null,
     /// or panicの内部表現。通常の値式としては構文から作らない。
     Panic(Vec<TemplatePart<Expression>>),
     Closure(Box<Closure>),

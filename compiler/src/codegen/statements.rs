@@ -18,6 +18,37 @@ pub(super) fn emit_block(
     let indent = "    ".repeat(depth);
     for statement in statements {
         match statement {
+            CheckedStatement::Arena { body, .. } => {
+                context.uses_arena = true;
+                let id = *next_assignment;
+                *next_assignment += 1;
+                writeln!(c, "{indent}{{\n{indent}    suz_arena_mark suz_arena_mark_{id} __attribute__((cleanup(suz_arena_restore))) = suz_arena_save();").unwrap();
+                emit_block(c, body, depth + 1, next_assignment, context);
+                writeln!(c, "{indent}}}").unwrap();
+            }
+            CheckedStatement::Store {
+                target,
+                id,
+                value,
+                body,
+                ..
+            } => {
+                writeln!(
+                    c,
+                    "{indent}{{\n{indent}    {} const suz_local_{id} = &({});",
+                    target.ty.pointer().c_name(),
+                    expression(target, context)
+                )
+                .unwrap();
+                emit_block(c, body, depth + 1, next_assignment, context);
+                writeln!(
+                    c,
+                    "{indent}    *suz_local_{id} = {};\n{indent}}}",
+                    expression(value, context)
+                )
+                .unwrap();
+            }
+
             CheckedStatement::Recover(value) => {
                 let target = context
                     .recovery
@@ -244,7 +275,7 @@ pub(super) fn emit_block(
                     writeln!(c, "{indent}}}").unwrap();
                 }
             }
-            CheckedStatement::Block(inner) => {
+            CheckedStatement::Block(inner) | CheckedStatement::Objection(inner) => {
                 writeln!(c, "{indent}{{").unwrap();
                 emit_block(c, inner, depth + 1, next_assignment, context);
                 writeln!(c, "{indent}}}").unwrap();
@@ -254,6 +285,7 @@ pub(super) fn emit_block(
                 id,
                 ty,
                 initializer,
+                ..
             } => {
                 writeln!(
                     c,
@@ -272,6 +304,7 @@ pub(super) fn emit_block(
                 fields,
                 ty,
                 value,
+                ..
             } => {
                 let index = *next_assignment;
                 *next_assignment += 1;
@@ -293,7 +326,7 @@ pub(super) fn emit_block(
                 writeln!(c, "{indent}{local} = suz_assign_{index};").unwrap();
                 writeln!(c, "{indent}(void){local};").unwrap();
             }
-            CheckedStatement::Return(value) => {
+            CheckedStatement::Return { value, .. } => {
                 writeln!(c, "{indent}return {};", expression(value, context)).unwrap();
             }
         }

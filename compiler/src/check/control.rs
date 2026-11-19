@@ -168,6 +168,8 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
                 visit(otherwise, false, true)?;
             }
             ExpressionKind::Negate(inner)
+            | ExpressionKind::New(inner)
+            | ExpressionKind::Deref(inner)
             | ExpressionKind::CBytes(inner)
             | ExpressionKind::CByteLen(inner)
             | ExpressionKind::Len(inner)
@@ -251,9 +253,24 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
                     validate_statements(body, in_value)?;
                 }
             }
-            Statement::Block(body) | Statement::Unsafe(body) => {
-                validate_statements(body, in_value)?
+            Statement::Let {
+                value,
+                body,
+                otherwise,
+                ..
+            } => {
+                visit(value, false, in_value)?;
+                validate_statements(body, in_value)?;
+                validate_statements(otherwise, in_value)?;
             }
+            Statement::Store { target, value, .. } => {
+                visit(target, false, in_value)?;
+                visit(value, true, in_value)?;
+            }
+            Statement::Arena { body, .. }
+            | Statement::Block(body)
+            | Statement::Unsafe(body)
+            | Statement::Objection(body) => validate_statements(body, in_value)?,
             _ => {}
         }
     }
@@ -276,17 +293,17 @@ fn has_return_handler(expr: &CheckedExpression) -> bool {
         Value::Cast(inner) | Value::TextView(inner) => has_return_handler(inner),
         Value::HandledCall { handler, .. } => matches!(
             handler.as_ref(),
-            super::ir::CallHandler::Return(_)
+            super::ir::CallHandler::Return { .. }
                 | super::ir::CallHandler::Fail(_)
                 | super::ir::CallHandler::Branches(_)
         ),
         Value::CastReturn { .. }
         | Value::Slice {
-            handler: Some(CheckedHandler::Return(_)),
+            handler: Some(CheckedHandler::Return { .. }),
             ..
         }
         | Value::IntegerArithmetic {
-            handler: Some(CheckedHandler::Return(_)),
+            handler: Some(CheckedHandler::Return { .. }),
             ..
         } => true,
         _ => false,
@@ -298,8 +315,9 @@ pub(super) fn lower_return_handler(
     expr: &mut CheckedExpression,
     statements: &mut Vec<CheckedStatement>,
     next_id: &mut usize,
+    location: crate::ast::Location,
 ) -> bool {
-    if matches!(&expr.value, Value::HandledCall { handler, .. } if matches!(handler.as_ref(), super::ir::CallHandler::Return(_) | super::ir::CallHandler::Fail(_) | super::ir::CallHandler::Branches(_)))
+    if matches!(&expr.value, Value::HandledCall { handler, .. } if matches!(handler.as_ref(), super::ir::CallHandler::Return { .. } | super::ir::CallHandler::Fail(_) | super::ir::CallHandler::Branches(_)))
     {
         let id = *next_id;
         *next_id += 1;
@@ -316,15 +334,15 @@ pub(super) fn lower_return_handler(
         return true;
     }
     if let Value::Cast(inner) | Value::TextView(inner) = &mut expr.value {
-        return lower_return_handler(inner, statements, next_id);
+        return lower_return_handler(inner, statements, next_id, location);
     }
     if matches!(
         &expr.value,
         Value::Slice {
-            handler: Some(CheckedHandler::Return(_)),
+            handler: Some(CheckedHandler::Return { .. }),
             ..
         } | Value::IntegerArithmetic {
-            handler: Some(CheckedHandler::Return(_)),
+            handler: Some(CheckedHandler::Return { .. }),
             ..
         }
     ) {
@@ -337,17 +355,23 @@ pub(super) fn lower_return_handler(
             Value::IntegerArithmetic { handler, .. } => (handler, false),
             _ => unreachable!(),
         };
-        let Some(CheckedHandler::Return(return_value)) = handler.take() else {
+        let Some(CheckedHandler::Return {
+            value: return_value,
+            location,
+        }) = handler.take()
+        else {
             unreachable!()
         };
         statements.push(if slice {
             CheckedStatement::SliceReturn {
+                location,
                 id,
                 operation,
                 return_value,
             }
         } else {
             CheckedStatement::ArithmeticReturn {
+                location,
                 id,
                 operation,
                 return_value,
@@ -377,15 +401,16 @@ pub(super) fn lower_return_handler(
         };
         let old = std::mem::replace(left, Box::new(replacement));
         statements.push(CheckedStatement::Binding {
+            location,
             mutable: false,
             id,
             ty: crate::ast::Type::Exact,
-            initializer: CheckedExpression {
+            initializer: Box::new(CheckedExpression {
                 ty: crate::ast::Type::Exact,
                 value: Value::Exact(old),
-            },
+            }),
         });
-        return lower_return_handler(rhs, statements, next_id);
+        return lower_return_handler(rhs, statements, next_id, location);
     }
     if let Value::Binary { left, right, .. }
     | Value::IntegerArithmetic {
@@ -408,12 +433,13 @@ pub(super) fn lower_return_handler(
             }),
         );
         statements.push(CheckedStatement::Binding {
+            location,
             mutable: false,
             id,
             ty,
-            initializer: *old,
+            initializer: old,
         });
-        return lower_return_handler(right, statements, next_id);
+        return lower_return_handler(right, statements, next_id, location);
     }
     if !matches!(expr.value, Value::CastReturn { .. }) {
         return false;
@@ -421,6 +447,7 @@ pub(super) fn lower_return_handler(
     let id = *next_id;
     *next_id += 1;
     let Value::CastReturn {
+        return_location,
         location,
         wrap,
         operand,
@@ -430,6 +457,7 @@ pub(super) fn lower_return_handler(
         unreachable!()
     };
     statements.push(CheckedStatement::CastReturn {
+        return_location,
         location,
         wrap,
         id,
@@ -467,6 +495,9 @@ fn contains_break(statements: &[Statement]) -> bool {
 }
 pub(super) fn stops(statements: &[Statement]) -> bool {
     statements.iter().any(|statement| match statement {
+        Statement::Let {
+            body, otherwise, ..
+        } => stops(body) && stops(otherwise),
         Statement::Match { arms, .. } => arms.iter().all(|arm| stops(&arm.body)),
         Statement::Return(_)
         | Statement::Fail(_)
@@ -483,7 +514,10 @@ pub(super) fn stops(statements: &[Statement]) -> bool {
                 .is_none_or(|e| matches!(e.kind, ExpressionKind::Bool(true)))
                 && !contains_break(body)
         }
-        Statement::Block(inner) | Statement::Unsafe(inner) => stops(inner),
+        Statement::Arena { body: inner, .. }
+        | Statement::Block(inner)
+        | Statement::Unsafe(inner)
+        | Statement::Objection(inner) => stops(inner),
         Statement::If {
             branches,
             otherwise,
