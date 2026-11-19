@@ -194,3 +194,113 @@ fn typed_c_pointers_are_limited_to_supported_extern_parameters() {
         assert!(suz::compile(source.as_bytes()).is_err(), "{source}");
     }
 }
+
+#[test]
+fn keep_allows_registration_until_release_inside_an_explicit_arena() {
+    let directory = TemporaryDirectory::new();
+    fs::write(
+        directory.0.join("fixture.h"),
+        r#"
+#include <stdint.h>
+struct state { int32_t value; };
+static struct state *saved;
+static const double *reading;
+static inline void attach(struct state *p, const double *q) { saved = p; reading = q; }
+static inline void tick(void) { saved->value += 1; }
+static inline double read_saved(void) { return *reading; }
+static inline void detach(void) { saved = 0; reading = 0; }
+static inline int active(void) { return saved != 0 || reading != 0; }
+"#,
+    )
+    .unwrap();
+    fs::write(
+        directory.0.join("main.suz"),
+        r#"
+extern "fixture.h" {
+    struct state as State { value: i32 }
+    fn attach(keep p: *State, keep q: *const f64) -> void
+    fn tick() -> void
+    fn read_saved() -> f64
+    fn detach() -> void
+    fn active() -> _int
+}
+fn register(p: ptr State, q: ptr f64) -> void { trusted { attach(p, q) } }
+fnshape Action() -> void
+fn invoke(f: fn Action) -> void { f() }
+arena fn make() -> ptr State { return new State { value: 0 } }
+fn main() -> u8 {
+    for i in 0..<2 {
+        arena {
+            fix ptr p = make()
+            fix ptr q = new 2.5
+            invoke(fn [p, q]() -> void { register(p, q) })
+            // 登録した関数・クロージャ・trustedを抜けても、実体のArenaは生きている。
+            trusted { tick() }
+            if p.value != 1 { return 1 }
+            #q = 3.5
+            trusted {
+                if read_saved() != 3.5 { return 2 }
+                detach()
+            }
+        }
+        trusted { if active() != 0 { return 3 } }
+    }
+    return 0
+}
+"#,
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_suz"))
+        .current_dir(&directory.0)
+        .args(["run", "main.suz", "--include-dir", "."])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+}
+
+#[test]
+fn keep_is_a_typed_pointer_modifier_not_a_reserved_name() {
+    for ty in ["i32", "_int", "f64", "bool", "*const void", "State"] {
+        let source = format!(
+            "extern \"f.h\" {{\nstruct state as State {{ value: i32 }}\nfn attach(keep p: {ty}) -> void\n}}\nfn main() -> u8 {{ return 0 }}"
+        );
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(error.rule(), "ffi.keep", "{ty}: {error}");
+    }
+    // 修飾語と仮引数名が同じ綴りでも、コロンの位置で区別する。
+    suz::compile(b"extern \"f.h\" {\nfn scalar(keep: _int) -> void\nfn attach(keep keep: *i32) -> void\n}\nfn main() -> u8 { fix keep = 1\nreturn keep as u8 or 1 }").unwrap();
+    for declaration in [
+        "fn wrapper(keep p: ptr i32) -> void {}",
+        "extern \"f.h\" { fn attach(keep keep p: *i32) -> void }",
+        "extern \"f.h\" { fn attach(keep p: ptr i32) -> void }",
+    ] {
+        let source = format!("{declaration}\nfn main() -> u8 {{ return 0 }}");
+        assert!(suz::compile(source.as_bytes()).is_err(), "{source}");
+    }
+}
+
+#[test]
+fn keep_preserves_call_type_trusted_and_suz_lifetime_checks() {
+    for (body, rule) in [
+        ("fix ptr p = new (1 as i32)\nattach(p)", "ffi.trusted"),
+        (
+            "fix ptr p: ptr? i32 = new 1\ntrusted { attach(p) }",
+            "type.expected",
+        ),
+        ("trusted { attach(null) }", "arena.null"),
+        (
+            "fix ptr p = new (1 as u32)\ntrusted { attach(p) }",
+            "type.expected",
+        ),
+        (
+            "var ptr p: ptr? i32 = null\ntrusted { arena { p = new (1 as i32)\nlet q = p { attach(q) } } }",
+            "arena.store",
+        ),
+    ] {
+        let source = format!(
+            "extern \"f.h\" {{ fn attach(keep p: *i32) -> void }}\nfn main() -> u8 {{ arena {{ {body}\n}}\nreturn 0 }}"
+        );
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(error.rule(), rule, "{body}: {error}");
+    }
+}

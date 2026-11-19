@@ -8,6 +8,16 @@ use crate::{
 
 impl Parser<'_, '_> {
     fn extern_parameter(&mut self) -> Result<ExternParameter, Diagnostic> {
+        let modifier_location = self.location();
+        // constと同じく文脈上の修飾語。keep: 型という従来の仮引数名は予約しない。
+        let keep = self.token().kind == Kind::Ident("keep")
+            && self
+                .tokens
+                .get(self.cursor + 1)
+                .is_some_and(|t| matches!(t.kind, Kind::Ident(_)));
+        if keep {
+            self.cursor += 1;
+        }
         let (name, location) = self.parameter_name()?;
         let mut read_only = false;
         let ty = if self.token().kind == Kind::Symbol("*") {
@@ -51,6 +61,17 @@ impl Parser<'_, '_> {
             }
             ty
         };
+        if keep && ty.pointee().is_none() {
+            return Err(modifier_location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "ffi.keep",
+                    "keep requires a typed C pointer parameter (*const T or *T)"
+                ),
+            ));
+        }
+        // keepはCが保持できる期間の契約だけを宣言する。型・ABI・寿命検査は
+        // 通常のポインタ引数と同じなので、後段へ実行用の情報を追加しない。
         Ok(ExternParameter {
             name,
             ty,

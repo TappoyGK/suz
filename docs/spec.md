@@ -1598,9 +1598,9 @@ fn main() -> u8 {
 
 この表記はexternの仮引数だけに使い、Suz内の変数や関数には従来の`ptr T`を使う。実引数には同じTの非nullな`ptr T`を要求する。`ptr? T`はletで確認してから渡す。Cで互換な型でも、異なるSuz型のポインタは暗黙変換しない。値そのものや`c_bytes`の結果は渡せない。externの戻り値にはポインタを認めない。
 
-**[ffi.borrow]** 型付きポインタは [ffi.trusted] の内側でCへ渡し、Cが実体を使える期間は呼び出し中だけとする。実体のコピーや所有権の移譲は行わない。実引数を左から右へ1回ずつ評価してから呼び出し、後の実引数がポインタ変数を付け替えても、先に評価したポインタが指す実体を渡す。
+**[ffi.borrow]** 型付きポインタは [ffi.trusted] の内側でCへ渡し、`keep`のない仮引数ではCが実体を使える期間を呼び出し中だけとする。実体のコピーや所有権の移譲は行わない。実引数を左から右へ1回ずつ評価してから呼び出し、後の実引数がポインタ変数を付け替えても、先に評価したポインタが指す実体を渡す。
 
-C側の解放・再確保は禁止し、`*const T`ではそのポインタを通じた書き込みも禁止する。`*T`による更新は同じ実体を指すSuz側の参照にも反映される。Cが渡された実体の範囲を守り、Tとして妥当な値だけを書き込むことはプログラマーが保証する。型付きポインタを呼び出し後まで保持する使い方、非同期処理、別スレッドからのアクセスは対象外とする。文字列用の`*const void`の保持期間は [ffi.bytes-contract] のままである。
+C側の解放・再確保は禁止し、`*const T`ではそのポインタを通じた書き込みも禁止する。`*T`による更新は同じ実体を指すSuz側の参照にも反映される。Cが渡された実体の範囲を守り、Tとして妥当な値だけを書き込むことはプログラマーが保証する。非同期処理と別スレッドからのアクセスは対象外とする。文字列用の`*const void`の保持期間は [ffi.bytes-contract] のままである。
 
 ```suz
 extern "counter.h" {
@@ -1621,6 +1621,45 @@ fn main() -> u8 {
 ```
 
 この例のヘッダーは `struct counter { int32_t value; };`、`int32_t counter_read(const struct counter *);`、`void counter_set(struct counter *, int32_t);` を宣言し、関数の実体をリンク時に用意する。
+
+**[ffi.keep]** externの型付きポインタ仮引数に `keep p: *T` または `keep p: *const T` と書くと、Cが呼び出し後もポインタを保持できる。`keep`はこの位置だけの修飾語であり、名前としての利用は予約しない。数値などの値渡しや、独自の保持契約を持つ`*const void`には付けられない。実引数の型と非nullの要件は [ffi.arena-pointer] と同じである。
+
+プログラマーは、登録解除などによってCの利用が終了するまで、実体を確保したArenaを生かす。`trusted`ブロックや、Cへ登録したSuz関数からの退出は、Cの利用終了を意味しない。mainや特定のArenaには限定せず、通常関数の引数やクロージャの値捕捉からも渡せる。ラッパー関数を作る場合、その関数の呼び出し側も保持期間の条件を満たすように契約を定める。
+
+所有権・解放禁止・読み書きの制約は [ffi.borrow] のままである。Suzは通常の型・寿命検査を行うが、C内部の保持や利用終了を証明せず、Arenaの寿命も延長しない。Suz内で禁止される保存や返却を`keep`で許可するものではない。
+
+例：Cライブラリの`state.h`が次を宣言する。`state_detach`は保持したポインタを破棄し、以降は使用しない契約とする。各関数の実体はリンク時に用意する。
+
+```c
+#include <stdint.h>
+struct state { int32_t value; };
+void state_attach(struct state *p);
+void state_tick(void);
+void state_detach(void);
+```
+
+Suz側の`main.suz`では、Cの利用を終えてからArenaを閉じる。
+
+```suz
+extern "state.h" {
+    struct state as State { value: i32 }
+    fn state_attach(keep p: *State) -> void
+    fn state_tick() -> void
+    fn state_detach() -> void
+}
+fn main() -> u8 {
+    arena {
+        fix ptr p = new State { value: 0 }
+        trusted { state_attach(p) }
+        // 登録したtrustedを抜けた後も、同じ実体をCが利用する。
+        trusted {
+            state_tick()
+            state_detach()
+        }
+    }
+    return 0
+}
+```
 
 ### 8.13 作業領域とポインタ
 
@@ -1701,7 +1740,7 @@ fn main() -> u8 {
 
 **[arena.parameter-regions]** 各引数に含まれる参照先は未知の領域に属するものとして扱い、引数同士が同じ領域にあるとは仮定しない。引数から参照をたどって到達する実体にも借用の制約を適用する。借りた実体へポインタを保存することは禁止する。`null`の代入、構造体全体の上書き、別名を経由する更新も同じである。参照を含まないメンバーの更新は許す。
 
-**[arena.function-check]** 借用の契約は関数定義で検査する。実引数の寿命に応じて保存・返却の許可を変えない。関数値やクロージャも同じ契約を持つ。値捕捉したポインタは借りた参照として利用できる。参照捕捉した変数へのポインタの再代入は、呼び出し元への保存として禁止する。externにはSuzのポインタやそれを含む値を渡せない。
+**[arena.function-check]** 借用の契約は関数定義で検査する。実引数の寿命に応じて保存・返却の許可を変えない。関数値やクロージャも同じ契約を持つ。値捕捉したポインタは借りた参照として利用できる。参照捕捉した変数へのポインタの再代入は、呼び出し元への保存として禁止する。externへの型付きポインタの受け渡しは [ffi.arena-pointer] に従う。Cが呼び出し後も保持する場合は、[ffi.keep] の保持期間をプログラマーが保証する。
 
 **[arena.call-allocation]** 通常関数は自分の本体で開いたarenaにだけ確保できる。実行時には呼び出し元の領域の内側に積まれ、そのarenaを抜けると回収される。クロージャは、宣言位置を囲むarenaを確保先として引き継がない。
 
@@ -2122,7 +2161,7 @@ ExternDeclaration ::= ExternFunction | ExternStruct
 ExternStruct     ::= "struct" CNAME ( "as" IDENT )? "{" NL* Fields "}"
 ExternFunction   ::= "fn" CNAME ( "as" IDENT )? "(" ExternParameters? ")" "->" Type
 ExternParameters ::= ExternParameter ( "," ExternParameter )* ","?
-ExternParameter  ::= IDENT ":" ( "*" "const"? Type | Type )
+ExternParameter  ::= "keep"? IDENT ":" ( "*" "const"? Type | Type )
 
 TopLevelBinding  ::= "fix" IDENT TypeAnnotation? "=" ConstExpression AllowClause?
 TypeAnnotation   ::= ":" Type
