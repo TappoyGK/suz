@@ -118,6 +118,7 @@ pub(crate) enum CheckedStatement {
         otherwise: Option<Vec<CheckedStatement>>,
     },
     Block(Vec<CheckedStatement>),
+    Objection(Vec<CheckedStatement>),
     Binding {
         location: Location,
         mutable: bool,

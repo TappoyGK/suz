@@ -267,9 +267,10 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
                 visit(target, false, in_value)?;
                 visit(value, true, in_value)?;
             }
-            Statement::Arena { body, .. } | Statement::Block(body) | Statement::Unsafe(body) => {
-                validate_statements(body, in_value)?
-            }
+            Statement::Arena { body, .. }
+            | Statement::Block(body)
+            | Statement::Unsafe(body)
+            | Statement::Objection(body) => validate_statements(body, in_value)?,
             _ => {}
         }
     }
@@ -515,7 +516,8 @@ pub(super) fn stops(statements: &[Statement]) -> bool {
         }
         Statement::Arena { body: inner, .. }
         | Statement::Block(inner)
-        | Statement::Unsafe(inner) => stops(inner),
+        | Statement::Unsafe(inner)
+        | Statement::Objection(inner) => stops(inner),
         Statement::If {
             branches,
             otherwise,

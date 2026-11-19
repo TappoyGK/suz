@@ -282,3 +282,6 @@ mod errors;
 
 #[path = "spec_cases/log_ignore.rs"]
 mod log_ignore;
+
+#[path = "spec_cases/objection.rs"]
+mod objection;

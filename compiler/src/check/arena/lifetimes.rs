@@ -43,6 +43,12 @@ enum Constraint {
 struct Analysis<'a> {
     scope: &'a Scope,
     borrowed: BTreeSet<usize>,
+    objection: bool,
+    // 字句上のobjection内で作ったStoreの添字。呼出し契約由来の制約は含めない。
+    objections: BTreeSet<usize>,
+    // 候補集合はnullを表さないため、非nullの証明を値と不変の保存場所に別途保持する。
+    nonnull_values: BTreeSet<Node>,
+    nonnull_cells: BTreeSet<Node>,
     return_region: Option<usize>,
     recovery: Option<Shape>,
     calls: Vec<boundaries::CallCheck>,
@@ -62,6 +68,10 @@ impl<'a> Analysis<'a> {
         Self {
             scope,
             borrowed: BTreeSet::new(),
+            objection: false,
+            objections: BTreeSet::new(),
+            nonnull_values: BTreeSet::new(),
+            nonnull_cells: BTreeSet::new(),
             return_region: None,
             recovery: None,
             calls: Vec::new(),
@@ -170,6 +180,9 @@ impl<'a> Analysis<'a> {
     fn write(&mut self, place: Place, value: Shape, location: Location) {
         for (path, source) in value {
             let destination = self.at(place.clone(), &path);
+            if self.objection {
+                self.objections.insert(self.constraints.len());
+            }
             self.constraints
                 .push(Constraint::Store(destination, source, location));
         }
@@ -180,6 +193,25 @@ impl<'a> Analysis<'a> {
                 self.constraints.push(Constraint::Copy(dst, source));
             }
         }
+    }
+    // 分岐で候補は合流する。非nullの証明は、すべての枝で保証される場合だけ残す。
+    fn alternatives(&mut self, ty: Type, alternatives: Vec<Shape>) -> Shape {
+        let result = self.shape(ty);
+        for (path, &node) in &result {
+            if !alternatives.is_empty()
+                && alternatives.iter().all(|shape| {
+                    shape
+                        .get(path)
+                        .is_some_and(|n| self.nonnull_values.contains(n))
+                })
+            {
+                self.nonnull_values.insert(node);
+            }
+        }
+        for shape in alternatives {
+            self.join(&result, shape);
+        }
+        result
     }
     fn place(&mut self, value: &CheckedExpression, region: usize, arena: Option<usize>) -> Place {
         match &value.value {
@@ -208,11 +240,20 @@ impl<'a> Analysis<'a> {
                 self.write(Place::Direct(cell), initial, *location);
                 let n = self.node();
                 self.targets[n].insert(cell);
+                self.nonnull_values.insert(n);
                 BTreeMap::from([(vec![], n)])
             }
             Value::Local(id) => {
                 if contains(value.ty, self.scope) {
-                    self.read(value.ty, Place::Direct(self.locals[id]))
+                    let cell = self.locals[id];
+                    let shape = self.read(value.ty, Place::Direct(cell));
+                    for (path, &node) in &shape {
+                        let field = self.project(cell, path);
+                        if self.nonnull_cells.contains(&field) {
+                            self.nonnull_values.insert(node);
+                        }
+                    }
+                    shape
                 } else {
                     Shape::new()
                 }
@@ -263,27 +304,24 @@ impl<'a> Analysis<'a> {
                 branches,
                 otherwise,
             } => {
-                let result = self.shape(value.ty);
+                let mut alternatives = Vec::new();
                 for (condition, branch) in branches {
                     self.expr(condition, region, arena);
-                    let branch = self.expr(branch, region, arena);
-                    self.join(&result, branch);
+                    alternatives.push(self.expr(branch, region, arena));
                 }
-                let other = self.expr(otherwise, region, arena);
-                self.join(&result, other);
-                result
+                alternatives.push(self.expr(otherwise, region, arena));
+                self.alternatives(value.ty, alternatives)
             }
             Value::Match { target, arms, .. } => {
                 self.expr(target, region, arena);
-                let result = self.shape(value.ty);
+                let mut alternatives = Vec::new();
                 for (pattern, arm) in arms {
                     if let Some(pattern) = pattern {
                         self.expr(pattern, region, arena);
                     }
-                    let arm = self.expr(arm, region, arena);
-                    self.join(&result, arm);
+                    alternatives.push(self.expr(arm, region, arena));
                 }
-                result
+                self.alternatives(value.ty, alternatives)
             }
             Value::Call {
                 arguments,
@@ -402,6 +440,7 @@ impl<'a> Analysis<'a> {
                     self.locals = locals;
                 }
                 CheckedStatement::Binding {
+                    mutable,
                     id,
                     initializer,
                     location,
@@ -411,6 +450,16 @@ impl<'a> Analysis<'a> {
                     let value = self.expr(initializer, region, arena);
                     let cell = self.cell(region, *location, *ty);
                     self.locals.insert(*id, cell);
+                    // fixで保持した値そのものは変化しない。構造体内のポインタも、
+                    // newした実体の可変フィールドとは区別して非null性を保持する。
+                    if !mutable {
+                        for (path, source) in &value {
+                            if self.nonnull_values.contains(source) {
+                                let field = self.project(cell, path);
+                                self.nonnull_cells.insert(field);
+                            }
+                        }
+                    }
                     self.write(Place::Direct(cell), value, *location);
                 }
                 CheckedStatement::Assign {
@@ -451,6 +500,12 @@ impl<'a> Analysis<'a> {
                         self.locals.remove(id);
                     }
                 }
+                CheckedStatement::Objection(body) => {
+                    let saved = self.objection;
+                    self.objection = true;
+                    self.block(body, region, arena);
+                    self.objection = saved;
+                }
                 CheckedStatement::Block(body) => self.block(body, region, arena),
                 CheckedStatement::If {
                     branches,
@@ -458,7 +513,21 @@ impl<'a> Analysis<'a> {
                 } => {
                     for (c, b) in branches {
                         self.expr(c, region, arena);
+                        // if letの本体だけ、束縛したスナップショットの非null性を使う。
+                        let confirmed = if let Value::NonNull(pointer) = &c.value {
+                            if let Value::Local(id) = pointer.value {
+                                Some(self.locals[&id])
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
+                        let added = confirmed.filter(|cell| self.nonnull_cells.insert(*cell));
                         self.block(b, region, arena);
+                        if let Some(cell) = added {
+                            self.nonnull_cells.remove(&cell);
+                        }
                     }
                     if let Some(b) = otherwise {
                         self.block(b, region, arena);
@@ -618,11 +687,13 @@ impl<'a> Analysis<'a> {
     // 候補の収束後に判定し、走査順でまだ見えていない参照先を安全と取り違えない。
     fn validate(&mut self, constraints: &[Constraint]) -> Result<(), Diagnostic> {
         self.validate_calls()?;
-        for constraint in constraints {
+        for (index, constraint) in constraints.iter().enumerate() {
             let Constraint::Store(place, src, location) = constraint else {
                 continue;
             };
-            for destination in self.destinations(place) {
+            let destinations = self.destinations(place);
+            // 借用先への保存は禁止。objectionの有無や候補の組み合わせで解除しない。
+            for &destination in &destinations {
                 if self.borrowed.contains(&self.cells[&destination].region) {
                     let cell = &self.cells[&destination];
                     let mut error = location.error(
@@ -642,6 +713,21 @@ impl<'a> Analysis<'a> {
                     ));
                     return Err(error);
                 }
+            }
+            // 実行される保存について、非nullで全候補対が違反する場合だけを証明済みとする。
+            // 候補の空集合は証明に使わない。集合が変わらない状態で全保存先をまとめて判定する。
+            let proven = self.nonnull_values.contains(src)
+                && !destinations.is_empty()
+                && !self.targets[*src].is_empty()
+                && destinations.iter().all(|dst| {
+                    self.targets[*src].iter().all(|source| {
+                        !self.outlives(self.cells[source].region, self.cells[dst].region)
+                    })
+                });
+            if self.objections.contains(&index) && !proven {
+                continue;
+            }
+            for destination in destinations {
                 for &source in &self.targets[*src] {
                     let source = &self.cells[&source];
                     if !self.outlives(source.region, self.cells[&destination].region) {
@@ -649,7 +735,12 @@ impl<'a> Analysis<'a> {
                             ErrorKind::InvalidSource,
                             crate::diagnostic!(
                                 "arena.store",
-                                "reference may outlive its arena{}",
+                                "{}{}",
+                                if proven {
+                                    "proven lifetime violation: reference outlives its arena"
+                                } else {
+                                    "reference may outlive its arena"
+                                },
                                 self.member_path(destination)
                             ),
                         );

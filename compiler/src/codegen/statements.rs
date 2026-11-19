@@ -275,7 +275,7 @@ pub(super) fn emit_block(
                     writeln!(c, "{indent}}}").unwrap();
                 }
             }
-            CheckedStatement::Block(inner) => {
+            CheckedStatement::Block(inner) | CheckedStatement::Objection(inner) => {
                 writeln!(c, "{indent}{{").unwrap();
                 emit_block(c, inner, depth + 1, next_assignment, context);
                 writeln!(c, "{indent}}}").unwrap();

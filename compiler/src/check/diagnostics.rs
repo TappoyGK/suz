@@ -240,9 +240,9 @@ fn collect_statements(statements: &[CheckedStatement], locations: &mut Vec<Locat
                 collect_statements(body, locations);
             }
             CheckedStatement::Break | CheckedStatement::Continue => {}
-            CheckedStatement::Arena { body: inner, .. } | CheckedStatement::Block(inner) => {
-                collect_statements(inner, locations)
-            }
+            CheckedStatement::Arena { body: inner, .. }
+            | CheckedStatement::Block(inner)
+            | CheckedStatement::Objection(inner) => collect_statements(inner, locations),
             CheckedStatement::Store {
                 target,
                 value,

@@ -141,9 +141,10 @@ fn statement_height(statement: &Statement) -> usize {
                 .max()
                 .unwrap_or(0)
         }
-        Statement::Arena { body, .. } | Statement::Block(body) | Statement::Unsafe(body) => {
-            block_height(body)
-        }
+        Statement::Arena { body, .. }
+        | Statement::Block(body)
+        | Statement::Unsafe(body)
+        | Statement::Objection(body) => block_height(body),
         Statement::Loop { condition, body } => condition
             .as_ref()
             .map_or(0, |v| v.height)

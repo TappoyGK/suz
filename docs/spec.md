@@ -69,7 +69,7 @@ Suzは次のものを含む。
 **[src.keywords]** 次の語はキーワードである。
 
 ```text
-fix var fn fnshape static struct enum error extern unsafe arena new ptr null let
+fix var fn fnshape static struct enum error extern unsafe arena new ptr null let objection
 if ifexpr elif else while loop for rev in break continue return match matchexpr
 as or not len c_bytes c_byte_len log panic fail ignore recover allow expr with
 true false nan inf
@@ -1678,7 +1678,40 @@ fn main() -> u8 {
 
 通常関数・`arena fn`ともに、シグネチャの`ptr int`・`ptr float`は汎用数値型を宣言する。参照先の具体型を推論に使うが、数値の幅の拡大をポインタの変換には適用しない。例えば`ptr i16`を`ptr i32`として渡せない。
 
-`objection`は[#94の段階4](https://github.com/TappoyGK/suz/issues/94)で追加する。
+#### 理由付きの寿命保証
+
+**[arena.objection]** `objection "理由" { 文 ... }` は、ブロック内の保存・返却について、コンパイラが寿命の安全性を証明できない場合に、プログラマーの保証によって拒否を解除する文である。通常のブロックと同じスコープを作り、入れ子にできる。
+
+**[arena.objection-reason]** 理由は二重引用符で囲むリテラルを必須とする。空文字列とUnicodeの空白文字だけの理由は拒否する。ソース上の1行に書き、制御文字を含められない。`\"`は引用符、`\\`はバックスラッシュを表し、それ以外のエスケープは使えない。埋め込みはなく、`${...}`も理由の文字として読む。理由は式ではなく、実行時に評価せず、文字列プールにも登録しない。
+
+**[arena.objection-scope]** 解除できるのは [arena.store] の未証明の寿命違反だけである。保存する参照が必ず非nullで、保存先と参照先の候補の全組が寿命の条件に違反する場合は、証明済みとして拒否を維持する。いずれかの候補集合が空なら、この証明には使わない。構造体はポインタを含む各メンバーについて判定する。診断には証明済みか、違反する可能性があるだけかを示す。
+
+非nullの証明には、`new`、非nullの値で初期化した不変のポインタ変数、`if let`の本体の束縛、非null性を引き継いだ値捕捉を使う。`ifexpr`・`matchexpr`の結果は全分岐で非nullの場合にだけ証明できる。不変の構造体の値では、初期値から各ポインタメンバーの非null性も引き継ぐ。変更可能な変数や、ポインタ経由の可変フィールドの読み出しは、参照先候補にnullが現れないことだけを根拠に非nullとは扱わない。
+
+構文・型・初期化・null参照解除のエラー、通常関数の参照保存・返却禁止、[arena.fn-call] の領域の一致など、明示的な制約は解除しない。指定は字句上のブロック内の操作だけに適用し、呼び出した関数やクロージャの定義には引き継がない。ブロック内の更新は解析から除外せず、後続の候補にも反映する。
+
+**[arena.objection-responsibility]** 理由には、安全だと判断した根拠を書く。コンパイラは文章の正しさを証明しない。実行時検査を追加せず、領域の寿命や回収時点も変えない。プログラマーの保証が誤っていれば、回収済みの実体への参照が起こり得る。objectionを含むプログラムの寿命の安全性は、この保証が正しいことを前提とする。
+
+```suz
+struct Node { next: ptr Node }
+
+fn main() -> u8 {
+    arena {
+        fix ptr outer = new Node { next: null }
+        arena {
+            fix ptr inner = new Node { next: null }
+            var ptr selected = outer
+            selected = inner
+            objection "selectedをinnerへ差し替えたので、保存先も参照先も内側のarenaに属する" {
+                if let p = selected { p.next = inner }
+            }
+        }
+    }
+    return 0
+}
+```
+
+この例では、実行順を区別しない解析にouterとinnerの候補が残るため、objectionなしでは保存を拒否する。`outer.next = inner`のように保存先が必ず外側で、保存する参照が必ず内側の非nullの実体を指す場合は、objectionで囲んでも拒否する。
 
 ## 9. 実行時の検査
 
@@ -2018,6 +2051,7 @@ Statement        ::= ( VariableDeclaration | Assignment | ReturnStatement
                    | WhileStatement | LoopStatement | ForStatement | RevStatement
                    | IfStatement | MatchStatement | Block | AllowStatement | PanicStatement | FailStatement
                    | RecoverStatement | IgnoreStatement | "unsafe" Block | "arena" Block | IfLetStatement
+                   | "objection" OBJECTION_REASON Block
 
 VariableDeclaration ::= ( "fix" | "var" ) "ptr"? IDENT TypeAnnotation?
                         "=" Expression
@@ -2043,6 +2077,8 @@ AllowStatement   ::= "allow" AllowItem ( "," AllowItem )* Block
 AllowClause      ::= "allow" AllowItem ( "," AllowItem )*
 AllowItem        ::= ALLOW_ITEM
 ```
+
+`OBJECTION_REASON`は [arena.objection-reason] の二重引用符付きリテラルである。
 
 `VariableDeclaration` はブロック内の宣言を表す。トップレベルの宣言は A.3 の `TopLevelBinding` で表す。通常の代入先には [assign.target] を適用する。ポインタを通した更新には [arena.ptr-operations] を適用し、参照先が書き込み可能な場所であることを要求する。
 

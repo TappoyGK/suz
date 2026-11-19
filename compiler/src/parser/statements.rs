@@ -250,6 +250,21 @@ impl Parser<'_, '_> {
                 self.if_let()
             }
             Kind::Keyword("if") => self.if_statement(),
+            Kind::Keyword("objection") => {
+                self.cursor += 1;
+                if self.token().kind != Kind::ObjectionReason {
+                    return Err(self.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "arena.objection-reason",
+                            "objection requires a quoted non-empty reason"
+                        ),
+                    ));
+                }
+                self.cursor += 1;
+                let (body, _) = self.block()?;
+                Ok(Statement::Objection(body))
+            }
             Kind::Keyword("arena") => {
                 self.cursor += 1;
                 let (body, end) = self.block()?;

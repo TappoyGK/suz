@@ -542,6 +542,7 @@ pub(crate) enum Statement {
     },
 
     Unsafe(Vec<Statement>),
+    Objection(Vec<Statement>),
     Log {
         level: LogLevel,
         parts: Vec<TemplatePart<Expression>>,

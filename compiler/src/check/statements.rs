@@ -288,6 +288,14 @@ fn check_statement(
             context.bindings.unsafe_block = previous;
             context.output.push(CheckedStatement::Block(checked?));
         }
+        Statement::Objection(inner) => {
+            context.output.push(CheckedStatement::Objection(block(
+                inner,
+                context.bindings,
+                context.next_id,
+                context.loop_depth,
+            )?));
+        }
         Statement::Block(inner) => {
             context.output.push(CheckedStatement::Block(block(
                 inner,
