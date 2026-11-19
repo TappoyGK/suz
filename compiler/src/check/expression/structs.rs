@@ -65,7 +65,7 @@ pub(super) fn check(expr: &Expression, scope: &Scope) -> Result<CheckedExpressio
         ExpressionKind::Field { target, name } => {
             let target = expression(target, None, scope)?;
             let target = if target.ty.pointee().is_some() {
-                crate::check::arena::deref(target, expr.location, scope)?
+                crate::check::arena::deref(target, expr.location)?
             } else {
                 target
             };

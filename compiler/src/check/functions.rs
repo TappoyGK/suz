@@ -307,7 +307,7 @@ pub(super) fn check_function(
     scope: Scope,
     id: usize,
 ) -> Result<(CheckedFunction, Vec<crate::ast::Location>), Diagnostic> {
-    check_with_captures(function, scope, id, &BTreeMap::new(), &Default::default())
+    check_with_captures(function, scope, id, &BTreeMap::new())
 }
 
 // 参照キャプチャーは外側の束縛への別名。未代入の判定は外側のスコープで行い、
@@ -317,13 +317,11 @@ pub(super) fn check_with_captures(
     mut scope: Scope,
     id: usize,
     references: &BTreeMap<String, Binding>,
-    nonnull_captures: &std::collections::BTreeSet<usize>,
 ) -> Result<(CheckedFunction, Vec<crate::ast::Location>), Diagnostic> {
     control::validate_return_positions(&function.statements)?;
     scope.unsafe_block = false;
     scope.arena_depth = usize::from(function.arena);
     scope.arena_used = Default::default();
-    scope.nonnull = nonnull_captures.clone();
     if !function.arena && super::arena::contains(function.result, &scope) {
         return Err(function.location.error(
             ErrorKind::InvalidSource,

@@ -22,18 +22,9 @@ pub(super) fn contains(ty: Type, scope: &Scope) -> bool {
     }
 }
 
-pub(super) fn nonnull(value: &CheckedExpression, scope: &Scope) -> bool {
-    match &value.value {
-        Value::New { .. } => true,
-        Value::Local(id) => scope.nonnull.contains(id),
-        _ => false,
-    }
-}
-
 pub(super) fn deref(
     value: CheckedExpression,
     location: Location,
-    scope: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
     let Some(ty) = value.ty.pointee() else {
         return Err(location.error(
@@ -41,7 +32,7 @@ pub(super) fn deref(
             crate::diagnostic!("arena.ptr-operations", "dereference requires ptr"),
         ));
     };
-    if !nonnull(&value, scope) {
+    if !value.ty.is_nonnull() {
         return Err(location.error(
             ErrorKind::InvalidSource,
             crate::diagnostic!(
@@ -66,9 +57,15 @@ pub(super) fn expression(
             let Some(ty @ Type::Pointer { .. }) = expected else {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
-                    crate::diagnostic!("arena.null", "null requires an expected ptr type"),
+                    crate::diagnostic!("arena.null", "null requires an expected ptr? type"),
                 ));
             };
+            if !ty.is_nullable() {
+                return Err(expr.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("arena.null", "null requires ptr?"),
+                ));
+            }
             Ok(CheckedExpression {
                 ty,
                 value: Value::Null,
@@ -99,11 +96,9 @@ pub(super) fn expression(
                 },
             })
         }
-        ExpressionKind::Deref(inner) => deref(
-            expression::expression(inner, None, scope)?,
-            expr.location,
-            scope,
-        ),
+        ExpressionKind::Deref(inner) => {
+            deref(expression::expression(inner, None, scope)?, expr.location)
+        }
         _ => unreachable!(),
     }
 }
@@ -149,12 +144,12 @@ pub(super) fn statement(
             }
             let id = *context.next_id;
             *context.next_id += 1;
-            let ty = value.ty;
+            let nonnull = value.ty.is_nonnull();
+            let ty = value.ty.with_nullable(false);
             context.bindings.locals.insert(
                 name.clone(),
                 Binding::local(id, ty, false, false, *location),
             );
-            context.bindings.nonnull.insert(id);
             let body = statements::block_with_bindings(
                 body,
                 context.bindings,
@@ -176,18 +171,22 @@ pub(super) fn statement(
                     ty,
                     initializer: Box::new(value),
                 },
-                CheckedStatement::If {
-                    branches: vec![(
-                        CheckedExpression {
-                            ty: Type::Bool,
-                            value: Value::NonNull(Box::new(CheckedExpression {
-                                ty,
-                                value: Value::Local(id),
-                            })),
-                        },
-                        body,
-                    )],
-                    otherwise: Some(otherwise),
+                if nonnull {
+                    CheckedStatement::Block(body)
+                } else {
+                    CheckedStatement::If {
+                        branches: vec![(
+                            CheckedExpression {
+                                ty: Type::Bool,
+                                value: Value::NonNull(Box::new(CheckedExpression {
+                                    ty,
+                                    value: Value::Local(id),
+                                })),
+                            },
+                            body,
+                        )],
+                        otherwise: Some(otherwise),
+                    }
                 },
             ]));
         }
@@ -291,7 +290,6 @@ fn store(
         name.clone(),
         Binding::local(id, target.ty.pointer(), false, false, location),
     );
-    context.bindings.nonnull.insert(id);
     let compound = operator.map(|operator| Expression {
         height: value.height + 2,
         location,
@@ -315,7 +313,6 @@ fn store(
         context.bindings,
     );
     context.bindings.locals.remove(&name);
-    context.bindings.nonnull.remove(&id);
     let mut value = result?;
     let mut body = Vec::new();
     super::control::lower_return_handler(&mut value, &mut body, context.next_id, location);

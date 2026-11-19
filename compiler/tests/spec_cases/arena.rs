@@ -297,8 +297,8 @@ fn arena_initial_and_growth_settings_are_validated_and_exported() {
 fn arena_pointer_updates_cycles_snapshots_and_nested_lifetimes() {
     let result = crate::test_util::compile_and_run_c23(
         r#"
-struct Node { value: i32, next: ptr Node }
-struct Holder { node: ptr Node }
+struct Node { value: i32, next: ptr? Node }
+struct Holder { node: ptr? Node }
 fn main() -> u8 {
     arena {
         fix ptr a = new Node { value: 1, next: null }
@@ -309,7 +309,7 @@ fn main() -> u8 {
             if next.value != 5 { return 1 }
             next.value = 6
         } else { return 2 }
-        var ptr selected: ptr Node = a
+        var ptr selected: ptr? Node = a
         let snapshot = selected {
             selected = b
             snapshot.value = 7
@@ -342,14 +342,14 @@ fn main() -> u8 {
 #[test]
 fn arena_rejects_escaping_references_through_aliases_and_copies() {
     for body in [
-        "var ptr saved: ptr Node = null\narena { saved = new Node { next: null } }",
+        "var ptr saved: ptr? Node = null\narena { saved = new Node { next: null } }",
         "arena { fix ptr outer = new Node { next: null }\narena { fix ptr alias = outer\nalias.next = new Node { next: null } } }",
         "arena { fix ptr outer = new Node { next: null }\narena { fix ptr inner = new Node { next: null }\n*outer = Node { next: inner } } }",
         "arena { var box = Box { node: null }\narena { fix ptr inner = new Node { next: null }\nfix copy = Box { node: inner }\nbox = copy } }",
-        "var ptr saved: ptr Node = null\nfor i in 0..<3 { arena { saved = new Node { next: null } } }",
+        "var ptr saved: ptr? Node = null\nfor i in 0..<3 { arena { saved = new Node { next: null } } }",
     ] {
         let source = format!(
-            "struct Node {{ next: ptr Node }}\nstruct Box {{ node: ptr Node }}\nfn main() -> u8 {{ {body}\nreturn 0 }}"
+            "struct Node {{ next: ptr? Node }}\nstruct Box {{ node: ptr? Node }}\nfn main() -> u8 {{ {body}\nreturn 0 }}"
         );
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert!(
@@ -368,11 +368,11 @@ fn arena_rejects_invalid_pointer_operations_and_function_boundaries() {
         ("arena { fix p = new 1 }", "arena.ptr-decl"),
         ("fix ptr p = 1", "arena.ptr-decl"),
         (
-            "arena { var ptr p = new 1\nfix n = *p }",
+            "arena { var ptr p: ptr? i64 = new 1\nfix n = *p }",
             "arena.null-deref",
         ),
         (
-            "arena { fix ptr p: ptr i32 = null\nfix n = *p }",
+            "arena { fix ptr p: ptr? i32 = null\nfix n = *p }",
             "arena.null-deref",
         ),
         ("arena { fix ptr p = new 1\np = new 2 }", "var.fix-assign"),
@@ -384,7 +384,7 @@ fn arena_rejects_invalid_pointer_operations_and_function_boundaries() {
             "{body}: {error}"
         );
     }
-    let source = "fn make() -> ptr i32 { arena { return new 1 } }\nfn main() -> u8 { return 0 }";
+    let source = "fn make() -> ptr? i32 { arena { return new 1 } }\nfn main() -> u8 { return 0 }";
     let error = suz::compile(source.as_bytes()).unwrap_err();
     assert!(error.to_string().contains("[arena.parameter]"), "{error}");
 }
@@ -397,7 +397,7 @@ fn arena_rewinds_on_return_failure_recovery_and_loop_exits() {
         &source,
         r#"
 error Err { Bad }
-arena fn recursive(n: i64) -> ptr i64 {
+arena fn recursive(n: i64) -> ptr? i64 {
     fix ptr p = new n
     if n == 0 { return p }
     fix ptr q = recursive(n -% 1)
@@ -508,7 +508,7 @@ fn main() -> u8 {
 fn arena_evaluates_initializers_once_and_supports_value_blocks() {
     let result = crate::test_util::compile_and_run_c23(
         r#"
-struct Pair { value: i32, link: ptr i32 }
+struct Pair { value: i32, link: ptr? i32 }
 fn generic(value: int) -> int { arena { fix ptr p = new value
     return *p } }
 fn main() -> u8 {
@@ -544,7 +544,7 @@ fn arena_rejects_pointer_conversions_captures_and_aggregate_operations() {
         "fix n = p + 1",
         "fix n = p == p",
         "fix n = p as i64",
-        "fix ptr q = 1 as ptr i32",
+        "fix ptr q = 1 as ptr? i32",
         "fix n = p[0]",
         "log info `${p}`",
         "fix n = Box { p: p } == Box { p: p }",
@@ -560,17 +560,17 @@ fn arena_rejects_pointer_conversions_captures_and_aggregate_operations() {
         "fix n = new nothing()",
     ] {
         let source = format!(
-            "struct Box {{ p: ptr i32 }}\nfnshape Read() -> i32\nfn invoke(f: fn Read) -> i32 {{ return f() }}\nfn nothing() -> void {{ return }}\nfn main() -> u8 {{ arena {{ fix ptr p = new (1 as i32)\n{statement}\n}}\nreturn 0 }}"
+            "struct Box {{ p: ptr? i32 }}\nfnshape Read() -> i32\nfn invoke(f: fn Read) -> i32 {{ return f() }}\nfn nothing() -> void {{ return }}\nfn main() -> u8 {{ arena {{ fix ptr p = new (1 as i32)\n{statement}\n}}\nreturn 0 }}"
         );
         assert!(suz::compile(source.as_bytes()).is_err(), "{statement}");
     }
     for source in [
         "struct Node { next: Node }\nfn main() -> u8 { return 0 }",
-        "struct Node { next: ptr int }\nfn main() -> u8 { return 0 }",
-        "fn main() -> u8 { fix ptr p: ptr int = null\nreturn 0 }",
-        "fn main() -> u8 { fix ptr p: ptr void = null\nreturn 0 }",
-        "fix Ptr: ptr i32 = null\nfn main() -> u8 { return 0 }",
-        "extern \"x.h\" { fn take(p: ptr i32) -> void }\nfn main() -> u8 { return 0 }",
+        "struct Node { next: ptr? int }\nfn main() -> u8 { return 0 }",
+        "fn main() -> u8 { fix ptr p: ptr? int = null\nreturn 0 }",
+        "fn main() -> u8 { fix ptr p: ptr? void = null\nreturn 0 }",
+        "fix Ptr: ptr? i32 = null\nfn main() -> u8 { return 0 }",
+        "extern \"x.h\" { fn take(p: ptr? i32) -> void }\nfn main() -> u8 { return 0 }",
         "fnshape Read() -> i32\nfn invoke(f: fn Read) -> i32 { return f() }\nfn main() -> u8 { arena { invoke(fn []() -> i32 { fix ptr p = new 1\nreturn 0 }) }\nreturn 0 }",
     ] {
         assert!(suz::compile(source.as_bytes()).is_err(), "{source}");
@@ -579,8 +579,8 @@ fn arena_rejects_pointer_conversions_captures_and_aggregate_operations() {
 
 #[test]
 fn arena_tracks_branch_union_field_loads_and_member_diagnostics() {
-    let source = r#"struct Node { next: ptr Node }
-struct Box { head: ptr Node }
+    let source = r#"struct Node { next: ptr? Node }
+struct Box { head: ptr? Node }
 fn main() -> u8 {
     arena {
         fix ptr outer = new Node { next: null }
@@ -608,8 +608,8 @@ fn main() -> u8 {
 fn arena_pointer_compound_assignment_reads_before_its_rhs() {
     let result = crate::test_util::compile_and_run_c23(
         r#"
-struct First { other: ptr Second }
-struct Second { other: ptr First }
+struct First { other: ptr? Second }
+struct Second { other: ptr? First }
 fn generic(value: int) -> int {
     arena { fix ptr p: ptr int = new value
         return *p }

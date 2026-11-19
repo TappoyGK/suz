@@ -21,6 +21,12 @@ pub(super) fn check(
     if expected.is_none() {
         super::super::function_values::require_context(expr, bindings)?;
     }
+    // 最外側だけの拡大は分岐の外で行い、元の非null型を寿命検査まで保つ。
+    let inferred = operand_type(expr, bindings);
+    let expected = match (inferred, expected) {
+        (Some(from), Some(to)) if from.lifts_to(to) => Some(from),
+        _ => expected,
+    };
     Ok(match &expr.kind {
         ExpressionKind::Match { target, arms } => {
             let target = crate::check::exact::use_value(target, bindings)?;

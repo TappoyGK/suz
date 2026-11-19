@@ -16,7 +16,7 @@ pub(super) struct CallGroup {
 }
 
 impl Analysis<'_> {
-    fn field_type(&self, mut ty: Type, path: &[usize]) -> Type {
+    pub(super) fn field_type(&self, mut ty: Type, path: &[usize]) -> Type {
         for &index in path {
             let Type::Struct(id) = ty else {
                 unreachable!("checked field path")
@@ -108,9 +108,6 @@ impl Analysis<'_> {
             let local = self.cell(storage, parameter.location, ty);
             self.cells.get_mut(&local).unwrap().origin = Origin::Parameter;
             self.locals.insert(id, local);
-            if self.scope.nonnull.contains(&id) && ty.pointee().is_some() {
-                self.nonnull_cells.insert(local);
-            }
             for path in self.paths(ty) {
                 let pointee = self.field_type(ty, &path).pointee().unwrap();
                 let object = self.parameter_object(pointee, region, parameter.location, objects);

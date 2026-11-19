@@ -48,7 +48,6 @@ pub(super) enum Mode {
 pub(super) struct Scope {
     pub arena_depth: usize,
     pub arena_used: Rc<std::cell::Cell<bool>>,
-    pub nonnull: std::collections::BTreeSet<usize>,
     pub unsafe_block: bool,
     // 最も内側のerror腕の成功型。関数の戻り値型とは独立し、クロージャ境界で解除する。
     pub recovery: Option<Type>,
@@ -125,7 +124,11 @@ impl Scope {
 
     pub fn type_name(&self, ty: Type) -> String {
         match ty {
-            Type::Pointer { .. } => format!("ptr {}", self.type_name(ty.pointee().unwrap())),
+            Type::Pointer { .. } => format!(
+                "ptr{} {}",
+                if ty.is_nullable() { "?" } else { "" },
+                self.type_name(ty.pointee().unwrap())
+            ),
             Type::Enum(ty) => self.enums[ty.id].name.clone(),
             Type::Struct(id) => self.structs[id].name.clone(),
             Type::StaticFunction(id) | Type::Function(id) => {
@@ -165,7 +168,6 @@ impl Default for Scope {
         Self {
             arena_depth: 0,
             arena_used: Default::default(),
-            nonnull: Default::default(),
             unsafe_block: false,
             recovery: None,
             loop_depth: 0,

@@ -48,7 +48,6 @@ struct Analysis<'a> {
     objections: BTreeSet<usize>,
     // 候補集合はnullを表さないため、非nullの証明を値と不変の保存場所に別途保持する。
     nonnull_values: BTreeSet<Node>,
-    nonnull_cells: BTreeSet<Node>,
     return_region: Option<usize>,
     recovery: Option<Shape>,
     calls: Vec<boundaries::CallCheck>,
@@ -71,7 +70,6 @@ impl<'a> Analysis<'a> {
             objection: false,
             objections: BTreeSet::new(),
             nonnull_values: BTreeSet::new(),
-            nonnull_cells: BTreeSet::new(),
             return_region: None,
             recovery: None,
             calls: Vec::new(),
@@ -150,7 +148,13 @@ impl<'a> Analysis<'a> {
     fn shape(&mut self, ty: Type) -> Shape {
         self.paths(ty)
             .into_iter()
-            .map(|p| (p, self.node()))
+            .map(|p| {
+                let n = self.node();
+                if self.field_type(ty, &p).is_nonnull() {
+                    self.nonnull_values.insert(n);
+                }
+                (p, n)
+            })
             .collect()
     }
     fn extended(place: Place, path: &[usize]) -> Place {
@@ -194,20 +198,9 @@ impl<'a> Analysis<'a> {
             }
         }
     }
-    // 分岐で候補は合流する。非nullの証明は、すべての枝で保証される場合だけ残す。
+    // 分岐で候補を合流する。非null性は分岐の結果型で決まる。
     fn alternatives(&mut self, ty: Type, alternatives: Vec<Shape>) -> Shape {
         let result = self.shape(ty);
-        for (path, &node) in &result {
-            if !alternatives.is_empty()
-                && alternatives.iter().all(|shape| {
-                    shape
-                        .get(path)
-                        .is_some_and(|n| self.nonnull_values.contains(n))
-                })
-            {
-                self.nonnull_values.insert(node);
-            }
-        }
         for shape in alternatives {
             self.join(&result, shape);
         }
@@ -230,6 +223,8 @@ impl<'a> Analysis<'a> {
     fn expr(&mut self, value: &CheckedExpression, region: usize, arena: Option<usize>) -> Shape {
         match &value.value {
             Value::Null => self.shape(value.ty),
+            // 最外側の暗黙変換は実体と、保存直前の非nullの証明を変えない。
+            Value::Cast(inner) if value.ty.pointee().is_some() => self.expr(inner, region, arena),
             Value::New {
                 value: initial,
                 location,
@@ -246,14 +241,7 @@ impl<'a> Analysis<'a> {
             Value::Local(id) => {
                 if contains(value.ty, self.scope) {
                     let cell = self.locals[id];
-                    let shape = self.read(value.ty, Place::Direct(cell));
-                    for (path, &node) in &shape {
-                        let field = self.project(cell, path);
-                        if self.nonnull_cells.contains(&field) {
-                            self.nonnull_values.insert(node);
-                        }
-                    }
-                    shape
+                    self.read(value.ty, Place::Direct(cell))
                 } else {
                     Shape::new()
                 }
@@ -277,7 +265,9 @@ impl<'a> Analysis<'a> {
                         result.insert(path, n);
                     }
                 }
-                result
+                let typed = self.shape(value.ty);
+                self.join(&typed, result);
+                typed
             }
             Value::With { target, fields } => {
                 let mut result = self.expr(target, region, arena);
@@ -288,7 +278,9 @@ impl<'a> Analysis<'a> {
                         result.insert(path, n);
                     }
                 }
-                result
+                let typed = self.shape(value.ty);
+                self.join(&typed, result);
+                typed
             }
             Value::Block {
                 statements, value, ..
@@ -440,7 +432,6 @@ impl<'a> Analysis<'a> {
                     self.locals = locals;
                 }
                 CheckedStatement::Binding {
-                    mutable,
                     id,
                     initializer,
                     location,
@@ -450,16 +441,6 @@ impl<'a> Analysis<'a> {
                     let value = self.expr(initializer, region, arena);
                     let cell = self.cell(region, *location, *ty);
                     self.locals.insert(*id, cell);
-                    // fixで保持した値そのものは変化しない。構造体内のポインタも、
-                    // newした実体の可変フィールドとは区別して非null性を保持する。
-                    if !mutable {
-                        for (path, source) in &value {
-                            if self.nonnull_values.contains(source) {
-                                let field = self.project(cell, path);
-                                self.nonnull_cells.insert(field);
-                            }
-                        }
-                    }
                     self.write(Place::Direct(cell), value, *location);
                 }
                 CheckedStatement::Assign {
@@ -513,21 +494,7 @@ impl<'a> Analysis<'a> {
                 } => {
                     for (c, b) in branches {
                         self.expr(c, region, arena);
-                        // letの本体だけ、束縛したスナップショットの非null性を使う。
-                        let confirmed = if let Value::NonNull(pointer) = &c.value {
-                            if let Value::Local(id) = pointer.value {
-                                Some(self.locals[&id])
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        };
-                        let added = confirmed.filter(|cell| self.nonnull_cells.insert(*cell));
                         self.block(b, region, arena);
-                        if let Some(cell) = added {
-                            self.nonnull_cells.remove(&cell);
-                        }
                     }
                     if let Some(b) = otherwise {
                         self.block(b, region, arena);

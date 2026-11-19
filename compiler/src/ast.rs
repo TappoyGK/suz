@@ -2,7 +2,9 @@
 //!
 //! 利用元: [`crate::parser`]、[`crate::check`]。
 
+mod pointer_shape;
 pub(crate) mod visit;
+use pointer_shape::PointerShape;
 
 use crate::{Diagnostic, ErrorKind};
 
@@ -159,7 +161,10 @@ pub(crate) const NUMERIC_COMBINATIONS: usize = 18;
 /// Structの番号は構造体宣言、Functionの番号は共通化した関数値の型を参照する。汎用の型はC生成までに具体化する。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Type {
-    Pointer { leaf: PointerLeaf, depth: usize },
+    Pointer {
+        leaf: PointerLeaf,
+        shape: PointerShape,
+    },
     CPointer,
     CInteger(CIntegerType),
     GenericInt,
@@ -179,7 +184,7 @@ pub(crate) enum Type {
     Text,
 }
 
-/// ポインタの末端の値型。間接参照の段数を別に持ち、型をヒープへ確保しない。
+/// ポインタの末端の値型。各段のnull許容性はPointerShapeで別に持つ。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PointerLeaf {
     CPointer,
@@ -203,10 +208,10 @@ pub(crate) enum PointerLeaf {
 impl Type {
     pub fn pointer(self) -> Self {
         let leaf = match self {
-            Self::Pointer { leaf, depth } => {
+            Self::Pointer { leaf, shape } => {
                 return Self::Pointer {
                     leaf,
-                    depth: depth + 1,
+                    shape: shape.push(),
                 };
             }
             Self::CPointer => PointerLeaf::CPointer,
@@ -227,16 +232,38 @@ impl Type {
             Self::Symbol => PointerLeaf::Symbol,
             Self::Text => PointerLeaf::Text,
         };
-        Self::Pointer { leaf, depth: 1 }
+        Self::Pointer {
+            leaf,
+            shape: PointerShape::new(),
+        }
+    }
+    pub fn is_nullable(self) -> bool {
+        matches!(self, Self::Pointer { shape, .. } if shape.is_nullable())
+    }
+    pub fn is_nonnull(self) -> bool {
+        matches!(self, Self::Pointer { .. }) && !self.is_nullable()
+    }
+    pub fn with_nullable(self, enabled: bool) -> Self {
+        match self {
+            Self::Pointer { leaf, shape } => Self::Pointer {
+                leaf,
+                shape: shape.with_nullable(enabled),
+            },
+            _ => self,
+        }
+    }
+    /// 外側のnull許容性だけを広げる。参照先の型は変更しない。
+    pub fn lifts_to(self, to: Self) -> bool {
+        self.is_nonnull() && to.is_nullable() && self.pointee() == to.pointee()
     }
     pub fn pointee(self) -> Option<Self> {
-        let Self::Pointer { leaf, depth } = self else {
+        let Self::Pointer { leaf, shape } = self else {
             return None;
         };
-        if depth > 1 {
+        if shape.depth() > 1 {
             return Some(Self::Pointer {
                 leaf,
-                depth: depth - 1,
+                shape: shape.pop(),
             });
         }
         Some(match leaf {
@@ -347,7 +374,13 @@ impl Type {
     }
     pub fn name(self) -> &'static str {
         match self {
-            Self::Pointer { .. } => "ptr",
+            Self::Pointer { .. } => {
+                if self.is_nullable() {
+                    "ptr?"
+                } else {
+                    "ptr"
+                }
+            }
             Self::CPointer => "*const void",
             Self::CInteger(ty) => ty.name(),
             Self::Exact => "exact integer",

@@ -452,9 +452,6 @@ fn check_binding(
     *context.next_id += 1;
     context.declared.push(name.clone());
     let ty = initializer.ty;
-    if !*mutable && super::arena::nonnull(&initializer, context.bindings) {
-        context.bindings.nonnull.insert(id);
-    }
     context.bindings.locals.insert(
         name.clone(),
         Binding::local(id, ty, *mutable, false, *location),
@@ -559,7 +556,6 @@ fn condition_value(
 pub(super) fn finish_scope(bindings: &mut Scope, declared: Vec<String>) -> Result<(), Diagnostic> {
     for name in declared {
         let binding = bindings.locals.remove(&name).unwrap();
-        bindings.nonnull.remove(&binding.id);
         if binding.mutable && !binding.assigned.get() {
             let error = binding.location.error(
                 ErrorKind::InvalidSource,

@@ -168,7 +168,9 @@ pub(super) fn resolve(
 // ptrで包まれた関数型にも、宣言番号から正規化後の番号への置き換えを適用する。
 fn remap(ty: Type, ids: &[Option<usize>]) -> Type {
     match ty {
-        Type::Pointer { .. } => remap(ty.pointee().unwrap(), ids).pointer(),
+        Type::Pointer { .. } => remap(ty.pointee().unwrap(), ids)
+            .pointer()
+            .with_nullable(ty.is_nullable()),
         Type::StaticFunction(id) => Type::StaticFunction(ids[id].unwrap()),
         Type::Function(id) => Type::Function(ids[id].unwrap()),
         _ => ty,

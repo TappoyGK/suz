@@ -277,7 +277,7 @@ fix bits: u8 = ~0     // 255
 
 **[type.context]** 構造体リテラルの各初期値には、そのフィールドの型を要求する。`for` と `rev` の両端は、一方の型が決まっていれば、もう一方にもその型を要求する。`match` と `matchexpr` のパターンには、対象の型を要求する。`symbol`・`text` のパターンには [text.match-view] を適用する。
 
-**[type.branch-inference]** `ifexpr` と `matchexpr` は、外側から要求される型がない場合、型の決まった分岐を [conv.join] と [text.join] に従ってそろえ、その型を未確定の数値リテラルにも要求する。そろう型がなければコンパイルエラーである。たとえば、`end` が `u8` なら、`ifexpr ready { end } else { 0 }` の `0` と結果の型は `u8` である。
+**[type.branch-inference]** `ifexpr` と `matchexpr` は、外側から要求される型がない場合、型の決まった分岐を [conv.join]・[text.join]・[arena.ptr-join] に従ってそろえ、その型を未確定の数値リテラルやnullの分岐にも要求する。そろう型がなければコンパイルエラーである。たとえば、`end` が `u8` なら、`ifexpr ready { end } else { 0 }` の `0` と結果の型は `u8` である。
 
 **[type.literal-default]** 数値リテラルは、要求される型、同じ型を要求する演算の相手、範囲のもう一方の端、分岐などの型情報を使って型を決める。それでも型が決まらない場合、整数リテラルは `i64`、浮動小数点リテラルは `f64` にする。既定型を決めるのは、これらの型情報を適用したあとである。
 
@@ -292,7 +292,7 @@ fix n: i32 = 1
 fix d = n as f64 + 0.5
 ```
 
-**[type.inference-order]** 型推論の結果は、分岐やオペランドの記述順によって変わらない。数値の型をそろえる場合は [conv.join]、`symbol` と `text` には [text.join] を適用する。同じ型が必要な演算には、その演算固有の制約を適用する。
+**[type.inference-order]** 型推論の結果は、分岐やオペランドの記述順によって変わらない。数値の型をそろえる場合は [conv.join]、`symbol` と `text` には [text.join]、ポインタの分岐には [arena.ptr-join] を適用する。同じ型が必要な演算には、その演算固有の制約を適用する。
 
 **[conv.widen]** 変換元の型で表せるすべての値を、値を変えずに変換先の型で表せる変換を、拡大変換と呼ぶ。数値型では、次の拡大変換を暗黙に行える。
 
@@ -1585,20 +1585,30 @@ fn main() -> u8 {
 
 **[arena.new-order]** 初期値を1回評価し、その後で整列・サイズ・容量を検査して確保し、評価済みの値を格納する。初期値の評価中の確保が先に完了する。失敗時は [rt.arena-allocation] に従う。
 
-**[arena.ptr-type]** ポインタ型は`ptr T`と書く。`ptr ptr T`も認める。コピーは同じ実体を指すポインタ値のコピーであり、実体を複製しない。
+**[arena.ptr-type]** `ptr T`は必ず実体を指す非nullのポインタ型、`ptr? T`は実体またはnullを指すポインタ型である。仮引数、戻り値、構造体のフィールド、ローカル変数で使い分ける。多重ポインタの段数は型推論によるものも含めて最大256とする。各段で指定し、`ptr ptr? T`は「null許容ポインタの実体を指す非nullのポインタ」を表す。コピーは同じ実体を指すポインタ値のコピーであり、実体を複製しない。
 
-**[arena.ptr-decl]** ローカルのポインタ変数は`fix ptr 名前[: ptr T] = 式`または`var ptr 名前[: ptr T] = 式`と宣言する。`ptr`のない宣言でポインタを保持すること、`ptr`を付けた宣言で別の型の値を保持することはできない。必ず初期化する。fixはポインタの再代入を禁じ、varは許す。どちらも参照先の更新は禁じない。
+**[arena.ptr-decl]** ローカルのポインタ変数は`fix ptr 名前[: 型] = 式`または`var ptr 名前[: 型] = 式`と宣言する。型には`ptr T`または`ptr? T`を指定する。`ptr`のない宣言でポインタを保持すること、`ptr`を付けた宣言で別の型の値を保持することはできない。必ず初期化する。fixはポインタの再代入を禁じ、varは許す。どちらも参照先の更新は禁じない。型注釈がなければ初期値の型をそのまま使う。`var ptr p = new 値`は非null型となり、後からnullを代入できない。nullを代入する変数には`ptr? T`を明記する。
+
+**[arena.ptr-conversion]** 参照先の型Tが完全に同じ場合に限り、`ptr T`から`ptr? T`への暗黙変換を認める。初期化・代入・実引数・戻り値に同じ規則を適用する。実体のコピーや実行時検査は行わず、寿命も変えない。逆方向の暗黙変換と`as`による変換は認めず、`let`で非nullを確認する。
+
+変換できるのは最外側のnull許容性だけである。`ptr ptr T`から`ptr? ptr T`へは変換できるが、`ptr ptr T`から`ptr ptr? T`へは変換できない。内側の型を変えると、別名を通してnullを書き込み、非nullの保証を壊せるためである。関数値の型や構造体のメンバー型をこの変換によって変更することも認めない。
+
+**[arena.ptr-join]** 外側から要求される型がない`ifexpr`・`matchexpr`では、参照先の型Tが完全に同じポインタの分岐をそろえる。すべて`ptr T`なら結果も`ptr T`とし、`ptr? T`またはnullの分岐を含む場合は`ptr? T`とする。nullの分岐には、その型を要求する。分岐の記述順には依存しない。すべての分岐がnullで、外側からも型が要求されなければ、Tを決められないためコンパイルエラーである。
+
+型をそろえるのは最外側だけであり、内側のnull許容性や数値の幅を変えない。`ptr ptr T`と`ptr ptr? T`の分岐はそろわない。外側から型が要求される場合は、各分岐をその型に照合し、認められる暗黙変換だけを適用する。要求型が`ptr T`なら、nullや`ptr? T`の分岐を拒否する。
+
+例えば`a`が`ptr Node`、`b.next`が`ptr? Node`なら、`ifexpr ready { a } else { null }`と`ifexpr ready { a } else { b.next }`は、ともに`ptr? Node`となる。
 
 **[arena.ptr-operations]** `*p`は参照先の読み出し、`*p = 値`と`*p += 値`などは更新である。構造体へのポインタの`p.field`は`(*p).field`と同じ意味とする。代入先を1回評価してから右辺を評価する。複合代入では右辺より先に更新前の値を読む。ポインタの算術・比較・添字・型変換・文字列への埋め込みは認めない。ポインタを含む構造体の比較・文字列変換も認めない。
 
-**[arena.null]** `null`は実体を指さないポインタである。要求されるポインタ型が分かる位置だけに書ける。`var ptr p: ptr Node = null`は有効で、`var ptr p = null`は型が決まらないためエラーとする。nullは参照先の領域や寿命を持たない。
+**[arena.null]** `null`は実体を指さない値である。要求される`ptr? T`の型が分かる位置だけに書ける。[arena.ptr-join]で他の分岐から決まる型も、この要求型に含む。`var ptr p: ptr? Node = null`は有効で、`var ptr p: ptr Node = null`は型違反、`var ptr p = null`は型が決まらないためエラーとする。nullは参照先の領域や寿命を持たない。
 
-**[arena.let]** `let 名前 = 式 { 文 ... } else { 文 ... }`はポインタ式を1回評価し、非nullならその参照を本体内だけ有効な不変の名前へ束縛する。nullならelse側を実行する。elseは省略できる。束縛したポインタは元の変数やフィールドの変更後も取得時の参照を保持する。参照先の更新は許す。名前には通常の命名規則とシャドーイング禁止を適用する。
+**[arena.let]** `let 名前 = 式 { 文 ... } else { 文 ... }`は`ptr? T`の式を1回評価し、非nullなら取得した参照を`ptr T`型の不変の名前へ束縛する。束縛は本体内だけで有効で、else側からは使えない。nullならelse側を実行する。elseは省略できる。`ptr T`の式も受け付け、その場合は常に本体を実行する。束縛したポインタは元の変数やフィールドの変更後も取得時の参照を保持する。参照先の更新は許す。名前には通常の命名規則とシャドーイング禁止を適用する。
 
-**[arena.null-deref]** nullの可能性が残るポインタの参照解除・フィールドアクセスは禁止する。`new`、`let`の束縛、および既に非nullと保証された値で初期化した`fix ptr`は非nullとする。値捕捉したポインタには、捕捉時に保証された非null性を引き継ぐ。通常の仮引数と参照捕捉にはこの保証を与えない。変更可能な変数やフィールドは、以前の初期値だけを根拠に非nullとは扱わない。
+**[arena.null-deref]** 参照解除・フィールドアクセスは`ptr T`にだけ認める。`ptr? T`は、初期値がnewであっても、直接参照できない。非null性は型で決まり、変更可能な変数、仮引数、フィールド、値捕捉・参照捕捉に同じ規則を適用する。null許容の値を使う場合は [arena.let] で確認する。
 
 ```suz
-struct Node { value: i32, next: ptr Node }
+struct Node { value: i32, next: ptr? Node }
 fn main() -> u8 {
     arena {
         fix ptr a = new Node { value: 1, next: null }
@@ -1610,7 +1620,13 @@ fn main() -> u8 {
 }
 ```
 
-**[arena.recursive-struct]** ポインタを介する自己参照・相互参照の構造体を認める。構造体の値を直接含む循環は、実体のサイズが決まらないため禁止する。
+**[arena.recursive-struct]** ポインタを介する自己参照・相互参照の構造体を認める。ただし、最初の実体を作るために既存の同じ型の実体が必ず必要となる循環は、型の宣言時に拒否する。構造体の値を直接含む循環も、[struct.recursion]に従って拒否する。
+
+検査では、各構造体から、初期化に実体が必須となるフィールドの構造体型への依存を調べる。構造体を値として持つフィールドと、非nullの`ptr`だけをたどって構造体に達するフィールドは必須の依存である。途中に`ptr?`があれば、そこでnullを初期値にできるため、その先への必須の依存は作らない。この必須の依存に循環があればコンパイルエラーとし、診断には循環をなすフィールドを示す。別のフィールドに`ptr?`があっても、必須の依存の循環が残る場合は拒否する。
+
+例えば`struct Node { next: ptr Node }`、および`struct Alpha { b: ptr Beta }`と`struct Beta { a: ptr Alpha }`の組は拒否する。後者の`Beta.a`を`ptr? Alpha`にすれば受理し、Bをnullで初期化してからAを作れる。`Alpha.b`が値型の`Beta`、`Beta.a`が`ptr Alpha`の場合も、必須の依存が循環するため拒否する。
+
+循環を作るための未初期化や自己参照初期化は設けない。null許容の箇所を初期化して実体を確保し、その後に参照をつなぐ。
 
 **[arena.exit]** 通常終了、`return`、`fail`、`recover`、`break`、`continue`でarenaを抜けると、そのarenaの開始時の使用位置へ戻す。複数のarenaを抜ける場合は内側から回収する。領域を抜けない移動では回収しない。returnやrecoverで渡す値は回収前に評価する。
 
@@ -1628,7 +1644,7 @@ fn main() -> u8 {
 
 #### 関数への受け渡し
 
-**[arena.parameter]** 通常関数は、引数の`ptr T`や構造体内の参照を、呼び出し中だけ借りる。参照先の読み出し、参照を含まない値への更新、ローカル変数への参照のコピー、通常関数への転送を許す。ポインタを含む戻り値型は禁止する。`null`を返す場合も例外にはしない。トップレベル変数へのポインタまたはそれを含む値の保持も禁止する。
+**[arena.parameter]** 通常関数は、引数の`ptr T`・`ptr? T`や構造体内の参照を、呼び出し中だけ借りる。参照先の読み出し、参照を含まない値への更新、ローカル変数への参照のコピー、通常関数への転送を許す。ポインタを含む戻り値型は禁止する。`null`を返す場合も例外にはしない。トップレベル変数へのポインタまたはそれを含む値の保持も禁止する。
 
 **[arena.parameter-regions]** 各引数に含まれる参照先は未知の領域に属するものとして扱い、引数同士が同じ領域にあるとは仮定しない。引数から参照をたどって到達する実体にも借用の制約を適用する。借りた実体へポインタを保存することは禁止する。`null`の代入、構造体全体の上書き、別名を経由する更新も同じである。参照を含まないメンバーの更新は許す。
 
@@ -1638,7 +1654,7 @@ fn main() -> u8 {
 
 ```suz
 fn increment(p: ptr i32) -> void {
-    let value = p { *value += 1 }
+    *p += 1
 }
 
 fn main() -> u8 {
@@ -1662,9 +1678,9 @@ fn main() -> u8 {
 **[arena.fn-value]** `arena fn`は関数値にもextern宣言にもできない。
 
 ```suz
-struct Node { value: i32, next: ptr Node }
+struct Node { value: i32, next: ptr? Node }
 
-arena fn prepend(value: i32, tail: ptr Node) -> ptr Node {
+arena fn prepend(value: i32, tail: ptr? Node) -> ptr Node {
     return new Node { value: value, next: tail }
 }
 
@@ -1672,7 +1688,7 @@ fn main() -> u8 {
     arena {
         fix ptr first = prepend(1, null)
         fix ptr second = prepend(2, first)
-        let p = second { if p.value != 2 { return 1 } }
+        if second.value != 2 { return 1 }
     }
     return 0
 }
@@ -1688,14 +1704,14 @@ fn main() -> u8 {
 
 **[arena.objection-scope]** 解除できるのは [arena.store] の未証明の寿命違反だけである。保存する参照が必ず非nullで、保存先と参照先の候補の全組が寿命の条件に違反する場合は、証明済みとして拒否を維持する。いずれかの候補集合が空なら、この証明には使わない。構造体はポインタを含む各メンバーについて判定する。診断には証明済みか、違反する可能性があるだけかを示す。
 
-非nullの証明には、`new`、非nullの値で初期化した不変のポインタ変数、`let`の本体の束縛、非null性を引き継いだ値捕捉を使う。`ifexpr`・`matchexpr`の結果は全分岐で非nullの場合にだけ証明できる。不変の構造体の値では、初期値から各ポインタメンバーの非null性も引き継ぐ。変更可能な変数や、ポインタ経由の可変フィールドの読み出しは、参照先候補にnullが現れないことだけを根拠に非nullとは扱わない。
+非nullの証明には、保存する値の型が`ptr T`であることを使う。保存先に合わせた最外側の`ptr? T`への暗黙変換では、変換前の型を使う。構造体内の参照はメンバーの型に従う。`ptr? T`の変数やフィールドは、初期値や参照先候補だけを根拠に非nullとは扱わない。
 
 構文・型・初期化・null参照解除のエラー、通常関数の参照保存・返却禁止、[arena.fn-call] の領域の一致など、明示的な制約は解除しない。指定は字句上のブロック内の操作だけに適用し、呼び出した関数やクロージャの定義には引き継がない。ブロック内の更新は解析から除外せず、後続の候補にも反映する。
 
 **[arena.objection-responsibility]** 理由には、安全だと判断した根拠を書く。コンパイラは文章の正しさを証明しない。実行時検査を追加せず、領域の寿命や回収時点も変えない。プログラマーの保証が誤っていれば、回収済みの実体への参照が起こり得る。objectionを含むプログラムの寿命の安全性は、この保証が正しいことを前提とする。
 
 ```suz
-struct Node { next: ptr Node }
+struct Node { next: ptr? Node }
 
 fn main() -> u8 {
     arena {
@@ -1705,7 +1721,7 @@ fn main() -> u8 {
             var ptr selected = outer
             selected = inner
             objection [selectedをinnerへ差し替えたので、保存先も参照先も内側のarenaに属する] {
-                let p = selected { p.next = inner }
+                selected.next = inner
             }
         }
     }
@@ -2032,7 +2048,7 @@ ErrorSpecItem    ::= IDENT ( "." IDENT )?
 Variants         ::= IDENT ( "," NL* IDENT )* ","? NL*
 
 Type             ::= IntegerType | "len_t" | "f32" | "f64" | "bool" | "char" | "symbol" | "text" | "void"
-                   | "ptr" Type | "int" | "float" | IDENT | "static" "fn" IDENT | "fn" IDENT | CIntegerType | "*" "const" "void"
+                   | "ptr" "?"? Type | "int" | "float" | IDENT | "static" "fn" IDENT | "fn" IDENT | CIntegerType | "*" "const" "void"
 CIntegerType     ::= "_int" | "_uint" | "_long" | "_ulong" | "_size_t" | "_char"
 IntegerType      ::= "i8" | "i16" | "i32" | "i64"
                    | "u8" | "u16" | "u32" | "u64"

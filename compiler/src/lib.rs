@@ -310,7 +310,9 @@ mod tests {
     #[test]
     #[cfg(target_pointer_width = "64")]
     fn statement_storage_stays_within_budget() {
-        // メモリ効率を維持するため、全ての文の格納サイズが再び肥大化する変更を検出する。
+        // ポインタの情報でTypeが大きくなると、ポインタを使わない式や文も肥大化する。
+        // 大きな入力の検査速度を落とさないよう、型と文の格納サイズを制限する。
+        assert!(std::mem::size_of::<ast::Type>() <= 48);
         assert!(std::mem::size_of::<ast::Statement>() <= 200);
         assert!(std::mem::size_of::<check::ir::CheckedStatement>() <= 208);
     }
