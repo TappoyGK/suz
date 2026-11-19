@@ -25,7 +25,7 @@ void suz_env_log(suz_log_level level, const char *text, size_t size) {
 _Noreturn void suz_env_panic(void) {
     assert(panic_expected);
     /* 診断用に確保せず、失敗前の使用位置と実体を保つ。 */
-    assert(allocations == expected_allocations && suz_arena.used == expected_used);
+    assert(allocations == expected_allocations && suz_arena_position.used == expected_used);
     if (sentinel) assert(*sentinel == 42);
     _Exit(101);
 }
@@ -48,7 +48,7 @@ static void growth(uint64_t limit) {
         assert(large[0] == 7 && large[63] == 7 && *first == 42);
         assert(suz_arena_alloc(32, 1, "arena.suz", 5, 1) == small);
         suz_arena_restore(&outer);
-        assert(*first == 42 && suz_arena.used == 1);
+        assert(*first == 42 && suz_arena_position.used == 1);
     }
     /* 大きな要求で小さい未使用ブロックを飛び越しても、小さい方を後で使える。 */
     suz_arena_mark empty = {NULL, 0};
@@ -69,7 +69,7 @@ int main(int argc, char **argv) {
         assert(allocations == 0 && suz_arena.total == 0);
         suz_arena_mark empty = suz_arena_save();
         void *first = suz_arena_alloc(48, 1, "arena.suz", 2, 1);
-        assert(allocations == 1 && suz_arena.capacity == 48);
+        assert(allocations == 1 && suz_arena_position.capacity == 48);
         suz_arena_restore(&empty);
         assert(suz_arena_alloc(48, 1, "arena.suz", 3, 1) == first);
         assert(allocations == 1);
@@ -87,7 +87,7 @@ int main(int argc, char **argv) {
     size_t capacity = strcmp(mode, "capacity") == 0 ? 9 : 128;
     bool expanding = strcmp(mode, "grow-failure") == 0 || strcmp(mode, "limit") == 0;
     suz_arena_init(capacity, expanding ? 64 : 0, strcmp(mode, "limit") == 0 ? 140 : 0, "arena.suz", 4, 2);
-    assert(allocations == 1 && suz_arena.used == 0);
+    assert(allocations == 1 && suz_arena_position.used == 0);
     unsigned char *first = suz_arena_alloc(1, 1, "arena.suz", 6, 3);
     *first = 42;
     sentinel = first;
@@ -117,16 +117,16 @@ int main(int argc, char **argv) {
             suz_arena_mark nested = suz_arena_save();
             unsigned char *tail = suz_arena_alloc(capacity - nested.used, 1, "arena.suz", 11, 5);
             memset(tail, 7, capacity - nested.used);
-            assert(suz_arena.used == capacity);
+            assert(suz_arena_position.used == capacity);
             suz_arena_restore(&nested);
             assert(*value == 3.5L && *first == 42);
             suz_arena_restore(&outer);
-            assert(suz_arena.used == outer.used && allocations == 1);
+            assert(suz_arena_position.used == outer.used && allocations == 1);
         }
-        suz_arena_mark start = {suz_arena.current, 0};
+        suz_arena_mark start = {suz_arena_position.current, 0};
         suz_arena_restore(&start);
         assert(suz_arena_alloc(capacity, 1, "arena.suz", 15, 5) == first);
-        assert(suz_arena.used == capacity && allocations == 1);
+        assert(suz_arena_position.used == capacity && allocations == 1);
         return 0;
     }
     return 99;

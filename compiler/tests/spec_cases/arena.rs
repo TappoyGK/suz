@@ -108,7 +108,7 @@ fn arena_capacity_cli_and_export_preserve_setting_without_allocating() {
 {generated}
 #undef main
 #include "suz_arena.h"
-int main(void) {{ suz_arena_init(SUZ_ARENA_INITIAL, SUZ_ARENA_GROW, SUZ_ARENA_LIMIT, "test", 1, 1); return suz_arena.capacity == 2048 ? 0 : 1; }}
+int main(void) {{ suz_arena_init(SUZ_ARENA_INITIAL, SUZ_ARENA_GROW, SUZ_ARENA_LIMIT, "test", 1, 1); return suz_arena_position.capacity == 2048 ? 0 : 1; }}
 "#
             );
             fs::write(&program, harness).unwrap();
@@ -397,6 +397,13 @@ fn arena_rewinds_on_return_failure_recovery_and_loop_exits() {
         &source,
         r#"
 error Err { Bad }
+arena fn recursive(n: i64) -> ptr i64 {
+    fix ptr p = new n
+    if n == 0 { return p }
+    fix ptr q = recursive(n -% 1)
+    if *p != n { panic `recursive allocation overwrote its caller` }
+    return q
+}
 fn returned() -> i64 {
     arena { fix ptr p = new (13 as i64)
         arena { fix ptr q = new (17 as i64)
@@ -425,6 +432,12 @@ fn main() -> u8 {
     arena {
         fix ptr sentinel = new (99 as i64)
         for i in 0..<1000 {
+            // 呼出し先の拡張後も、呼出し元は同じ確保位置を使う。
+            arena {
+                fix ptr p = recursive(2)
+                fix ptr q = new (71 as i64)
+                let value = p { if *value != 0 { return 6 } }
+            }
             if returned() != 30 { return 1 }
             if early() != 23 { return 2 }
             fix result = forwarded() or error {
@@ -473,18 +486,21 @@ fn main() -> u8 {
             "64",
         ],
     ] {
-        let result = Command::new(env!("CARGO_BIN_EXE_suz"))
-            .arg("run")
-            .arg(&source)
-            .args(&flags)
-            .output()
-            .unwrap();
-        assert_eq!(
-            result.status.code(),
-            Some(0),
-            "{flags:?}: {}",
-            String::from_utf8_lossy(&result.stderr)
-        );
+        for optimization in ["-O0", "-O2"] {
+            let result = Command::new(env!("CARGO_BIN_EXE_suz"))
+                .arg("run")
+                .arg(&source)
+                .args(&flags)
+                .arg(optimization)
+                .output()
+                .unwrap();
+            assert_eq!(
+                result.status.code(),
+                Some(0),
+                "{flags:?} {optimization}: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+        }
     }
 }
 

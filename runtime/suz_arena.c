@@ -28,23 +28,16 @@ static suz_arena_chunk *allocate(uint64_t capacity, const char *source, size_t l
     return chunk;
 }
 
-static void select_chunk(suz_arena_chunk *chunk) {
-    suz_arena.current = chunk;
-    suz_arena.bytes = chunk->bytes;
-    suz_arena.capacity = chunk->capacity;
-    suz_arena.used = 0;
-}
-
-void suz_arena_init(uint64_t initial, uint64_t grow, uint64_t limit, const char *source, size_t line, size_t column) {
+suz_arena_cursor suz_arena_storage_init(uint64_t initial, uint64_t grow, uint64_t limit, const char *source, size_t line, size_t column) {
     assert(suz_arena.first == NULL);
     if (limit != 0 && initial > limit) initial = limit;
     suz_arena.grow = grow;
     suz_arena.limit = limit;
-    if (initial == 0) return;
+    if (initial == 0) return (suz_arena_cursor){0};
     suz_arena_chunk *chunk = allocate(initial, source, line, column);
     suz_arena.first = chunk;
     suz_arena.total = initial;
-    select_chunk(chunk);
+    return (suz_arena_cursor){chunk->bytes, chunk->capacity, 0, chunk};
 }
 
 _Noreturn void suz_arena_capacity_exceeded(size_t size, const char *source, size_t line, size_t column) {
@@ -62,9 +55,9 @@ _Noreturn void suz_arena_capacity_exceeded(size_t size, const char *source, size
     suz_panic_end();
 }
 
-void *suz_arena_expand(size_t size, const char *source, size_t line, size_t column) {
+suz_arena_cursor suz_arena_expand(suz_arena_chunk *current, size_t size, const char *source, size_t line, size_t column) {
     if (size > SIZE_MAX - offsetof(suz_arena_chunk, bytes)) suz_arena_overflow(source, line, column);
-    suz_arena_chunk **unused = suz_arena.current ? &suz_arena.current->next : &suz_arena.first;
+    suz_arena_chunk **unused = current ? &current->next : &suz_arena.first;
     suz_arena_chunk **candidate = unused;
     while (*candidate && (*candidate)->capacity < size) candidate = &(*candidate)->next;
     suz_arena_chunk *chunk = *candidate;
@@ -82,7 +75,5 @@ void *suz_arena_expand(size_t size, const char *source, size_t line, size_t colu
     }
     chunk->next = *unused;
     *unused = chunk;
-    select_chunk(chunk);
-    suz_arena.used = size;
-    return chunk->bytes;
+    return (suz_arena_cursor){chunk->bytes, chunk->capacity, size, chunk};
 }
