@@ -20,7 +20,7 @@ Suzは次のものを含む。
 
 ### 1.2 安全性
 
-正しい Suz のプログラムは、未定義動作を起こさない。ただし、FFIでは呼び出すC関数の契約を守る責任を呼び出し側が持ち、C側の不正動作はこの保証に含めない（[ffi.unsafe]）。整数演算では、[9 章](#9-実行時の検査)で定める検査に違反し、対応する `or` がないときにパニックする。失敗しうる `as` と、`symbol`・`text` からの `as%` は、変換失敗を `or` で処理する。ラップする算術と `as%` はビット幅に収める規則に従い、浮動小数点数の演算は IEEE 754 に従う。
+正しい Suz のプログラムは、未定義動作を起こさない。ただし、FFIでは呼び出すC関数の契約を守る責任を呼び出し側が持ち、C側の不正動作はこの保証に含めない（[ffi.trusted]）。整数演算では、[9 章](#9-実行時の検査)で定める検査に違反し、対応する `or` がないときにパニックする。失敗しうる `as` と、`symbol`・`text` からの `as%` は、変換失敗を `or` で処理する。ラップする算術と `as%` はビット幅に収める規則に従い、浮動小数点数の演算は IEEE 754 に従う。
 
 ### 1.3 値の受け渡し
 
@@ -71,7 +71,7 @@ Suzは次のものを含む。
 **[src.keywords]** 次の語はキーワードである。
 
 ```text
-fix var fn fnshape self static struct enum error extern unsafe arena new ptr null let objection
+fix var fn fnshape self static struct enum error extern trusted arena new ptr null let objection
 if ifexpr elif else while loop for rev in break continue return match matchexpr
 as or not len c_bytes c_byte_len log panic fail ignore recover allow expr with
 true false nan inf
@@ -1517,7 +1517,7 @@ extern "stdlib.h" {
     fn abs(value: _int) -> _int
 }
 fn main() -> u8 {
-    unsafe {
+    trusted {
         if abs(-7) != 7 { return 1 }
     }
     return 0
@@ -1538,21 +1538,23 @@ fn main() -> u8 {
 
 **[ffi.cast]** C固有型とSuzの整数型・浮動小数点型との変換、およびC固有型同士の変換は明示的に行う。異なる型への暗黙変換はない。`as`でC固有型またはSuzの整数型に変換する場合は、同じ型への変換を除き`or`を必須とし、変換先の範囲外なら既存の失敗処理を行う。浮動小数点からは0方向へ丸めた整数の範囲を検査し、NaN・無限大は失敗する。C固有型から浮動小数点型へは最近接・偶数丸めを行い、`or`を省略できる。`as%`は整数同士だけに認め、変換先のビット幅の下位ビットを使う。符号付きの変換先ではそのビット列を2の補数として解釈する。`len_t`を`as%`の変換先にはできない。整数の`as%`に`or`は付けない。
 
-**[ffi.unsafe]** extern関数の呼び出しと`c_bytes`は字句的に `unsafe { ... }` の内側だけで許可する。通常のブロックと同じスコープを作り、`return`・`break`・`continue`にも既存の規則を適用する。unsafeは別の関数・クロージャの本体へ引き継がない。unsafe内でも型・範囲などの検査を省略しない。呼び出すC APIの契約を守る責任を示す構文であり、Cの不正動作を検出・防止する保証ではない。C固有型の保持・比較・変換にはunsafeは不要である。
+**[ffi.trusted]** extern関数の呼び出しと`c_bytes`は字句的に `trusted { ... }` の内側だけで許可する。通常のブロックと同じスコープを作り、`return`・`break`・`continue`にも既存の規則を適用する。trustedは別の関数・クロージャの本体へ引き継がない。trusted内でも型・範囲・寿命の検査を省略しない。C固有型の保持・比較・変換にはtrustedは不要である。
 
-**[ffi.function-value]** extern関数は名前による直接呼び出しだけに使える。`fn 名前`による関数値化はunsafe内でもコンパイルエラーである。関数値が必要なら、内部のunsafeでC関数を呼ぶ通常のSuz関数を用意し、その関数を値にする。
+Suzが検証できない外部APIの契約をプログラマーが保証する構文である。C側の契約遵守に加え、呼び出し側が引数、実体の寿命、読み書きの範囲、APIが要求する同期などの条件を守ることを含む。Cが参照を保持する場合、ブロックを抜けてもCによる最後の利用まで契約を守る責任は続く。C内部の動作を証明したり、不正動作を検出・防止したりする保証ではない。Suz内の寿命検査が証明できなかった判断への異議を示すobjectionとは役割が異なり、trustedによって寿命検査を解除することはできない。
+
+**[ffi.function-value]** extern関数は名前による直接呼び出しだけに使える。`fn 名前`による関数値化はtrusted内でもコンパイルエラーである。関数値が必要なら、内部のtrustedでC関数を呼ぶ通常のSuz関数を用意し、その関数を値にする。
 
 ### 8.12 Cへのバイト列の受け渡し
 
-**[ffi.pointer-type]** `*const void`はCの`const void *`に対応し、Suzが管理する不変のバイト列を指す。ポインタを作る操作は`c_bytes`だけとする。ローカルの`fix`・`var`、通常のSuz関数の仮引数・戻り値、構造体のフィールドに保持・コピーできる。保持・受け渡し自体にunsafeは不要である。externでは引数だけに使え、ポインタを返すC関数は宣言できない。externで使えるポインタ型はこれだけとする。Suz内の `ptr T` は8.13節に従い、Cとの間では受け渡せない。この型表記内の`const`は修飾語であり、予約語には追加しない。
+**[ffi.pointer-type]** `*const void`はCの`const void *`に対応し、Suzが管理する不変のバイト列を指す。ポインタを作る操作は`c_bytes`だけとする。ローカルの`fix`・`var`、通常のSuz関数の仮引数・戻り値、構造体のフィールドに保持・コピーできる。保持・受け渡し自体にtrustedは不要である。externでは引数だけに使え、ポインタを返すC関数は宣言できない。externで使えるポインタ型はこれだけとする。Suz内の `ptr T` は8.13節に従い、Cとの間では受け渡せない。この型表記内の`const`は修飾語であり、予約語には追加しない。
 
 **[ffi.pointer-operations]** ポインタの比較・算術・ビット演算・型変換・テンプレートへの埋め込み・参照先の読み書きは認めない。ポインタを含む構造体の比較や、文字列からその構造体への変換も認めない。整数や文字列値からの暗黙変換、NULLリテラルもない。
 
 **[ffi.bytes-source]** `c_bytes 式`と`c_byte_len 式`の対象には`symbol`または`text`を要求する。関数ではなく`len`と同じ優先順位の前置構文であり、対象式をそれぞれ1回だけ評価する。`c_bytes make_message()`のように関数の戻り値にも使える。これらの操作はSuzの定数式には含めない。
 
-**[ffi.bytes]** `c_bytes`は対象範囲の先頭を指す`*const void`を返す。字句的にunsafeの内側でだけ使える。文字列の実体をコピーせず、動的確保やNUL終端の追加も行わない。対象式自身が文字列を生成するときの確保はこの制約に含めない。
+**[ffi.bytes]** `c_bytes`は対象範囲の先頭を指す`*const void`を返す。字句的にtrustedの内側でだけ使える。文字列の実体をコピーせず、動的確保やNUL終端の追加も行わない。対象式自身が文字列を生成するときの確保はこの制約に含めない。
 
-**[ffi.byte-len]** `c_byte_len`は対象範囲のUTF-8バイト数を`_size_t`で返す。unsafeの外でも使える。Unicodeスカラー値の個数を返す`len`とは異なり、埋め込みNULも1バイトとして数える。空の範囲のバイト数は0である。
+**[ffi.byte-len]** `c_byte_len`は対象範囲のUTF-8バイト数を`_size_t`で返す。trustedの外でも使える。Unicodeスカラー値の個数を返す`len`とは異なり、埋め込みNULも1バイトとして数える。空の範囲のバイト数は0である。
 
 **[ffi.bytes-contract]** ポインタが指すバイト列は、元のローカル束縛のスコープを抜けてもプロセス終了まで生存する。C側で呼び出し後に保持してよいが、変更・解放してはいけない。ポインタと長さが同じ範囲を表すこと、C側がその範囲だけを読むことは呼び出し側の責任である。切り出したtextは切り出し位置からの範囲を渡す。空の範囲ではC側は1バイトも読んではならない。NUL終端は保証しないため、NUL終端や書き込みバッファを要求するAPIにはC側のラッパーを用意する。
 
@@ -1562,7 +1564,7 @@ extern "output.h" {
 }
 fn main() -> u8 {
     fix msg = `こんにちは\n`
-    unsafe {
+    trusted {
         if output_bytes(c_bytes msg, c_byte_len msg) < 0 { return 1 }
     }
     return 0
@@ -2114,7 +2116,7 @@ Statement        ::= ( VariableDeclaration | Assignment | ReturnStatement
                      | "break" | "continue" | LogStatement | Expression ) AllowClause?
                    | WhileStatement | LoopStatement | ForStatement | RevStatement
                    | IfStatement | MatchStatement | Block | AllowStatement | PanicStatement | FailStatement
-                   | RecoverStatement | IgnoreStatement | "unsafe" Block | "arena" Block | LetStatement
+                   | RecoverStatement | IgnoreStatement | "trusted" Block | "arena" Block | LetStatement
                    | "objection" OBJECTION_REASON Block
 
 VariableDeclaration ::= ( "fix" | "var" ) "ptr"? IDENT TypeAnnotation?

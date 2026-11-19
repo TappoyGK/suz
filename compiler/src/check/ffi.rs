@@ -1,4 +1,4 @@
-//! 外部関数の名前、C固有型の変換、バイト列取得の型とunsafe境界を検査する。
+//! 外部関数の名前、C固有型の変換、バイト列取得の型とtrusted境界を検査する。
 use super::scope::Signature;
 use crate::{Diagnostic, ErrorKind, ast::Program};
 use std::collections::{BTreeMap, BTreeSet};
@@ -215,17 +215,17 @@ pub(super) fn contains_pointer(ty: Type, scope: &Scope) -> bool {
     }
 }
 
-/// バイト列取得のunsafe境界と対象型を検査する。長さだけの取得にはunsafeを要求しない。
+/// バイト列取得のtrusted境界と対象型を検査する。長さだけの取得にはtrustedを要求しない。
 pub(super) fn bytes(
     expr: &Expression,
     inner: &Expression,
     bindings: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
     let bytes = matches!(expr.kind, ExpressionKind::CBytes(_));
-    if bytes && !bindings.unsafe_block {
+    if bytes && !bindings.trusted_block {
         return Err(expr.location.error(
             ErrorKind::InvalidSource,
-            crate::diagnostic!("ffi.unsafe", "c_bytes requires an unsafe block"),
+            crate::diagnostic!("ffi.trusted", "c_bytes requires a trusted block"),
         ));
     }
     let operand = super::expression::expression(inner, None, bindings)?;

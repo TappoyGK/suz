@@ -581,7 +581,7 @@ pub(crate) enum Statement {
         location: Location,
     },
 
-    Unsafe(Vec<Statement>),
+    Trusted(Vec<Statement>),
     Objection(Vec<Statement>),
     Log {
         level: LogLevel,

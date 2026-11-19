@@ -9,7 +9,7 @@ extern "stdlib.h" { fn abs(value: _int) -> _int }
 extern "math.h" { fn log as natural_log(value: f64) -> f64 }
 struct Boxed { value: _int }
 fnshape Transform(_int) -> _int
-fn magnitude(value: _int) -> _int { unsafe { return abs(value) } }
+fn magnitude(value: _int) -> _int { trusted { return abs(value) } }
 fn from_generic(value: int) -> _int { return value as _int or 0 }
 fn to_generic(value: _int, fallback: int) -> int { return value as int or fallback }
 fn main() -> u8 {
@@ -22,7 +22,7 @@ fn main() -> u8 {
     if box.value != 7 || 6 >= value { return 1 }
     fix converted = value as i32 or return 2
     if converted != 7 { return 3 }
-    unsafe {
+    trusted {
         if natural_log(1.0) != 0.0 { return 4 }
         { if abs(-2) != 2 { return 5 } }
     }
@@ -59,13 +59,14 @@ fn main() -> u8 {
 }
 
 #[test]
-fn ffi_rejects_unsafe_escape_and_unsupported_operations() {
+fn ffi_rejects_trusted_escape_and_unsupported_operations() {
     let declaration = "extern \"stdlib.h\" { fn abs(value: _int) -> _int }\n";
     for body in [
         "fix x = abs(-1)",
-        "unsafe { fix callback = fn abs }",
+        "unsafe { fix x = abs(-1) }",
+        "trusted { fix callback = fn abs }",
         "fix callback = fn abs",
-        "unsafe { }\nfix x = abs(-1)",
+        "trusted { }\nfix x = abs(-1)",
         "fix x: _int = 1\nfix y = x + 1",
         "fix x: _int = 1\nfix y = x & x",
         "fix x: _int = 1\nfix y = -x",
@@ -96,15 +97,24 @@ fn ffi_rejects_unsafe_escape_and_unsupported_operations() {
         );
     }
     let source = format!(
-        "{declaration}fn helper() -> _int {{ return abs(-1) }}\nfn main() -> u8 {{ unsafe {{ fix x = helper() }}\nreturn 0 }}"
+        "{declaration}fn helper() -> _int {{ return abs(-1) }}\nfn main() -> u8 {{ trusted {{ fix x = helper() }}\nreturn 0 }}"
     );
     let error = suz::compile(source.as_bytes()).unwrap_err();
-    assert!(error.message().contains("ffi.unsafe"), "{error:?}");
+    assert!(error.message().contains("ffi.trusted"), "{error:?}");
     let closure = format!(
-        "{declaration}fnshape Action() -> _int\nfn apply(action: fn Action) -> _int {{ return action() }}\nfn main() -> u8 {{\nunsafe {{ fix x = apply(fn []() -> _int {{ return abs(-1) }}) }}\nreturn 0\n}}"
+        "{declaration}fnshape Action() -> _int\nfn apply(action: fn Action) -> _int {{ return action() }}\nfn main() -> u8 {{\ntrusted {{ fix x = apply(fn []() -> _int {{ return abs(-1) }}) }}\nreturn 0\n}}"
     );
     let error = suz::compile(closure.as_bytes()).unwrap_err();
-    assert!(error.message().contains("ffi.unsafe"), "{error:?}");
+    assert!(error.message().contains("ffi.trusted"), "{error:?}");
+}
+
+#[test]
+fn trusted_does_not_override_arena_lifetimes() {
+    let error = suz::compile(
+        b"fn main() -> u8 { arena {\nvar ptr p: ptr? i32 = null\ntrusted { arena { p = new 1 } }\n}\nreturn 0 }",
+    )
+    .unwrap_err();
+    assert_eq!(error.rule(), "arena.store", "{error}");
 }
 
 #[test]
@@ -212,7 +222,7 @@ fn ffi_scalar_abi_and_argument_evaluation() {
         ));
     }
     header.push_str("static int count;\nstatic inline int next(void) { return ++count; }\nstatic inline int ordered(int a, int b) { return a == 1 && b == 2 && count == 2; }\nstatic inline void clear(void) { count = 0; }\n");
-    source.push_str("fn next() -> _int\nfn ordered(a: _int, b: _int) -> _int\nfn clear() -> void\n}\nfn main() -> u8 {\nunsafe {\nclear()\nif ordered(next(), next()) != 1 { return 2 }\n");
+    source.push_str("fn next() -> _int\nfn ordered(a: _int, b: _int) -> _int\nfn clear() -> void\n}\nfn main() -> u8 {\ntrusted {\nclear()\nif ordered(next(), next()) != 1 { return 2 }\n");
     source.push_str(&body);
     source.push_str("}\nreturn 0\n}\n");
     fs::write(directory.0.join("fixture.h"), header).unwrap();
@@ -243,7 +253,7 @@ fn ffi_literals_check_the_target_c_range_at_c_compile_time() {
         "fn main() -> u8 { fix x: _uint = -(1)\nreturn 0 }",
         "fn unused() -> _uint { return -1 }\nfn main() -> u8 { return 0 }",
         "fn main() -> u8 { if false { fix x: _size_t = 18446744073709551616 }\nreturn 0 }",
-        "extern \"stdlib.h\" { fn abs(value: _int) -> _int }\nfn main() -> u8 { unsafe { if abs(-7) > 18446744073709551615 { return 1 } }\nreturn 0 }",
+        "extern \"stdlib.h\" { fn abs(value: _int) -> _int }\nfn main() -> u8 { trusted { if abs(-7) > 18446744073709551615 { return 1 } }\nreturn 0 }",
     ] {
         // Suz側だけでは対象環境のC型の範囲を判定しない。
         fs::write(&path, suz::compile(source.as_bytes()).unwrap()).unwrap();
@@ -295,16 +305,16 @@ fn ffi_checks_are_conditional_and_literals_need_no_runtime_call() {
 }
 
 #[test]
-fn ffi_unsafe_preserves_assignments_and_expression_contexts() {
+fn ffi_trusted_preserves_assignments_and_expression_contexts() {
     let result = compile_and_run_c23(
         r#"
 extern "stdlib.h" { fn abs(value: _int) -> _int }
 fn main() -> u8 {
     var assigned: i64 = 0
     var incremented: i64 = 0
-    unsafe {
+    trusted {
         assigned = 4
-        unsafe { incremented += 1 }
+        trusted { incremented += 1 }
         fix a = ifexpr true { abs(-2) } else { abs(-3) }
         fix b = expr { abs(-4) }
         fix c = 1.0e20 as _long or 7
@@ -337,9 +347,9 @@ fn ffi_rejects_function_values_in_all_storage_and_call_positions() {
         "fix x = Boxed { callback: fn abs }",
         "fix x = generic(fn abs, 1 as i32)",
     ] {
-        for unsafe_scope in [false, true] {
-            let body = if unsafe_scope {
-                format!("unsafe {{ {statement} }}")
+        for trusted_scope in [false, true] {
+            let body = if trusted_scope {
+                format!("trusted {{ {statement} }}")
             } else {
                 statement.into()
             };
@@ -364,7 +374,7 @@ return 0
         br#"
 extern "stdlib.h" { fn abs(value: _int) -> _int }
 fnshape Transform(_int) -> _int
-fn expose() -> static fn Transform { unsafe { return fn abs } }
+fn expose() -> static fn Transform { trusted { return fn abs } }
 fn main() -> u8 { return 0 }
 "#,
     )
@@ -389,7 +399,7 @@ fn ffi_runtime_internals_and_void_values_are_rejected() {
     let error = suz::compile(
         br#"
 extern "stdlib.h" { fn srand(seed: _uint) -> void }
-fn main() -> u8 { unsafe { fix x = srand(0) }
+fn main() -> u8 { trusted { fix x = srand(0) }
 return 0 }
 "#,
     )

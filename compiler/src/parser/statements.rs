@@ -414,11 +414,11 @@ impl Parser<'_, '_> {
                 }
                 Ok(Statement::Return(self.expression()?))
             }
-            Kind::Keyword("unsafe") => {
+            Kind::Keyword("trusted") => {
                 self.cursor += 1;
                 self.nested(self.location(), |p| {
                     let (body, _) = p.block()?;
-                    Ok(Statement::Unsafe(body))
+                    Ok(Statement::Trusted(body))
                 })
             }
             _ => {

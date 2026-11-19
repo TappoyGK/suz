@@ -143,7 +143,7 @@ fn statement_height(statement: &Statement) -> usize {
         }
         Statement::Arena { body, .. }
         | Statement::Block(body)
-        | Statement::Unsafe(body)
+        | Statement::Trusted(body)
         | Statement::Objection(body) => block_height(body),
         Statement::Loop { condition, body } => condition
             .as_ref()
