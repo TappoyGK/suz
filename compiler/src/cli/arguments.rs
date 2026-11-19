@@ -44,7 +44,6 @@ pub struct Options {
     pub log_allow: bool,
     pub log_ignore: bool,
     pub log_level: suz::LogLevel,
-    pub deny_global_var: bool,
     pub mode: suz::ArithmeticMode,
     pub text_pool_limit: suz::TextPoolLimit,
     pub arena: suz::ArenaOptions,
@@ -91,7 +90,6 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
     let mut log_allow = false;
     let mut log_ignore = false;
     let mut log_level = None;
-    let mut deny_global_var = false;
     let mut help = false;
     let mut paths_only = false;
     while let Some(arg) = args.next() {
@@ -114,10 +112,6 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
                 }
                 Some("--") => {
                     paths_only = true;
-                    continue;
-                }
-                Some("--deny-global-var") if !deny_global_var => {
-                    deny_global_var = true;
                     continue;
                 }
                 Some("--log-ignore") => {
@@ -264,7 +258,6 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
         log_allow,
         log_ignore,
         log_level: log_level.unwrap_or_default(),
-        deny_global_var,
         mode: mode.unwrap_or_default(),
         text_pool_limit: text_pool_limit.unwrap_or_default(),
         arena: suz::ArenaOptions {

@@ -14,13 +14,11 @@ use crate::{
 struct Writes<'a> {
     name: &'a str,
     fields: &'a [String],
-    global: bool,
 }
 impl Visitor for Writes<'_> {
     fn expression(&mut self, expr: &Expression) -> Result<(), Diagnostic> {
-        // 本体へ同じ変数が引き継がれるのは、参照キャプチャーか大域変数の場合だけ。
+        // 本体へ同じ変数が引き継がれるのは、参照キャプチャーの場合だけ。
         if let ExpressionKind::Closure(closure) = &expr.kind
-            && !self.global
             && !closure
                 .captures
                 .iter()
@@ -51,16 +49,6 @@ impl Visitor for Writes<'_> {
         visit::walk_statement(self, statement)
     }
 }
-pub(super) fn check(
-    value: &Expression,
-    name: &str,
-    fields: &[String],
-    global: bool,
-) -> Result<(), Diagnostic> {
-    Writes {
-        name,
-        fields,
-        global,
-    }
-    .expression(value)
+pub(super) fn check(value: &Expression, name: &str, fields: &[String]) -> Result<(), Diagnostic> {
+    Writes { name, fields }.expression(value)
 }

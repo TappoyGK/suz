@@ -18,7 +18,6 @@ use crate::{
 pub(super) struct Binding {
     pub(super) constant: Option<CheckedExpression>,
     pub(super) id: usize,
-    pub(super) global: bool,
     pub(super) ty: Type,
     pub(super) mutable: bool,
     pub(super) parameter: bool,
@@ -41,7 +40,6 @@ impl Binding {
         location: Location,
     ) -> Self {
         Self {
-            global: false,
             constant: None,
             id,
             ty,
@@ -514,8 +512,8 @@ fn check_assign(
             },
         ));
     }
-    super::writes::check(value, name, fields, binding.global)?;
-    let (id, global, mut ty) = (binding.id, binding.global, binding.ty);
+    super::writes::check(value, name, fields)?;
+    let (id, mut ty) = (binding.id, binding.ty);
     let mut indices = Vec::new();
     for name in fields {
         let (index, field_type) =
@@ -528,7 +526,6 @@ fn check_assign(
     context.bindings[name].assigned.set(true);
     context.output.push(CheckedStatement::Assign {
         location: *location,
-        global,
         id,
         fields: indices,
         ty,

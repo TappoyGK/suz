@@ -183,7 +183,6 @@ pub struct CompilationOptions {
     /// 実行されたignoreの位置と理由を記録する。既定では記録しない。
     pub log_ignore: bool,
     pub log_allow: bool,
-    pub deny_global_var: bool,
     pub arithmetic_mode: ArithmeticMode,
     pub text_pool_limit: TextPoolLimit,
     pub arena: ArenaOptions,

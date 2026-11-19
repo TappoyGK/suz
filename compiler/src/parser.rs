@@ -92,7 +92,6 @@ impl<'a, 's> Parser<'a, 's> {
 
     fn top_level_binding(&mut self) -> Result<TopLevelBinding, Diagnostic> {
         let start = self.location();
-        let mutable = self.token().kind == Kind::Keyword("var");
         self.cursor += 1;
         let location = self.location();
         let name = match self.token().kind {
@@ -125,10 +124,7 @@ impl<'a, 's> Parser<'a, 's> {
         if self.token().kind != Kind::Symbol("=") {
             return Err(self.error(
                 ErrorKind::InvalidSource,
-                crate::diagnostic!(
-                    if mutable { "top.var" } else { "const.decl" },
-                    "a top-level binding requires an initializer"
-                ),
+                crate::diagnostic!("const.decl", "a top-level binding requires an initializer"),
             ));
         }
         self.cursor += 1;
@@ -137,7 +133,6 @@ impl<'a, 's> Parser<'a, 's> {
         self.constant_expression = false;
         self.allow_clause(start, allows::expression_contains_block(&initializer))?;
         Ok(TopLevelBinding {
-            mutable,
             name,
             location,
             annotation,
@@ -172,7 +167,7 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
     while p.token().kind != Kind::End {
         match p.token().kind {
             Kind::Keyword("extern") => externs.extend(p.extern_block()?),
-            Kind::Keyword("fix" | "var") => bindings.push(p.top_level_binding()?),
+            Kind::Keyword("fix") => bindings.push(p.top_level_binding()?),
             Kind::Keyword("fnshape") => {
                 p.cursor = fnshapes.iter().find(|d| d.start == p.cursor).unwrap().end;
             }
@@ -225,7 +220,7 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
                     ErrorKind::InvalidSource,
                     crate::diagnostic!(
                         "decl.top-level",
-                        "expected a fix, var, fn, fnshape, struct or enum declaration"
+                        "expected a fix, fn, fnshape, struct, enum, error or extern declaration"
                     ),
                 ));
             }

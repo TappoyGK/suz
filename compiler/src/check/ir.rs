@@ -17,9 +17,7 @@ pub(crate) struct CheckedProgram {
     pub comparison_warnings: Vec<(Location, bool)>,
     /// 実行開始時に登録する文字列定数。
     pub constant_texts: std::collections::BTreeSet<String>,
-    /// 静的な格納領域へmainの前に設定する、評価済みの大域変数の初期値。
-    pub globals: Vec<CheckedExpression>,
-    pub global_warnings: Vec<Location>,
+    /// 起動時の初期化失敗を報告するmainの位置。
     pub main_location: Location,
     pub structs: Vec<crate::ast::StructDeclaration>,
     pub enums: Vec<crate::ast::EnumDeclaration>,
@@ -129,7 +127,6 @@ pub(crate) enum CheckedStatement {
     },
     Assign {
         location: Location,
-        global: bool,
         fields: Vec<usize>,
         id: usize,
         ty: Type,
@@ -365,7 +362,6 @@ pub(crate) enum Value {
         operands: Vec<CheckedExpression>,
     },
     Local(usize),
-    Global(usize),
 }
 
 // 参照用と変更用の定数式の文法を一つの定義で保つ。違いは可変性と訪問メソッドだけ。
@@ -442,7 +438,7 @@ macro_rules! constant_children_visitor {
                 }
                 Self::Null | Self::CIntegerLiteral { .. } | Self::GenericNumericLiteral { .. } | Self::Integer { .. } | Self::Float(_)
                 | Self::Function(_) | Self::Bool(_) | Self::Text { .. } => {}
-                Self::Panic { .. } | Self::HandledCall { .. } | Self::Closure(_) | Self::Local(_) | Self::Global(_) | Self::Void | Self::Invoke { .. } | Self::Call { .. } | Self::Block { .. }
+                Self::Panic { .. } | Self::HandledCall { .. } | Self::Closure(_) | Self::Local(_) | Self::Void | Self::Invoke { .. } | Self::Call { .. } | Self::Block { .. }
                 | Self::Match { .. } | Self::If { .. } | Self::CastReturn { .. } => return false,
             }
             true
