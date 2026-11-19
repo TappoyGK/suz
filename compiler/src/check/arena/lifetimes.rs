@@ -1,5 +1,7 @@
 //! 実行順によらない候補の包含制約を解く。各保存場所は自身の寿命を持ち、
 //! 別名経由のメンバーも同じセルへ合流させる。安全でも候補を絞れない保存は拒否する。
+mod solver;
+
 use super::*;
 use std::collections::{BTreeMap, BTreeSet};
 type Node = usize;
@@ -24,7 +26,6 @@ enum Place {
     Direct(Node),
     Indirect(Node, Vec<usize>),
 }
-#[derive(Clone)]
 enum Constraint {
     Copy(Node, Node),
     Load(Node, Place),
@@ -42,7 +43,22 @@ struct Analysis<'a> {
     locals: BTreeMap<usize, Node>,
 }
 
-impl Analysis<'_> {
+impl<'a> Analysis<'a> {
+    fn new(scope: &'a Scope) -> Self {
+        Self {
+            scope,
+            targets: vec![],
+            cells: BTreeMap::new(),
+            projections: BTreeMap::new(),
+            regions: vec![Region {
+                parent: None,
+                end: Location { line: 1, column: 1 },
+            }],
+            constraints: vec![],
+            locals: BTreeMap::new(),
+        }
+    }
+
     fn node(&mut self) -> Node {
         let n = self.targets.len();
         self.targets.push(BTreeSet::new());
@@ -488,11 +504,6 @@ impl Analysis<'_> {
                 .collect(),
         }
     }
-    fn grow(&mut self, destination: Node, source: impl IntoIterator<Item = Node>) -> bool {
-        let old = self.targets[destination].len();
-        self.targets[destination].extend(source);
-        self.targets[destination].len() != old
-    }
     fn outlives(&self, source: usize, mut destination: usize) -> bool {
         loop {
             if source == destination {
@@ -522,42 +533,22 @@ impl Analysis<'_> {
             format!(" in member '{}'", names.join("."))
         }
     }
-    // ループ・循環参照・後から起きる別名更新を含め、候補が増えなくなるまで伝播する。
-    // 判定は収束後に行い、走査順でまだ見えていない候補を安全と取り違えない。
     fn solve(&mut self) -> Result<(), Diagnostic> {
-        loop {
-            let mut changed = false;
-            for constraint in self.constraints.clone() {
-                match constraint {
-                    Constraint::Copy(dst, src) => {
-                        changed |= self.grow(dst, self.targets[src].clone())
-                    }
-                    Constraint::Load(dst, place) => {
-                        for cell in self.destinations(&place) {
-                            changed |= self.grow(dst, self.targets[cell].clone());
-                        }
-                    }
-                    Constraint::Address(dst, place) => {
-                        let cells = self.destinations(&place);
-                        changed |= self.grow(dst, cells);
-                    }
-                    Constraint::Store(place, src, _) => {
-                        for cell in self.destinations(&place) {
-                            changed |= self.grow(cell, self.targets[src].clone());
-                        }
-                    }
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
-        for constraint in self.constraints.clone() {
+        // 制約は固定し、候補集合と保存場所だけを更新する。列全体の複製は不要。
+        let constraints = std::mem::take(&mut self.constraints);
+        solver::propagate(self, &constraints);
+        let result = self.validate(&constraints);
+        self.constraints = constraints;
+        result
+    }
+    // 候補の収束後に判定し、走査順でまだ見えていない参照先を安全と取り違えない。
+    fn validate(&mut self, constraints: &[Constraint]) -> Result<(), Diagnostic> {
+        for constraint in constraints {
             let Constraint::Store(place, src, location) = constraint else {
                 continue;
             };
-            for destination in self.destinations(&place) {
-                for &source in &self.targets[src] {
+            for destination in self.destinations(place) {
+                for &source in &self.targets[*src] {
                     let source = &self.cells[&source];
                     if !self.outlives(source.region, self.cells[&destination].region) {
                         let mut error = location.error(
@@ -589,18 +580,7 @@ impl Analysis<'_> {
 }
 
 pub(super) fn check(statements: &[CheckedStatement], scope: &Scope) -> Result<(), Diagnostic> {
-    let mut analysis = Analysis {
-        scope,
-        targets: vec![],
-        cells: BTreeMap::new(),
-        projections: BTreeMap::new(),
-        regions: vec![Region {
-            parent: None,
-            end: Location { line: 1, column: 1 },
-        }],
-        constraints: vec![],
-        locals: BTreeMap::new(),
-    };
+    let mut analysis = Analysis::new(scope);
     // 関数境界のptrは禁止しているので、引数由来の領域はまだ導入しない。
     analysis.statements(statements, 0, None);
     analysis.solve()

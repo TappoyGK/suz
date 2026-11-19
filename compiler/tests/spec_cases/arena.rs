@@ -5,55 +5,58 @@ use std::{fs, path::Path, process::Command};
 fn arena_runtime_aligns_rewinds_and_checks_before_mutation() {
     let directory = TemporaryDirectory::new();
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
-    let executable = directory.0.join("arena");
-    let built = Command::new(std::env::var_os("CC").unwrap_or_else(|| "clang".into()))
-        .args([
-            "-std=c23",
-            "-Wall",
-            "-Wextra",
-            "-Werror",
-            "-fsanitize=undefined",
-            "-fno-sanitize-recover=all",
-            "-iquote",
-        ])
-        .arg(root.join("runtime"))
-        .arg(root.join("compiler/tests/spec_cases/arena_runtime.c"))
-        .arg(root.join("runtime/suz_arena.c"))
-        .arg(root.join("runtime/suz_runtime.c"))
-        .args(["-lm", "-o"])
-        .arg(&executable)
-        .output()
-        .unwrap();
-    assert!(built.status.success(), "{built:?}");
-    for (mode, code, message) in [
-        ("success", 0, ""),
-        (
-            "capacity",
-            101,
-            "arena.suz:8:5: arena capacity exceeded: limit=9, used=1, additional=9 [rt.arena-allocation]",
-        ),
-        (
-            "padding-overflow",
-            101,
-            "size calculation overflow [rt.arena-allocation]",
-        ),
-        (
-            "end-overflow",
-            101,
-            "size calculation overflow [rt.arena-allocation]",
-        ),
-        (
-            "init-failure",
-            101,
-            "arena.suz:4:2: arena allocation failed: requested=128 [rt.arena-storage]",
-        ),
-    ] {
-        let output = Command::new(&executable).arg(mode).output().unwrap();
-        assert_eq!(output.status.code(), Some(code), "{mode}: {output:?}");
-        assert!(
-            String::from_utf8_lossy(&output.stderr).contains(message),
-            "{mode}: {output:?}"
-        );
+    for optimization in ["-O0", "-O2"] {
+        let executable = directory.0.join(format!("arena{optimization}"));
+        let built = Command::new(std::env::var_os("CC").unwrap_or_else(|| "clang".into()))
+            .arg(optimization)
+            .args([
+                "-std=c23",
+                "-Wall",
+                "-Wextra",
+                "-Werror",
+                "-fsanitize=undefined",
+                "-fno-sanitize-recover=all",
+                "-iquote",
+            ])
+            .arg(root.join("runtime"))
+            .arg(root.join("compiler/tests/spec_cases/arena_runtime.c"))
+            .arg(root.join("runtime/suz_arena.c"))
+            .arg(root.join("runtime/suz_runtime.c"))
+            .args(["-lm", "-o"])
+            .arg(&executable)
+            .output()
+            .unwrap();
+        assert!(built.status.success(), "{built:?}");
+        for (mode, code, message) in [
+            ("success", 0, ""),
+            (
+                "capacity",
+                101,
+                "arena.suz:8:5: arena capacity exceeded: limit=9, used=1, additional=9 [rt.arena-allocation]",
+            ),
+            (
+                "padding-overflow",
+                101,
+                "size calculation overflow [rt.arena-allocation]",
+            ),
+            (
+                "end-overflow",
+                101,
+                "size calculation overflow [rt.arena-allocation]",
+            ),
+            (
+                "init-failure",
+                101,
+                "arena.suz:4:2: arena allocation failed: requested=128 [rt.arena-storage]",
+            ),
+        ] {
+            let output = Command::new(&executable).arg(mode).output().unwrap();
+            assert_eq!(output.status.code(), Some(code), "{mode}: {output:?}");
+            assert!(
+                String::from_utf8_lossy(&output.stderr).contains(message),
+                "{mode}: {output:?}"
+            );
+        }
     }
 }
 
