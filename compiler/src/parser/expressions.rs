@@ -279,7 +279,7 @@ impl Parser<'_, '_> {
         Ok(value)
     }
 
-    fn unary(&mut self) -> Result<Expression, Diagnostic> {
+    pub(super) fn unary(&mut self) -> Result<Expression, Diagnostic> {
         self.nested(self.location(), Self::unary_inner)
     }
 
@@ -371,10 +371,31 @@ impl Parser<'_, '_> {
                 self.cursor += 1;
                 ExpressionKind::Bool(value)
             }
-            Kind::Symbol("~" | "*")
-            | Kind::Keyword("len" | "not" | "c_bytes" | "c_byte_len" | "new") => {
+            Kind::Symbol(".") => {
+                self.cursor += 1;
+                let operand = self.unary()?;
+                // .p.field は参照解除とフィールド選択の順が読み取りにくい。
+                // Groupで区切った (.p).field / .(p.field) は区別して受け付ける。
+                let mut target = &operand;
+                while let ExpressionKind::Invoke { target: inner, .. }
+                | ExpressionKind::Slice { target: inner, .. }
+                | ExpressionKind::With { target: inner, .. } = &target.kind
+                {
+                    target = inner;
+                }
+                if matches!(target.kind, ExpressionKind::Field { .. }) {
+                    return Err(location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "arena.ptr-operations",
+                            "parenthesize dereference and field access: (.p).field or .(p.field)"
+                        ),
+                    ));
+                }
+                ExpressionKind::Deref(Box::new(operand))
+            }
+            Kind::Symbol("~") | Kind::Keyword("len" | "not" | "c_bytes" | "c_byte_len" | "new") => {
                 let constructor: fn(Box<Expression>) -> ExpressionKind = match self.token().kind {
-                    Kind::Symbol("*") => ExpressionKind::Deref,
                     Kind::Keyword("new") => ExpressionKind::New,
                     Kind::Symbol("~") => ExpressionKind::BitNot,
                     Kind::Keyword("len") => ExpressionKind::Len,

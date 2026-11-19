@@ -55,7 +55,7 @@ impl Parser<'_, '_> {
         while self
             .tokens
             .get(cursor)
-            .is_some_and(|t| t.kind == Kind::Symbol("."))
+            .is_some_and(|t| matches!(t.kind, Kind::Symbol("." | "#")))
         {
             if !self
                 .tokens
@@ -268,7 +268,7 @@ impl Parser<'_, '_> {
                 let (body, end) = self.block()?;
                 Ok(Statement::Arena { body, end })
             }
-            Kind::Symbol("*" | "(") => self.indirect_statement(),
+            Kind::Symbol("#" | "." | "(") => self.indirect_statement(),
 
             Kind::Keyword("elif" | "else") => Err(self.error(
                 ErrorKind::InvalidSource,
@@ -344,7 +344,8 @@ impl Parser<'_, '_> {
                     location,
                     height: 1,
                 };
-                while self.token().kind == Kind::Symbol(".") {
+                while matches!(self.token().kind, Kind::Symbol("." | "#")) {
+                    let write_field = self.token().kind == Kind::Symbol("#");
                     self.cursor += 1;
                     let Kind::Ident(field) = self.token().kind else {
                         unreachable!()
@@ -361,6 +362,16 @@ impl Parser<'_, '_> {
                         location: self.location(),
                     };
                     self.cursor += 1;
+                    let last_field = !matches!(self.token().kind, Kind::Symbol("." | "#"));
+                    if write_field != last_field {
+                        return Err(self.error(
+                            ErrorKind::InvalidSource,
+                            crate::diagnostic!(
+                                "assign.target",
+                                "use # only before the final field of an assignment target"
+                            ),
+                        ));
+                    }
                 }
                 let operator_location = self.location();
                 self.cursor += 1;
@@ -408,7 +419,14 @@ impl Parser<'_, '_> {
                     Ok(Statement::Unsafe(body))
                 })
             }
-            _ => Ok(Statement::Expression(self.expression()?)),
+            _ => {
+                let target = self.expression()?;
+                if self.token().kind == Kind::Symbol("#") {
+                    self.finish_indirect_statement(target, false)
+                } else {
+                    Ok(Statement::Expression(target))
+                }
+            }
         }
     }
 

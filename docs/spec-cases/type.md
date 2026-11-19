@@ -327,7 +327,7 @@ fn main() -> u8 {
     fix x: i32 = 1
     fix original = Point { x }
     var copied = original
-    copied.x = 2
+    copied#x = 2
     fix updated = original with { x: 3 }
     return ifexpr original.x == 1 && copied.x == 2 && updated.x == 3 { 0 } else { 1 }
 }
@@ -382,7 +382,7 @@ struct Box { point: Point }
 
 fn changed(original: Box) -> Box {
     var copy = original
-    copy.point.x = 9
+    copy.point#x = 9
     return copy
 }
 
@@ -591,7 +591,7 @@ fn mark(n: i32) -> i32 {
 
 fn change(original: Pair) -> Pair {
     var copy = original
-    copy.x = 9
+    copy#x = 9
     return copy
 }
 
@@ -896,7 +896,7 @@ fn echo(ch: char) -> char { return ch }
 fn main() -> u8 {
     fix original = Letter { ch: 'a' }
     var copy = original
-    copy.ch = echo('b')
+    copy#ch = echo('b')
     log info `${original.ch} ${copy.ch}`
     return 0
 }

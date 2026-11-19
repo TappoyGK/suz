@@ -28,7 +28,7 @@ fn main() -> u8 {
     if first != 6 { return 1 }
     var point = Point { x: 7 }
     fix saved = apply(fn [point](x: i32) -> i32 { return point.x + x }, expr {
-        point.x = 20
+        point#x = 20
         1
     })
     if saved != 8 { return 2 }
@@ -126,7 +126,7 @@ fn closures_reject_escaping_implicit_captures_and_mutating_value_captures() {
             "closure.capture-value",
         ),
         (
-            "fix p = Point { x: 1 }\nrun(fn [p]() -> i32 { p.x += 1\nreturn p.x })",
+            "fix p = Point { x: 1 }\nrun(fn [p]() -> i32 { p#x += 1\nreturn p.x })",
             "closure.capture-value",
         ),
         (
@@ -253,8 +253,8 @@ fn main() -> u8 {
     if after(fn [var total]() -> i32 { return total }, expr { total = 20
         0 }) != 20 { return 3 }
     var point = Point { x: 1, y: 2 }
-    execute(fn [var point]() -> void { point.x = 4
-        point.y += 3 })
+    execute(fn [var point]() -> void { point#x = 4
+        point#y += 3 })
     if point.x != 4 || point.y != 5 { return 4 }
     // 値ブロックとクロージャをまたいでも同じ変数へ書く。
     fix nested = expr {
@@ -277,7 +277,7 @@ fn main() -> u8 {
     }
     if total != 1030 { return 8 }
     // 別フィールドへの書き込みは右辺でも許される。
-    point.x = run(fn [var point]() -> i32 { point.y += 1
+    point#x = run(fn [var point]() -> i32 { point#y += 1
         return 9 })
     if point.x != 9 || point.y != 6 { return 9 }
     return 0
@@ -327,7 +327,7 @@ fn reference_captures_enforce_mutability_and_assignment_boundaries() {
             "assign.rhs-write",
         ),
         (
-            "var p = Point { x: 1 }\np.x = run(fn [var p]() -> i32 { p.x = 2\nreturn 0 })",
+            "var p = Point { x: 1 }\np#x = run(fn [var p]() -> i32 { p#x = 2\nreturn 0 })",
             "assign.rhs-write",
         ),
         (

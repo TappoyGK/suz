@@ -59,23 +59,23 @@ fn function_values_capture_the_target_before_evaluating_arguments() {
 fnshape Pair(ptr State, i32, i32) -> i32
 struct Holder { action: static fn Pair }
 struct State { current: static fn Pair, holder: Holder, trace: i32 }
-fn first(state: ptr State, a: i32, b: i32) -> i32 { state.trace = state.trace * 10 + 4
+fn first(state: ptr State, a: i32, b: i32) -> i32 { state#trace = state.trace * 10 + 4
 return a * 10 + b }
 fn second(state: ptr State, a: i32, b: i32) -> i32 { return 99 }
-fn pick(state: ptr State) -> static fn Pair { state.trace = state.trace * 10 + 1
+fn pick(state: ptr State) -> static fn Pair { state#trace = state.trace * 10 + 1
 return state.current }
-fn change(state: ptr State) -> i32 { state.trace = state.trace * 10 + 2
-state.current = fn second
-state.holder.action = fn second
+fn change(state: ptr State) -> i32 { state#trace = state.trace * 10 + 2
+state#current = fn second
+state.holder#action = fn second
 return 2 }
-fn next(state: ptr State) -> i32 { state.trace = state.trace * 10 + 3
+fn next(state: ptr State) -> i32 { state#trace = state.trace * 10 + 3
 return 3 }
 fn main() -> u8 {
     arena {
     fix ptr state = new State { current: fn first, holder: Holder { action: fn first }, trace: 0 }
     if pick(state)(state, change(state), next(state)) != 23 || state.trace != 1234 { return 1 }
-    state.trace = 0
-    state.holder.action = fn first
+    state#trace = 0
+    state.holder#action = fn first
     if state.holder.action(state, change(state), next(state)) != 23 || state.trace != 234 { return 2 }
     var local: static fn Pair = fn first
     fix result = local(state, expr { local = fn second
@@ -470,11 +470,11 @@ fn main() -> u8 {
     if generic_forward(fn identity, 3) != 3 { return 8 }
     if forward(expr { trace += 1
 current }, expr { current = fn twice
-holder.action = fn twice
+holder#action = fn twice
 3 }) != 3 || trace != 1 { return 1 }
-    holder.action = fn identity
+    holder#action = fn identity
     if apply(holder.action, expr { current = fn twice
-holder.action = fn twice
+holder#action = fn twice
 3 }) != 3 { return 2 }
     if pair(fn identity, current, 3) != 9 { return 3 }
     if again(fn identity, 3) != 3 { return 4 }

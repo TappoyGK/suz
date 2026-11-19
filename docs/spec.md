@@ -174,7 +174,8 @@ fix lower = -inf      // f64 の負の無限大
 
 - 文自体は数えない。文に書いた式とブロックは、その文を含むブロックより1段深い。条件、`match`の対象とパターン、`for`・`rev`の反復対象と範囲の両端も同じであり、範囲演算子は別の段として数えない。
 - `if`・`elif`・`else`・`while`・`loop`・`for`・`rev`の本体、`match`の腕、ブロック文、`allow`のブロックは、それぞれ1つのブロックとして数える。腕の本体を式だけで書く場合も、その式を含むブロックを1段として数える。
-- リテラル、名前、丸括弧、単項・二項演算子、`new`、参照解除の`*`、`len`、`as`・`as%`、`or`、関数呼び出し、構造体リテラル、テンプレート、フィールド参照、切り出し・添字、`with`を、それぞれ1つの式として数える。各オペランド、実引数、初期値、添字・切り出しの境界、テンプレートの埋め込みの式は、その式より1段深い。`with`のコピー元と初期値も、その`with`より1段深い。
+- リテラル、名前、丸括弧、単項・二項演算子、`new`、参照解除の`.`、`len`、`as`・`as%`、`or`、関数呼び出し、構造体リテラル、テンプレート、フィールド参照、切り出し・添字、`with`を、それぞれ1つの式として数える。各オペランド、実引数、初期値、添字・切り出しの境界、テンプレートの埋め込みの式は、その式より1段深い。`with`のコピー元と初期値も、その`with`より1段深い。
+- 書き換え対象の`#p`も参照解除と同じく1段として数え、対象の式pをその1段下とする。
 - `fn 関数名` は1つの式として数える。名前で呼ぶ `f(x)` の名前は別の段として数えない。それ以外の呼び出しでは、呼び出し対象の式も呼び出しより1段深い。
 - クロージャは1つの式として数える。本体のブロックはその式より1段深く、本体の文の式はさらにその下とする。本体で数え直さない。キャプチャー一覧の名前と仮引数は数えない。
 - 左結合の並びは演算ごとに1段を数える。比較の連鎖は全体で1つの式とし、各オペランドはその1段下とする。
@@ -409,7 +410,7 @@ fn main() -> u8 {
 
 **[struct.with-eval]** 左の式を最初に 1 回だけ評価し、構造体の値を保存する。続いて、初期値を書いた順に 1 回ずつ評価し、保存した値の対応するフィールドを差し替える。初期値の評価中にコピー元の変数が変更されても、保存済みの値には影響しない。
 
-初期値の式から呼ぶ関数が参照先を書き換えるなど、式の評価による副作用は通常どおり発生する。たとえば `state` が `ptr State` のとき、`(*state) with { x: change_state(state) }` で `change_state` が `state.y` を変更しても、結果の `y` は関数を呼ぶ前に保存した値となる。参照先の実体には、その関数による変更が残る。
+初期値の式から呼ぶ関数が参照先を書き換えるなど、式の評価による副作用は通常どおり発生する。たとえば `state` が `ptr State` のとき、`(.state) with { x: change_state(state) }` で `change_state` が `state.y` を変更しても、結果の `y` は関数を呼ぶ前に保存した値となる。参照先の実体には、その関数による変更が残る。
 
 **[struct.with-const]** 左の式と初期値がすべて定数式である `with` 式は、定数式である。[const.expression] の構成要素に加える。
 
@@ -567,7 +568,7 @@ count += 1
 
 ### 6.3 代入
 
-**[assign.target]** 代入は `代入先 = 式` と書く。代入先は、ブロック内の `var` で宣言した変数、またはそのフィールドである。入れ子の構造体のフィールドも代入先にできる。それ以外への代入はコンパイルエラーである。
+**[assign.target]** 代入は `代入先 = 式` と書く。代入先は、ブロック内の `var` で宣言した変数、またはそのフィールドである。フィールドへの代入では、最後のメンバー名の直前だけに`#`を置く。`v#x = 値`、入れ子なら`v.pos#x = 値`と書き、途中の`.`は元の実体のフィールドをたどる。`v.x = 値`や`v#pos#x = 値`は認めない。`v#x`は書き換え対象の指定であり、値式には使えない。変数自身への代入は`v = 値`とする。ポインタを通した更新には [arena.ptr-operations] を適用し、それ以外への代入はコンパイルエラーである。
 
 **[assign.type]** 通常の代入では、右辺に代入先の型を要求し、[conv.widen] と [text.from-symbol] の暗黙変換を認める。算術式の格納には [arith.store] を適用する。要求を満たさない場合はコンパイルエラーである。
 
@@ -586,7 +587,7 @@ var count: i32 = 0
 count += 1
 
 var p = Vec2 { x: 0.0, y: 0.0 }
-p.x = 1.0
+p#x = 1.0
 ```
 
 この例では、`p.x` への代入によって、`p` は [var.never-reassigned] の条件を満たす。
@@ -705,7 +706,7 @@ if not ready {
 | 順位 | 演算 |
 |---|---|
 | 1 | 関数呼び出し、フィールド参照、切り出し・添字の `[ ]` |
-| 2 | 単項 `-` `not` `~` `len` `new` `*` |
+| 2 | 単項 `-` `not` `~` `len` `new` `.` |
 | 3 | `as` `as%` |
 | 4 | `*` `/` `%` `*%` |
 | 5 | `+` `-` `+%` `-%` |
@@ -1575,7 +1576,7 @@ fn main() -> u8 {
 
 **[arena.new]** `new 式` は、現在の関数内でその位置を字句的に囲む最内側のarenaへ実体を確保し、`ptr T`を返す。Tは初期値の型である。関数内にそのようなarenaがない場合、`arena fn`では呼び出し元の領域Rへ確保し、通常関数ではコンパイルエラーとする。
 
-**[arena.new-value]** 初期値には保存できる任意の型の値を使える。`void`と呼び出し専用の`fn`型は使えない。既存の変数のアドレスを取得する構文は設けない。`new`と参照解除の`*`は`len`と同じ優先順位で、定数式には含めない。
+**[arena.new-value]** 初期値には保存できる任意の型の値を使える。`void`と呼び出し専用の`fn`型は使えない。既存の変数のアドレスを取得する構文は設けない。`new`と参照解除の`.`は`len`と同じ優先順位で、定数式には含めない。
 
 **[arena.new-order]** 初期値を1回評価し、その後で整列・サイズ・容量を検査して確保し、評価済みの値を格納する。初期値の評価中の確保が先に完了する。失敗時は [rt.arena-allocation] に従う。
 
@@ -1593,7 +1594,13 @@ fn main() -> u8 {
 
 例えば`a`が`ptr Node`、`b.next`が`ptr? Node`なら、`ifexpr ready { a } else { null }`と`ifexpr ready { a } else { b.next }`は、ともに`ptr? Node`となる。
 
-**[arena.ptr-operations]** `*p`は参照先の読み出し、`*p = 値`と`*p += 値`などは更新である。構造体へのポインタの`p.field`は`(*p).field`と同じ意味とする。代入先を1回評価してから右辺を評価する。複合代入では右辺より先に更新前の値を読む。ポインタの算術・比較・添字・型変換・文字列への埋め込みは認めない。ポインタを含む構造体の比較・文字列変換も認めない。
+**[arena.ptr-operations]** `.p`はポインタpの参照先の値を読む式である。参照先全体を更新するときは、代入文の先頭に`#p = 値`、`#p += 値`などと書く。`#p`は書き換え対象の指定であり、式としては使えない。`.p`自体への代入は括弧で囲んでも認めない。単項の`*p`は認めない。乗算とFFIの型表記`*const void`には影響しない。
+
+前置の`.`は単項演算子と同じ優先順位で右から結び付く。`..pp`は`.(.pp)`と同じく2段の参照先を読む。`#.pp = 値`は`.pp`が指す実体を更新する。`#`の対象は単項式であり、二項式を対象にするときは括弧が必要である。関数の返すポインタも`.get()`、`#get() = 値`で扱える。
+
+前置の`.`の対象に括弧なしのフィールドアクセスを続ける`.p.field`は認めない。参照解除の後でフィールドを選ぶ場合は`(.p).field`、フィールドのポインタを参照解除する場合は`.(p.field)`と書く。構造体へのポインタの`p.field`は`(.p).field`と同じ意味とする。フィールドの更新は`p#field = 値`または`(.p)#field = 値`と書く。`holder.p#field`の途中の`.`はポインタやフィールドをたどり、最後の`#`が更新するメンバーを指定する。前置の`#`とフィールド指定の`#`を1つの代入先で併用することは認めない。
+
+代入先を1回評価してから右辺を評価し、右辺がポインタ変数を変更しても確定済みの参照先へ書き込む。複合代入では右辺より先に更新前の値を読む。`#`は書き換えの許可を追加しない。fixのポインタ変数への再代入禁止、参照先への更新、非nullの要求、寿命と借用の制約には既存の規則を適用する。ポインタの算術・比較・添字・型変換・文字列への埋め込みは認めない。ポインタを含む構造体の比較・文字列変換も認めない。
 
 **[arena.null]** `null`は実体を指さない値である。要求される`ptr? T`の型が分かる位置だけに書ける。[arena.ptr-join]で他の分岐から決まる型も、この要求型に含む。`var ptr p: ptr? Node = null`は有効で、`var ptr p: ptr Node = null`は型違反、`var ptr p = null`は型が決まらないためエラーとする。nullは参照先の領域や寿命を持たない。
 
@@ -1607,8 +1614,8 @@ fn main() -> u8 {
     arena {
         fix ptr a = new Node { value: 1, next: null }
         fix ptr b = new Node { value: 2, next: a }
-        a.next = b
-        let next = a.next { next.value += 1 }
+        a#next = b
+        let next = a.next { next#value += 1 }
     }
     return 0
 }
@@ -1648,14 +1655,14 @@ fn main() -> u8 {
 
 ```suz
 fn increment(p: ptr i32) -> void {
-    *p += 1
+    #p += 1
 }
 
 fn main() -> u8 {
     arena {
         fix ptr count = new (0 as i32)
         increment(count)
-        if *count != 1 { return 1 }
+        if .count != 1 { return 1 }
     }
     return 0
 }
@@ -1715,7 +1722,7 @@ fn main() -> u8 {
             var ptr selected = outer
             selected = inner
             objection [selectedをinnerへ差し替えたので、保存先も参照先も内側のarenaに属する] {
-                selected.next = inner
+                selected#next = inner
             }
         }
     }
@@ -1723,7 +1730,7 @@ fn main() -> u8 {
 }
 ```
 
-この例では、実行順を区別しない解析にouterとinnerの候補が残るため、objectionなしでは保存を拒否する。`outer.next = inner`のように保存先が必ず外側で、保存する参照が必ず内側の非nullの実体を指す場合は、objectionで囲んでも拒否する。
+この例では、実行順を区別しない解析にouterとinnerの候補が残るため、objectionなしでは保存を拒否する。`outer#next = inner`のように保存先が必ず外側で、保存する参照が必ず内側の非nullの実体を指す場合は、objectionで囲んでも拒否する。
 
 ## 9. 実行時の検査
 
@@ -2065,7 +2072,7 @@ Statement        ::= ( VariableDeclaration | Assignment | ReturnStatement
 VariableDeclaration ::= ( "fix" | "var" ) "ptr"? IDENT TypeAnnotation?
                         "=" Expression
 Assignment       ::= AssignmentTarget AssignmentOperator Expression
-AssignmentTarget ::= IDENT ( "." IDENT )* | "*" Unary | "(" Expression ")" ( "." IDENT )*
+AssignmentTarget ::= IDENT | "#" Unary | Expression "#" IDENT
 LetStatement     ::= "let" IDENT "=" Condition Block ( NL* "else" Block )?
 AssignmentOperator ::= "=" | "+=" | "-=" | "*=" | "/=" | "%="
                      | "+%=" | "-%=" | "*%=" | "&=" | "|=" | "^="
@@ -2123,7 +2130,7 @@ Sum              ::= Product ( ( "+" | "-" | "+%" | "-%" ) Product )*
 Product          ::= Cast ( ( "*" | "/" | "%" | "*%" ) Cast )*
 Cast             ::= Unary ( "as%" Type CastHandler? | "as" Type CastHandler? )*
 CastHandler      ::= "or" ( Expression | "return" Expression? | "panic" TEMPLATE )
-Unary            ::= ( "-" | "not" | "~" | "len" | "c_bytes" | "c_byte_len" | "new" | "*" ) Unary | "fn" IDENT | Postfix
+Unary            ::= ( "-" | "not" | "~" | "len" | "c_bytes" | "c_byte_len" | "new" | "." ) Unary | "fn" IDENT | Postfix
 Postfix          ::= Primary ( "." IDENT | "[" Index "]" IndexHandler?
                              | "(" Arguments? ")"
                              | "with" "{" NL* Initializers "}" )*
