@@ -440,11 +440,19 @@ pub(crate) struct StructField {
 /// 構造体の宣言。宣言順のフィールドとトークン範囲を持つ。
 #[derive(Clone)]
 pub(crate) struct StructDeclaration {
+    pub external: Option<ExternStruct>,
     pub name: String,
     pub location: Location,
     pub fields: Vec<StructField>,
     pub start: usize,
     pub end: usize,
+}
+
+/// ヘッダーのstructタグとの照合に使うC側の名前。
+#[derive(Clone)]
+pub(crate) struct ExternStruct {
+    pub header: String,
+    pub c_name: String,
 }
 
 /// 構造体リテラルに書いたフィールド名・初期化式・位置。意味検査でフィールド番号へ解決する。

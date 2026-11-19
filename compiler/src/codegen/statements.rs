@@ -5,7 +5,7 @@
 use super::{
     ExpressionContext, arithmetic::integer_parts, casts::cast_parts, expressions::expression,
 };
-use crate::check::CheckedStatement;
+use crate::{ast::Type, check::CheckedStatement};
 use std::fmt::Write;
 
 pub(super) fn emit_block(
@@ -299,6 +299,7 @@ pub(super) fn emit_block(
                 writeln!(c, "{indent}(void)suz_local_{id};").unwrap();
             }
             CheckedStatement::Assign {
+                root_type,
                 id,
                 fields,
                 ty,
@@ -315,8 +316,18 @@ pub(super) fn emit_block(
                 )
                 .unwrap();
                 let mut local = context.local(*id);
+                let mut owner = *root_type;
                 for index in fields {
-                    write!(local, ".suz_field_{index}").unwrap();
+                    write!(
+                        local,
+                        ".{}",
+                        super::structs::field_name(owner, *index, context)
+                    )
+                    .unwrap();
+                    let Type::Struct(id) = owner else {
+                        unreachable!("checked assignment field")
+                    };
+                    owner = context.structs[id].fields[*index].ty;
                 }
                 writeln!(c, "{indent}{local} = suz_assign_{index};").unwrap();
                 writeln!(c, "{indent}(void){local};").unwrap();

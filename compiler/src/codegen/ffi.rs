@@ -7,14 +7,24 @@ use crate::{
 use std::fmt::Write;
 
 pub(super) fn declarations(c: &mut String, program: &CheckedProgram) {
-    if program.externs.is_empty() {
+    if program.externs.is_empty() && !program.structs.iter().any(|s| s.external.is_some()) {
         return;
     }
-    c.push_str("#if !__has_builtin(__builtin_types_compatible_p)\n#error \"C function type checking requires __builtin_types_compatible_p\"\n#endif\n");
+    c.push_str("#if !__has_builtin(__builtin_types_compatible_p)\n#error \"C interface type checking requires __builtin_types_compatible_p\"\n#endif\n");
     let mut headers = std::collections::BTreeSet::new();
-    for f in &program.externs {
-        if headers.insert(&f.header) {
-            writeln!(c, "#include <{}>", f.header).unwrap();
+    for header in program.externs.iter().map(|f| &f.header).chain(
+        program
+            .structs
+            .iter()
+            .filter_map(|s| s.external.as_ref().map(|s| &s.header)),
+    ) {
+        if headers.insert(header) {
+            writeln!(c, "#include <{header}>").unwrap();
+        }
+    }
+    for (id, declaration) in program.structs.iter().enumerate() {
+        if let Some(external) = &declaration.external {
+            struct_checks(c, id, declaration, external);
         }
     }
     for (index, f) in program.externs.iter().enumerate() {
@@ -54,6 +64,38 @@ pub(super) fn declarations(c: &mut String, program: &CheckedProgram) {
         };
         // 未使用の宣言でもヘッダー照合は行うが、リンク対象は実際に呼ぶ関数だけ。
         writeln!(c, "static inline __attribute__((unused)) {} suz_fn_{id}({args}) {{ {returned}{}({names}); }}", f.result.c_name(), f.c_name).unwrap();
+    }
+}
+
+/// 実体にはヘッダーの型を使い、Suzが宣言した通常のC配置との一致を検査する。
+/// 同じサイズの別型へのキャストでは、Cの型に基づく別名規則を満たせない。
+fn struct_checks(
+    c: &mut String,
+    id: usize,
+    declaration: &crate::ast::StructDeclaration,
+    external: &crate::ast::ExternStruct,
+) {
+    let tag = &external.c_name;
+    writeln!(
+        c,
+        "#ifdef {tag}\n#error \"[tool.ffi-header] struct tag macros are not supported\"\n#endif"
+    )
+    .unwrap();
+    writeln!(c, "struct suz_ffi_layout_{id} {{").unwrap();
+    for (index, field) in declaration.fields.iter().enumerate() {
+        writeln!(c, "    {} suz_field_{index};", field.ty.c_name()).unwrap();
+    }
+    c.push_str("};\n");
+    for property in ["sizeof", "_Alignof"] {
+        writeln!(c, "_Static_assert({property}(struct {tag}) == {property}(struct suz_ffi_layout_{id}), \"[tool.ffi-header] incompatible C struct layout: {tag}\");").unwrap();
+    }
+    for (index, field) in declaration.fields.iter().enumerate() {
+        let name = &field.name;
+        writeln!(c, "#ifdef {name}\n#error \"[tool.ffi-header] struct field macros are not supported\"\n#endif").unwrap();
+        writeln!(c, "_Static_assert(offsetof(struct {tag}, {name}) == offsetof(struct suz_ffi_layout_{id}, suz_field_{index}), \"[tool.ffi-header] incompatible C field offset: {tag}.{name}\");").unwrap();
+        writeln!(c, "_Static_assert(__builtin_types_compatible_p(__typeof__(((struct {tag} *)0)->{name}), {}), \"[tool.ffi-header] incompatible C field type: {tag}.{name}\");", field.ty.c_name()).unwrap();
+        // types_compatible_pはトップレベルのconst/volatileを無視するため、アドレスの型も照合する。
+        writeln!(c, "_Static_assert(__builtin_types_compatible_p(__typeof__(&((struct {tag} *)0)->{name}), {} *), \"[tool.ffi-header] incompatible C field qualifiers: {tag}.{name}\");", field.ty.c_name()).unwrap();
     }
 }
 

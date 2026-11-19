@@ -163,18 +163,73 @@ pub(super) fn collect(
     };
     let mut headers = Vec::<StructDeclaration>::new();
     let mut depth = 0usize;
+    let mut external_header = None;
+    let mut c_names = BTreeSet::new();
     while p.token().kind != Kind::End {
-        if depth == 0 && p.token().kind == Kind::Keyword("struct") {
+        if depth == 0 && p.token().kind == Kind::Keyword("extern") {
+            p.cursor += 1;
+            let Kind::Header(header) = p.token().kind else {
+                return Err(p.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("ffi.header", "extern requires a quoted C header name"),
+                ));
+            };
+            external_header = Some(header.to_owned());
+            p.cursor += 1;
+            p.expect(FixedToken::Symbol("{"))?;
+            depth = 1;
+            continue;
+        }
+        if (depth == 0 || (depth == 1 && external_header.is_some()))
+            && p.token().kind == Kind::Keyword("struct")
+        {
             let start = p.cursor;
             p.cursor += 1;
             let location = p.location();
+            let external = if let Some(header) = &external_header {
+                let c_name = match p.token().kind {
+                    Kind::Ident(name) | Kind::Keyword(name) | Kind::TypeName(name) => {
+                        name.to_owned()
+                    }
+                    _ => {
+                        return Err(p.error(
+                            ErrorKind::InvalidSource,
+                            crate::diagnostic!("ffi.struct", "expected a C struct tag"),
+                        ));
+                    }
+                };
+                if c_name.starts_with("suz_") {
+                    return Err(p.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!("ffi.name", "C names starting with suz_ are reserved"),
+                    ));
+                }
+                if !c_names.insert(c_name.clone()) {
+                    return Err(p.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!("ffi.duplicate", "duplicate C struct tag"),
+                    ));
+                }
+                if p.tokens
+                    .get(p.cursor + 1)
+                    .is_some_and(|t| t.kind == Kind::Keyword("as"))
+                {
+                    p.cursor += 2;
+                }
+                Some(crate::ast::ExternStruct {
+                    header: header.clone(),
+                    c_name,
+                })
+            } else {
+                None
+            };
             let Kind::Ident(name) = p.token().kind else {
                 return Err(p.error(
                     ErrorKind::InvalidSource,
-                    crate::diagnostic!("src.ident", "expected a struct name"),
+                    crate::diagnostic!("src.ident", "expected a struct name or Suz alias"),
                 ));
             };
-            super::names::check(super::names::Shape::Type, name, location)?;
+            super::names::check(super::names::Shape::Type, name, p.location())?;
             let name = name.to_owned();
             // 列挙型との重複と同じく、構造体の名前の位置で報告する。
             if fnshapes.iter().any(|decl| decl.name == name)
@@ -204,6 +259,7 @@ pub(super) fn collect(
                 p.cursor += 1;
             }
             headers.push(StructDeclaration {
+                external,
                 name,
                 location,
                 fields: Vec::new(),
@@ -217,12 +273,18 @@ pub(super) fn collect(
             Kind::Symbol("}" | ")" | "]") => depth = depth.saturating_sub(1),
             _ => {}
         }
+        if depth == 0 {
+            external_header = None;
+        }
         p.cursor += 1;
     }
     p.structs = &headers;
     let mut declarations = headers.clone();
     for decl in &mut declarations {
         p.cursor = decl.start + 2;
+        if decl.external.is_some() && p.token().kind == Kind::Keyword("as") {
+            p.cursor += 2;
+        }
         decl.fields = p.delimited_list("{", "}", Parser::field_declaration)?;
         if decl.fields.is_empty() {
             return Err(decl.location.error(
@@ -232,6 +294,15 @@ pub(super) fn collect(
         }
         let mut names = BTreeSet::new();
         for field in &decl.fields {
+            if decl.external.is_some() && !super::ffi::numeric_type(field.ty) {
+                return Err(field.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "ffi.struct",
+                        "C struct fields require supported numeric types"
+                    ),
+                ));
+            }
             if !names.insert(&field.name) {
                 return Err(field.location.error(
                     ErrorKind::InvalidSource,

@@ -142,7 +142,8 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             super::structs::literal(id, fields, context)
         }
         Value::Field { ref target, index } => {
-            format!("({}).suz_field_{index}", expression(target, context))
+            let name = super::structs::field_name(target.ty, index, context);
+            format!("({}).{name}", expression(target, context))
         }
         Value::Void => String::new(),
         Value::Call {

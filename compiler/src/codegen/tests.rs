@@ -76,6 +76,7 @@ fn generated_bool_values_preserve_negation_and_copies() {
                         initializer: Box::new(boolean(Value::Local(0))),
                     },
                     CheckedStatement::Assign {
+                        root_type: Type::Bool,
                         location: crate::ast::Location { line: 1, column: 1 },
                         fields: Vec::new(),
                         id: 0,

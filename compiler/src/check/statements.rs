@@ -525,6 +525,7 @@ fn check_assign(
     lower_return_handler(&mut value, &mut context.output, context.next_id, *location);
     context.bindings[name].assigned.set(true);
     context.output.push(CheckedStatement::Assign {
+        root_type: binding.ty,
         location: *location,
         id,
         fields: indices,

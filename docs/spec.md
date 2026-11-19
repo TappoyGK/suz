@@ -1510,7 +1510,7 @@ fn main() -> u8 {
 
 ### 8.11 C関数の呼び出し
 
-**[ffi.decl]** `.suz`のトップレベルに `extern "ヘッダー名" { fn C名(仮引数...) -> 型 }` と書く。関数宣言は改行で区切る。宣言はファイル内だけで有効で、モジュールや別の宣言ファイルを必要としない。本体、`impl fn`、`or Error`は書けない。`.sif`への宣言は認めない。
+**[ffi.decl]** `.suz`のトップレベルに `extern "ヘッダー名" { fn C名(仮引数...) -> 型 }` と書く。関数宣言と [ffi.struct] の構造体宣言は改行で区切る。宣言はファイル内だけで有効で、モジュールや別の宣言ファイルを必要としない。本体、`impl fn`、`or Error`は書けない。`.sif`への宣言は認めない。
 
 ```suz
 extern "stdlib.h" {
@@ -1528,9 +1528,26 @@ fn main() -> u8 {
 
 **[ffi.name]** `fn C名 as Suz名(...) -> 型`で別名を付ける。C名はCの識別子の綴りとし、Suzの予約語や組み込み型名と同じ綴りも認める。Suz名には通常の関数名の規則と予約語・組み込み名との衝突禁止を適用し、`main`も使えない。`as Suz名`を省略するとC名をSuz名にする。例えばCの`log`は `fn log as natural_log(value: f64) -> f64` と宣言する。照合とリンクはC名で行う。`suz_`で始まるC名はランタイムの内部名として予約し、別名の有無によらず拒否する。
 
-**[ffi.duplicate]** 同じファイル内で同じC名を複数回宣言すると、ヘッダー・別名・型が同じかどうかによらずコンパイルエラーである。Suz名には [decl.duplicate]・[decl.shadowing] を適用する。
+**[ffi.duplicate]** 同じファイル内で同じC関数名または同じC構造体タグを複数回宣言すると、ヘッダー・別名・型が同じかどうかによらずコンパイルエラーである。C関数名とC構造体タグの重複は認める。Suz名には [decl.duplicate]・[decl.shadowing] を適用する。
 
 **[ffi.type]** externの引数・戻り値には固定幅整数型、`f32`・`f64`・`bool`、下記のC固有型を使える。`void`は戻り値だけ、`*const void`は引数だけに使える。`len_t`・`char`・`text`・`symbol`・汎用型・構造体・列挙型・エラー型・関数値は使えない。Cとの対応表は [runtime.ffi-types] に定める。
+
+**[ffi.struct]** externブロック内に `struct Cタグ as Suz名 { フィールド名: 型, ... }` と宣言できる。Cタグはヘッダーの `struct Cタグ` を指し、typedef名やunion名ではない。Suz名は [name.type] に従い、Cタグがその規則を満たす場合は `as Suz名` を省略できる。`suz_`で始まるCタグは [ffi.name] により拒否する。
+
+フィールドは宣言順に並べ、名前には [name.value] を適用する。使える型はi8〜i64・u8〜u64、f32・f64、C固有整数型である。空の宣言、フィールド名の重複、bool・len_t・char・文字列・ポインタ・構造体・列挙型・関数値のフィールドは認めない。C側の配列、ビットフィールド、const・volatile・atomicのフィールドも対象外とする。
+
+Suz内では通常の構造体と同じく初期化・コピー・フィールドの読み書き・with・メソッド・newに使える。各フィールドの型に応じた通常の制約を適用する。C構造体もextern関数の値引数・戻り値には使えない。ヘッダーとの配置・型の照合は [tool.ffi-header] に従う。
+
+```suz
+extern "time.h" {
+    struct timespec as Timespec {
+        tv_sec: _long,
+        tv_nsec: _long,
+    }
+}
+```
+
+この宣言は、対象環境の `struct timespec` が指定した型・配置と一致する場合に使える。
 
 **[ffi.c-integer]** `_int`・`_uint`・`_long`・`_ulong`・`_size_t`・`_char`はそれぞれCの `int`・`unsigned int`・`long`・`unsigned long`・`size_t`・`char` に対応する別々の組み込み型である。externの内外で使え、値の保持、関数の引数・戻り値、構造体のフィールド、同じ型同士の等値・順序比較を認める。型の幅・符号・範囲はCの対象環境に従う。汎用型`int`には含めない。C固有型は通常の整数型を対象にした算術・ビット演算・反復・添字・テンプレート埋め込みの規則には含めず、それらの操作ではSuzの型へ明示的に変換する。文字列からC固有型およびそれを含む構造体への変換も認めない。
 
@@ -2068,7 +2085,9 @@ Program          ::= NL* ( Declaration NL+ )* Declaration? EOF
 Declaration      ::= TopLevelBinding | FunctionDeclaration
                    | StructDeclaration | EnumDeclaration | ErrorDeclaration | FnShapeDeclaration | ExternBlock
 
-ExternBlock      ::= "extern" HEADER "{" NL* ( ExternFunction NL+ )* ExternFunction? "}"
+ExternBlock      ::= "extern" HEADER "{" NL* ( ExternDeclaration NL+ )* ExternDeclaration? "}"
+ExternDeclaration ::= ExternFunction | ExternStruct
+ExternStruct     ::= "struct" CNAME ( "as" IDENT )? "{" NL* Fields "}"
 ExternFunction   ::= "fn" CNAME ( "as" IDENT )? "(" Parameters? ")" "->" Type
 
 TopLevelBinding  ::= "fix" IDENT TypeAnnotation? "=" ConstExpression AllowClause?

@@ -172,7 +172,7 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
                 assign(
                     c,
                     field.ty,
-                    &format!("{path}.suz_field_{index}"),
+                    &format!("{path}.{}", super::structs::field_name(ty, index, context)),
                     slot,
                     context,
                 );
