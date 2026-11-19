@@ -270,13 +270,31 @@ fn keep_is_a_typed_pointer_modifier_not_a_reserved_name() {
     // 修飾語と仮引数名が同じ綴りでも、コロンの位置で区別する。
     suz::compile(b"extern \"f.h\" {\nfn scalar(keep: _int) -> void\nfn attach(keep keep: *i32) -> void\n}\nfn main() -> u8 { fix keep = 1\nreturn keep as u8 or 1 }").unwrap();
     for declaration in [
-        "fn wrapper(keep p: ptr i32) -> void {}",
         "extern \"f.h\" { fn attach(keep keep p: *i32) -> void }",
         "extern \"f.h\" { fn attach(keep p: ptr i32) -> void }",
     ] {
         let source = format!("{declaration}\nfn main() -> u8 {{ return 0 }}");
         assert!(suz::compile(source.as_bytes()).is_err(), "{source}");
     }
+}
+
+#[test]
+fn keep_on_suz_parameters_explains_the_extern_only_modifier() {
+    for declaration in [
+        "fn wrapper(keep p: ptr i32) -> void {}",
+        "arena fn wrapper(keep p: ptr i32) -> void {}",
+        "fn wrapper() -> void { fix f = fn [](keep p: ptr i32) -> void {} }",
+    ] {
+        let source = format!("{declaration}\nfn main() -> u8 {{ return 0 }}");
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(error.rule(), "ffi.keep", "{source}: {error}");
+        assert!(
+            error
+                .to_string()
+                .contains("only allowed on extern typed C pointer parameters")
+        );
+    }
+    suz::compile(b"fn value(keep: i32) -> i32 { return keep }\nfn main() -> u8 { return value(0) as u8 or 1 }").unwrap();
 }
 
 #[test]

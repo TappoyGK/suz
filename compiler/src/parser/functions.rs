@@ -100,6 +100,21 @@ impl Parser<'_, '_> {
     }
 
     pub(super) fn parameter(&mut self) -> Result<Parameter, Diagnostic> {
+        // keep: 型は通常の名前。keep 名前: 型だけをextern専用の修飾語として診断する。
+        if self.token().kind == Kind::Ident("keep")
+            && self
+                .tokens
+                .get(self.cursor + 1)
+                .is_some_and(|t| matches!(t.kind, Kind::Ident(_)))
+        {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "ffi.keep",
+                    "keep is only allowed on extern typed C pointer parameters"
+                ),
+            ));
+        }
         let (name, location) = self.parameter_name()?;
         let ty = self.function_parameter_type()?;
         if ty == Type::Void {
