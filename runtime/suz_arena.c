@@ -25,8 +25,28 @@ static suz_arena_chunk *allocate(uint64_t capacity, const char *source, size_t l
     if (chunk == NULL) allocation_failed(capacity, source, line, column);
     chunk->next = NULL;
     chunk->capacity = (size_t)capacity;
+#ifdef SUZ_ARENA_ASAN
+    __asan_poison_memory_region(chunk->bytes, chunk->capacity);
+#endif
     return chunk;
 }
+
+#ifdef SUZ_ARENA_ASAN
+void suz_arena_poison_reclaimed(suz_arena_chunk *saved, size_t used, suz_arena_cursor current) {
+    if (current.current == NULL) return;
+    suz_arena_chunk *chunk = saved ? saved : suz_arena.first;
+    /* 途中のブロックには使用位置を保存していない。既に毒の未使用部分も含めて
+       末尾まで塗り直す。現在のブロックは使用位置まででよく、単一ブロック内の
+       小さなarenaの回収で大容量の未使用領域を毎回塗り直すことを避ける。 */
+    for (;;) {
+        size_t end = chunk == current.current ? current.used : chunk->capacity;
+        __asan_poison_memory_region(chunk->bytes + used, end - used);
+        if (chunk == current.current) break;
+        chunk = chunk->next;
+        used = 0;
+    }
+}
+#endif
 
 suz_arena_cursor suz_arena_storage_init(uint64_t initial, uint64_t grow, uint64_t limit, const char *source, size_t line, size_t column) {
     assert(suz_arena.first == NULL);
