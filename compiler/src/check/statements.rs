@@ -434,6 +434,15 @@ fn check_binding(
             ),
         ));
     }
+    if matches!(initializer.ty, Type::Function(_)) {
+        return Err(location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "fn.type-call",
+                "call-only function values cannot be stored in bindings"
+            ),
+        ));
+    }
     if initializer.ty == Type::Void {
         return Err(location.error(
             ErrorKind::InvalidSource,

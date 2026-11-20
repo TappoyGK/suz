@@ -159,6 +159,12 @@ fn main() -> u8 {
 "#;
     let error = suz::compile(source.as_bytes()).unwrap_err();
     assert!(error.message().contains("arena.store"), "{error:?}");
+    let ordinary = b"fn identity[T](value: T) -> T { return value }\nfn main() -> u8 { arena { fix ptr p = new (1 as i32)\nidentity[ptr i32](p) }\nreturn 0 }";
+    let error = suz::compile(ordinary).unwrap_err();
+    assert!(
+        format!("{error:?}").contains("arena.parameter"),
+        "{error:?}"
+    );
     let recursive = r#"
 fn grow[T]() -> void { grow[ptr T]() }
 fn main() -> u8 { grow[i32]()
@@ -185,6 +191,8 @@ fn substituted_requirements_and_call_only_types_cannot_hide_invalid_signatures()
     for source in [
         "@needs T: +(T) -> i8\n@needs U: +(U) -> i64\nfn keep[T, U](a: T, b: U) -> U { return b }\nfn main() -> u8 { keep[i8, i8](1, 2)\nreturn 0 }",
         "@needs T: .read() -> i32\n@needs T: arena .read() -> i32\nfn keep[T](v: T) -> T { return v }\nfn main() -> u8 { return 0 }",
+        "fnshape Action() -> void\nfn local[T]() -> void { fix ptr p: ptr T = panic `stop` }\nfn main() -> u8 { local[fn Action]()\nreturn 0 }",
+        "fnshape Action() -> void\nfn local[T]() -> void { fix p: T = panic `stop` }\nfn main() -> u8 { local[fn Action]()\nreturn 0 }",
         "fnshape Action() -> void\nfn exit_now[T]() -> T { return panic `stop` }\nfn main() -> u8 { exit_now[fn Action]()\nreturn 0 }",
         "fnshape Action() -> void\nfn unused[T](p: ptr? T) -> void {}\nfn forward(f: fn Action) -> void { unused[fn Action](null) }\nfn main() -> u8 { return 0 }",
     ] {
@@ -201,12 +209,12 @@ fn Number.*(k: int) -> Number { return Number { n: self.n * k } }
 @needs T: *(i32) -> T
 fn scale[T](a: T) -> T { return a * 2 }
 @needs T: *(T) -> i64
-fn wide[T](a: T, b: T) -> i64 { return a * b }
+fn wide[T](a: T, b: T) -> i64 { return a * b + 1 }
 fn twice(n: int) -> int { return n * 2 }
 fn call_numeric[T](a: T, n: i32) -> i32 { return twice(n) }
 fn main() -> u8 {
     if scale[Number](Number { n: 3 }).n != 6 { return 1 }
-    if wide[i8](100, 2) != 200 { return 2 }
+    if wide[i8](100, 2) != 201 { return 2 }
     if call_numeric[bool](true, 2) != 4 { return 3 }
     return 0
 }

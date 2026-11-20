@@ -442,6 +442,12 @@ fn expression_inner(
     widen: Widening,
     argument: Option<super::generic::Family>,
 ) -> Result<CheckedExpression, Diagnostic> {
+    if required.is_some_and(|ty| ty.pointee().is_some() && matches!(ty.leaf(), Type::Function(_))) {
+        return Err(expr.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!("arena.ptr-type", "pointer requires a stored value type"),
+        ));
+    }
     if let Some(Type::CInteger(_)) = required
         && let Some(value) = super::ffi::literal(expr, required.unwrap())?
     {

@@ -366,7 +366,7 @@ pub(super) fn check_with_captures(
     scope.trusted_block = false;
     scope.arena_depth = usize::from(function.arena);
     scope.arena_used = Default::default();
-    if !function.arena && super::arena::contains(function.result, &scope) {
+    if !function.arena && super::arena::contains(scope.resolve_type(function.result), &scope) {
         return Err(function.location.error(
             ErrorKind::InvalidSource,
             crate::diagnostic!(
