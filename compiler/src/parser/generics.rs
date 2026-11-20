@@ -124,9 +124,9 @@ impl Parser<'_, '_> {
         &mut self,
     ) -> Result<Vec<crate::ast::generics::Need>, Diagnostic> {
         use super::FixedToken;
-        use crate::ast::generics::Need;
+        use crate::ast::generics::NeedList;
         let saved = self.cursor;
-        let mut needs: Vec<Need> = Vec::new();
+        let mut needs = NeedList::default();
         for (start, end) in std::mem::take(&mut self.pending_needs) {
             self.cursor = start + 1;
             self.expect(FixedToken::Keyword("needs"))?;
@@ -137,25 +137,12 @@ impl Parser<'_, '_> {
                 ));
             }
             for need in self.need_item(end)? {
-                Self::insert_need(&mut needs, need);
+                needs.insert(need);
             }
         }
         self.cursor = saved;
-        Ok(needs)
+        Ok(needs.into_vec())
     }
-    pub(super) fn insert_need(
-        needs: &mut Vec<crate::ast::generics::Need>,
-        need: crate::ast::generics::Need,
-    ) {
-        // 別名のfnshapeの矛盾は型解決後に判定する。
-        if !needs
-            .iter()
-            .any(|n| n.same_operation(&need) && n.same_signature(&need))
-        {
-            needs.push(need);
-        }
-    }
-
     pub(super) fn need_item(
         &mut self,
         end: usize,
@@ -287,6 +274,7 @@ impl Parser<'_, '_> {
             }
         }
         let need = Need {
+            definition: location,
             parameter,
             operation,
             parameters,

@@ -689,7 +689,7 @@ fn definition_scope(
     let mut context = globals.clone();
     context.named = Rc::new(super::scope::NamedTypes {
         type_parameters: Rc::new(parameters.to_vec()),
-        needs: Rc::new(needs.to_vec()),
+        needs: Rc::new(needs.to_vec().into()),
         ..Default::default()
     });
     if !needs.is_empty() {

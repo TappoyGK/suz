@@ -34,16 +34,24 @@ fn find<'a>(
     args: &[Expression],
     scope: &'a Scope,
 ) -> Option<&'a Need> {
-    scope.named.needs.iter().find(|n| {
-        n.parameter == parameter
-            && &n.operation == operation
-            && n.parameters.len() == args.len()
-            && n.parameters.iter().zip(args).all(|(ty, arg)| {
-                expression::operand_type(arg, scope).is_none_or(|known| {
-                    scope.resolve_type_at(*ty, arg.location).ok() == Some(known)
+    let (method, name) = match operation {
+        RequiredOperation::Operator(op) => (false, *op),
+        RequiredOperation::Method { name, .. } => (true, name.as_str()),
+    };
+    scope
+        .named
+        .needs
+        .candidates(parameter, method, name)
+        .find(|n| {
+            n.parameter == parameter
+                && &n.operation == operation
+                && n.parameters.len() == args.len()
+                && n.parameters.iter().zip(args).all(|(ty, arg)| {
+                    expression::operand_type(arg, scope).is_none_or(|known| {
+                        scope.resolve_type_at(*ty, arg.location).ok() == Some(known)
+                    })
                 })
-            })
-    })
+        })
 }
 
 /// 構造体の等値比較は各フィールドの==を使うため、型引数のフィールドにも要求が必要。
@@ -60,7 +68,7 @@ pub(in crate::check) fn struct_equality(
         match ty {
             Type::Struct(id) => pending.extend(scope.structs.get(id).fields.iter().map(|f| f.ty)),
             Type::Parameter(id)
-                if !scope.named.needs.iter().any(|n| {
+                if !scope.named.needs.candidates(id, false, "==").any(|n| {
                     n.parameter == id
                         && n.operation == RequiredOperation::Operator("==")
                         && n.parameters == [ty]
@@ -110,10 +118,10 @@ pub(in crate::check) fn hint(expr: &Expression, scope: &Scope) -> Option<Type> {
     }
     match &expr.kind {
         ExpressionKind::Binary { operator, left, right } => find(target(left, scope)?, &RequiredOperation::Operator(operator.c_symbol()), std::slice::from_ref(right), scope).and_then(|n| scope.resolve_type_at(n.result, expr.location).ok()),
-        ExpressionKind::MethodCall { target: receiver, name, mutable, arguments } => scope.named.needs.iter().find(|n| {
-            Some(n.parameter) == method_target(receiver, scope) && n.parameters.len() == arguments.len()
-                && matches!(&n.operation, RequiredOperation::Method { name: member, mutable: write, .. } if name == member && mutable == write)
-        }).and_then(|n| scope.resolve_type_at(n.result, expr.location).ok()),
+        ExpressionKind::MethodCall { target: receiver, name, mutable, arguments } => method_target(receiver, scope).and_then(|parameter| scope.named.needs.candidates(parameter, true, name).find(|n| {
+            n.parameters.len() == arguments.len()
+                && matches!(&n.operation, RequiredOperation::Method { mutable: write, .. } if mutable == write)
+        })).and_then(|n| scope.resolve_type_at(n.result, expr.location).ok()),
         _ => None,
     }
 }
@@ -316,7 +324,7 @@ fn method(
         unreachable!()
     };
     let parameter = method_target(receiver, scope).unwrap();
-    let need = scope.named.needs.iter().find(|n| {
+    let need = scope.named.needs.candidates(parameter, true, name).find(|n| {
         n.parameter == parameter && n.parameters.len() == arguments.len()
             && matches!(&n.operation, RequiredOperation::Method { name: member, mutable: write, .. } if member == name && write == mutable)
     }).ok_or_else(|| missing_operator(expr.location, parameter, name, scope))?;
@@ -391,18 +399,23 @@ pub(super) fn satisfy(
         error
     };
     if let Type::Parameter(parameter) = target {
-        return if scope.named.needs.iter().any(|n| {
-            n.parameter == parameter
-                && n.operation == need.operation
-                && n.parameters
-                    .iter()
-                    .map(|t| scope.substitute(*t, &[], location))
-                    .collect::<Result<Vec<_>, _>>()
-                    .ok()
-                    == Some(parameters.clone())
-                && scope.substitute(n.result, &[], location).ok() == Some(result)
-                && n.errors == need.errors
-        }) {
+        let (method, name, _) = need.operation_key();
+        return if scope
+            .named
+            .needs
+            .candidates(parameter, method, name)
+            .any(|n| {
+                n.parameter == parameter
+                    && n.operation == need.operation
+                    && n.parameters
+                        .iter()
+                        .map(|t| scope.substitute(*t, &[], location))
+                        .collect::<Result<Vec<_>, _>>()
+                        .ok()
+                        == Some(parameters.clone())
+                    && scope.substitute(n.result, &[], location).ok() == Some(result)
+                    && n.errors == need.errors
+            }) {
             Ok(())
         } else {
             Err(error())
@@ -558,6 +571,10 @@ pub(super) fn validate_substitution(
     scope: &Scope,
     location: Location,
 ) -> Result<(), Diagnostic> {
+    // 各要求の型と充足は呼び出し元で検査する。二つ未満なら要求間の矛盾はない。
+    if needs.len() < 2 {
+        return Ok(());
+    }
     let mut resolved: Vec<(Type, Need)> = Vec::new();
     for need in needs {
         let target = types[need.parameter];
@@ -569,31 +586,28 @@ pub(super) fn validate_substitution(
             .map(|t| scope.substitute(*t, types, location))
             .collect::<Result<_, _>>()?;
         concrete.result = scope.substitute(need.result, types, location)?;
-        for (previous_target, previous) in &resolved {
-            if *previous_target == target
-                && previous.same_operation(&concrete)
-                && !previous.same_signature(&concrete)
-            {
-                let mut error = location.error(
-                    ErrorKind::InvalidSource,
-                    crate::diagnostic!(
-                        "generic.needs-check",
-                        "type substitution makes requirement signatures conflict"
-                    ),
-                );
-                for site in [previous.location, need.location] {
-                    error.related.push(site.error(
-                        ErrorKind::InvalidSource,
-                        crate::diagnostic!(
-                            "generic.needs",
-                            "conflicting requirement declared here"
-                        ),
-                    ));
-                }
-                return Err(error);
-            }
-        }
         resolved.push((target, concrete));
+    }
+    let mut signatures = std::collections::BTreeMap::new();
+    for (target, concrete) in &resolved {
+        if let Some(previous) = signatures.insert((*target, concrete.operation_key()), concrete)
+            && !previous.same_signature(concrete)
+        {
+            let mut error = location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "generic.needs-check",
+                    "type substitution makes requirement signatures conflict"
+                ),
+            );
+            for site in [previous.definition, concrete.definition] {
+                error.related.push(site.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("generic.needs", "conflicting requirement declared here"),
+                ));
+            }
+            return Err(error);
+        }
     }
     Ok(())
 }

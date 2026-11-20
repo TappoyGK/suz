@@ -9,7 +9,7 @@ pub(crate) struct TypeParameter {
 }
 
 /// 要求する演算子、または読み取り・書き換えとArenaの区別を持つメソッド。
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum RequiredOperation {
     Operator(&'static str),
     Method {
@@ -28,23 +28,16 @@ pub(crate) struct Need {
     pub result: Type,
     pub errors: Vec<ErrorVariant>,
     pub location: Location,
+    /// 一覧を展開しても、直接要求を書いた行を診断に残す。
+    pub definition: Location,
 }
 
 impl Need {
-    /// 演算子は右辺の型ごとに定義できるが、通常メソッドは名前による多重定義を持たない。
-    pub fn same_operation(&self, other: &Self) -> bool {
-        if self.parameter != other.parameter {
-            return false;
-        }
-        match (&self.operation, &other.operation) {
-            (RequiredOperation::Operator(a), RequiredOperation::Operator(b)) => {
-                a == b && self.parameters == other.parameters
-            }
-            (
-                RequiredOperation::Method { name: a, .. },
-                RequiredOperation::Method { name: b, .. },
-            ) => a == b,
-            _ => false,
+    /// 演算子は右辺型も照合する。通常メソッドは名前だけで重複を判定する。
+    pub fn operation_key(&self) -> (bool, &str, &[Type]) {
+        match &self.operation {
+            RequiredOperation::Operator(op) => (false, op, &self.parameters),
+            RequiredOperation::Method { name, .. } => (true, name, &[]),
         }
     }
     /// 重複した要求をまとめるときに、操作の修飾・引数・結果・エラーを照合する。
@@ -88,4 +81,49 @@ pub(crate) struct NeedGroup {
     pub location: Location,
     pub type_parameters: Vec<TypeParameter>,
     pub needs: Vec<Need>,
+}
+
+/// 構文解析時の重複除去。出現順と最初の定義位置を保ち、署名は表で照合する。
+#[derive(Default)]
+pub(crate) struct NeedList {
+    items: Vec<Need>,
+    signatures: std::collections::BTreeSet<NeedSignature>,
+}
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+struct NeedSignature {
+    parameter: usize,
+    operation: RequiredOperation,
+    parameters: Vec<Type>,
+    result: Type,
+    errors: Vec<ErrorVariant>,
+}
+impl From<&Need> for NeedSignature {
+    fn from(need: &Need) -> Self {
+        Self {
+            parameter: need.parameter,
+            operation: need.operation.clone(),
+            parameters: need.parameters.clone(),
+            result: need.result,
+            errors: need.errors.clone(),
+        }
+    }
+}
+impl NeedList {
+    pub fn insert(&mut self, need: Need) {
+        // 要求が一つなら比較相手がなく、署名表の確保も不要。
+        if self.items.is_empty() {
+            self.items.push(need);
+            return;
+        }
+        if self.signatures.is_empty() {
+            self.signatures.insert(NeedSignature::from(&self.items[0]));
+        }
+        let key = NeedSignature::from(&need);
+        if self.signatures.insert(key) {
+            self.items.push(need);
+        }
+    }
+    pub fn into_vec(self) -> Vec<Need> {
+        self.items
+    }
 }

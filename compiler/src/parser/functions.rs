@@ -489,15 +489,11 @@ impl Parser<'_, '_> {
                 }
             }
         }
-        let mut needs = self.declaration_needs()?;
-        for need in inherited {
-            if !needs
-                .iter()
-                .any(|n| n.same_operation(&need) && n.same_signature(&need))
-            {
-                needs.push(need);
-            }
+        let mut needs = crate::ast::generics::NeedList::default();
+        for need in self.declaration_needs()?.into_iter().chain(inherited) {
+            needs.insert(need);
         }
+        let needs = needs.into_vec();
         if name == "main" && !self.type_parameters.is_empty() {
             return Err(location.error(
                 ErrorKind::InvalidSource,

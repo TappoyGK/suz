@@ -201,7 +201,12 @@ fn named_needs_detect_conflicts_after_parameter_substitution() {
     let prefix = "needs Reads[T, U] {\nT: .read() -> i32\nU: .read() -> bool\n}\n";
     let error = suz::compile(format!("{prefix}@needs Reads[T, T]\nfn unused[T](x: T) -> T {{ return x }}\nfn main() -> u8 {{ return 0 }}").as_bytes()).unwrap_err();
     assert!(error.to_string().contains("generic.needs-check"), "{error}");
-    assert!(error.related.iter().any(|e| e.line == 5), "{error:?}");
+    assert_eq!(error.line, 6, "{error:?}");
+    assert_eq!(
+        error.related.iter().map(|e| e.line).collect::<Vec<_>>(),
+        [2, 3],
+        "{error:?}"
+    );
     let valid = format!(
         "{prefix}@needs Reads[T, U]\nfn unused[T, U](x: T, y: U) -> T {{ return x }}\nfn main() -> u8 {{ return 0 }}"
     );
@@ -234,4 +239,28 @@ fn named_needs_resolve_long_forward_chains_without_recursive_expansion() {
     }
     source.push_str("needs Layer2000[T] {\nT: <(T) -> bool\n}\n@needs Layer0[T]\nfn less[T](a: T, b: T) -> bool { return a < b }\nfn main() -> u8 { return 0 }");
     suz::compile(source.as_bytes()).unwrap();
+}
+
+#[test]
+fn named_needs_conflicts_report_definitions_through_nested_lists() {
+    let prefix =
+        "needs Aa[A, B] {\nA: +(A) -> A\nA: +(B) -> i64\n}\nneeds Outer[X, Y] {\nAa[X, Y]\n}\n";
+    for (declaration, use_line) in [
+        (
+            "@needs Outer[T, T]\nfn unused[T](x: T) -> T { return x }\nfn main() -> u8 { return 0 }",
+            9,
+        ),
+        (
+            "@needs Outer[T, U]\nfn unused[T, U](x: T, y: U) -> T { return x }\nfn main() -> u8 { fix result = unused(1 as i32, 2 as i32)\nreturn 0 }",
+            10,
+        ),
+    ] {
+        let error = suz::compile(format!("{prefix}{declaration}").as_bytes()).unwrap_err();
+        assert_eq!(error.line, use_line, "{error:?}");
+        assert_eq!(
+            error.related.iter().map(|e| e.line).collect::<Vec<_>>(),
+            [2, 3],
+            "{error:?}"
+        );
+    }
 }

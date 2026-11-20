@@ -4,7 +4,7 @@ use crate::{
     Diagnostic, ErrorKind,
     ast::{
         Location, Type,
-        generics::{Need, NeedGroup, TypeParameter},
+        generics::{Need, NeedGroup, NeedList, TypeParameter},
     },
     lexer::{Kind, Token},
 };
@@ -249,7 +249,7 @@ impl Parser<'_, '_> {
             ));
         }
         let template = self.need_groups.expanded.borrow()[&id].clone();
-        let mut needs = Vec::new();
+        let mut needs = NeedList::default();
         for mut need in template {
             let Type::Parameter(parameter) = arguments[need.parameter] else {
                 return Err(location.error(
@@ -266,9 +266,9 @@ impl Parser<'_, '_> {
             }
             // 使用時の矛盾は一覧を使用した行へ結び付ける。
             need.location = location;
-            Self::insert_need(&mut needs, need);
+            needs.insert(need);
         }
-        Ok(needs)
+        Ok(needs.into_vec())
     }
 
     fn expand_group(&mut self, id: usize) -> Result<Vec<Need>, Diagnostic> {
@@ -292,15 +292,16 @@ impl Parser<'_, '_> {
                 ));
             }
         }
-        let mut needs = Vec::new();
+        let mut needs = NeedList::default();
         for &(start, end) in &d.body {
             self.cursor = start;
             for need in self.need_item(end)? {
-                Self::insert_need(&mut needs, need);
+                needs.insert(need);
             }
         }
         self.cursor = saved;
         self.type_parameters = parameters;
+        let needs = needs.into_vec();
         groups.expanded.borrow_mut().insert(id, needs.clone());
         Ok(needs)
     }

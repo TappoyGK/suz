@@ -49,13 +49,71 @@ pub(super) enum Mode {
     Instance(super::generic::GenericTypes),
 }
 
+/// 要求は宣言順に保持し、操作を検索するときだけ対象の型引数と名前で候補を絞る。
+#[derive(Default)]
+pub(super) struct Requirements {
+    items: Vec<crate::ast::generics::Need>,
+    operations: BTreeMap<(usize, bool), BTreeMap<String, Vec<usize>>>,
+}
+impl From<Vec<crate::ast::generics::Need>> for Requirements {
+    fn from(items: Vec<crate::ast::generics::Need>) -> Self {
+        // 一つだけの要求はそのまま照合できる。小さな汎用関数に索引の確保を課さない。
+        if items.len() <= 1 {
+            return Self {
+                items,
+                ..Self::default()
+            };
+        }
+        let mut operations: BTreeMap<_, BTreeMap<_, Vec<_>>> = BTreeMap::new();
+        for (id, need) in items.iter().enumerate() {
+            let (method, name, _) = need.operation_key();
+            operations
+                .entry((need.parameter, method))
+                .or_default()
+                .entry(name.to_owned())
+                .or_default()
+                .push(id);
+        }
+        Self { items, operations }
+    }
+}
+impl std::ops::Deref for Requirements {
+    type Target = [crate::ast::generics::Need];
+    fn deref(&self) -> &Self::Target {
+        &self.items
+    }
+}
+impl Requirements {
+    pub fn candidates(
+        &self,
+        parameter: usize,
+        method: bool,
+        name: &str,
+    ) -> impl Iterator<Item = &crate::ast::generics::Need> {
+        let single = self.items.first().filter(|need| {
+            let (kind, operation, _) = need.operation_key();
+            self.items.len() == 1
+                && need.parameter == parameter
+                && kind == method
+                && operation == name
+        });
+        self.operations
+            .get(&(parameter, method))
+            .and_then(|names| names.get(name))
+            .into_iter()
+            .flatten()
+            .map(|&id| &self.items[id])
+            .chain(single)
+    }
+}
+
 /// 名前付き型引数の検査状態。通常のスコープ複製では一つの参照だけを引き継ぐ。
 #[derive(Clone, Default)]
 pub(super) struct NamedTypes {
     /// 名前付き型引数の具体化。汎用定義の検査ではNoneとし、type_parametersとneedsを使う。
     pub type_arguments: Option<Rc<Vec<Type>>>,
     pub type_parameters: Rc<Vec<crate::ast::generics::TypeParameter>>,
-    pub needs: Rc<Vec<crate::ast::generics::Need>>,
+    pub needs: Rc<Requirements>,
     pub instantiation_path: Rc<Vec<(usize, Vec<Type>)>>,
 }
 
