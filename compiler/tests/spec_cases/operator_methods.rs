@@ -141,7 +141,7 @@ fn operator_methods_reject_invalid_definitions_and_calls() {
             "arena { fix ptr p = new n\nif n < p { return 1 } }",
             "operator.overload",
         ),
-        ("", "fix a = n % n", "expr.operator-types"),
+        ("", "fix a = n % n", "operator.overload"),
         (
             "fn Num.+(n: Num) -> Num { return n }",
             "arena { fix ptr p = new n\nfix a = p + n }",
@@ -225,6 +225,18 @@ fn operator_methods_in_constants_are_source_errors() {
     let directory = crate::test_util::TemporaryDirectory::new();
     for (declarations, initializer) in [
         (
+            "fn Num.len() -> len_t { return 1 }",
+            "fix VALUE = len (Num { v: 1 })",
+        ),
+        (
+            "fn Num.not() -> bool { return false }",
+            "fix VALUE = not (Num { v: 1 })",
+        ),
+        (
+            "fn Num.~() -> i32 { return 1 }",
+            "fix VALUE = ~(Num { v: 1 })",
+        ),
+        (
             "fn Num.-() -> i32 { return 1 }",
             "fix VALUE = -(Num { v: 1 })",
         ),
@@ -291,7 +303,9 @@ fn missing_operator_diagnostics_include_the_symbol_without_any_definitions() {
         ("struct Num { v: i32 }", "Num { v: 1 }"),
         ("enum Num: u8 { A, B }", "Num.A"),
     ] {
-        for operator in ["+", "-", "*", "/", "<", "<=", ">", ">="] {
+        for operator in [
+            "+", "-", "*", "/", "%", "&", "|", "^", "<<", ">>", "<", "<=", ">", ">=",
+        ] {
             let source = format!(
                 "{declaration}\nfn main() -> u8 {{ fix a = {value}\nfix b = a {operator} a\nreturn 0 }}"
             );
@@ -358,7 +372,7 @@ fn unary_minus_methods_reject_invalid_definitions_and_call_contexts() {
         (
             "fn Num.-() -> Num { return self }\nfn Num.-() -> i32 { return 0 }",
             "",
-            "operator.unary-minus",
+            "operator.unary",
         ),
         ("fn Num.-() -> void {}", "", "operator.method"),
         ("fn Num#-() -> Num { return self }", "", "operator.method"),
@@ -378,11 +392,11 @@ fn unary_minus_methods_reject_invalid_definitions_and_call_contexts() {
             "",
             "operator.method",
         ),
-        ("", "fix a = -n", "operator.unary-minus"),
+        ("", "fix a = -n", "operator.unary"),
         (
             "fn Num.-(a: Num) -> Num { return a }",
             "fix a = -n",
-            "operator.unary-minus",
+            "operator.unary",
         ),
         (
             "fn Num.-() -> Num { return self }",
@@ -623,4 +637,160 @@ fn main() -> u8 {
         "compound-operator-handlers.suz",
     );
     assert!(output.status.success(), "{output:?}");
+}
+
+#[test]
+fn operator_methods_extend_value_operations_and_compound_assignments() {
+    let output = compile_and_run_c23(
+        r#"
+struct Bits { v: u32 }
+fn Bits.%(n: u32) -> Bits { return Bits { v: self.v % n } }
+fn Bits.&(n: u32) -> Bits { return Bits { v: self.v & n } }
+fn Bits.|(n: u32) -> Bits { return Bits { v: self.v | n } }
+fn Bits.^(n: u32) -> Bits { return Bits { v: self.v ^ n } }
+fn Bits.<<(n: u32) -> Bits { return Bits { v: self.v << n } }
+fn Bits.>>(n: u32) -> Bits { return Bits { v: self.v >> n } }
+fn Bits.<<(n: Bits) -> Bits { return Bits { v: self.v << n.v } }
+fn Bits.~() -> Bits { return Bits { v: ~self.v } }
+fn Bits.not() -> bool { return self.v == 0 }
+fn Bits.len() -> len_t { return self.v as len_t or 0 }
+fn make(p: ptr i32, n: u32) -> Bits { #p += 1
+return Bits { v: n } }
+fn main() -> u8 {
+    var b = Bits { v: 31 }
+    b %= 16
+    b &= 7
+    b |= 8
+    b ^= 3
+    b <<= 2
+    b >>= 1
+    if b.v != 24 { return 1 }
+    if (b << (Bits { v: 1 })).v != 48 { return 2 }
+    if (b & 15 | 1 ^ 2).v != 11 { return 3 }
+    if (~~b).v != 24 { return 4 }
+    if not b { return 5 }
+    if not (not (Bits { v: 0 })) { return 6 }
+    fix size: len_t = len b + 1
+    if size != 25 { return 7 }
+    arena {
+        fix ptr count = new (0 as i32)
+        if (len make(count, 3)) != 3 || .count != 1 { return 8 }
+        if not make(count, 1) || .count != 2 { return 9 }
+        if (~make(count, 0)).v != 4294967295 || .count != 3 { return 10 }
+        fix ptr p = new b
+        #p %= 5
+        #p <<= 1
+        #p |= 1
+        if (.p).v != 9 { return 11 }
+        if (len .p) != 9 { return 12 }
+    }
+    return 0
+}
+"#,
+        "extended-operators.suz",
+    );
+    assert!(output.status.success(), "{output:?}");
+}
+
+#[test]
+fn operator_methods_extended_results_drive_outer_type_inference() {
+    let output = compile_and_run_c23(
+        r#"
+struct Num { v: i32 }
+fn Num.~() -> float { return 0.5 }
+fn Num.%(n: f32) -> f32 { return n }
+fn Num.&(n: Num) -> i32 { return self.v + n.v }
+fn Num.>>(n: int) -> int { return n * 2 }
+fn Num.^(n: i32) -> i32 { return n }
+fn main() -> u8 {
+    fix n = Num { v: 3 }
+    fix a: f32 = (~n) + 0.5
+    if a != 1.0 { return 1 }
+    if n % 0.5 != 0.5 { return 2 }
+    fix b: u8 = (n & n) + 250 or 7
+    if b != 7 { return 3 }
+    fix c: i32 = n >> 4
+    if c != 8 { return 4 }
+    if n ^ (6 / 2 or 1) != 3 { return 5 }
+    return 0
+}
+"#,
+        "extended-operator-types.suz",
+    );
+    assert!(output.status.success(), "{output:?}");
+}
+
+#[test]
+fn operator_methods_enforce_eligibility_and_unary_contracts() {
+    for (decl, body, rule) in [
+        ("fn Num.not() -> i32 { return 0 }", "", "operator.method"),
+        ("fn Num.len() -> i32 { return 0 }", "", "operator.method"),
+        (
+            "fn Num.~(n: Num) -> Num { return n }",
+            "",
+            "operator.method",
+        ),
+        (
+            "fn Num.not(n: Num) -> bool { return true }",
+            "",
+            "operator.method",
+        ),
+        (
+            "fn Num.len(n: Num) -> len_t { return 0 }",
+            "",
+            "operator.method",
+        ),
+        (
+            "fn Num.~() -> Num { return self }\nfn Num.~() -> Num { return self }",
+            "",
+            "operator.unary",
+        ),
+        (
+            "fn Num.not() -> bool { return true }",
+            "fix a = ~n",
+            "operator.unary",
+        ),
+        (
+            "fn Num.~() -> Num { return self }",
+            "fix a = ~n or n",
+            "operator.arith-boundary",
+        ),
+        (
+            "fn Num.len() -> len_t { return 0 }",
+            "fix a = len n or 0",
+            "operator.arith-boundary",
+        ),
+        (
+            "fn Num.%(k: i32) -> i32 { return k }",
+            "var b = n\nb %= 2",
+            "operator.compound",
+        ),
+        (
+            "fn Num.<<(k: i32) -> Num { return self }",
+            "fix b = n << 0.5",
+            "operator.overload",
+        ),
+        (
+            "fn Num.+%(k: Num) -> Num { return self }",
+            "",
+            "operator.method",
+        ),
+        (
+            "fn Num.&&(k: Num) -> bool { return true }",
+            "",
+            "operator.method",
+        ),
+        ("fn Num.as() -> i32 { return 0 }", "", "operator.method"),
+        (
+            "fn Num.==(k: Num) -> bool { return true }",
+            "",
+            "operator.no-equality",
+        ),
+    ] {
+        let source = format!(
+            "struct Num {{ v: i32 }}\n{decl}\nfn main() -> u8 {{ fix n = Num {{ v: 1 }}\n{body}\nreturn 0 }}"
+        );
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(error.rule(), rule, "{source}\n{error}");
+    }
 }

@@ -329,12 +329,25 @@ impl Parser<'_, '_> {
             self.cursor += 1;
             let (method_name, operator) = match self.token().kind {
                 Kind::Ident(name) => (name, None),
-                Kind::Symbol(op @ ("+" | "-" | "*" | "/" | "<" | "<=" | ">" | ">=")) => {
+                Kind::Symbol(
+                    op @ ("+" | "-" | "*" | "/" | "%" | "&" | "|" | "^" | "<<" | ">>" | "~" | "<"
+                    | "<=" | ">" | ">="),
+                )
+                | Kind::Keyword(op @ ("not" | "len")) => {
                     let symbol = match op {
                         "+" => "+",
                         "-" => "-",
                         "*" => "*",
                         "/" => "/",
+                        "%" => "%",
+                        "&" => "&",
+                        "|" => "|",
+                        "^" => "^",
+                        "<<" => "<<",
+                        ">>" => ">>",
+                        "~" => "~",
+                        "not" => "not",
+                        "len" => "len",
                         "<" => "<",
                         "<=" => "<=",
                         ">" => ">",
@@ -429,12 +442,17 @@ impl Parser<'_, '_> {
         if let Some(method) = method {
             if let Some(operator) = method.operator {
                 if method.mutable
-                    || !(parameters.len() == 1 || (operator == "-" && parameters.is_empty()))
+                    || !match operator {
+                        "~" | "not" | "len" => parameters.is_empty(),
+                        "-" => parameters.len() <= 1,
+                        _ => parameters.len() == 1,
+                    }
                     || result == Type::Void
-                    || (matches!(operator, "<" | "<=" | ">" | ">=") && result != Type::Bool)
+                    || (matches!(operator, "<" | "<=" | ">" | ">=" | "not") && result != Type::Bool)
+                    || (operator == "len" && result != Type::Integer(crate::ast::IntegerType::Len))
                 {
                     return Err(location.error(ErrorKind::InvalidSource, crate::diagnostic!(
-                        "operator.method", "operator methods require a read receiver and a value result; binary operators take one parameter, unary - takes none, comparisons return bool")));
+                        "operator.method", "operator methods require a read receiver and a value result; binary operators take one parameter, unary operators take none, comparisons and not return bool, len returns len_t")));
                 }
                 // 引数のない単項と二項を区別する。二項の数値は種類ごと、その他は型ごとに一意にする。
                 let key = if parameters.is_empty() {

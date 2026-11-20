@@ -32,8 +32,8 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
                     ErrorKind::InvalidSource,
                     if function.parameters.len() == 1 {
                         crate::diagnostic!(
-                            "operator.unary-minus",
-                            "duplicate unary operator - definition"
+                            "operator.unary",
+                            "duplicate unary operator definition"
                         )
                     } else {
                         crate::diagnostic!(

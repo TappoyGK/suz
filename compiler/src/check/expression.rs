@@ -72,7 +72,15 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
         ExpressionKind::Null => None,
         ExpressionKind::CBytes(_) => Some(Type::CPointer),
         ExpressionKind::CByteLen(_) => Some(Type::CInteger(crate::ast::CIntegerType::Size)),
-        ExpressionKind::Len(_) => Some(Type::Integer(IntegerType::Len)),
+        ExpressionKind::Len(inner) => {
+            if bindings.has_operator_methods
+                && super::operator_methods::owner(inner, bindings).is_some()
+            {
+                super::operator_methods::unary_hint("len", inner, bindings)
+            } else {
+                Some(Type::Integer(IntegerType::Len))
+            }
+        }
         ExpressionKind::Template(_) => Some(Type::Symbol),
         ExpressionKind::Struct { id, .. } => Some(Type::Struct(*id)),
         ExpressionKind::With { target, .. } => operand_type(target, bindings),
@@ -117,10 +125,16 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
         ExpressionKind::Integer { .. } | ExpressionKind::Float(_) => None,
         ExpressionKind::Name(name) => bindings.get(name).map(|binding| binding.ty),
         ExpressionKind::Negate(inner)
+        | ExpressionKind::BitNot(inner)
+        | ExpressionKind::Not(inner)
             if bindings.has_operator_methods
                 && super::operator_methods::owner(inner, bindings).is_some() =>
         {
-            super::operator_methods::unary_hint(inner, bindings)
+            super::operator_methods::unary_hint(
+                super::operator_methods::unary(expr).unwrap().0,
+                inner,
+                bindings,
+            )
         }
         ExpressionKind::ArithmeticHandler { operand: inner, .. }
         | ExpressionKind::Group(inner)
@@ -219,9 +233,16 @@ fn has_float_source_inner<const OPERATOR_METHODS: bool>(
         }
         ExpressionKind::Float(_) => true,
         ExpressionKind::Negate(inner)
+        | ExpressionKind::BitNot(inner)
+        | ExpressionKind::Not(inner)
             if OPERATOR_METHODS && super::operator_methods::owner(inner, bindings).is_some() =>
         {
-            super::operator_methods::unary_hint(inner, bindings).is_some_and(Type::is_float)
+            super::operator_methods::unary_hint(
+                super::operator_methods::unary(expr).unwrap().0,
+                inner,
+                bindings,
+            )
+            .is_some_and(Type::is_float)
         }
         ExpressionKind::ArithmeticHandler { operand: inner, .. }
         | ExpressionKind::Group(inner)
@@ -430,10 +451,10 @@ fn expression_inner(
             bindings,
         )?
     } else if bindings.has_operator_methods
-        && let ExpressionKind::Negate(operand) = &expr.kind
+        && let Some((op, operand)) = super::operator_methods::unary(expr)
         && super::operator_methods::owner(operand, bindings).is_some()
     {
-        super::operator_methods::unary_call(expr, operand, inference_hint, bindings)?
+        super::operator_methods::unary_call(expr, op, operand, inference_hint, bindings)?
     } else if super::exact::is_operator(expr) && super::exact::integer(expr, bindings) {
         super::exact::check(expr, inference_hint, bindings, false)?
     } else {

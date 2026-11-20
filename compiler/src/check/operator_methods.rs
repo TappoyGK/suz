@@ -77,7 +77,10 @@ fn resolve<'a>(
 
 pub(super) fn supported(op: crate::ast::BinaryOperator) -> bool {
     use crate::ast::BinaryOperator::*;
-    matches!(op, Add | Subtract | Multiply | Divide)
+    matches!(
+        op,
+        Add | Subtract | Multiply | Divide | Remainder | And | Or | Xor | ShiftLeft | ShiftRight
+    )
 }
 
 pub(super) fn is_call(expr: &Expression, scope: &Scope) -> bool {
@@ -88,8 +91,7 @@ pub(super) fn is_call(expr: &Expression, scope: &Scope) -> bool {
         ExpressionKind::Binary { operator, left, .. } if supported(*operator) => {
             owner(left, scope).is_some()
         }
-        ExpressionKind::Negate(operand) => owner(operand, scope).is_some(),
-        _ => false,
+        _ => unary(expr).is_some_and(|(_, operand)| owner(operand, scope).is_some()),
     }
 }
 
@@ -106,31 +108,43 @@ pub(super) fn hint(op: &str, left: &Expression, right: &Expression, scope: &Scop
     super::generic::call_operand_type(name, &[left.clone(), right.clone()], &hints)
 }
 
-fn unary_name(operand: &Expression, scope: &Scope) -> Option<String> {
+/// 値を一度評価して渡す単項演算。型や格納先を指定する構文は含めない。
+pub(super) fn unary(expr: &Expression) -> Option<(&'static str, &Expression)> {
+    match &expr.kind {
+        ExpressionKind::Negate(inner) => Some(("-", inner)),
+        ExpressionKind::BitNot(inner) => Some(("~", inner)),
+        ExpressionKind::Not(inner) => Some(("not", inner)),
+        ExpressionKind::Len(inner) => Some(("len", inner)),
+        _ => None,
+    }
+}
+
+fn unary_name(op: &str, operand: &Expression, scope: &Scope) -> Option<String> {
     Some(format!(
-        "{}.-@unary",
+        "{}.{op}@unary",
         scope.type_name(owner(operand, scope)?)
     ))
 }
 
-pub(super) fn unary_hint(operand: &Expression, scope: &Scope) -> Option<Type> {
-    let name = unary_name(operand, scope)?;
+pub(super) fn unary_hint(op: &str, operand: &Expression, scope: &Scope) -> Option<Type> {
+    let name = unary_name(op, operand, scope)?;
     super::generic::call_operand_type(&name, std::slice::from_ref(operand), scope)
 }
 
 pub(super) fn unary_call(
     expr: &Expression,
+    op: &str,
     operand: &Expression,
     expected: Option<Type>,
     scope: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
-    let name = unary_name(operand, scope).expect("operator receiver checked");
+    let name = unary_name(op, operand, scope).expect("operator receiver checked");
     if !scope.functions.contains_key(&name) {
         return Err(expr.location.error(
             ErrorKind::InvalidSource,
             crate::diagnostic!(
-                "operator.unary-minus",
-                "no unary operator - defined for this type"
+                "operator.unary",
+                "no unary operator {op} defined for this type"
             ),
         ));
     }

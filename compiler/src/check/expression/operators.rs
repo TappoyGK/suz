@@ -192,7 +192,7 @@ pub(super) fn check(
                                 if matches!(&expr.kind, ExpressionKind::Negate(_)) =>
                             {
                                 crate::diagnostic!(
-                                    "operator.unary-minus",
+                                    "operator.unary",
                                     "no unary operator - defined for this type"
                                 )
                             }
