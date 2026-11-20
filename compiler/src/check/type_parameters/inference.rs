@@ -21,7 +21,13 @@ pub(super) fn resolve(
     location: Location,
     defer_checks: bool,
 ) -> Result<Vec<Type>, Diagnostic> {
-    let mut candidates = vec![None; signature.type_parameters];
+    let mut candidates: Vec<_> = signature
+        .type_parameter_names
+        .as_deref()
+        .map_or(&[][..], Vec::as_slice)
+        .iter()
+        .map(|name| (name.as_str(), None))
+        .collect();
     let known: Vec<_> = arguments.iter().map(|arg| known_type(arg, scope)).collect();
     for ((argument, parameter), actual) in arguments.iter().zip(&signature.parameters).zip(&known) {
         if let Some(actual) = actual {
@@ -38,7 +44,10 @@ pub(super) fn resolve(
     }
     // この集合は既定型を選ぶ前に固定する。先に置かれたリテラルの既定型を、
     // 後ろのリテラルへの要求型として使うと、引数順で結果が変わってしまう。
-    let fixed: Vec<_> = candidates.iter().map(Option::is_some).collect();
+    let fixed: Vec<_> = candidates
+        .iter()
+        .map(|(_, candidate)| candidate.is_some())
+        .collect();
     if fixed.iter().any(|fixed| !fixed) {
         for ((argument, parameter), known) in arguments.iter().zip(&signature.parameters).zip(known)
         {
@@ -60,15 +69,14 @@ pub(super) fn resolve(
 
     candidates
         .into_iter()
-        .enumerate()
-        .map(|(id, candidate)| {
+        .map(|(name, candidate)| {
             candidate.map(|c| c.ty).ok_or_else(|| {
                 location.error(
                     ErrorKind::InvalidSource,
                     crate::diagnostic!(
                         "generic.inference",
-                        "cannot infer type argument {}; specify all type arguments explicitly",
-                        id + 1
+                        "cannot infer type parameter {}; specify all type arguments explicitly",
+                        name
                     ),
                 )
             })
@@ -83,7 +91,7 @@ fn constrain(
     actual: Type,
     location: Location,
     scope: &Scope,
-    candidates: &mut [Option<Candidate>],
+    candidates: &mut [(&str, Option<Candidate>)],
     fixed: &[bool],
     defer_checks: bool,
 ) -> Result<(), Diagnostic> {
@@ -100,17 +108,18 @@ fn constrain(
         if fixed.get(id) == Some(&true) {
             return Ok(());
         }
-        if let Some(previous) = candidates[id] {
+        let (name, candidate) = &mut candidates[id];
+        if let Some(previous) = *candidate {
             if previous.ty != actual {
                 let conflict = |a, b| {
                     let mut error = location.error(
                         ErrorKind::InvalidSource,
                         crate::diagnostic!(
                             "generic.inference",
-                            "conflicting types {} and {} for type argument {}",
+                            "conflicting types {} and {} for type parameter {}",
                             scope.type_name(a),
                             scope.type_name(b),
-                            id + 1
+                            name
                         ),
                     );
                     error.related.push(previous.location.error(
@@ -139,7 +148,7 @@ fn constrain(
                 }
             }
         } else {
-            candidates[id] = Some(Candidate {
+            *candidate = Some(Candidate {
                 ty: actual,
                 location,
             });

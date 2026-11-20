@@ -9,6 +9,8 @@ use std::{collections::BTreeMap, rc::Rc};
 #[derive(Clone)]
 pub(super) struct Signature {
     pub type_parameters: usize,
+    // 診断用の名前は汎用宣言だけに保持し、署名を複製するときも共有する。
+    pub type_parameter_names: Option<Rc<Vec<String>>>,
     pub needs: Vec<crate::ast::generics::Need>,
     pub method: Option<crate::ast::Method>,
     pub arena: bool,

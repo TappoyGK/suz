@@ -515,3 +515,39 @@ fn inferred_and_explicit_calls_generate_the_same_code() {
         suz::compile(inferred.as_bytes()).unwrap()
     );
 }
+
+#[test]
+fn inference_diagnostics_name_the_callee_type_parameters() {
+    for (definition, usage, expected) in [
+        (
+            "fn first[T](a: T, b: T) -> T { return a }",
+            "fix a: i16 = 1\nfix b: i32 = 2\nfirst(a, b)",
+            "conflicting types i16 and i32 for type parameter T",
+        ),
+        (
+            "fn choose[Key, Item](key: Key, a: Item, b: Item) -> Item { return a }\nfn forward[Left, Right](a: Left, b: Right) -> void { choose(true, a, b) }",
+            "",
+            "conflicting types Left and Right for type parameter Item",
+        ),
+        (
+            "fn make[Result]() -> Result { panic `missing` }",
+            "fix n: i32 = make()",
+            "cannot infer type parameter Result; specify all type arguments explicitly",
+        ),
+        (
+            "fn accept[Element](p: ptr? Element) -> void {}",
+            "accept(null)",
+            "cannot infer type parameter Element; specify all type arguments explicitly",
+        ),
+        (
+            "fn pair[T, U](value: T) -> T { return value }",
+            "pair(1)",
+            "cannot infer type parameter U; specify all type arguments explicitly",
+        ),
+    ] {
+        let source = format!("{definition}\nfn main() -> u8 {{ {usage}\nreturn 0 }}");
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(error.rule(), "generic.inference", "{error}");
+        assert!(error.message().contains(expected), "{error}");
+    }
+}

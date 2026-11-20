@@ -33,6 +33,7 @@ pub(super) fn signatures(
             function.name.clone(),
             Signature {
                 type_parameters: 0,
+                type_parameter_names: None,
                 needs: Vec::new(),
                 method: None,
                 arena: false,

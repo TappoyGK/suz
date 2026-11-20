@@ -271,6 +271,7 @@ pub(super) fn method_signature(
         method.owner = scope.substitute(method.owner, &arguments, location)?;
     }
     resolved.type_parameters = 0;
+    resolved.type_parameter_names = None;
     Ok(resolved)
 }
 

@@ -79,6 +79,15 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
             function.name.clone(),
             Signature {
                 type_parameters: function.type_parameters.len(),
+                type_parameter_names: (!function.type_parameters.is_empty()).then(|| {
+                    Rc::new(
+                        function
+                            .type_parameters
+                            .iter()
+                            .map(|p| p.name.clone())
+                            .collect(),
+                    )
+                }),
                 needs: function.needs.clone(),
                 method,
                 arena: function.arena,
