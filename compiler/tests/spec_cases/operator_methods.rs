@@ -794,3 +794,42 @@ fn operator_methods_enforce_eligibility_and_unary_contracts() {
         assert_eq!(error.rule(), rule, "{source}\n{error}");
     }
 }
+
+#[test]
+fn missing_unary_operator_diagnostics_distinguish_user_types_from_builtins() {
+    for (declaration, value) in [
+        ("struct Num { v: i32 }", "Num { v: 1 }"),
+        ("enum Num: u8 { A, B }", "Num.A"),
+    ] {
+        // 定義の有無によって変わる検査経路の両方で、同じ診断を要求する。
+        for extra in ["", "fn Num.+(n: Num) -> Num { return n }"] {
+            for op in ["-", "~", "not", "len"] {
+                let source = format!(
+                    "{declaration}\n{extra}\nfn main() -> u8 {{ fix a = {value}\nfix b = {op} a\nreturn 0 }}"
+                );
+                let error = suz::compile(source.as_bytes()).unwrap_err();
+                assert_eq!(error.rule(), "operator.unary", "{source}\n{error}");
+                assert!(
+                    error
+                        .to_string()
+                        .contains(&format!("no unary operator {op} defined for this type")),
+                    "{source}\n{error}"
+                );
+            }
+        }
+    }
+    for (op, value, rule) in [
+        ("~", "1.0", "expr.operator-types"),
+        ("not", "1", "expr.not"),
+        ("len", "1", "len.targets"),
+        ("~", "p", "expr.operator-types"),
+        ("not", "p", "expr.not"),
+        ("len", "p", "len.targets"),
+    ] {
+        let source = format!(
+            "fn main() -> u8 {{ arena {{ fix ptr p = new (1 as i32)\nfix b = {op} {value} }}\nreturn 0 }}"
+        );
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(error.rule(), rule, "{source}\n{error}");
+    }
+}

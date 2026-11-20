@@ -543,7 +543,14 @@ fn expression_inner(
                 if !operand.ty.is_text() {
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
-                        crate::diagnostic!("len.targets", "len requires symbol or text"),
+                        if matches!(operand.ty, Type::Struct(_) | Type::Enum(_)) {
+                            crate::diagnostic!(
+                                "operator.unary",
+                                "no unary operator len defined for this type"
+                            )
+                        } else {
+                            crate::diagnostic!("len.targets", "len requires symbol or text")
+                        },
                     ));
                 }
                 CheckedExpression {

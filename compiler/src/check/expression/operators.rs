@@ -189,11 +189,15 @@ pub(super) fn check(
                         ErrorKind::InvalidSource,
                         match ty {
                             Type::Struct(_) | Type::Enum(_)
-                                if matches!(&expr.kind, ExpressionKind::Negate(_)) =>
+                                if matches!(
+                                    &expr.kind,
+                                    ExpressionKind::Negate(_) | ExpressionKind::BitNot(_)
+                                ) =>
                             {
                                 crate::diagnostic!(
                                     "operator.unary",
-                                    "no unary operator - defined for this type"
+                                    "no unary operator {} defined for this type",
+                                    super::super::operator_methods::unary(expr).unwrap().0
                                 )
                             }
                             Type::Text => crate::diagnostic!(
@@ -306,7 +310,14 @@ pub(super) fn check(
             if operand.ty != Type::Bool {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
-                    crate::diagnostic!("expr.not", "not requires a bool operand"),
+                    if matches!(operand.ty, Type::Struct(_) | Type::Enum(_)) {
+                        crate::diagnostic!(
+                            "operator.unary",
+                            "no unary operator not defined for this type"
+                        )
+                    } else {
+                        crate::diagnostic!("expr.not", "not requires a bool operand")
+                    },
                 ));
             }
             CheckedExpression {
