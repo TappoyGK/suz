@@ -168,7 +168,7 @@ impl Parser<'_, '_> {
     }
 
     // 戻り値に続くエラー指定と、変換に続くorハンドラーは呼び出し側で解析する。
-    fn type_atom(&mut self) -> Result<Type, Diagnostic> {
+    pub(super) fn type_atom(&mut self) -> Result<Type, Diagnostic> {
         let mut layers = Vec::new();
         while self.token().kind == Kind::Keyword("ptr") {
             if layers.len() == 256 {
@@ -185,6 +185,15 @@ impl Parser<'_, '_> {
             layers.push(nullable);
         }
         let mut ty = self.type_leaf()?;
+        if !self.type_parameters.is_empty() && ty.generic() {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "generic.numeric-existing",
+                    "named type parameters cannot be combined with int or float"
+                ),
+            ));
+        }
         if !layers.is_empty() && (ty == Type::Void || matches!(ty, Type::Function(_))) {
             return Err(self.error(
                 ErrorKind::InvalidSource,
@@ -259,6 +268,12 @@ impl Parser<'_, '_> {
                 crate::diagnostic!("fn.type-mark", "fn requires a declared fnshape name"),
             ));
         }
+        if let Kind::Ident(name) = self.token().kind
+            && let Some(index) = self.type_parameters.iter().position(|p| p.name == name)
+        {
+            self.cursor += 1;
+            return Ok(Type::Parameter(index));
+        }
         let ty = match self.token().kind {
             Kind::TypeName(name) => Type::from_name(name).unwrap(),
             Kind::Ident(name) => self
@@ -302,6 +317,11 @@ impl Parser<'_, '_> {
         let owner_name = name;
         let ordinary_name = matches!(self.token().kind, Kind::Ident(_));
         self.cursor += 1;
+        self.type_parameters = if self.token().kind == Kind::Symbol("[") {
+            self.generic_parameters()?
+        } else {
+            Vec::new()
+        };
         let (mut name, method) = if matches!(self.token().kind, Kind::Symbol("." | "#")) {
             let mutable = self.token().kind == Kind::Symbol("#");
             let owner = self
@@ -403,6 +423,22 @@ impl Parser<'_, '_> {
             super::names::check(super::names::Shape::Value, owner_name, location)?;
             (owner_name.to_owned(), None)
         };
+        if method.is_some() && !self.type_parameters.is_empty() {
+            return Err(location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "generic.receiver-parameters",
+                    "receiver parameters must match the struct declaration"
+                ),
+            ));
+        }
+        let needs = self.declaration_needs()?;
+        if name == "main" && !self.type_parameters.is_empty() {
+            return Err(location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("generic.parameters", "main cannot have type parameters"),
+            ));
+        }
         let (mut parameters, result) = if name == "main" {
             if has_main {
                 return Err(self.error(
@@ -490,6 +526,8 @@ impl Parser<'_, '_> {
         }
         let (statements, end) = self.block()?;
         Ok(Function {
+            type_parameters: std::mem::take(&mut self.type_parameters),
+            needs,
             method,
             arena: false,
             keyword_location,

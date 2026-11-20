@@ -13,7 +13,7 @@ pub(super) fn owner(expr: &Expression, scope: &Scope) -> Option<Type> {
     expression::operand_type(expr, scope).filter(|ty| matches!(ty, Type::Struct(_) | Type::Enum(_)))
 }
 
-fn select<'a>(
+pub(super) fn select<'a>(
     op: &str,
     left: &Expression,
     right: &Expression,
@@ -119,7 +119,7 @@ pub(super) fn unary(expr: &Expression) -> Option<(&'static str, &Expression)> {
     }
 }
 
-fn unary_name(op: &str, operand: &Expression, scope: &Scope) -> Option<String> {
+pub(super) fn unary_name(op: &str, operand: &Expression, scope: &Scope) -> Option<String> {
     Some(format!(
         "{}.{op}@unary",
         scope.type_name(owner(operand, scope)?)

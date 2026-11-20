@@ -8,6 +8,8 @@ use std::{collections::BTreeMap, rc::Rc};
 
 #[derive(Clone)]
 pub(super) struct Signature {
+    pub type_parameters: usize,
+    pub needs: Vec<crate::ast::generics::Need>,
     pub method: Option<crate::ast::Method>,
     pub arena: bool,
     pub external: bool,
@@ -47,6 +49,12 @@ pub(super) enum Mode {
 
 #[derive(Clone)]
 pub(super) struct Scope {
+    /// 名前付き型引数の具体化。汎用定義の検査ではNoneとし、type_parametersとneedsを使う。
+    pub type_arguments: Option<Rc<Vec<Type>>>,
+    pub type_parameters: Rc<Vec<crate::ast::generics::TypeParameter>>,
+    pub needs: Rc<Vec<crate::ast::generics::Need>>,
+    pub instantiation_path: Rc<Vec<(usize, Vec<Type>)>>,
+
     // 定義のないプログラムでは、演算子用の型ヒント取得を省く。
     pub has_operator_methods: bool,
     // 定数初期値では、演算子構文による関数呼び出しも拒否する。
@@ -110,6 +118,10 @@ impl Scope {
         self.get(name).is_some()
     }
     pub fn resolve_type(&self, ty: Type) -> Type {
+        let ty = self
+            .type_arguments
+            .as_ref()
+            .map_or(ty, |args| super::type_parameters::substitute(ty, args));
         match self.mode {
             Mode::Instance(types) => types.resolve(ty),
             Mode::Ordinary | Mode::GenericCheck => ty,
@@ -124,6 +136,10 @@ impl Scope {
 
     pub fn type_name(&self, ty: Type) -> String {
         match ty {
+            Type::Parameter(id) => self
+                .type_parameters
+                .get(id)
+                .map_or_else(|| "type parameter".into(), |p| p.name.clone()),
             Type::Pointer { .. } => format!(
                 "ptr{} {}",
                 if ty.is_nullable() { "?" } else { "" },
@@ -166,6 +182,10 @@ impl Scope {
 impl Default for Scope {
     fn default() -> Self {
         Self {
+            type_arguments: None,
+            type_parameters: Rc::default(),
+            needs: Rc::default(),
+            instantiation_path: Rc::default(),
             has_operator_methods: false,
             constant_initializer: false,
             arena_depth: 0,

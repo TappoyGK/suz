@@ -118,6 +118,7 @@ impl Schema {
             | Type::CInteger(_)
             | Type::StaticFunction(_)
             | Type::Function(_)
+            | Type::Parameter(_)
             | Type::GenericInt
             | Type::GenericFloat
             | Type::Numeric(_)

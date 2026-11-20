@@ -32,6 +32,8 @@ pub(super) fn signatures(
         signatures.insert(
             function.name.clone(),
             Signature {
+                type_parameters: 0,
+                needs: Vec::new(),
                 method: None,
                 arena: false,
                 external: true,

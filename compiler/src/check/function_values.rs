@@ -41,6 +41,15 @@ pub(super) fn value(
         .get(name)
         .filter(|_| name != "main")
         .ok_or_else(error)?;
+    if signature.type_parameters != 0 {
+        return Err(expr.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "generic.type-arguments",
+                "generic function values require explicit type arguments"
+            ),
+        ));
+    }
     if signature.arena {
         return Err(expr.location.error(
             ErrorKind::InvalidSource,

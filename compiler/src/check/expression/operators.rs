@@ -35,7 +35,9 @@ pub(super) fn check(
                         fallback.as_ref(),
                     );
                 }
-                ExpressionKind::Call { name, arguments } => {
+                ExpressionKind::Call {
+                    name, arguments, ..
+                } => {
                     return super::super::functions::call(
                         call,
                         name,

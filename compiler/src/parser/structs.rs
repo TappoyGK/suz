@@ -149,6 +149,9 @@ pub(super) fn collect(
     fnshapes: &[crate::ast::FnShapeDeclaration],
 ) -> Result<Vec<StructDeclaration>, Diagnostic> {
     let mut p = Parser {
+        type_parameters: Vec::new(),
+        pending_needs: Vec::new(),
+        generic_functions: Default::default(),
         allows: Vec::new(),
         tokens,
         enums,

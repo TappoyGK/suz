@@ -35,6 +35,12 @@ pub(super) fn operand_type(expr: &Expression, bindings: &Scope) -> Option<Type> 
 }
 
 fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
+    if !bindings.needs.is_empty()
+        && bindings.type_arguments.is_none()
+        && let Some(ty) = super::type_parameters::hint(expr, bindings)
+    {
+        return Some(ty);
+    }
     #[cfg(test)]
     super::generic::work();
     match &expr.kind {
@@ -101,7 +107,25 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
             .find(|e| &e.name == enum_name)
             .map(|e| Type::Enum(e.ty)),
         ExpressionKind::Void => Some(Type::Void),
-        ExpressionKind::Call { name, arguments } => {
+        ExpressionKind::Call {
+            name,
+            arguments,
+            type_arguments,
+        } => {
+            if let Some(signature) = bindings
+                .functions
+                .get(name)
+                .filter(|s| s.type_parameters != 0)
+            {
+                if signature.type_parameters != type_arguments.len() {
+                    return None;
+                }
+                let args: Vec<_> = type_arguments
+                    .iter()
+                    .map(|t| bindings.resolve_type(*t))
+                    .collect();
+                return Some(super::type_parameters::substitute(signature.result, &args));
+            }
             super::generic::call_operand_type(name, arguments, bindings)
         }
         ExpressionKind::Block { statements, value } => {
@@ -433,7 +457,12 @@ fn expression_inner(
     } else {
         required
     };
-    let checked = if bindings.has_operator_methods
+    let checked = if bindings.type_arguments.is_none()
+        && !bindings.type_parameters.is_empty()
+        && let Some(checked) = super::type_parameters::operation(expr, bindings)?
+    {
+        checked
+    } else if bindings.has_operator_methods
         && let ExpressionKind::Binary {
             operator,
             left,
@@ -526,9 +555,9 @@ fn expression_inner(
                 ty: Type::Void,
                 value: Value::Void,
             },
-            ExpressionKind::Call { name, arguments } => {
-                super::functions::call(expr, name, arguments, inference_hint, bindings, None)?
-            }
+            ExpressionKind::Call {
+                name, arguments, ..
+            } => super::functions::call(expr, name, arguments, inference_hint, bindings, None)?,
             ExpressionKind::Block { statements, value } => {
                 blocks::check(statements, value, inference_hint, bindings)?
             }

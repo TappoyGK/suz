@@ -2,6 +2,7 @@
 //!
 //! 利用元: [`crate::parser`]、[`crate::check`]。
 
+pub(crate) mod generics;
 mod pointer_shape;
 pub(crate) mod visit;
 use pointer_shape::PointerShape;
@@ -167,6 +168,7 @@ pub(crate) enum Type {
     },
     CPointer,
     CInteger(CIntegerType),
+    Parameter(usize),
     GenericInt,
     GenericFloat,
     Numeric([Option<ScalarType>; NUMERIC_COMBINATIONS]), // intとfloatの内部の型関数。
@@ -189,6 +191,7 @@ pub(crate) enum Type {
 pub(crate) enum PointerLeaf {
     CPointer,
     CInteger(CIntegerType),
+    Parameter(usize),
     GenericInt,
     GenericFloat,
     Numeric([Option<ScalarType>; NUMERIC_COMBINATIONS]),
@@ -216,6 +219,7 @@ impl Type {
             }
             Self::CPointer => PointerLeaf::CPointer,
             Self::CInteger(v) => PointerLeaf::CInteger(v),
+            Self::Parameter(id) => PointerLeaf::Parameter(id),
             Self::GenericInt => PointerLeaf::GenericInt,
             Self::GenericFloat => PointerLeaf::GenericFloat,
             Self::Numeric(v) => PointerLeaf::Numeric(v),
@@ -269,6 +273,7 @@ impl Type {
         Some(match leaf {
             PointerLeaf::CPointer => Self::CPointer,
             PointerLeaf::CInteger(v) => Self::CInteger(v),
+            PointerLeaf::Parameter(id) => Self::Parameter(id),
             PointerLeaf::GenericInt => Self::GenericInt,
             PointerLeaf::GenericFloat => Self::GenericFloat,
             PointerLeaf::Numeric(v) => Self::Numeric(v),
@@ -383,6 +388,7 @@ impl Type {
             }
             Self::CPointer => "*const void",
             Self::CInteger(ty) => ty.name(),
+            Self::Parameter(_) => "type parameter",
             Self::Exact => "exact integer",
             Self::GenericInt => "int",
             Self::GenericFloat => "float",
@@ -411,7 +417,7 @@ impl Type {
             Self::CPointer => "suz_ffi_bytes".into(),
             Self::CInteger(ty) => ty.c_name().into(),
             Self::Exact => "suz_exact".into(),
-            Self::GenericInt | Self::GenericFloat | Self::Numeric(_) => {
+            Self::Parameter(_) | Self::GenericInt | Self::GenericFloat | Self::Numeric(_) => {
                 unreachable!("generic types are resolved before code generation")
             }
             Self::Struct(id) => format!("suz_struct_{id}"),
@@ -520,6 +526,8 @@ pub(crate) struct Parameter {
 /// 関数の構文。仮引数・戻り値型・本体の文と、宣言の開始・終了位置を保持する。
 #[derive(Clone)]
 pub(crate) struct Function {
+    pub type_parameters: Vec<generics::TypeParameter>,
+    pub needs: Vec<generics::Need>,
     pub method: Option<Method>,
     pub arena: bool,
     pub keyword_location: Location,
@@ -899,6 +907,7 @@ pub(crate) enum ExpressionKind {
     },
     Void,
     Call {
+        type_arguments: Vec<Type>,
         name: String,
         arguments: Vec<Expression>,
     },

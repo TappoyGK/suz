@@ -67,6 +67,8 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
         signatures.insert(
             function.name.clone(),
             Signature {
+                type_parameters: function.type_parameters.len(),
+                needs: function.needs.clone(),
                 method: function.method,
                 arena: function.arena,
                 external: false,
@@ -98,6 +100,14 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     let mut functions = Vec::new();
     check_instances(program, &globals, &mut functions, &mut warnings)?;
     for (id, function) in program.functions.iter().enumerate() {
+        if !function.type_parameters.is_empty() {
+            let mut context = globals.clone();
+            context.type_parameters = Rc::new(function.type_parameters.clone());
+            context.needs = Rc::new(function.needs.clone());
+            let (_, found) = check_function(function, context, id)?;
+            warnings.extend(found);
+            continue;
+        }
         if globals.functions[&function.name].is_generic() {
             match &analyze_once(function, id, &globals).result {
                 Ok(found) => warnings.extend(found.iter().copied()),
@@ -112,6 +122,15 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
         let (checked, found) = result?;
         functions.push(checked);
         warnings.extend(found);
+    }
+    // 名前付き型引数の関数から既存の数値汎用関数を呼ぶ場合と、その逆の両方を処理する。
+    loop {
+        super::type_parameters::check_instances(program, &globals, &mut functions, &mut warnings)?;
+        check_instances(program, &globals, &mut functions, &mut warnings)?;
+        let instances = globals.instances.borrow();
+        if instances.named_cursor == instances.named.len() && instances.queue.is_empty() {
+            break;
+        }
     }
     warnings.sort_by_key(|l| (l.line, l.column));
     // 整数演算の箇所は汎用検査と具体化の両方で集まるため、ソースの演算ごとに一度だけ報告する。
@@ -492,6 +511,13 @@ pub(super) fn call(
                 "argument count does not match the function declaration"
             ),
         ));
+    }
+    let explicit = match &expr.kind {
+        ExpressionKind::Call { type_arguments, .. } => type_arguments.as_slice(),
+        _ => &[],
+    };
+    if signature.type_parameters != 0 || !explicit.is_empty() {
+        return super::type_parameters::call(expr, signature, explicit, arguments, scope, handler);
     }
     let generic = signature.is_generic();
     let types = super::generic::resolve(signature, arguments, expected, scope, expr.location)?;

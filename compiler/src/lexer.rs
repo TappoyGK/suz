@@ -68,7 +68,7 @@ const SYMBOLS: &[&str] = &[
     "(", ")", "[", "]", "{", "}", ",", ":", ".", "->", "=>", "=", "+=", "-=", "*=", "/=", "%=",
     "+%=", "-%=", "*%=", "&=", "|=", "^=", "<<=", ">>=", "+", "-", "*", "/", "%", "+%", "-%", "*%",
     "&", "|", "^", "~", "<<", ">>", "==", "!=", "<", "<=", ">", ">=", "&&", "||", "..<", "..=",
-    "?", "#",
+    "?", "#", "@",
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -97,6 +97,8 @@ pub(crate) struct Token<'a> {
     pub column: usize,
     /// CRLFを正規化した後のソース内のバイト範囲。
     pub span: Range<usize>,
+    /// コメントだけの行と空行を区別し、宣言に付く要求の隣接条件を検査する。
+    pub blank_line: bool,
 }
 
 pub(crate) fn position(prefix: &str) -> (usize, usize) {
@@ -276,6 +278,12 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
             '\n' => {
                 if !matches!(delimiters.last(), Some(&"(" | &"[")) && !continuation {
                     tokens.push(Token {
+                        blank_line: source[..offset]
+                            .rsplit('\n')
+                            .next()
+                            .unwrap()
+                            .trim()
+                            .is_empty(),
                         kind: Kind::Newline,
                         line,
                         column,
@@ -290,6 +298,7 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
             '[' if matches!(tokens.last().map(|t| t.kind), Some(Kind::Keyword("ignore"))) => {
                 let length = reasons::scan(rest, line, column, reasons::Kind::Ignore)?;
                 tokens.push(Token {
+                    blank_line: false,
                     kind: Kind::IgnoreReason(rest[1..length - 1].trim_matches(' ')),
                     line,
                     column,
@@ -309,6 +318,7 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
             {
                 let length = reasons::scan(rest, line, column, reasons::Kind::Allow)?;
                 tokens.push(Token {
+                    blank_line: false,
                     kind: Kind::AllowItem(&rest[1..length - 1]),
                     line,
                     column,
@@ -323,6 +333,7 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
                 let (value, length) = char_literal(rest)
                     .map_err(|message| error(line, column, ErrorKind::InvalidSource, message))?;
                 tokens.push(Token {
+                    blank_line: false,
                     kind: Kind::Char(value),
                     line,
                     column,
@@ -339,6 +350,7 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
             {
                 let length = reasons::scan(rest, line, column, reasons::Kind::Objection)?;
                 tokens.push(Token {
+                    blank_line: false,
                     kind: Kind::ObjectionReason,
                     line,
                     column,
@@ -380,6 +392,7 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
                 }
                 let length = end + 2;
                 tokens.push(Token {
+                    blank_line: false,
                     kind: Kind::Header(header),
                     line,
                     column,
@@ -393,6 +406,7 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
             '`' => {
                 let length = templates::scan(rest, line, column)?.0;
                 tokens.push(Token {
+                    blank_line: false,
                     kind: Kind::Template(&rest[..length]),
                     line,
                     column,
@@ -468,6 +482,7 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
             _ => {}
         }
         tokens.push(Token {
+            blank_line: false,
             kind,
             line,
             column,
@@ -477,6 +492,7 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
         column += length; // コメント以外の対応トークンはすべてASCII。
     }
     tokens.push(Token {
+        blank_line: false,
         kind: Kind::End,
         line,
         column,

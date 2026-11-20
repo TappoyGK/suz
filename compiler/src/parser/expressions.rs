@@ -500,8 +500,34 @@ impl Parser<'_, '_> {
                         enum_name: name.into(),
                         variant: variant.into(),
                     }
+                } else if self.explicit_type_arguments(name) {
+                    let type_arguments = self.delimited_list("[", "]", Self::type_argument)?;
+                    if type_arguments.is_empty() {
+                        return Err(location.error(
+                            ErrorKind::InvalidSource,
+                            crate::diagnostic!(
+                                "generic.type-arguments",
+                                "type arguments cannot be empty"
+                            ),
+                        ));
+                    }
+                    if self.constant_expression {
+                        return Err(location.error(
+                            ErrorKind::InvalidSource,
+                            crate::diagnostic!(
+                                "const.expression",
+                                "function calls are not constant expressions"
+                            ),
+                        ));
+                    }
+                    ExpressionKind::Call {
+                        type_arguments,
+                        name: name.into(),
+                        arguments: self.list(Self::parenthesized_expression)?,
+                    }
                 } else if self.token().kind == Kind::Symbol("(") {
                     ExpressionKind::Call {
+                        type_arguments: Vec::new(),
                         name: name.into(),
                         arguments: self.list(Self::parenthesized_expression)?,
                     }

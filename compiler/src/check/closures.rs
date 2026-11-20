@@ -22,10 +22,10 @@ pub(super) fn check(
         .function
         .parameters
         .iter()
-        .map(|p| p.ty)
+        .map(|p| outer.resolve_type(p.ty))
         .collect::<Vec<_>>()
         != signature.parameters
-        || closure.function.result != signature.result
+        || outer.resolve_type(closure.function.result) != signature.result
         || closure.function.errors != signature.errors
     {
         return Err(closure.function.location.error(

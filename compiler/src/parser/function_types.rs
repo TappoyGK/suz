@@ -65,6 +65,9 @@ pub(super) fn resolve(
         }
     }
     let mut p = Parser {
+        type_parameters: Vec::new(),
+        pending_needs: Vec::new(),
+        generic_functions: Default::default(),
         allows: Vec::new(),
         tokens,
         enums,

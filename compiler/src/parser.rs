@@ -13,6 +13,7 @@ mod expressions;
 mod ffi;
 mod function_types;
 mod functions;
+mod generics;
 mod logs;
 mod names;
 pub(crate) mod nesting;
@@ -31,6 +32,9 @@ enum FixedToken {
 }
 
 struct Parser<'a, 's> {
+    type_parameters: Vec<crate::ast::generics::TypeParameter>,
+    pending_needs: Vec<(usize, usize)>,
+    generic_functions: std::rc::Rc<std::collections::BTreeSet<String>>,
     allows: Vec<crate::warnings::AllowScope>,
     tokens: &'a [Token<'s>],
     enums: &'a [crate::ast::EnumDeclaration],
@@ -147,6 +151,9 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
     let mut structs = structs::collect(tokens, &enums, &fnshapes)?;
     let function_types = function_types::resolve(tokens, &enums, &mut structs, &mut fnshapes)?;
     let mut p = Parser {
+        type_parameters: Vec::new(),
+        pending_needs: Vec::new(),
+        generic_functions: std::rc::Rc::new(generics::function_names(tokens)),
         allows: Vec::new(),
         enums: &enums,
         structs: &structs,
@@ -165,7 +172,25 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
     let mut main = false;
     p.newlines();
     while p.token().kind != Kind::End {
+        if !p.pending_needs.is_empty()
+            && !matches!(
+                p.token().kind,
+                Kind::Symbol("@") | Kind::Keyword("fn" | "arena")
+            )
+        {
+            return Err(p.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "generic.needs",
+                    "requirements must precede a generic declaration"
+                ),
+            ));
+        }
         match p.token().kind {
+            Kind::Symbol("@") => {
+                p.collect_need()?;
+                continue;
+            }
             Kind::Keyword("extern") => externs.extend(p.extern_block()?),
             Kind::Keyword("fix") => bindings.push(p.top_level_binding()?),
             Kind::Keyword("fnshape") => {
