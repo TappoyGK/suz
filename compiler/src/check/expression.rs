@@ -125,12 +125,13 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
             left,
             right,
         } => {
-            if super::operator_methods::supported(*operator)
-                && super::operator_methods::owner(left, bindings).is_some()
+            let a = operand_type(left, bindings);
+            if bindings.has_operator_methods
+                && super::operator_methods::supported(*operator)
+                && matches!(a, Some(Type::Struct(_) | Type::Enum(_)))
             {
                 return super::operator_methods::hint(operator.c_symbol(), left, right, bindings);
             }
-            let a = operand_type(left, bindings);
             let b = operand_type(right, bindings);
             if operator.is_shift() {
                 return a;

@@ -134,7 +134,7 @@ fn operator_methods_reject_invalid_definitions_and_calls() {
         (
             "fn Num.*(n: i32) -> Num { return self }",
             "fix a = n * 0.5",
-            "type.expected",
+            "operator.overload",
         ),
         (
             "fn Num.<(p: ptr? Num) -> bool { return true }",
@@ -217,6 +217,66 @@ fn main() -> u8 {
         "operator-types.suz",
     );
     assert!(output.status.success(), "{output:?}");
-    let error = suz::compile(b"struct Num { v: i32 }\nfn Num.+(n: Num) -> Num { return n }\nfix VALUE = Num { v: 1 } + Num { v: 2 }\nfn main() -> u8 { return 0 }").unwrap_err();
-    assert_eq!(error.rule(), "const.initializer", "{error}");
+}
+
+// APIの診断分類だけではCLIの内部エラー扱いへの退行を見逃すため、終了コードも確認する。
+#[test]
+fn operator_methods_in_constants_are_source_errors() {
+    let directory = crate::test_util::TemporaryDirectory::new();
+    for (declarations, initializer) in [
+        (
+            "fn Num.+(n: i32) -> i32 { return n }",
+            "fix VALUE: i32 = Num { v: 1 } + 1",
+        ),
+        (
+            "fn Num.*(n: Num) -> Num { return n }",
+            "fix VALUE = Num { v: 1 } * Num { v: 2 }",
+        ),
+        (
+            "fn Num.<(n: Num) -> bool { return true }",
+            "fix VALUE = Num { v: 1 } < Num { v: 2 } < Num { v: 3 }",
+        ),
+    ] {
+        let source = format!(
+            "struct Num {{ v: i32 }}\n{declarations}\n{initializer}\nfn main() -> u8 {{ return 0 }}"
+        );
+        let path = directory.0.join("constant.suz");
+        std::fs::write(&path, &source).unwrap();
+        for command in ["check", "run"] {
+            let output = std::process::Command::new(env!("CARGO_BIN_EXE_suz"))
+                .arg(command)
+                .arg(&path)
+                .output()
+                .unwrap();
+            assert_eq!(output.status.code(), Some(1), "{source}\n{output:?}");
+            let diagnostic = String::from_utf8(output.stderr).unwrap();
+            assert!(diagnostic.contains("[const.expression]"), "{diagnostic}");
+        }
+    }
+}
+
+#[test]
+fn operator_methods_report_accepted_types_without_float_to_integer_fallback() {
+    for overload in ["", "fn Num.*(n: Tag) -> Num { return self }"] {
+        let source = format!(
+            "struct Num {{ v: i32 }}\nstruct Tag {{ v: i32 }}\nfn Num.*(n: i32) -> Num {{ return self }}\n{overload}\nfn main() -> u8 {{ fix a = Num {{ v: 1 }} * 0.5\nreturn 0 }}"
+        );
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
+        assert_eq!(error.rule(), "operator.overload");
+        let diagnostic = error.to_string();
+        assert!(diagnostic.contains("i32"), "{diagnostic}");
+        if !overload.is_empty() {
+            assert!(diagnostic.contains("Tag"), "{diagnostic}");
+        }
+    }
+    let error = suz::compile(b"struct Num { v: i32 }\nfn Num.*(n: i32) -> Num { return self }\nfn main() -> u8 { fix k: i64 = 1\nfix a = Num { v: 1 } * k\nreturn 0 }").unwrap_err();
+    assert_eq!(error.rule(), "type.expected", "{error}");
+}
+
+#[test]
+fn operator_methods_comparison_chains_do_not_generate_block_helpers() {
+    let source = b"struct Num { v: i32 }\nfn Num.<(n: Num) -> bool { return self.v < n.v }\nfn ordered(a: Num, b: Num, c: Num) -> bool { return a < b < c == c }\nfn main() -> u8 { return 0 }";
+    let compiled = suz::compile(source).unwrap();
+    assert!(!compiled.contains("suz_block_"));
 }

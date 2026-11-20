@@ -47,6 +47,10 @@ pub(super) enum Mode {
 
 #[derive(Clone)]
 pub(super) struct Scope {
+    // 定義のないプログラムでは、演算子用の型ヒント取得を省く。
+    pub has_operator_methods: bool,
+    // 定数初期値では、演算子構文による関数呼び出しも拒否する。
+    pub constant_initializer: bool,
     pub arena_depth: usize,
     pub arena_used: Rc<std::cell::Cell<bool>>,
     pub trusted_block: bool,
@@ -162,6 +166,8 @@ impl Scope {
 impl Default for Scope {
     fn default() -> Self {
         Self {
+            has_operator_methods: false,
+            constant_initializer: false,
             arena_depth: 0,
             arena_used: Default::default(),
             trusted_block: false,

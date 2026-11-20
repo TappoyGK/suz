@@ -210,11 +210,9 @@ impl Resolver<'_> {
         for (dependency, location) in names {
             self.resolve(&dependency, location)?;
         }
-        let checked = expression(
-            &declaration.initializer,
-            declaration.annotation,
-            &self.bindings,
-        )?;
+        let mut scope = self.bindings.clone();
+        scope.constant_initializer = true;
+        let checked = expression(&declaration.initializer, declaration.annotation, &scope)?;
         if super::arena::contains(checked.ty, &self.bindings) {
             return Err(declaration.location.error(
                 ErrorKind::InvalidSource,

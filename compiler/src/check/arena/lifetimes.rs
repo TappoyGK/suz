@@ -422,6 +422,8 @@ impl<'a> Analysis<'a> {
                 self.expr(right, region, arena);
                 Shape::new()
             }
+            // 比較メソッドはarena fnではなくboolを返す通常関数。引数の評価以外の
+            // 寿命への効果はないので、組み込み比較と同じく各オペランドを一度だけ訪問する。
             Value::Comparison { operands, .. } => {
                 for operand in operands {
                     self.expr(operand, region, arena);

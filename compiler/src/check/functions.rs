@@ -74,6 +74,10 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     let main_id = signatures["main"].id;
     let signatures = Rc::new(signatures);
     let scope = Scope {
+        has_operator_methods: program
+            .functions
+            .iter()
+            .any(|f| f.method.is_some_and(|m| m.operator.is_some())),
         functions: signatures,
         fnshapes: Rc::new(program.fnshapes.clone()),
         function_types: Rc::new(std::cell::RefCell::new(program.function_types.clone())),

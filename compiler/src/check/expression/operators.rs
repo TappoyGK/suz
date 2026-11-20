@@ -186,6 +186,9 @@ pub(super) fn check(
                                 "symbol.operations",
                                 "symbol does not support arithmetic or bitwise operations"
                             ),
+                            Type::Struct(_) | Type::Enum(_) if matches!(&expr.kind,
+                                ExpressionKind::Binary { operator, .. } if super::super::operator_methods::supported(*operator)) => crate::diagnostic!(
+                                    "operator.overload", "no matching operator; accepted right-hand types: none"),
                             _ => crate::diagnostic!(
                                 "expr.operator-types",
                                 "invalid operand type for this operator"
@@ -405,10 +408,17 @@ pub(super) fn check(
             {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
-                    crate::diagnostic!(
-                        "expr.operator-types",
-                        "ordering comparisons require numeric operands"
-                    ),
+                    if matches!(ty, Type::Struct(_) | Type::Enum(_)) {
+                        crate::diagnostic!(
+                            "operator.overload",
+                            "no matching operator; accepted right-hand types: none"
+                        )
+                    } else {
+                        crate::diagnostic!(
+                            "expr.operator-types",
+                            "ordering comparisons require numeric operands"
+                        )
+                    },
                 ));
             }
             for ((op, pair), location) in operators.iter().zip(operands.windows(2)).zip(locations) {
@@ -425,6 +435,7 @@ pub(super) fn check(
             CheckedExpression {
                 ty: Type::Bool,
                 value: Value::Comparison {
+                    methods: Vec::new(),
                     operators: operators.clone(),
                     operands,
                 },

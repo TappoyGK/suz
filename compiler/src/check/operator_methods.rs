@@ -7,6 +7,9 @@ use crate::{
 };
 
 pub(super) fn owner(expr: &Expression, scope: &Scope) -> Option<Type> {
+    if !scope.has_operator_methods {
+        return None;
+    }
     expression::operand_type(expr, scope).filter(|ty| matches!(ty, Type::Struct(_) | Type::Enum(_)))
 }
 
@@ -17,39 +20,24 @@ fn select<'a>(
     scope: &'a Scope,
 ) -> Option<&'a str> {
     let owner = owner(left, scope)?;
-    let candidates: Vec<_> = scope
-        .functions
-        .iter()
-        .filter(|(_, f)| {
-            f.method
-                .is_some_and(|m| m.owner == owner && m.operator == Some(op))
-        })
-        .collect();
-    let known = expression::operand_type(right, scope);
-    // C固有整数型やポインタには、数値の種類による選択や暗黙変換を使わない。
-    let numeric = known.is_none_or(|ty| ty.is_numeric());
-    if numeric {
-        let float = expression::has_float_source(right, scope) || known.is_some_and(Type::is_float);
-        let wanted = candidates.iter().find(|(_, f)| {
-            if float {
-                f.parameters[1].is_float()
-            } else {
-                f.parameters[1].is_integer()
-            }
-        });
-        let fallback = candidates.iter().find(|(_, f)| {
-            if float {
-                f.parameters[1].is_integer()
-            } else {
-                f.parameters[1].is_float()
-            }
-        });
-        wanted.or(fallback).map(|(name, _)| name.as_str())
-    } else {
-        candidates
-            .iter()
-            .find(|(_, f)| Some(f.parameters[1]) == known)
+    // 宣言時に付けたキーで直接引く。数値の種類だけを選び、具体型の検査は呼び出しに任せる。
+    let prefix = format!("{}.{}@", scope.type_name(owner), op);
+    let lookup = |key: &str| {
+        scope
+            .functions
+            .get_key_value(&format!("{prefix}{key}"))
             .map(|(name, _)| name.as_str())
+    };
+    let known = expression::operand_type(right, scope);
+    if known.is_none_or(|ty| ty.is_numeric()) {
+        let float = expression::has_float_source(right, scope) || known.is_some_and(Type::is_float);
+        if float {
+            lookup("float")
+        } else {
+            lookup("integer").or_else(|| lookup("float"))
+        }
+    } else {
+        lookup(&format!("{:?}", known?))
     }
 }
 
@@ -97,6 +85,10 @@ pub(super) fn binary(expr: &Expression, scope: &Scope) -> bool {
 
 pub(super) fn hint(op: &str, left: &Expression, right: &Expression, scope: &Scope) -> Option<Type> {
     let name = select(op, left, right, scope)?;
+    let result = scope.functions[name].result;
+    if !result.leaf().generic() {
+        return Some(result);
+    }
     // 複製したASTのアドレスを元のヒントキャッシュへ残さない。
     let mut hints = scope.clone();
     hints.type_hints = Default::default();
@@ -112,6 +104,15 @@ pub(super) fn call(
     expected: Option<Type>,
     scope: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
+    if scope.constant_initializer {
+        return Err(expr.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "const.expression",
+                "operator method calls are not constant expressions"
+            ),
+        ));
+    }
     let name = resolve(op, left, right, scope)?;
     scope.type_hints.borrow_mut().clear();
     scope.float_hints.borrow_mut().clear();
@@ -128,13 +129,13 @@ pub(super) fn call(
     result
 }
 
-/// 比較連鎖は各値を一度だけ束縛し、成立した場合だけ次の比較へ進む。
-/// 通常の値ブロック・分岐へ下げるので、呼び出しや寿命の検査を別に持たない。
+/// 中間の値は検査済みの値として次の比較へ渡す。IRにも各オペランドを一つだけ残し、
+/// コード生成では通常の比較と同じ一時変数と短絡評価を使う。
 pub(super) fn comparison(
     expr: &Expression,
     scope: &Scope,
 ) -> Result<Option<CheckedExpression>, Diagnostic> {
-    use crate::ast::Statement;
+    use super::ir::Value;
     let ExpressionKind::Comparison {
         operators,
         operands,
@@ -143,10 +144,11 @@ pub(super) fn comparison(
     else {
         return Ok(None);
     };
-    if !operators
-        .iter()
-        .zip(operands)
-        .any(|(op, left)| !op.is_equality() && owner(left, scope).is_some())
+    if !scope.has_operator_methods
+        || !operators
+            .iter()
+            .zip(operands)
+            .any(|(op, left)| !op.is_equality() && owner(left, scope).is_some())
     {
         return Ok(None);
     }
@@ -161,73 +163,60 @@ pub(super) fn comparison(
         )
         .map(Some);
     }
-    let make = |kind| Expression {
-        kind,
-        location: expr.location,
-        height: expr.height,
-    };
-    let names: Vec<_> = (0..operands.len())
-        .map(|i| {
-            format!(
-                "$comparison_{}_{}_{}",
-                expr.location.line, expr.location.column, i
-            )
-        })
-        .collect();
-    let reference = |i: usize| make(ExpressionKind::Name(names[i].clone()));
-    let binding = |i: usize, annotation: Option<Type>| Statement::Binding {
-        pointer: annotation
-            .or_else(|| expression::operand_type(&operands[i], scope))
-            .is_some_and(|ty| ty.pointee().is_some()),
-        mutable: false,
-        name: names[i].clone(),
-        location: operands[i].location,
-        annotation,
-        initializer: Box::new(operands[i].clone()),
-    };
-    let mut tail = make(ExpressionKind::Bool(true));
-    for i in (0..operators.len()).rev() {
-        let op = operators[i];
-        let annotation = if !op.is_equality() && owner(&operands[i], scope).is_some() {
-            let name = resolve(op.symbol(), &operands[i], &operands[i + 1], scope)?;
-            let signature = &scope.functions[name];
-            let types = super::generic::resolve(
-                signature,
-                &operands[i..=i + 1],
-                None,
-                scope,
-                locations[i],
-            )?;
-            Some(types.resolve(signature.parameters[1]))
+    let mut scope = scope.clone();
+    scope.type_hints = Default::default();
+    scope.float_hints = Default::default();
+    let mut checked = Vec::with_capacity(operands.len());
+    let mut methods = Vec::with_capacity(operators.len());
+    let mut left = operands[0].clone();
+    for (i, op) in operators.iter().enumerate() {
+        let (method, mut pair) = if !op.is_equality() && owner(&left, &scope).is_some() {
+            let value = call(expr, op.symbol(), &left, &operands[i + 1], None, &scope)?;
+            let Value::Call { id, arguments, .. } = value.value else {
+                unreachable!()
+            };
+            (Some(id), arguments)
         } else {
-            None
+            let pair = Expression {
+                kind: ExpressionKind::Comparison {
+                    operators: vec![*op],
+                    operands: vec![left.clone(), operands[i + 1].clone()],
+                    locations: vec![locations[i]],
+                },
+                location: expr.location,
+                height: expr.height,
+            };
+            let value = expression::expression(&pair, Some(Type::Bool), &scope)?;
+            let Value::Comparison { operands, .. } = value.value else {
+                unreachable!()
+            };
+            (None, operands)
         };
-        let condition = make(ExpressionKind::Comparison {
-            operators: vec![op],
-            operands: vec![reference(i), reference(i + 1)],
-            locations: vec![locations[i]],
-        });
-        let value = if i == operators.len() - 1 {
-            condition
-        } else {
-            make(ExpressionKind::If {
-                branches: vec![(condition, tail)],
-                otherwise: Box::new(make(ExpressionKind::Bool(false))),
-            })
+        let right = pair.pop().unwrap();
+        if i == 0 {
+            checked.push(pair.pop().unwrap());
+        }
+        methods.push(method);
+        // ソースには書けない名前。次の比較の型検査専用であり、実行時のローカルは作らない。
+        let name = "$comparison".to_owned();
+        let mut binding = super::statements::Binding::hint(right.ty, operands[i + 1].location);
+        binding.constant = Some(right.clone());
+        scope.locals.insert(name.clone(), binding);
+        left = Expression {
+            kind: ExpressionKind::Name(name),
+            location: operands[i + 1].location,
+            height: 1,
         };
-        tail = make(ExpressionKind::Block {
-            statements: vec![binding(i + 1, annotation)],
-            value: Box::new(value),
-        });
+        checked.push(right);
+        scope.type_hints.borrow_mut().clear();
+        scope.float_hints.borrow_mut().clear();
     }
-    let lowered = make(ExpressionKind::Block {
-        statements: vec![binding(0, None)],
-        value: Box::new(tail),
-    });
-    scope.type_hints.borrow_mut().clear();
-    scope.float_hints.borrow_mut().clear();
-    let result = expression::expression(&lowered, Some(Type::Bool), scope);
-    scope.type_hints.borrow_mut().clear();
-    scope.float_hints.borrow_mut().clear();
-    result.map(Some)
+    Ok(Some(CheckedExpression {
+        ty: Type::Bool,
+        value: Value::Comparison {
+            operators: operators.clone(),
+            operands: checked,
+            methods,
+        },
+    }))
 }
