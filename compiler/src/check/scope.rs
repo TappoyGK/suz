@@ -131,7 +131,8 @@ impl Scope {
         arguments: &[Type],
         location: crate::ast::Location,
     ) -> Result<Type, crate::Diagnostic> {
-        self.structs.resolve(ty, arguments, location)
+        self.structs
+            .resolve_with_parameters(ty, arguments, location, &self.named.type_parameters)
     }
     pub fn method_arguments(&self, ty: Type) -> Vec<Type> {
         if let Type::Struct(id) = ty.pointee().unwrap_or(ty)
@@ -229,7 +230,7 @@ impl Scope {
     pub fn is_type_name(&self, name: &str) -> bool {
         self.fnshapes.iter().any(|d| d.name == name)
             || self.enums.iter().any(|decl| decl.name == name)
-            || self.structs.iter().any(|decl| decl.name == name)
+            || self.structs.contains_name(name)
     }
 }
 impl Default for Scope {

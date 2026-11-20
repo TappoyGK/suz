@@ -277,3 +277,44 @@ fn main() -> u8 {
         assert!(error.to_string().contains(rule), "{error:?}");
     }
 }
+
+#[test]
+fn generic_struct_recursion_checks_concrete_transitions() {
+    for ty in ["i32", "ptr i32"] {
+        let source = format!(
+            "struct Down[T] {{ next: ptr? Down[i32] }}\nfn main() -> u8 {{ fix d = Down[{ty}] {{ next: null }}\nreturn 0 }}"
+        );
+        suz::compile(source.as_bytes()).unwrap();
+    }
+    let source = "struct Down[T] { next: ptr? Down[i32] }\nfn main() -> u8 { fix d = Down[u8] { next: null }\nreturn 0 }";
+    let error = suz::compile(source.as_bytes()).unwrap_err().to_string();
+    assert!(error.contains("generic.recursion"), "{error}");
+    assert!(error.contains("[u8] to [i32]"), "{error}");
+}
+
+#[test]
+fn generic_struct_recursion_reports_declared_parameter_names() {
+    for (source, expected) in [
+        (
+            "struct Grow[Item] { next: ptr? Grow[ptr Item] }",
+            "[Item] to [ptr Item]",
+        ),
+        (
+            "struct Grow[Item] { next: ptr? Grow[ptr Item] }\nfn unused[Other, Value](v: Grow[Value]) -> void {}",
+            "[Value] to [ptr Value]",
+        ),
+        (
+            "struct Box[T] { value: T }\nstruct Wrap[Item] { next: ptr? Wrap[Box[Item]] }",
+            "[Item] to [Box[Item]]",
+        ),
+        (
+            "struct First[Item] { next: ptr? Second[Item] }\nstruct Second[Other] { next: ptr? First[ptr Other] }",
+            "[Item] to [ptr Item]",
+        ),
+    ] {
+        let source = format!("{source}\nfn main() -> u8 {{ return 0 }}");
+        let error = suz::compile(source.as_bytes()).unwrap_err().to_string();
+        assert!(error.contains("generic.recursion"), "{error}");
+        assert!(error.contains(expected), "{error}");
+    }
+}

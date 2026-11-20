@@ -24,7 +24,12 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     for (id, function) in program.functions.iter().enumerate() {
         let mut method = function.method;
         if let Some(method) = &mut method {
-            method.owner = structs.resolve(method.owner, &[], function.location)?;
+            method.owner = structs.resolve_with_parameters(
+                method.owner,
+                &[],
+                function.location,
+                &function.type_parameters,
+            )?;
         }
         if let Some(method) = method {
             let member = function.name.rsplit('.').next().unwrap();
@@ -62,7 +67,7 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
         if signatures.contains_key(&function.name)
             || program.bindings.iter().any(|c| c.name == function.name)
             || program.enums.iter().any(|e| e.name == function.name)
-            || program.structs.iter().any(|s| s.name == function.name)
+            || structs.contains_name(&function.name)
             || program.fnshapes.iter().any(|s| s.name == function.name)
         {
             return Err(function.location.error(
@@ -82,9 +87,21 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
                 parameters: function
                     .parameters
                     .iter()
-                    .map(|p| structs.resolve(p.ty, &[], p.location))
+                    .map(|p| {
+                        structs.resolve_with_parameters(
+                            p.ty,
+                            &[],
+                            p.location,
+                            &function.type_parameters,
+                        )
+                    })
                     .collect::<Result<_, _>>()?,
-                result: structs.resolve(function.result, &[], function.location)?,
+                result: structs.resolve_with_parameters(
+                    function.result,
+                    &[],
+                    function.location,
+                    &function.type_parameters,
+                )?,
                 errors: function.errors.clone(),
             },
         );
