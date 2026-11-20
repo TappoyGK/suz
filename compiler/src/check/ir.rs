@@ -366,6 +366,8 @@ pub(crate) enum Value {
         right: Box<CheckedExpression>,
     },
     Comparison {
+        // 空なら全て組み込み比較。Some(id)は比較メソッドの具体化済み関数ID。
+        methods: Vec<Option<usize>>,
         operators: Vec<ComparisonOperator>,
         operands: Vec<CheckedExpression>,
     },
@@ -414,10 +416,11 @@ macro_rules! constant_children_visitor {
                     visit(left);
                     visit(right);
                 }
-                Self::Comparison { operands, .. } => {
+                Self::Comparison { operands, methods, .. } => {
                     for value in operands {
                         visit(value);
                     }
+                    return !methods.iter().any(Option::is_some);
                 }
                 Self::Template { parts, .. } => {
                     for part in parts {

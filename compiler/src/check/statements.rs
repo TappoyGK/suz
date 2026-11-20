@@ -474,7 +474,7 @@ fn check_assign(
         fields,
         location,
         value,
-        ..
+        compound,
     } = statement
     else {
         unreachable!("matching statement handler")
@@ -521,7 +521,11 @@ fn check_assign(
         indices.push(index);
         ty = field_type;
     }
-    let mut value = super::expression::coerced(value, Some(ty), context.bindings)?;
+    let mut value = if *compound {
+        super::operator_methods::compound(value, ty, context.bindings)?
+    } else {
+        super::expression::coerced(value, Some(ty), context.bindings)?
+    };
     lower_return_handler(&mut value, &mut context.output, context.next_id, *location);
     context.bindings[name].assigned.set(true);
     context.output.push(CheckedStatement::Assign {

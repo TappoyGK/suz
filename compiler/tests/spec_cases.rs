@@ -295,3 +295,6 @@ mod log_ignore;
 
 #[path = "spec_cases/objection.rs"]
 mod objection;
+
+#[path = "spec_cases/operator_methods.rs"]
+mod operator_methods;

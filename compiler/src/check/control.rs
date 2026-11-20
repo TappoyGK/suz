@@ -412,12 +412,21 @@ pub(super) fn lower_return_handler(
         });
         return lower_return_handler(rhs, statements, next_id, location);
     }
-    if let Value::Binary { left, right, .. }
-    | Value::IntegerArithmetic {
-        operation: IntegerOperation::Binary { left, right, .. },
-        ..
-    } = &mut expr.value
-    {
+    let operands = match &mut expr.value {
+        Value::Binary { left, right, .. }
+        | Value::IntegerArithmetic {
+            operation: IntegerOperation::Binary { left, right, .. },
+            ..
+        } => Some((left.as_mut(), right.as_mut())),
+        // 演算子による複合代入も、更新前の値と右辺を受け取る2引数の呼び出しになる。
+        // 通常の関数呼び出しの実引数内では、構文の検査でor returnを拒否している。
+        Value::Call { arguments, .. } => match arguments.as_mut_slice() {
+            [left, right] => Some((left, right)),
+            _ => None,
+        },
+        _ => None,
+    };
+    if let Some((left, right)) = operands {
         if !has_return_handler(right) {
             return false;
         }
@@ -427,17 +436,17 @@ pub(super) fn lower_return_handler(
         let ty = left.ty;
         let old = std::mem::replace(
             left,
-            Box::new(CheckedExpression {
+            CheckedExpression {
                 ty,
                 value: Value::Local(id),
-            }),
+            },
         );
         statements.push(CheckedStatement::Binding {
             location,
             mutable: false,
             id,
             ty,
-            initializer: old,
+            initializer: Box::new(old),
         });
         return lower_return_handler(right, statements, next_id, location);
     }

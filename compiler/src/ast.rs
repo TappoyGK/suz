@@ -535,6 +535,7 @@ pub(crate) struct Function {
 /// メソッドの受け手。暗黙の第1仮引数selfの型と更新の可否を保持する。
 #[derive(Clone, Copy)]
 pub(crate) struct Method {
+    pub operator: Option<&'static str>,
     pub owner: Type,
     pub mutable: bool,
 }

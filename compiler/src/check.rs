@@ -18,6 +18,7 @@ mod generic;
 pub(crate) mod ir;
 mod matches;
 mod methods;
+mod operator_methods;
 mod ranges;
 mod scope;
 mod statements;

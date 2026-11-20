@@ -223,6 +223,7 @@ fn comparison_codegen_sequences_and_reuses_operands() {
             })
             .collect();
         let mut expr = boolean(Value::Comparison {
+            methods: Vec::new(),
             operators,
             operands,
         });

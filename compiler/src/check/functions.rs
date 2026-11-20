@@ -27,6 +27,22 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
                 Type::Enum(ty) => program.enums[ty.id].variants.iter().any(|v| v == member),
                 _ => unreachable!(),
             };
+            if method.operator.is_some() && signatures.contains_key(&function.name) {
+                return Err(function.location.error(
+                    ErrorKind::InvalidSource,
+                    if function.parameters.len() == 1 {
+                        crate::diagnostic!(
+                            "operator.unary",
+                            "duplicate unary operator definition"
+                        )
+                    } else {
+                        crate::diagnostic!(
+                            "operator.overload",
+                            "duplicate operator definition for this right-hand type or numeric family"
+                        )
+                    },
+                ));
+            }
             if collision || signatures.contains_key(&function.name) {
                 return Err(function.location.error(
                     ErrorKind::InvalidSource,
@@ -65,6 +81,10 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     let main_id = signatures["main"].id;
     let signatures = Rc::new(signatures);
     let scope = Scope {
+        has_operator_methods: program
+            .functions
+            .iter()
+            .any(|f| f.method.is_some_and(|m| m.operator.is_some())),
         functions: signatures,
         fnshapes: Rc::new(program.fnshapes.clone()),
         function_types: Rc::new(std::cell::RefCell::new(program.function_types.clone())),
