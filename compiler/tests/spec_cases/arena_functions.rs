@@ -465,3 +465,40 @@ fn main() -> u8 {
         Some(0)
     );
 }
+
+#[test]
+fn returned_allocation_keeps_proven_store_diagnostics_inside_objection() {
+    let source = b"struct Node { v: i32, next: ptr? Node }\n\
+arena fn mk(v: i32) -> ptr Node { return new Node { v: v, next: null } }\n\
+fn main() -> u8 {\n\
+    arena {\n\
+        fix ptr a = new Node { v: 1, next: null }\n\
+        arena {\n\
+            fix ptr t = mk(2)\n\
+            objection [test] { a#next = t }\n\
+        }\n\
+    }\n\
+    return 0\n\
+}";
+    let error = suz::compile(source).unwrap_err();
+    assert_eq!(error.rule(), "arena.store");
+    assert!(
+        error.message().contains("proven lifetime violation"),
+        "{error}"
+    );
+    assert!(error.message().contains("in member 'next'"), "{error}");
+    assert!(
+        error
+            .related
+            .iter()
+            .any(|note| note.line == 7 && note.message().contains("this call may allocate")),
+        "{error}"
+    );
+    assert!(
+        error
+            .related
+            .iter()
+            .any(|note| note.line == 9 && note.message().contains("its arena ends here")),
+        "{error}"
+    );
+}

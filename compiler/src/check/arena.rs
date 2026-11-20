@@ -10,18 +10,21 @@ use crate::{
     Diagnostic, ErrorKind,
     ast::{Expression, ExpressionKind, Location, Statement, Type},
 };
-pub(crate) use lifetimes::Analysis as LifetimeBody;
+pub(crate) use lifetimes::Body as LifetimeBody;
 pub(super) use lifetimes::check_program;
 
 pub(super) fn contains(ty: Type, scope: &Scope) -> bool {
+    contains_in(ty, &scope.structs)
+}
+
+fn contains_in(ty: Type, structs: &super::type_parameters::structs::Structs) -> bool {
     match ty {
         Type::Pointer { .. } => true,
-        Type::Struct(id) => scope
-            .structs
+        Type::Struct(id) => structs
             .get(id)
             .fields
             .iter()
-            .any(|f| contains(f.ty, scope)),
+            .any(|f| contains_in(f.ty, structs)),
         _ => false,
     }
 }
@@ -337,7 +340,7 @@ pub(super) fn check_lifetimes(
     function: &crate::ast::Function,
     references: &std::collections::BTreeMap<String, Binding>,
     id: usize,
-) -> Result<Option<std::rc::Rc<LifetimeBody>>, Diagnostic> {
+) -> Result<Option<LifetimeBody>, Diagnostic> {
     if !scope.arena_used.get()
         && !function.arena
         && !function.parameters.iter().any(|p| {

@@ -24,16 +24,16 @@ fn call(id: usize, arguments: Vec<(Type, Node)>, result: Node, region: usize) ->
         id,
         arguments: arguments
             .into_iter()
-            .map(|(ty, value)| (ty, BTreeMap::from([(vec![], value)])))
+            .map(|(ty, value)| (ty, vec![(vec![], value)]))
             .collect(),
         result_ty: Type::Bool.pointer(),
-        result: BTreeMap::from([(vec![], result)]),
+        result: vec![(vec![], result)],
         receiver: None,
         region,
         location: HERE,
     }
 }
-fn identity() -> (BTreeMap<usize, Rc<Analysis>>, BTreeMap<usize, Summary>) {
+fn identity() -> (BTreeMap<usize, Rc<Analysis>>, BTreeMap<usize, Rc<Summary>>) {
     let mut f = body(1);
     let first = parameter(&mut f, 0, Type::Bool);
     parameter(&mut f, 1, Type::Bool);
@@ -364,7 +364,7 @@ fn recursive_allocation_sites_remain_finite() {
             .iter()
             .map(|value| value.object)
             .collect::<BTreeSet<_>>(),
-        BTreeSet::from([Object::Allocation(1, object)])
+        BTreeSet::from([Object::RecursiveAllocation(1, Type::Bool)])
     );
 }
 
@@ -438,4 +438,152 @@ fn mutable_receivers_with_the_same_value_keep_distinct_storage() {
         checked.validate(&constraints).unwrap_err().rule_id,
         "arena.store"
     );
+}
+
+fn recursive_ring(count: usize, writes_input: bool) -> BTreeMap<usize, Rc<Analysis>> {
+    let tokens =
+        crate::lexer::lex("struct Node { v: i32, next: ptr? Node }\nfn main() -> u8 { return 0 }")
+            .unwrap();
+    let program = crate::parser::parse(&tokens).unwrap();
+    let structs = Rc::new(crate::check::type_parameters::structs::Structs::new(
+        &program,
+    ));
+    structs.prepare().unwrap();
+    let ty = Type::Struct(0);
+    let mut bodies = BTreeMap::new();
+    for id in 0..count {
+        let mut f = body(id);
+        f.structs = structs.clone();
+        let p = parameter(&mut f, 0, ty);
+        let q = parameter(&mut f, 1, ty);
+        for argument in [p, q] {
+            let object = f.targets[argument].first().unwrap().target;
+            let field = f.project(object, &[1]);
+            f.targets[field].insert(Reference::object(object));
+        }
+        let (fresh, object) = pointer(&mut f, 0, ty);
+        f.objects.insert(object, Object::Allocation(id, object));
+        let field = f.project(object, &[1]);
+        f.constraints
+            .push(Constraint::Store(Place::Direct(field), q, HERE));
+        if writes_input {
+            f.constraints
+                .push(Constraint::Store(Place::Indirect(p, vec![1]), q, HERE));
+        }
+        let recursive = f.node();
+        let mut invocation = call(
+            (id + 1) % count,
+            vec![(ty.pointer(), fresh), (ty.pointer(), p)],
+            recursive,
+            0,
+        );
+        invocation.result_ty = ty.pointer();
+        f.direct_calls.push(invocation);
+        let result = f.node();
+        f.constraints.extend([
+            Constraint::Copy(result, q),
+            Constraint::Copy(result, recursive),
+        ]);
+        f.returned.insert(vec![], result);
+        bodies.insert(id, Rc::new(f));
+    }
+    bodies
+}
+
+#[test]
+fn swapping_arguments_around_a_recursive_ring_has_bounded_work_per_function() {
+    for count in [10, 20, 40, 80] {
+        let inferred = infer_checked(recursive_ring(count, false), true, BTreeMap::new()).unwrap();
+        assert!(
+            inferred.evaluations <= 12 * count,
+            "{} evaluations for {count}",
+            inferred.evaluations
+        );
+        for summary in inferred.summaries.values() {
+            assert!(summary.objects.len() <= 3);
+            assert!(summary.stores.len() <= 6);
+        }
+        let candidates: usize = inferred
+            .checked
+            .values()
+            .flat_map(|body| &body.targets)
+            .map(BTreeSet::len)
+            .sum();
+        assert!(
+            candidates <= 500 * count,
+            "{candidates} candidates for {count}"
+        );
+    }
+}
+
+#[test]
+fn recursive_allocation_abstraction_keeps_stores_into_older_arguments_visible() {
+    let bodies = recursive_ring(10, true);
+    let summaries = infer(&bodies).unwrap();
+    let mut caller = body(100);
+    caller.structs = bodies[&0].structs.clone();
+    let ty = Type::Struct(0);
+    let inner = caller.region(0, HERE);
+    let (older, _) = pointer(&mut caller, 0, ty);
+    let (younger, _) = pointer(&mut caller, inner, ty);
+    let result = caller.node();
+    let mut invocation = call(
+        0,
+        vec![(ty.pointer(), older), (ty.pointer(), younger)],
+        result,
+        inner,
+    );
+    invocation.result_ty = ty.pointer();
+    caller.direct_calls.push(invocation);
+    let mut checked = caller.with_summaries(&summaries).unwrap();
+    let constraints = checked.constraints.clone();
+    assert_eq!(
+        checked.validate(&constraints).unwrap_err().rule_id,
+        "arena.store"
+    );
+}
+
+#[test]
+fn forwarding_substitution_matches_constraint_solving_and_excludes_writes() {
+    let (_, summaries) = identity();
+    let mut f = body(2);
+    f.return_region = Some(0);
+    let a = parameter(&mut f, 0, Type::Bool);
+    let b = parameter(&mut f, 1, Type::Bool);
+    let result = f.node();
+    f.direct_calls.push(call(
+        1,
+        vec![(Type::Bool.pointer(), b), (Type::Bool.pointer(), a)],
+        result,
+        0,
+    ));
+    f.returned.insert(vec![], result);
+    let substituted = f.forwarded_summary(&summaries).unwrap();
+    let solved = f.with_summaries(&summaries).unwrap().summary();
+    assert_eq!(substituted, solved);
+    assert_eq!(
+        substituted.returned[&vec![]].first().unwrap().object,
+        Object::Parameter(1, Type::Bool)
+    );
+    f.constraints
+        .push(Constraint::Store(Place::Indirect(a, vec![]), b, HERE));
+    assert!(f.forwarded_summary(&summaries).is_none());
+}
+
+#[test]
+fn direct_parameter_returns_need_no_call_graph_expansion() {
+    let mut f = body(2);
+    f.return_region = Some(0);
+    let value = parameter(&mut f, 0, Type::Bool);
+    f.returned.insert(vec![], value);
+    let summaries = BTreeMap::new();
+    assert_eq!(
+        f.forwarded_summary(&summaries).unwrap(),
+        f.with_summaries(&summaries).unwrap().summary()
+    );
+    let region = f.region(0, HERE);
+    let local = f.cell(region, HERE, Type::Bool);
+    f.constraints
+        .push(Constraint::Address(value, Place::Direct(local)));
+    assert!(f.forwarded_summary(&summaries).is_none());
 }

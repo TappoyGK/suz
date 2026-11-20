@@ -4,8 +4,8 @@ use super::*;
 
 #[derive(Clone)]
 pub(super) struct CallCheck {
-    arguments: Vec<(Type, Shape)>,
-    region: usize,
+    arguments: Vec<(Type, Leaves)>,
+    pub region: usize,
     location: Location,
 }
 
@@ -23,7 +23,7 @@ impl Analysis {
             let Type::Struct(id) = ty else {
                 unreachable!("checked field path")
             };
-            ty = self.scope.structs.get(id).fields[index].ty;
+            ty = self.structs.get(id).fields[index].ty;
         }
         ty
     }
@@ -69,6 +69,7 @@ impl Analysis {
         &mut self,
         function: &crate::ast::Function,
         references: &BTreeMap<String, super::super::Binding>,
+        scope: &Scope,
     ) -> (usize, Option<usize>) {
         self.regions[0].end = function.end;
         // arena fnでは0が呼び出し元のR。ローカル変数の寿命はRより短い。
@@ -79,11 +80,10 @@ impl Analysis {
         };
         self.return_region = function.arena.then_some(0);
         for (id, parameter) in function.parameters.iter().enumerate() {
-            let ty = self
-                .scope
+            let ty = scope
                 .resolve_type_at(parameter.ty, parameter.location)
                 .expect("parameter type was checked before lifetime analysis");
-            if !contains(ty, &self.scope) {
+            if !contains(ty, scope) {
                 continue;
             }
             let region = if function.arena {
@@ -134,13 +134,28 @@ impl Analysis {
         let region = self
             .return_region
             .expect("ordinary functions cannot return pointer-containing values");
-        let result = self.cell(region, location, ty);
         if self.returned.is_empty() {
-            self.returned = self.shape(ty);
+            let result = self.cell(region, location, ty);
+            self.returned = self
+                .paths(ty)
+                .into_iter()
+                .map(|path| {
+                    let cell = self.project(result, &path);
+                    (path, cell)
+                })
+                .collect();
         }
-        let returned = self.returned.clone();
-        self.join(&returned, value.clone());
-        self.write(Place::Direct(result), value, location);
+        // 返却先の検査と要約で同じ保存場所を使い、同じ値を別のノードへ写さない。
+        for (path, source) in value {
+            if self.objection {
+                self.objections.insert(self.constraints.len());
+            }
+            self.constraints.push(Constraint::Store(
+                Place::Direct(self.returned[&path]),
+                source,
+                location,
+            ));
+        }
     }
 
     pub(super) fn arena_call(
@@ -165,7 +180,18 @@ impl Analysis {
                 .push(Constraint::Limit(node, local, region));
         }
         self.calls.push(CallCheck {
-            arguments: arguments.to_vec(),
+            arguments: arguments
+                .iter()
+                .map(|(ty, shape)| {
+                    (
+                        *ty,
+                        shape
+                            .iter()
+                            .map(|(path, &node)| (path.clone(), node))
+                            .collect(),
+                    )
+                })
+                .collect(),
             region,
             location,
         });
@@ -239,39 +265,47 @@ impl Analysis {
     }
 
     pub(super) fn validate_calls(&self) -> Result<(), Diagnostic> {
-        // グループには推移的な参照先まで伝播済み。正常な領域を呼び出しごとにたどらない。
-        let invalid: BTreeSet<_> = self
-            .call_groups
-            .iter()
-            .filter_map(|group| {
-                self.targets[group.reachable]
-                    .iter()
-                    .any(|target| self.cells[&target.target].region != group.region)
-                    .then_some(group.region)
-            })
-            .collect();
+        self.validate_call_regions(false)
+    }
+
+    pub(super) fn validate_direct_calls(&self) -> Result<(), Diagnostic> {
+        self.validate_call_regions(true)
+    }
+
+    fn validate_call_regions(&self, direct: bool) -> Result<(), Diagnostic> {
         let mut secondary = None;
-        for call in &self.calls {
-            if !invalid.contains(&call.region) {
-                continue;
-            }
+        let mut visited = BTreeSet::new();
+        let calls = self
+            .calls
+            .iter()
+            .map(|call| (&call.arguments, call.region, call.location))
+            .chain(
+                self.direct_calls
+                    .iter()
+                    .filter(|_| direct)
+                    .map(|call| (&call.arguments, call.region, call.location)),
+            );
+        for (arguments, region, location) in calls {
             // 実引数から実体をたどり、違反に至るメンバーの経路を診断にも残す。
             // 同じ実体は一度だけ調べ、循環するグラフでも停止させる。
             let mut pending = std::collections::VecDeque::new();
-            for (index, (ty, shape)) in call.arguments.iter().enumerate() {
-                for (path, &node) in shape {
+            for (index, (ty, shape)) in arguments.iter().enumerate() {
+                for (path, node) in shape {
+                    let node = *node;
                     let target = self.field_type(*ty, path).pointee().unwrap();
                     let label = self.field_label(*ty, path, format!("argument {}", index + 1));
                     pending.push_back((target, node, label));
                 }
             }
-            let mut visited = BTreeSet::new();
             while let Some((ty, node, label)) = pending.pop_front() {
                 for reference in &self.targets[node] {
                     let target = reference.target;
+                    if !visited.insert((region, target)) {
+                        continue;
+                    }
                     let cell = &self.cells[&target];
-                    if cell.region != call.region {
-                        let mut error = call.location.error(
+                    if cell.region != region {
+                        let mut error = location.error(
                             ErrorKind::InvalidSource,
                             crate::diagnostic!(
                                 "arena.fn-call",
@@ -296,15 +330,12 @@ impl Analysis {
                         ));
                         // 短命な候補は別の違反から伝わった結果かもしれない。
                         // 外側や借用先へ届く呼び出しを優先し、それがなければこの診断を使う。
-                        if self.outlives(cell.region, call.region) {
+                        if self.outlives(cell.region, region) {
                             return Err(error);
                         }
                         if secondary.is_none() {
                             secondary = Some(error);
                         }
-                    }
-                    if !visited.insert(target) {
-                        continue;
                     }
                     for path in self.paths(ty) {
                         let mut full_path = cell.path.clone();
@@ -326,7 +357,7 @@ impl Analysis {
             let Type::Struct(id) = ty else {
                 unreachable!("checked field path")
             };
-            let field = &self.scope.structs.get(id).fields[index];
+            let field = &self.structs.get(id).fields[index];
             label.push('.');
             label.push_str(&field.name);
             ty = field.ty;

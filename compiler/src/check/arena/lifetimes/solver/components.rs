@@ -30,10 +30,12 @@ pub(in crate::check::arena::lifetimes) fn representatives(
     }
     // 読み出しや一時値に入力が1つしかなければ、その値は入力と等しい。
     // 逆辺を足して同じ成分へまとめる。保存場所は間接書込みで変わるので対象外。
+    // 検査専用の返却先はソースからアドレスを取れず、間接書込みもないのでまとめられる。
     // これにより、同じ変数を何度読み出して保存しても、同じコピー辺を重複して作らない。
     for dst in 0..count {
         if !dynamic[dst]
-            && !analysis.cells.contains_key(&dst)
+            && (!analysis.cells.contains_key(&dst)
+                || analysis.returned.values().any(|&node| node == dst))
             && !analysis.call_regions.contains_key(&dst)
             && analysis.targets[dst].is_empty()
             && incoming[dst].len() == 1

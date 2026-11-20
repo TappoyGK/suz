@@ -553,3 +553,22 @@ fn objection_does_not_extend_a_returned_references_period() {
         "{error}"
     );
 }
+
+#[test]
+fn root_references_do_not_outlive_an_independent_destination_region() {
+    let mut analysis = Analysis::new(&Scope::default());
+    let root = analysis.cell(0, HERE, Type::Bool);
+    let source = analysis.node();
+    analysis.targets[source].insert(Reference::object(root));
+    analysis
+        .regions
+        .push(crate::check::arena::lifetimes::Region {
+            parent: None,
+            end: HERE,
+        });
+    let destination = analysis.cell(1, HERE, Type::Bool.pointer());
+    analysis
+        .constraints
+        .push(Constraint::Store(Place::Direct(destination), source, HERE));
+    assert_eq!(analysis.solve().unwrap_err().rule_id, "arena.store");
+}

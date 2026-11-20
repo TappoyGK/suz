@@ -32,7 +32,7 @@ pub(crate) struct CheckedProgram {
 #[derive(Clone)]
 pub(crate) struct CheckedFunction {
     /// 関数群がそろうまで保持する寿命制約。呼び出し要約の検査後に取り除く。
-    pub lifetime: Option<std::rc::Rc<super::arena::LifetimeBody>>,
+    pub lifetime: Option<super::arena::LifetimeBody>,
     pub mutable_receiver: bool,
     pub id: usize,
     pub parameters: Vec<Type>,

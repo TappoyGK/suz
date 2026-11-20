@@ -116,7 +116,20 @@ impl Worklist {
     }
 
     fn run(&mut self, analysis: &mut Analysis, constraints: &[Constraint]) {
-        self.representative = components::representatives(analysis, constraints);
+        self.run_with(
+            analysis,
+            constraints,
+            components::representatives(analysis, constraints),
+        );
+    }
+
+    fn run_with(
+        &mut self,
+        analysis: &mut Analysis,
+        constraints: &[Constraint],
+        representative: Vec<Node>,
+    ) {
+        self.representative = representative;
         self.resize(analysis.targets.len());
         for node in 0..analysis.targets.len() {
             let representative = self.representative[node];
@@ -202,6 +215,16 @@ impl Worklist {
 
 pub(super) fn propagate(analysis: &mut Analysis, constraints: &[Constraint]) {
     Worklist::default().run(analysis, constraints);
+}
+
+// 呼び出しの入力を正規化した代表を再利用する。追加した効果用ノードは独立で、
+// 元の無条件コピーが保証する等値関係は、効果を追加しても変わらない。
+pub(super) fn propagate_with(
+    analysis: &mut Analysis,
+    constraints: &[Constraint],
+    representative: Vec<Node>,
+) {
+    Worklist::default().run_with(analysis, constraints, representative);
 }
 
 #[cfg(test)]

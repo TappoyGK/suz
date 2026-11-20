@@ -32,6 +32,16 @@ impl Reference {
 }
 // 構造体の各ポインタ葉をフィールド番号列で区別する。ポインタ自身の値は空の列。
 type Shape = BTreeMap<Vec<usize>, Node>;
+// 型検査後の呼び出し境界では葉を追加・削除しないため、並びだけを保持する。
+type Leaves = Vec<(Vec<usize>, Node)>;
+
+/// 呼び出し先を待つ本体と、検査・要約が済んだ本体を区別する。
+/// 呼び出しのない関数の解析グラフを、全具体化が終わるまで保持しない。
+#[derive(Clone)]
+pub(crate) enum Body {
+    Pending(Rc<Analysis>),
+    Resolved(Rc<summaries::Summary>),
+}
 
 // ローカル変数またはnewで作る実体の保存場所。別名から到達しても同じroot/pathを使う。
 #[derive(Clone)]
@@ -71,8 +81,9 @@ enum Constraint {
 #[derive(Clone)]
 /// 型検査で作った寿命制約。具体化済みの呼び出し先がそろうまで保持する。
 pub(crate) struct Analysis {
-    scope: Scope,
+    structs: Rc<crate::check::type_parameters::structs::Structs>,
     function_id: usize,
+    resolved: bool,
     objects: BTreeMap<Node, summaries::Object>,
     returned: Shape,
     direct_calls: Vec<summaries::Call>,
@@ -102,8 +113,9 @@ pub(crate) struct Analysis {
 impl Analysis {
     fn new(scope: &Scope) -> Self {
         Self {
-            scope: scope.clone(),
+            structs: scope.structs.clone(),
             function_id: 0,
+            resolved: false,
             objects: BTreeMap::new(),
             returned: Shape::new(),
             direct_calls: Vec::new(),
@@ -176,7 +188,6 @@ impl Analysis {
         match ty {
             Type::Pointer { .. } => vec![vec![]],
             Type::Struct(id) => self
-                .scope
                 .structs
                 .get(id)
                 .fields
@@ -288,7 +299,7 @@ impl Analysis {
                 BTreeMap::from([(vec![], n)])
             }
             Value::Local(id) => {
-                if contains(value.ty, &self.scope) {
+                if contains_in(value.ty, &self.structs) {
                     let cell = self.locals[id];
                     self.read(value.ty, Place::Direct(cell))
                 } else {
@@ -391,9 +402,15 @@ impl Analysis {
                     let result = self.shape(value.ty);
                     self.direct_calls.push(summaries::Call {
                         id: *id,
-                        arguments: shapes,
+                        arguments: shapes
+                            .into_iter()
+                            .map(|(ty, shape)| (ty, shape.into_iter().collect()))
+                            .collect(),
                         result_ty: value.ty,
-                        result: result.clone(),
+                        result: result
+                            .iter()
+                            .map(|(path, &node)| (path.clone(), node))
+                            .collect(),
                         receiver,
                         region: arena.expect("checked arena call"),
                         location: *location,
@@ -438,7 +455,7 @@ impl Analysis {
                 Shape::new()
             }
             Value::Closure(closure) => {
-                if let Some(body) = &closure.function.lifetime {
+                if let Some(Body::Pending(body)) = &closure.function.lifetime {
                     self.closures.push(body.clone());
                 }
                 Shape::new() // 呼び出し専用の関数値には、まだ通常関数の借用契約を適用する。
@@ -795,7 +812,7 @@ impl Analysis {
             let Type::Struct(id) = ty else {
                 unreachable!("checked member path")
             };
-            let declaration = self.scope.structs.get(id);
+            let declaration = self.structs.get(id);
             let field = &declaration.fields[index];
             names.push(field.name.clone());
             ty = field.ty;
@@ -833,7 +850,28 @@ impl Analysis {
         error
     }
     // 候補の収束後に判定し、走査順でまだ見えていない参照先を安全と取り違えない。
+    fn root_references_only(&self) -> bool {
+        // 全参照が呼び出し元のArenaに属し、より短い利用期間もなければ、
+        // 本体内の保存先より長命である。局所変数のアドレスや内側のArena、
+        // 独立した借用先を含む場合は通常の検査に回す。
+        self.borrowed.is_empty()
+            && self
+                .regions
+                .iter()
+                .skip(1)
+                .all(|region| region.parent.is_some())
+            && self.calls.iter().all(|call| call.region == 0)
+            && self.direct_calls.iter().all(|call| call.region == 0)
+            && self.targets.iter().flatten().all(|source| {
+                self.cells[&source.target].region == 0
+                    && source.limit.is_none_or(|limit| limit == 0)
+            })
+    }
+
     fn validate(&mut self, constraints: &[Constraint]) -> Result<(), Diagnostic> {
+        if self.root_references_only() {
+            return Ok(());
+        }
         self.validate_calls()?;
         for (index, constraint) in constraints.iter().enumerate() {
             let Constraint::Store(place, src, location) = constraint else {
@@ -862,6 +900,16 @@ impl Analysis {
                     return Err(self.call_diagnostic(index, error));
                 }
             }
+            // 実行される保存について、非nullで全候補対が違反する場合だけを証明済みとする。
+            // 候補の空集合は証明に使わない。集合が変わらない状態で全保存先をまとめて判定する。
+            let proven = self.nonnull_values.contains(src)
+                && !destinations.is_empty()
+                && !self.targets[*src].is_empty()
+                && destinations.iter().all(|dst| {
+                    self.targets[*src]
+                        .iter()
+                        .all(|source| !self.reference_outlives(*source, self.cells[dst].region))
+                });
             // 戻り値の利用期間は明示的な契約であり、objectionでは延長できない。
             // 実体の所属は変えず、外側の実体でも参照値そのものの持ち出しを拒否する。
             for &destination in &destinations {
@@ -869,17 +917,16 @@ impl Analysis {
                     if let Some(limit) = source.limit
                         && !self.outlives(limit, self.cells[&destination].region)
                     {
-                        let message = if self.outlives(
+                        if !self.outlives(
                             self.cells[&source.target].region,
                             self.cells[&destination].region,
                         ) {
-                            crate::diagnostic!(
-                                "arena.return-lifetime",
-                                "returned reference cannot be stored beyond its permitted lifetime"
-                            )
-                        } else {
-                            crate::diagnostic!("arena.store", "reference may outlive its arena")
-                        };
+                            continue;
+                        }
+                        let message = crate::diagnostic!(
+                            "arena.return-lifetime",
+                            "returned reference cannot be stored beyond its permitted lifetime"
+                        );
                         let mut error = location.error(ErrorKind::InvalidSource, message);
                         error.related.push(self.regions[limit].end.error(
                             ErrorKind::InvalidSource,
@@ -892,23 +939,20 @@ impl Analysis {
                     }
                 }
             }
-            // 実行される保存について、非nullで全候補対が違反する場合だけを証明済みとする。
-            // 候補の空集合は証明に使わない。集合が変わらない状態で全保存先をまとめて判定する。
-            let proven = self.nonnull_values.contains(src)
-                && !destinations.is_empty()
-                && !self.targets[*src].is_empty()
-                && destinations.iter().all(|dst| {
-                    self.targets[*src]
-                        .iter()
-                        .all(|source| !self.reference_outlives(*source, self.cells[dst].region))
-                });
-            if self.objections.contains(&index) && !proven {
+            let limited = destinations.iter().any(|dst| {
+                self.targets[*src].iter().any(|source| {
+                    source
+                        .limit
+                        .is_some_and(|limit| !self.outlives(limit, self.cells[dst].region))
+                })
+            });
+            if self.objections.contains(&index) && !proven && !limited {
                 continue;
             }
             for destination in destinations {
                 for &source in &self.targets[*src] {
                     if !self.reference_outlives(source, self.cells[&destination].region) {
-                        let lifetime = source.limit.unwrap_or(self.cells[&source.target].region);
+                        let lifetime = self.cells[&source.target].region;
                         let source = &self.cells[&source.target];
                         let mut error = location.error(
                             ErrorKind::InvalidSource,
@@ -955,21 +999,28 @@ pub(super) fn check(
     function: &crate::ast::Function,
     references: &BTreeMap<String, super::Binding>,
     id: usize,
-) -> Result<Rc<Analysis>, Diagnostic> {
+) -> Result<Body, Diagnostic> {
     let mut analysis = Analysis::new(scope);
     analysis.function_id = id;
-    let (region, arena) = analysis.parameters(function, references);
+    let (region, arena) = analysis.parameters(function, references, scope);
     analysis.statements(statements, region, arena);
-    // 型解決後の制約に必要なのは構造体の定義だけ。局所束縛や具体化の作業待ちを
-    // 関数ごとの要約用データに保持しない。
-    analysis.scope = Scope {
-        structs: scope.structs.clone(),
-        ..Scope::default()
-    };
-    let mut legacy = analysis.clone();
-    legacy.legacy_calls();
-    legacy.solve()?;
-    Ok(Rc::new(analysis))
+    if scope.generic_check()
+        || (!function.type_parameters.is_empty() && scope.named.type_arguments.is_none())
+    {
+        // 記号的な汎用本体は具体化一覧に入らないため、ここで従来契約を検査する。
+        analysis.legacy_calls();
+        analysis.solve()?;
+        analysis.resolved = true;
+    } else if analysis.direct_calls.is_empty() && analysis.closures.is_empty() {
+        let summary = if let Some(summary) = analysis.forwarded_summary(&BTreeMap::new()) {
+            summary
+        } else {
+            analysis.solve()?;
+            analysis.summary()
+        };
+        return Ok(Body::Resolved(Rc::new(summary)));
+    }
+    Ok(Body::Pending(Rc::new(analysis)))
 }
 
 pub(in crate::check) use summaries::check_program;
