@@ -264,3 +264,76 @@ fn named_needs_conflicts_report_definitions_through_nested_lists() {
         );
     }
 }
+
+#[test]
+fn generic_operator_requirements_select_numeric_literals_independently_of_order() {
+    let prefix = r#"
+struct Num { v: i32 }
+fn Num.+(other: Num) -> Num { return Num { v: self.v + other.v } }
+fn Num.+(other: i32) -> Num { return Num { v: self.v + other } }
+fn Num.+(other: f32) -> Num { return Num { v: self.v + 10 + (other as i32 or 0) } }
+fn Num.-() -> Num { return Num { v: -self.v } }
+"#;
+    let requirements = [
+        "T: +(T) -> T",
+        "T: +(i32) -> T",
+        "T: +(f32) -> T",
+        "T: -() -> T",
+    ];
+    for reverse in [false, true] {
+        let mut rows = requirements.to_vec();
+        if reverse {
+            rows.reverse();
+        }
+        for named in [false, true] {
+            let declaration = if named {
+                format!("needs Arithmetic[T] {{\n{}\n}}\n", rows.join("\n"))
+            } else {
+                String::new()
+            };
+            let needs = if named {
+                "@needs Arithmetic[T]\n".to_owned()
+            } else {
+                rows.iter().map(|row| format!("@needs {row}\n")).collect()
+            };
+            let source = format!(
+                "{prefix}{declaration}{needs}fn calculate[T](a: T) -> T {{ return -((a + a) + 1) }}\n{needs}fn floating[T](a: T) -> T {{ return a + 1.0 }}\nfn main() -> u8 {{\nfix x = calculate(Num {{ v: 2 }})\nfix y = floating(Num {{ v: 2 }})\nif x.v != -5 || y.v != 13 {{ return 1 }}\nreturn 0\n}}"
+            );
+            let output = compile_and_run_c23(&source, "generic-literal-overload.suz");
+            assert!(output.status.success(), "{source}\n{output:?}");
+        }
+    }
+    let source = format!(
+        "{prefix}@needs T: +(T) -> T\n@needs T: +(i32) -> T\nfn bad[T](a: T) -> T {{ return a + 1.0 }}\nfn main() -> u8 {{ return 0 }}"
+    );
+    assert!(
+        suz::compile(source.as_bytes())
+            .unwrap_err()
+            .to_string()
+            .contains("generic.operations")
+    );
+}
+
+#[test]
+fn named_needs_small_and_indexed_lists_preserve_duplicates_and_conflicts() {
+    for count in [7, 8, 9, 16] {
+        let rows: String = (0..count)
+            .map(|i| format!("T: .m{i}x() -> i32\n"))
+            .collect();
+        let prefix = format!("needs Many[T] {{\n{rows}T: .m0x() -> i32\n}}\n");
+        let good = format!(
+            "{prefix}@needs Many[T]\nfn unused[T](a: T) -> i32 {{ return a.m0x() }}\nfn main() -> u8 {{ return 0 }}"
+        );
+        suz::compile(good.as_bytes()).unwrap();
+        let bad = format!(
+            "{prefix}@needs Many[T]\n@needs T: .m0x() -> bool\nfn unused[T](a: T) -> T {{ return a }}\nfn main() -> u8 {{ return 0 }}"
+        );
+        let error = suz::compile(bad.as_bytes()).unwrap_err();
+        assert!(error.to_string().contains("generic.needs-check"), "{error}");
+        assert_eq!(
+            error.related.iter().map(|e| e.line).collect::<Vec<_>>(),
+            [2, count + 5],
+            "{error:?}"
+        );
+    }
+}

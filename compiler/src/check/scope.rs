@@ -57,8 +57,8 @@ pub(super) struct Requirements {
 }
 impl From<Vec<crate::ast::generics::Need>> for Requirements {
     fn from(items: Vec<crate::ast::generics::Need>) -> Self {
-        // 一つだけの要求はそのまま照合できる。小さな汎用関数に索引の確保を課さない。
-        if items.len() <= 1 {
+        // 少数の要求はそのまま照合できる。小さな汎用関数に索引の確保を課さない。
+        if items.len() <= crate::ast::generics::SMALL_NEEDS {
             return Self {
                 items,
                 ..Self::default()
@@ -90,20 +90,25 @@ impl Requirements {
         method: bool,
         name: &str,
     ) -> impl Iterator<Item = &crate::ast::generics::Need> {
-        let single = self.items.first().filter(|need| {
-            let (kind, operation, _) = need.operation_key();
-            self.items.len() == 1
-                && need.parameter == parameter
-                && kind == method
-                && operation == name
-        });
+        let small = self
+            .items
+            .iter()
+            .take(if self.operations.is_empty() {
+                self.items.len()
+            } else {
+                0
+            })
+            .filter(move |need| {
+                let (kind, operation, _) = need.operation_key();
+                need.parameter == parameter && kind == method && operation == name
+            });
         self.operations
             .get(&(parameter, method))
             .and_then(|names| names.get(name))
             .into_iter()
             .flatten()
             .map(|&id| &self.items[id])
-            .chain(single)
+            .chain(small)
     }
 }
 

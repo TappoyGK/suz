@@ -83,6 +83,9 @@ pub(crate) struct NeedGroup {
     pub needs: Vec<Need>,
 }
 
+/// 少数の要求は直接比較し、表の確保とキーの複製を省く上限。
+pub(crate) const SMALL_NEEDS: usize = 8;
+
 /// 構文解析時の重複除去。出現順と最初の定義位置を保ち、署名は表で照合する。
 #[derive(Default)]
 pub(crate) struct NeedList {
@@ -110,13 +113,19 @@ impl From<&Need> for NeedSignature {
 }
 impl NeedList {
     pub fn insert(&mut self, need: Need) {
-        // 要求が一つなら比較相手がなく、署名表の確保も不要。
-        if self.items.is_empty() {
-            self.items.push(need);
+        if self.items.len() < SMALL_NEEDS {
+            if !self
+                .items
+                .iter()
+                .any(|n| n.parameter == need.parameter && n.same_signature(&need))
+            {
+                self.items.push(need);
+            }
             return;
         }
         if self.signatures.is_empty() {
-            self.signatures.insert(NeedSignature::from(&self.items[0]));
+            self.signatures
+                .extend(self.items.iter().map(NeedSignature::from));
         }
         let key = NeedSignature::from(&need);
         if self.signatures.insert(key) {

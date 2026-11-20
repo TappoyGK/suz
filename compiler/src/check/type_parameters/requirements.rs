@@ -28,30 +28,44 @@ fn method_target(expr: &Expression, scope: &Scope) -> Option<usize> {
     }
 }
 
+/// 二項演算子の右辺は、通常の演算子メソッドと同じ数値の種類か完全一致で選ぶ。
 fn find<'a>(
     parameter: usize,
-    operation: &RequiredOperation,
+    operation: &str,
     args: &[Expression],
     scope: &'a Scope,
 ) -> Option<&'a Need> {
-    let (method, name) = match operation {
-        RequiredOperation::Operator(op) => (false, *op),
-        RequiredOperation::Method { name, .. } => (true, name.as_str()),
+    let mut candidates = scope.named.needs.candidates(parameter, false, operation);
+    let [right] = args else {
+        return candidates.find(|n| n.parameters.is_empty());
     };
-    scope
-        .named
-        .needs
-        .candidates(parameter, method, name)
-        .find(|n| {
-            n.parameter == parameter
-                && &n.operation == operation
-                && n.parameters.len() == args.len()
-                && n.parameters.iter().zip(args).all(|(ty, arg)| {
-                    expression::operand_type(arg, scope).is_none_or(|known| {
-                        scope.resolve_type_at(*ty, arg.location).ok() == Some(known)
-                    })
-                })
-        })
+    let known = expression::operand_type(right, scope);
+    if known.is_some_and(|ty| !ty.is_numeric()) {
+        return candidates.find(|n| {
+            n.parameters.len() == 1
+                && scope.resolve_type_at(n.parameters[0], right.location).ok() == known
+        });
+    }
+    // リテラルを先にi32へ固定しない。整数の要求がなければ浮動小数点の要求を使える。
+    let float = expression::has_float_source(right, scope) || known.is_some_and(Type::is_float);
+    let mut integer = None;
+    let mut floating = None;
+    for need in candidates.filter(|n| n.parameters.len() == 1) {
+        let ty = scope
+            .resolve_type_at(need.parameters[0], right.location)
+            .ok()?;
+        if ty.is_integer() {
+            integer = Some(need);
+        }
+        if ty.is_float() {
+            floating = Some(need);
+        }
+    }
+    if float {
+        floating
+    } else {
+        integer.or(floating)
+    }
 }
 
 /// 構造体の等値比較は各フィールドの==を使うため、型引数のフィールドにも要求が必要。
@@ -108,16 +122,11 @@ fn missing(location: Location) -> Diagnostic {
 /// ヒントの取得は副作用を持たず、要求の結果型だけを返す。実引数はoperationで検査する。
 pub(in crate::check) fn hint(expr: &Expression, scope: &Scope) -> Option<Type> {
     if let Some((op, operand)) = crate::check::operator_methods::unary(expr) {
-        return find(
-            target(operand, scope)?,
-            &RequiredOperation::Operator(op),
-            &[],
-            scope,
-        )
-        .and_then(|n| scope.resolve_type_at(n.result, expr.location).ok());
+        return find(target(operand, scope)?, op, &[], scope)
+            .and_then(|n| scope.resolve_type_at(n.result, expr.location).ok());
     }
     match &expr.kind {
-        ExpressionKind::Binary { operator, left, right } => find(target(left, scope)?, &RequiredOperation::Operator(operator.c_symbol()), std::slice::from_ref(right), scope).and_then(|n| scope.resolve_type_at(n.result, expr.location).ok()),
+        ExpressionKind::Binary { operator, left, right } => find(target(left, scope)?, operator.c_symbol(), std::slice::from_ref(right), scope).and_then(|n| scope.resolve_type_at(n.result, expr.location).ok()),
         ExpressionKind::MethodCall { target: receiver, name, mutable, arguments } => method_target(receiver, scope).and_then(|parameter| scope.named.needs.candidates(parameter, true, name).find(|n| {
             n.parameters.len() == arguments.len()
                 && matches!(&n.operation, RequiredOperation::Method { mutable: write, .. } if mutable == write)
@@ -209,7 +218,7 @@ pub(in crate::check) fn operation(
     if let Some((op, operand)) = crate::check::operator_methods::unary(expr)
         && let Some(parameter) = target(operand, scope)
     {
-        let need = find(parameter, &RequiredOperation::Operator(op), &[], scope)
+        let need = find(parameter, op, &[], scope)
             .ok_or_else(|| missing_operator(expr.location, parameter, op, scope))?;
         return invoke(need, operand, &[], expr, scope, None).map(Some);
     }
@@ -225,7 +234,7 @@ pub(in crate::check) fn operation(
             let args = std::slice::from_ref(right.as_ref());
             let need = find(
                 target(left, scope).unwrap(),
-                &RequiredOperation::Operator(operator.c_symbol()),
+                operator.c_symbol(),
                 args,
                 scope,
             )
@@ -250,15 +259,10 @@ pub(in crate::check) fn operation(
             let mut values = Vec::new();
             for (i, pair) in operands.windows(2).enumerate() {
                 if let Some(parameter) = target(&pair[0], scope) {
-                    let need = find(
-                        parameter,
-                        &RequiredOperation::Operator(operators[i].symbol()),
-                        &pair[1..],
-                        scope,
-                    )
-                    .ok_or_else(|| {
-                        missing_operator(locations[i], parameter, operators[i].symbol(), scope)
-                    })?;
+                    let need = find(parameter, operators[i].symbol(), &pair[1..], scope)
+                        .ok_or_else(|| {
+                            missing_operator(locations[i], parameter, operators[i].symbol(), scope)
+                        })?;
                     invoke(need, &pair[0], &pair[1..], expr, scope, None)?;
                 } else {
                     let pair_expr = Expression {
@@ -589,8 +593,18 @@ pub(super) fn validate_substitution(
         resolved.push((target, concrete));
     }
     let mut signatures = std::collections::BTreeMap::new();
-    for (target, concrete) in &resolved {
-        if let Some(previous) = signatures.insert((*target, concrete.operation_key()), concrete)
+    for (index, (target, concrete)) in resolved.iter().enumerate() {
+        let previous = if resolved.len() <= crate::ast::generics::SMALL_NEEDS {
+            resolved[..index]
+                .iter()
+                .find(|(other_target, other)| {
+                    target == other_target && concrete.operation_key() == other.operation_key()
+                })
+                .map(|(_, need)| need)
+        } else {
+            signatures.insert((*target, concrete.operation_key()), concrete)
+        };
+        if let Some(previous) = previous
             && !previous.same_signature(concrete)
         {
             let mut error = location.error(
