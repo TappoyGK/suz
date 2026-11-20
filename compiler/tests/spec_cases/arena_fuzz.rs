@@ -96,9 +96,9 @@ fn emit_inner_ops(out: &mut String, rng: &mut Rng, phase: usize, in_loop: bool, 
                 let p = pick_opt_ptr(rng, true);
                 let q = pick_nonnull_ptr(rng, true);
                 if rng.chance(1, 2) {
-                    let _ = writeln!(out, "{indent}#outer_mut = Node {{ value: 42, next: {p} }}");
+                    let _ = writeln!(out, "{indent}#outer_mut = $Node {{ value: 42, next: {p} }}");
                 } else {
-                    let _ = writeln!(out, "{indent}outer_holder = Holder {{ p: {p}, q: {q} }}");
+                    let _ = writeln!(out, "{indent}outer_holder = $Holder {{ p: {p}, q: {q} }}");
                 }
             }
             5 => {
@@ -156,12 +156,12 @@ fn emit_inner_ops(out: &mut String, rng: &mut Rng, phase: usize, in_loop: bool, 
                 if rng.chance(1, 2) {
                     let _ = writeln!(
                         out,
-                        "{indent}sink = apply_action(fn [inner_a](x: ptr? Node) -> i32 {{ return borrow_read(x) + inner_a.value }}, {arg})"
+                        "{indent}sink = apply_action(fn [inner_a](x: ptr? $Node) -> i32 {{ return borrow_read(x) + inner_a.value }}, {arg})"
                     );
                 } else {
                     let _ = writeln!(
                         out,
-                        "{indent}sink = apply_action(fn [var outer_opt](x: ptr? Node) -> i32 {{\n{indent}    outer_opt = x\n{indent}    return borrow_read(outer_opt)\n{indent}}}, {arg})"
+                        "{indent}sink = apply_action(fn [var outer_opt](x: ptr? $Node) -> i32 {{\n{indent}    outer_opt = x\n{indent}    return borrow_read(outer_opt)\n{indent}}}, {arg})"
                     );
                 }
             }
@@ -185,7 +185,7 @@ fn emit_inner_ops(out: &mut String, rng: &mut Rng, phase: usize, in_loop: bool, 
                 let h_var = format!("h_arg_{phase}_{op_idx}");
                 let _ = writeln!(
                     out,
-                    "{indent}fix ptr {h_var} = new Holder {{ p: null, q: {q} }}"
+                    "{indent}fix ptr {h_var} = new $Holder {{ p: null, q: {q} }}"
                 );
                 let _ = writeln!(out, "{indent}attach({h_var})");
             }
@@ -238,71 +238,106 @@ fn emit_post_rewind_access(out: &mut String, indent: &str) {
 }
 
 fn generate_program(seed: u64, index: usize) -> String {
+    let generic = !index.is_multiple_of(2);
     let mut rng = Rng(seed
         ^ ((index as u64)
             .wrapping_add(1)
             .wrapping_mul(0x9E37_79B9_7F4A_7C15)));
-    let mut out = String::from(
-        r#"struct Node { value: i32, next: ptr? Node }
-struct Holder { p: ptr? Node, q: ptr Node }
-struct Pair { a: Holder, b: ptr? Node }
+    // 共通の操作生成で、通常構造体と汎用構造体の両方を検査する。
+    // 型引数を経由しても、別名・フィールド更新・回収後のアクセスの判定を変えない。
+    let mut out = String::from(if generic {
+        r#"struct Node[T] { value: T, next: ptr? Node[T] }
+struct Holder[T] { p: ptr? Node[T], q: ptr Node[T] }
+struct Pair[T] { a: Holder[T], b: ptr? Node[T] }
 error ArenaErr { Abort }
-fnshape NodeAction(ptr? Node) -> i32
+fnshape NodeAction[T](ptr? Node[T]) -> i32
+fn apply_generic[T](f: fn NodeAction[T], arg: ptr? Node[T]) -> i32 { return f(arg) }
 
-fn Holder.read_p() -> i32 {
+fn Holder[T].read_p() -> T {
     let n = self.p { return n.value } else { return self.q.value }
 }
 
-fn Holder#bump_q(delta: i32) -> void {
+@needs T: +(T) -> T
+fn Holder[T]#bump_q(delta: T) -> void {
     self.q#value += delta
     return
 }
 
-fn Node#bump(delta: i32) -> void {
+@needs T: +(T) -> T
+fn Node[T]#bump(delta: T) -> void {
     self#value += delta
     return
 }
 
-fn borrow_read(p: ptr? Node) -> i32 {
+arena fn make_node[T](v: T, tail: ptr? Node[T]) -> ptr Node[T] {
+    return new Node[T] { value: v, next: tail }
+}
+
+"#
+    } else {
+        r#"struct $Node { value: i32, next: ptr? $Node }
+struct $Holder { p: ptr? $Node, q: ptr $Node }
+struct $Pair { a: $Holder, b: ptr? $Node }
+error ArenaErr { Abort }
+fnshape NodeAction(ptr? $Node) -> i32
+
+fn $Holder.read_p() -> i32 {
+    let n = self.p { return n.value } else { return self.q.value }
+}
+
+fn $Holder#bump_q(delta: i32) -> void {
+    self.q#value += delta
+    return
+}
+
+fn $Node#bump(delta: i32) -> void {
+    self#value += delta
+    return
+}
+
+"#
+    });
+    out.push_str(
+        r#"fn borrow_read(p: ptr? $Node) -> i32 {
     let n = p { return n.value } else { return 0 }
 }
 
-fn borrow_mutate(p: ptr Node) -> void {
+fn borrow_mutate(p: ptr $Node) -> void {
     p#value += 1
     return
 }
 
-fn borrow_holder(h: Holder) -> i32 {
+fn borrow_holder(h: $Holder) -> i32 {
     let n = h.p { return n.value } else { return h.q.value }
 }
 
-fn apply_action(f: fn NodeAction, arg: ptr? Node) -> i32 {
+fn apply_action(f: fn NodeAction, arg: ptr? $Node) -> i32 {
     return f(arg)
 }
 
-arena fn attach(h: ptr Holder) -> void {
-    h.q#next = new Node { value: 7, next: null }
+arena fn attach(h: ptr $Holder) -> void {
+    h.q#next = new $Node { value: 7, next: null }
     return
 }
 
-arena fn build_chain(v: i32, tail: ptr? Node, depth: i32) -> ptr Node {
+arena fn build_chain(v: i32, tail: ptr? $Node, depth: i32) -> ptr $Node {
     if depth <= 0 {
-        return new Node { value: v, next: tail }
+        return new $Node { value: v, next: tail }
     }
     fix ptr next = build_chain(v + 1, tail, depth - 1)
-    return new Node { value: v, next: next }
+    return new $Node { value: v, next: next }
 }
 
-arena fn maybe_alloc(flag: bool, fallback: ptr? Node) -> ptr? Node {
+arena fn maybe_alloc(flag: bool, fallback: ptr? $Node) -> ptr? $Node {
     if flag {
-        return new Node { value: 7, next: fallback }
+        return new $Node { value: 7, next: fallback }
     }
     return fallback
 }
 
-fn helper_return_inside_arena(outer_p: ptr Node, flag: bool) -> i32 {
+fn helper_return_inside_arena(outer_p: ptr $Node, flag: bool) -> i32 {
     arena {
-        fix ptr local_n = new Node { value: 99, next: outer_p }
+        fix ptr local_n = new $Node { value: 99, next: outer_p }
         if flag {
             return borrow_read(local_n)
         }
@@ -310,9 +345,9 @@ fn helper_return_inside_arena(outer_p: ptr Node, flag: bool) -> i32 {
     return borrow_read(outer_p)
 }
 
-fn may_fail_inside_arena(outer_p: ptr Node, do_fail: bool) -> i32 or ArenaErr {
+fn may_fail_inside_arena(outer_p: ptr $Node, do_fail: bool) -> i32 or ArenaErr {
     arena {
-        fix ptr local_n = new Node { value: 88, next: outer_p }
+        fix ptr local_n = new $Node { value: 88, next: outer_p }
         if do_fail {
             fail ArenaErr.Abort
         }
@@ -322,12 +357,12 @@ fn may_fail_inside_arena(outer_p: ptr Node, do_fail: bool) -> i32 or ArenaErr {
 
 fn main() -> u8 {
     arena {
-        fix ptr outer_a = new Node { value: 10, next: null }
-        fix ptr pp_outer: ptr ptr Node = new outer_a
-        var ptr outer_opt: ptr? Node = null
-        var ptr outer_mut: ptr Node = outer_a
-        var outer_holder = Holder { p: null, q: outer_a }
-        var outer_pair = Pair { a: outer_holder, b: null }
+        fix ptr outer_a = new $Node { value: 10, next: null }
+        fix ptr pp_outer: ptr ptr $Node = new outer_a
+        var ptr outer_opt: ptr? $Node = null
+        var ptr outer_mut: ptr $Node = outer_a
+        var outer_holder = $Holder { p: null, q: outer_a }
+        var outer_pair = $Pair { a: outer_holder, b: null }
         var sink: i32 = 0
 "#,
     );
@@ -342,15 +377,15 @@ fn main() -> u8 {
             let _ = writeln!(out, "            arena {{");
             let _ = writeln!(
                 out,
-                "                fix ptr inner_a = new Node {{ value: 20, next: null }}"
+                "                fix ptr inner_a = new $Node {{ value: 20, next: null }}"
             );
             let _ = writeln!(
                 out,
-                "                var ptr inner_opt: ptr? Node = new Node {{ value: 30, next: null }}"
+                "                var ptr inner_opt: ptr? $Node = new $Node {{ value: 30, next: null }}"
             );
             let _ = writeln!(
                 out,
-                "                var inner_holder = Holder {{ p: inner_a, q: inner_a }}"
+                "                var inner_holder = $Holder {{ p: inner_a, q: inner_a }}"
             );
             emit_inner_ops(&mut out, &mut rng, phase, true, "                ");
             let _ = writeln!(out, "            }}");
@@ -361,15 +396,15 @@ fn main() -> u8 {
             let _ = writeln!(out, "        arena {{");
             let _ = writeln!(
                 out,
-                "            fix ptr inner_a = new Node {{ value: 20, next: null }}"
+                "            fix ptr inner_a = new $Node {{ value: 20, next: null }}"
             );
             let _ = writeln!(
                 out,
-                "            var ptr inner_opt: ptr? Node = new Node {{ value: 30, next: null }}"
+                "            var ptr inner_opt: ptr? $Node = new $Node {{ value: 30, next: null }}"
             );
             let _ = writeln!(
                 out,
-                "            var inner_holder = Holder {{ p: inner_a, q: inner_a }}"
+                "            var inner_holder = $Holder {{ p: inner_a, q: inner_a }}"
             );
             if rng.chance(1, 2) {
                 let _ = writeln!(out, "            arena {{");
@@ -394,7 +429,7 @@ fn main() -> u8 {
             let _ = writeln!(out, "        arena {{");
             let _ = writeln!(
                 out,
-                "            fix ptr reused = new Node {{ value: 55, next: outer_a }}"
+                "            fix ptr reused = new $Node {{ value: 55, next: outer_a }}"
             );
             let _ = writeln!(out, "            sink = borrow_read(reused)");
             let _ = writeln!(out, "        }}");
@@ -402,6 +437,35 @@ fn main() -> u8 {
     }
 
     out.push_str("        outer_opt = outer_opt\n        outer_mut = outer_mut\n        outer_holder = outer_holder\n        outer_pair = outer_pair\n        sink = sink\n    }\n    return 0\n}\n");
+    if generic {
+        // arena fnの具体化も通す。通常版と同じ値と参照を返す。
+        // コールバックは型引数付きfnshapeと具体化した関数値を経由して転送する。
+        out = out
+            .replace("fn NodeAction,", "fn NodeAction[i32],")
+            .replace(
+                "    return f(arg)\n",
+                "    return (fn apply_generic[i32])(f, arg)\n",
+            )
+            .replace(
+                "new $Node { value: v, next: tail }",
+                "make_node[i32](v, tail)",
+            )
+            .replace(
+                "new $Node { value: v, next: next }",
+                "make_node[i32](v, next)",
+            );
+    }
+    // 汎用版の半数は型引数を推論し、明示した場合と同じ寿命検査・実行を通す。
+    if generic && index % 4 == 3 {
+        out = out.replace("make_node[i32]", "make_node");
+    }
+    for (placeholder, concrete, applied) in [
+        ("$Node", "Node", "Node[i32]"),
+        ("$Holder", "Holder", "Holder[i32]"),
+        ("$Pair", "Pair", "Pair[i32]"),
+    ] {
+        out = out.replace(placeholder, if generic { applied } else { concrete });
+    }
     out
 }
 
@@ -442,12 +506,21 @@ fn arena_fuzz_accepted_programs_never_trigger_asan() {
 
     let directory = TemporaryDirectory::new();
     let mut accepted: Vec<(usize, String, PathBuf)> = Vec::new();
-    let mut rejected = 0usize;
+    let mut accepted_by_kind = [0usize; 3];
+    let mut rejected_by_kind = [0usize; 3];
 
     for index in 0..count {
         let source = generate_program(seed, index);
+        let kind = if index.is_multiple_of(2) {
+            0
+        } else if index % 4 == 1 {
+            1
+        } else {
+            2
+        };
         match suz::compile(source.as_bytes()) {
             Ok(compiled) => {
+                accepted_by_kind[kind] += 1;
                 let c_path = directory.0.join(format!("case-{index}.c"));
                 fs::write(&c_path, compiled).unwrap();
                 accepted.push((index, source, c_path));
@@ -457,21 +530,23 @@ fn arena_fuzz_accepted_programs_never_trigger_asan() {
                     error.rule().starts_with("arena."),
                     "unexpected non-arena compile error at seed={seed}, case={index}: {error}\n{source}"
                 );
-                rejected += 1;
+                rejected_by_kind[kind] += 1;
             }
         }
     }
 
-    assert!(
-        accepted.len() * 10 >= count,
-        "arena fuzz generator accepted too few programs: accepted={}, rejected={rejected}, count={count}, seed={seed}",
-        accepted.len()
-    );
-    assert!(
-        rejected * 10 >= count,
-        "arena fuzz generator rejected too few programs: accepted={}, rejected={rejected}, count={count}, seed={seed}",
-        accepted.len()
-    );
+    for (kind, name) in ["ordinary", "generic-explicit", "generic-inferred"]
+        .into_iter()
+        .enumerate()
+    {
+        let total = accepted_by_kind[kind] + rejected_by_kind[kind];
+        assert!(
+            accepted_by_kind[kind] * 10 >= total && rejected_by_kind[kind] * 10 >= total,
+            "arena fuzz must exercise accepted and rejected {name} programs: accepted={}, rejected={}, seed={seed}",
+            accepted_by_kind[kind],
+            rejected_by_kind[kind]
+        );
+    }
 
     let batch_inputs: Vec<(usize, PathBuf)> = accepted
         .iter()

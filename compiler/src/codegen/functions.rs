@@ -155,9 +155,41 @@ pub(super) fn invoke(
 }
 
 /// 構造体の前方宣言の後、本体の前に関数ポインタ型を宣言する。
-/// 関数値の型の番号は依存先から付くため、ここでは番号順に出力できる。
+/// 再帰する構造体のために予約した番号もあるので、関数型の依存先から出力する。
 pub(super) fn type_declarations(c: &mut String, context: &ExpressionContext) {
+    let mut dependencies = vec![0; context.function_types.len()];
+    let mut parents = vec![Vec::new(); context.function_types.len()];
+    let mut symbolic = vec![false; context.function_types.len()];
     for (id, ty) in context.function_types.iter().enumerate() {
+        for ty in ty.parameters.iter().chain([&ty.result]) {
+            match ty.leaf() {
+                Type::StaticFunction(dependency) | Type::Function(dependency) => {
+                    dependencies[id] += 1;
+                    parents[dependency].push(id);
+                }
+                Type::Parameter(_) => symbolic[id] = true,
+                Type::Struct(id_struct) => symbolic[id] |= context.structs[id_struct].symbolic,
+                ty if ty.symbolic() => symbolic[id] = true,
+                _ => {}
+            }
+        }
+    }
+    let mut ready: std::collections::VecDeque<_> = (0..dependencies.len())
+        .filter(|id| dependencies[*id] == 0)
+        .collect();
+    while let Some(id) = ready.pop_front() {
+        for &parent in &parents[id] {
+            symbolic[parent] |= symbolic[id];
+            dependencies[parent] -= 1;
+            if dependencies[parent] == 0 {
+                ready.push_back(parent);
+            }
+        }
+        // 定義検査用の記号的な署名には、C側の型を作らない。
+        if symbolic[id] {
+            continue;
+        }
+        let ty = &context.function_types[id];
         let mut args = if ty.parameters.is_empty() {
             "void".into()
         } else {

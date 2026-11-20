@@ -50,6 +50,8 @@ impl Parser<'_, '_> {
         Ok(Closure {
             captures,
             function: Function {
+                type_parameters: Vec::new(),
+                needs: Vec::new(),
                 method: None,
                 arena: false,
                 name: String::new(),

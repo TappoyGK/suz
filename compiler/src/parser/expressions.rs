@@ -102,7 +102,7 @@ impl Parser<'_, '_> {
             self.cursor += 1;
             let value = if matches!(
                 self.token().kind,
-                Kind::Newline | Kind::Symbol("}" | ")" | ",") | Kind::End
+                Kind::Newline | Kind::BlankLine | Kind::Symbol("}" | ")" | ",") | Kind::End
             ) {
                 None
             } else {
@@ -124,7 +124,7 @@ impl Parser<'_, '_> {
             self.cursor += 1;
             if matches!(
                 self.token().kind,
-                Kind::Newline | Kind::Symbol("}" | ")" | ",") | Kind::End
+                Kind::Newline | Kind::BlankLine | Kind::Symbol("}" | ")" | ",") | Kind::End
             ) {
                 return Ok(FailureHandler::Return {
                     value: Box::new(Expression {
@@ -299,6 +299,57 @@ impl Parser<'_, '_> {
         self.nested(self.location(), Self::unary_inner)
     }
 
+    fn function_value_node(
+        &mut self,
+        location: crate::ast::Location,
+    ) -> Result<Expression, Diagnostic> {
+        self.cursor += 1;
+        if self.token().kind == Kind::Symbol("[") {
+            return self.closure_node(location);
+        }
+        let Kind::Ident(name) = self.token().kind else {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("fn.value-mark", "fn requires a function name"),
+            ));
+        };
+        self.cursor += 1;
+        if matches!(self.token().kind, Kind::Symbol("." | "#")) {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "method.no-fn-value",
+                    "methods cannot be extracted as function values"
+                ),
+            ));
+        }
+        let type_arguments = if self.token().kind == Kind::Symbol("[") {
+            let arguments = self.delimited_list("[", "]", Self::type_argument)?;
+            if arguments.is_empty() {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "generic.type-arguments",
+                        "at least one type argument is required"
+                    ),
+                ));
+            }
+            arguments
+        } else {
+            Vec::new()
+        };
+        if matches!(self.token().kind, Kind::Symbol("(" | "." | "[")) {
+            return Err(self.error(ErrorKind::InvalidSource, crate::diagnostic!("fn.value-mark", "fn applies to a function name only; parenthesize the function value before calling it")));
+        }
+        self.primary_node(
+            ExpressionKind::FunctionValue {
+                name: name.into(),
+                type_arguments,
+            },
+            location,
+        )
+    }
+
     fn unary_inner(&mut self) -> Result<Expression, Diagnostic> {
         if self.constant_expression
             && matches!(
@@ -316,32 +367,7 @@ impl Parser<'_, '_> {
         }
         let location = self.location();
         let kind = match self.token().kind {
-            Kind::Keyword("fn") => {
-                self.cursor += 1;
-                if self.token().kind == Kind::Symbol("[") {
-                    return self.closure_node(location);
-                }
-                let Kind::Ident(name) = self.token().kind else {
-                    return Err(self.error(
-                        ErrorKind::InvalidSource,
-                        crate::diagnostic!("fn.value-mark", "fn requires a function name"),
-                    ));
-                };
-                self.cursor += 1;
-                if matches!(self.token().kind, Kind::Symbol("." | "#")) {
-                    return Err(self.error(
-                        ErrorKind::InvalidSource,
-                        crate::diagnostic!(
-                            "method.no-fn-value",
-                            "methods cannot be extracted as function values"
-                        ),
-                    ));
-                }
-                if matches!(self.token().kind, Kind::Symbol("(" | "." | "[")) {
-                    return Err(self.error(ErrorKind::InvalidSource, crate::diagnostic!("fn.value-mark", "fn applies to a function name only; parenthesize the function value before calling it")));
-                }
-                return self.primary_node(ExpressionKind::FunctionValue(name.into()), location);
-            }
+            Kind::Keyword("fn") => return self.function_value_node(location),
             Kind::Keyword("if") => {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
@@ -464,7 +490,7 @@ impl Parser<'_, '_> {
                         ),
                     ));
                 }
-                if self.token().kind == Kind::Symbol("{")
+                if matches!(self.token().kind, Kind::Symbol("{" | "["))
                     && self.structs.iter().any(|decl| decl.name == name)
                 {
                     if self.restricted_condition {
@@ -481,8 +507,9 @@ impl Parser<'_, '_> {
                         .iter()
                         .position(|decl| decl.name == name)
                         .unwrap();
+                    let ty = self.struct_type(id)?;
                     ExpressionKind::Struct {
-                        id,
+                        ty,
                         fields: self.delimited_list("{", "}", Self::field_initializer)?,
                     }
                 } else if self.token().kind == Kind::Symbol(".")
@@ -500,8 +527,34 @@ impl Parser<'_, '_> {
                         enum_name: name.into(),
                         variant: variant.into(),
                     }
+                } else if self.explicit_type_arguments(name) {
+                    let type_arguments = self.delimited_list("[", "]", Self::type_argument)?;
+                    if type_arguments.is_empty() {
+                        return Err(location.error(
+                            ErrorKind::InvalidSource,
+                            crate::diagnostic!(
+                                "generic.type-arguments",
+                                "type arguments cannot be empty"
+                            ),
+                        ));
+                    }
+                    if self.constant_expression {
+                        return Err(location.error(
+                            ErrorKind::InvalidSource,
+                            crate::diagnostic!(
+                                "const.expression",
+                                "function calls are not constant expressions"
+                            ),
+                        ));
+                    }
+                    ExpressionKind::Call {
+                        type_arguments,
+                        name: name.into(),
+                        arguments: self.list(Self::parenthesized_expression)?,
+                    }
                 } else if self.token().kind == Kind::Symbol("(") {
                     ExpressionKind::Call {
+                        type_arguments: Vec::new(),
                         name: name.into(),
                         arguments: self.list(Self::parenthesized_expression)?,
                     }

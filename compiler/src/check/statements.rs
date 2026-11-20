@@ -422,7 +422,9 @@ fn check_binding(
     // 登録する前に解決する。束縛は自身の初期化式から参照できない。
     let mut initializer = super::expression::coerced(
         initializer,
-        annotation.map(|t| context.bindings.resolve_type(t)),
+        annotation
+            .map(|t| context.bindings.resolve_type_at(t, *location))
+            .transpose()?,
         context.bindings,
     )?;
     if initializer.ty.pointee().is_some() != *pointer {
@@ -431,6 +433,15 @@ fn check_binding(
             crate::diagnostic!(
                 "arena.ptr-decl",
                 "pointer bindings require fix ptr or var ptr"
+            ),
+        ));
+    }
+    if matches!(initializer.ty, Type::Function(_)) {
+        return Err(location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "fn.type-call",
+                "call-only function values cannot be stored in bindings"
             ),
         ));
     }

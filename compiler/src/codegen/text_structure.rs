@@ -154,6 +154,10 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
             | Type::CInteger(_)
             | Type::StaticFunction(_)
             | Type::Function(_)
+            | Type::Application(_)
+            | Type::StaticShape(_)
+            | Type::Shape(_)
+            | Type::Parameter(_)
             | Type::GenericInt
             | Type::GenericFloat
             | Type::Numeric(_)

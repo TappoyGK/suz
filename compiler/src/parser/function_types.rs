@@ -1,6 +1,4 @@
-//! fnshapeの前方参照を解決し、同じ形の関数値の型を一つにまとめる。
-//! 構造体は名前で区別するため、関数値の型の循環検査は構造体の内部へ進まない。
-
+//! fnshapeの前方宣言と型引数・要求を解析する。関数型の同一性は具体化後に決める。
 use super::{FixedToken, Parser};
 use crate::{
     Diagnostic, ErrorKind,
@@ -8,40 +6,95 @@ use crate::{
     lexer::{Kind, Token},
 };
 
+/// 型引数などの情報が増えても、名前の解決で宣言を毎回全件走査しない。
+pub(super) fn name_index(
+    declarations: &[FnShapeDeclaration],
+) -> std::rc::Rc<std::collections::BTreeMap<String, usize>> {
+    std::rc::Rc::new(
+        declarations
+            .iter()
+            .enumerate()
+            .map(|(id, d)| (d.name.clone(), id))
+            .collect(),
+    )
+}
+
+fn parser<'a, 's>(
+    tokens: &'a [Token<'s>],
+    enums: &'a [EnumDeclaration],
+    structs: &'a [StructDeclaration],
+    declarations: &'a [FnShapeDeclaration],
+    applications: crate::ast::generics::Applications,
+    need_groups: std::rc::Rc<super::need_groups::Groups>,
+) -> Parser<'a, 's> {
+    Parser {
+        need_groups,
+        applications,
+        type_parameters: Vec::new(),
+        pending_needs: Vec::new(),
+        generic_functions: Default::default(),
+        allows: Vec::new(),
+        tokens,
+        enums,
+        structs,
+        fnshapes: declarations,
+        fnshape_names: name_index(declarations),
+        restricted_condition: false,
+        cursor: 0,
+        constant_expression: false,
+        in_value: false,
+        depth: 0,
+        limit_location: None,
+    }
+}
+
 pub(super) fn headers(tokens: &[Token<'_>]) -> Result<Vec<FnShapeDeclaration>, Diagnostic> {
     let mut result = Vec::new();
+    let mut p = parser(
+        tokens,
+        &[],
+        &[],
+        &[],
+        Default::default(),
+        Default::default(),
+    );
     let mut depth = 0usize;
-    let mut cursor = 0;
-    while tokens[cursor].kind != Kind::End {
-        if depth == 0 && tokens[cursor].kind == Kind::Keyword("fnshape") {
-            let start = cursor;
-            cursor += 1;
-            let location = crate::ast::Location {
-                line: tokens[cursor].line,
-                column: tokens[cursor].column,
-            };
-            let Kind::Ident(name) = tokens[cursor].kind else {
+    while p.token().kind != Kind::End {
+        if depth == 0 && p.token().kind == Kind::Keyword("fnshape") {
+            let start = p.cursor;
+            p.cursor += 1;
+            let location = p.location();
+            let Kind::Ident(name) = p.token().kind else {
                 return Err(location.error(
                     ErrorKind::InvalidSource,
                     crate::diagnostic!("fnshape.decl", "expected a function type name"),
                 ));
             };
             super::names::check(super::names::Shape::Type, name, location)?;
-            let type_id = result.len();
+            p.cursor += 1;
+            let type_parameters = if p.token().kind == Kind::Symbol("[") {
+                p.generic_parameters()?
+            } else {
+                Vec::new()
+            };
             result.push(FnShapeDeclaration {
+                plain_application: None,
                 name: name.into(),
                 location,
                 start,
                 end: 0,
-                type_id,
+                type_id: result.len(),
+                type_parameters,
+                needs: Vec::new(),
             });
+            continue;
         }
-        match tokens[cursor].kind {
+        match p.token().kind {
             Kind::Symbol("{" | "(" | "[") => depth += 1,
             Kind::Symbol("}" | ")" | "]") => depth = depth.saturating_sub(1),
             _ => {}
         }
-        cursor += 1;
+        p.cursor += 1;
     }
     Ok(result)
 }
@@ -51,7 +104,12 @@ pub(super) fn resolve(
     enums: &[EnumDeclaration],
     structs: &mut [StructDeclaration],
     declarations: &mut [FnShapeDeclaration],
+    applications: crate::ast::generics::Applications,
+    need_groups: std::rc::Rc<super::need_groups::Groups>,
 ) -> Result<Vec<FunctionType>, Diagnostic> {
+    if declarations.is_empty() {
+        return Ok(Vec::new());
+    }
     let mut names = std::collections::BTreeSet::new();
     for d in declarations.iter() {
         if !names.insert(&d.name)
@@ -64,37 +122,63 @@ pub(super) fn resolve(
             ));
         }
     }
-    let mut p = Parser {
-        allows: Vec::new(),
+    let mut p = parser(
         tokens,
         enums,
         structs,
-        fnshapes: declarations,
-        restricted_condition: false,
-        cursor: 0,
-        constant_expression: false,
-        in_value: false,
-        depth: 0,
-        limit_location: None,
-    };
+        declarations,
+        applications.clone(),
+        need_groups,
+    );
+    let mut ranges = std::collections::BTreeMap::new();
+    // @needsを持たないソースでは、要求の位置を探す二度目の構文走査を行わない。
+    if tokens.iter().any(|token| token.kind == Kind::Symbol("@")) {
+        let mut depth = 0usize;
+        while p.token().kind != Kind::End {
+            if depth == 0 && p.token().kind == Kind::Symbol("@") {
+                p.collect_need()?;
+                continue;
+            }
+            if depth == 0 && p.token().kind == Kind::Keyword("fnshape") {
+                ranges.insert(p.cursor, std::mem::take(&mut p.pending_needs));
+            } else if depth == 0 && matches!(p.token().kind, Kind::Keyword(_)) {
+                p.pending_needs.clear();
+            }
+            match p.token().kind {
+                Kind::Symbol("{" | "(" | "[") => depth += 1,
+                Kind::Symbol("}" | ")" | "]") => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+            p.cursor += 1;
+        }
+    }
     let mut raw = Vec::new();
-    let mut ends = Vec::new();
+    let mut metadata = Vec::new();
     for d in declarations.iter() {
         p.cursor = d.start + 2;
+        p.type_parameters = if p.token().kind == Kind::Symbol("[") {
+            p.generic_parameters()?
+        } else {
+            Vec::new()
+        };
+        p.pending_needs = ranges.remove(&d.start).unwrap_or_default();
+        let needs = p.declaration_needs()?;
         let parameters = p.list(Parser::function_parameter_type)?;
         p.expect(FixedToken::Symbol("->"))?;
         let result = p.parse_type()?;
         let errors = p.error_spec()?;
-        for ty in parameters.iter().chain([&result]) {
-            if ty.leaf().generic() {
-                return Err(d.location.error(
-                    ErrorKind::InvalidSource,
-                    crate::diagnostic!(
-                        "num.places",
-                        "fnshape requires concrete types; int and float are not allowed"
-                    ),
-                ));
-            }
+        if parameters
+            .iter()
+            .chain([&result])
+            .any(|ty| ty.leaf().generic())
+        {
+            return Err(d.location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "num.places",
+                    "fnshape requires concrete types; int and float are not allowed"
+                ),
+            ));
         }
         if parameters.contains(&Type::Void) {
             return Err(d.location.error(
@@ -107,38 +191,35 @@ pub(super) fn resolve(
             result,
             errors,
         });
-        ends.push(p.cursor);
+        metadata.push((p.cursor, needs));
     }
-    // 依存先から順に解決する。長い前方参照の連鎖でもRustの再帰スタックを使わない。
+    // 構造体を経由しない関数型の循環は、型引数の有無によらず拒否する。
+    let applications = applications.borrow();
     let mut pending = vec![0; raw.len()];
     let mut parents = vec![Vec::new(); raw.len()];
     for (id, signature) in raw.iter().enumerate() {
-        for ty in signature.parameters.iter().chain([&signature.result]) {
-            if let Type::StaticFunction(child) | Type::Function(child) = ty.leaf() {
+        let mut types: Vec<_> = signature
+            .parameters
+            .iter()
+            .copied()
+            .chain([signature.result])
+            .collect();
+        while let Some(ty) = types.pop() {
+            if let Type::StaticShape(app) | Type::Shape(app) = ty.leaf() {
+                let app = &applications.entries[app];
                 pending[id] += 1;
-                parents[child].push(id);
+                parents[app.declaration].push(id);
+                types.extend(&app.arguments);
             }
         }
     }
     let mut ready: std::collections::VecDeque<_> =
-        (0..raw.len()).filter(|&id| pending[id] == 0).collect();
-    let mut ids = vec![None; raw.len()];
-    let mut types = Vec::new();
+        (0..raw.len()).filter(|id| pending[*id] == 0).collect();
+    let mut visited = vec![false; raw.len()];
+    let mut order = Vec::new();
     while let Some(id) = ready.pop_front() {
-        let remap = |ty| remap(ty, &ids);
-        let signature = FunctionType {
-            parameters: raw[id].parameters.iter().copied().map(remap).collect(),
-            result: remap(raw[id].result),
-            errors: raw[id].errors.clone(),
-        };
-        let canonical = types
-            .iter()
-            .position(|t| t == &signature)
-            .unwrap_or_else(|| {
-                types.push(signature);
-                types.len() - 1
-            });
-        ids[id] = Some(canonical);
+        visited[id] = true;
+        order.push(id);
         for &parent in &parents[id] {
             pending[parent] -= 1;
             if pending[parent] == 0 {
@@ -146,7 +227,7 @@ pub(super) fn resolve(
             }
         }
     }
-    if let Some(id) = ids.iter().position(Option::is_none) {
+    if let Some(id) = visited.iter().position(|done| !done) {
         return Err(declarations[id].location.error(
             ErrorKind::InvalidSource,
             crate::diagnostic!(
@@ -155,24 +236,12 @@ pub(super) fn resolve(
             ),
         ));
     }
-    for (id, d) in declarations.iter_mut().enumerate() {
-        d.type_id = ids[id].unwrap();
-        d.end = ends[id];
+    for (d, (end, needs)) in declarations.iter_mut().zip(metadata) {
+        d.end = end;
+        d.needs = needs;
     }
-    for field in structs.iter_mut().flat_map(|s| &mut s.fields) {
-        field.ty = remap(field.ty, &ids);
+    for (type_id, &declaration) in order.iter().enumerate() {
+        declarations[declaration].type_id = type_id;
     }
-    Ok(types)
-}
-
-// ptrで包まれた関数型にも、宣言番号から正規化後の番号への置き換えを適用する。
-fn remap(ty: Type, ids: &[Option<usize>]) -> Type {
-    match ty {
-        Type::Pointer { .. } => remap(ty.pointee().unwrap(), ids)
-            .pointer()
-            .with_nullable(ty.is_nullable()),
-        Type::StaticFunction(id) => Type::StaticFunction(ids[id].unwrap()),
-        Type::Function(id) => Type::Function(ids[id].unwrap()),
-        _ => ty,
-    }
+    Ok(order.into_iter().map(|id| raw[id].clone()).collect())
 }

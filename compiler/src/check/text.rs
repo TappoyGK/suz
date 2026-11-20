@@ -29,6 +29,7 @@ pub(super) fn parts(
                         Type::StaticFunction(_)
                             | Type::Function(_)
                             | Type::Void
+                            | Type::Parameter(_)
                             | Type::Struct(_)
                             | Type::Pointer { .. }
                             | Type::CPointer

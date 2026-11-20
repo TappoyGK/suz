@@ -15,6 +15,7 @@ use crate::{
 pub(super) fn value(
     expr: &Expression,
     name: &str,
+    explicit: &[Type],
     expected: Option<Type>,
     scope: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
@@ -58,6 +59,26 @@ pub(super) fn value(
                 "C functions cannot be used as Suz function values"
             ),
         ));
+    }
+    if signature.type_parameters != 0 || !explicit.is_empty() {
+        return super::type_parameters::function_value(expr, signature, explicit, expected, scope);
+    }
+    // 注釈や仮引数の型が既に確定している通常関数は、その署名と直接照合できる。
+    // 同じ関数値を保存するたびに署名を複製して型表へ登録し直さない。
+    if !signature.is_generic()
+        && let Some(Type::StaticFunction(id)) = expected
+    {
+        let types = scope.function_types.borrow();
+        let required = &types[id];
+        if signature.parameters == required.parameters
+            && signature.result == required.result
+            && signature.errors == required.errors
+        {
+            return Ok(CheckedExpression {
+                ty: Type::StaticFunction(id),
+                value: Value::Function(signature.id),
+            });
+        }
     }
     let mut types = GenericTypes::default();
     if signature.is_generic() {
@@ -216,10 +237,11 @@ pub(super) fn invoke(
 /// 型注釈のある文は独自の要求を持つため、ここでは分岐の結果だけをたどる。
 pub(super) fn require_context(expr: &Expression, scope: &Scope) -> Result<(), Diagnostic> {
     match &expr.kind {
-        ExpressionKind::FunctionValue(name)
-            if scope.functions.get(name).is_some_and(|s| s.is_generic()) =>
-        {
-            value(expr, name, None, scope)?;
+        ExpressionKind::FunctionValue {
+            name,
+            type_arguments,
+        } if scope.functions.get(name).is_some_and(|s| s.is_generic()) => {
+            value(expr, name, type_arguments, None, scope)?;
         }
         ExpressionKind::Group(v) | ExpressionKind::Block { value: v, .. } => {
             require_context(v, scope)?

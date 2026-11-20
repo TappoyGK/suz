@@ -72,7 +72,7 @@ impl Parser<'_, '_> {
     fn check_branch_line(&self, end: Location) -> Result<(), Diagnostic> {
         let next = self.tokens[self.cursor..]
             .iter()
-            .find(|t| t.kind != Kind::Newline)
+            .find(|t| !t.kind.is_newline())
             .unwrap();
         if matches!(next.kind, Kind::Keyword("elif" | "else")) && next.line != end.line {
             return Err(Location {
@@ -155,7 +155,7 @@ impl Parser<'_, '_> {
                 body,
             });
             match self.token().kind {
-                Kind::Newline => self.newlines(),
+                Kind::Newline | Kind::BlankLine => self.newlines(),
                 Kind::Symbol("}") => {}
                 _ => {
                     return Err(self.error(

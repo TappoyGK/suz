@@ -101,7 +101,10 @@ impl Parser<'_, '_> {
                     .find(|s| s.start == self.cursor)
                     .expect("collected extern struct")
                     .end;
-                if !matches!(self.token().kind, Kind::Newline | Kind::Symbol("}")) {
+                if !matches!(
+                    self.token().kind,
+                    Kind::Newline | Kind::BlankLine | Kind::Symbol("}")
+                ) {
                     return Err(self.error(
                         ErrorKind::InvalidSource,
                         crate::diagnostic!(
@@ -173,7 +176,10 @@ impl Parser<'_, '_> {
                     crate::diagnostic!("fn.parameter-scope", "duplicate parameter name"),
                 ));
             }
-            if !matches!(self.token().kind, Kind::Newline | Kind::Symbol("}")) {
+            if !matches!(
+                self.token().kind,
+                Kind::Newline | Kind::BlankLine | Kind::Symbol("}")
+            ) {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
                     crate::diagnostic!(

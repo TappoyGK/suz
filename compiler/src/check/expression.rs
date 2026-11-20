@@ -35,6 +35,12 @@ pub(super) fn operand_type(expr: &Expression, bindings: &Scope) -> Option<Type> 
 }
 
 fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
+    if !bindings.named.needs.is_empty()
+        && bindings.named.type_arguments.is_none()
+        && let Some(ty) = super::type_parameters::hint(expr, bindings)
+    {
+        return Some(ty);
+    }
     #[cfg(test)]
     super::generic::work();
     match &expr.kind {
@@ -48,8 +54,20 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
             operand_type(target, bindings).map(|t| t.pointee().unwrap_or(t))
         }
         ExpressionKind::Closure(_) | ExpressionKind::Panic(_) => None,
-        ExpressionKind::FunctionValue(name) => {
+        ExpressionKind::FunctionValue {
+            name,
+            type_arguments,
+        } => {
             let signature = bindings.functions.get(name)?;
+            if signature.type_parameters != 0 || !type_arguments.is_empty() {
+                return super::type_parameters::function_value_type(
+                    signature,
+                    type_arguments,
+                    bindings,
+                    expr.location,
+                )
+                .ok();
+            }
             if signature.is_generic() || name == "main" {
                 return None;
             }
@@ -82,14 +100,16 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
             }
         }
         ExpressionKind::Template(_) => Some(Type::Symbol),
-        ExpressionKind::Struct { id, .. } => Some(Type::Struct(*id)),
+        ExpressionKind::Struct { ty, .. } => bindings.resolve_type_at(*ty, expr.location).ok(),
         ExpressionKind::With { target, .. } => operand_type(target, bindings),
         ExpressionKind::Field { target, name } => {
             let known = operand_type(target, bindings)?;
             let Type::Struct(id) = known.pointee().unwrap_or(known) else {
                 return None;
             };
-            bindings.structs[id]
+            bindings
+                .structs
+                .get(id)
                 .fields
                 .iter()
                 .find(|field| &field.name == name)
@@ -101,7 +121,24 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
             .find(|e| &e.name == enum_name)
             .map(|e| Type::Enum(e.ty)),
         ExpressionKind::Void => Some(Type::Void),
-        ExpressionKind::Call { name, arguments } => {
+        ExpressionKind::Call {
+            name,
+            arguments,
+            type_arguments,
+        } => {
+            if let Some(signature) = bindings
+                .functions
+                .get(name)
+                .filter(|s| s.type_parameters != 0)
+            {
+                return super::type_parameters::call_hint(
+                    signature,
+                    type_arguments,
+                    arguments,
+                    bindings,
+                    expr.location,
+                );
+            }
             super::generic::call_operand_type(name, arguments, bindings)
         }
         ExpressionKind::Block { statements, value } => {
@@ -110,7 +147,9 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
         ExpressionKind::Match { arms, .. } => {
             branch_type(arms.iter().map(|arm| &arm.body), bindings)
         }
-        ExpressionKind::Cast { target, .. } => Some(bindings.resolve_type(*target)),
+        ExpressionKind::Cast { target, .. } => {
+            bindings.resolve_type_at(*target, expr.location).ok()
+        }
         ExpressionKind::If {
             branches,
             otherwise,
@@ -418,6 +457,12 @@ fn expression_inner(
     widen: Widening,
     argument: Option<super::generic::Family>,
 ) -> Result<CheckedExpression, Diagnostic> {
+    if required.is_some_and(|ty| ty.pointee().is_some() && matches!(ty.leaf(), Type::Function(_))) {
+        return Err(expr.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!("arena.ptr-type", "pointer requires a stored value type"),
+        ));
+    }
     if let Some(Type::CInteger(_)) = required
         && let Some(value) = super::ffi::literal(expr, required.unwrap())?
     {
@@ -433,7 +478,12 @@ fn expression_inner(
     } else {
         required
     };
-    let checked = if bindings.has_operator_methods
+    let checked = if bindings.named.type_arguments.is_none()
+        && !bindings.named.type_parameters.is_empty()
+        && let Some(checked) = super::type_parameters::operation(expr, bindings)?
+    {
+        checked
+    } else if bindings.has_operator_methods
         && let ExpressionKind::Binary {
             operator,
             left,
@@ -480,9 +530,10 @@ fn expression_inner(
                     ),
                 ));
             }
-            ExpressionKind::FunctionValue(name) => {
-                super::function_values::value(expr, name, required, bindings)?
-            }
+            ExpressionKind::FunctionValue {
+                name,
+                type_arguments,
+            } => super::function_values::value(expr, name, type_arguments, required, bindings)?,
             ExpressionKind::Invoke { target, arguments } => {
                 super::function_values::invoke(expr, target, arguments, bindings, None)?
             }
@@ -526,9 +577,9 @@ fn expression_inner(
                 ty: Type::Void,
                 value: Value::Void,
             },
-            ExpressionKind::Call { name, arguments } => {
-                super::functions::call(expr, name, arguments, inference_hint, bindings, None)?
-            }
+            ExpressionKind::Call {
+                name, arguments, ..
+            } => super::functions::call(expr, name, arguments, inference_hint, bindings, None)?,
             ExpressionKind::Block { statements, value } => {
                 blocks::check(statements, value, inference_hint, bindings)?
             }

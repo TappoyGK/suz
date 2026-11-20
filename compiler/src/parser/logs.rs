@@ -125,11 +125,17 @@ impl Parser<'_, '_> {
                         item.column += column - 1;
                     }
                     let mut parser = Parser {
+                        applications: self.applications.clone(),
+                        type_parameters: self.type_parameters.clone(),
+                        pending_needs: Vec::new(),
+                        need_groups: self.need_groups.clone(),
+                        generic_functions: self.generic_functions.clone(),
                         allows: Vec::new(),
                         tokens: &tokens,
                         enums: self.enums,
                         structs: self.structs,
                         fnshapes: self.fnshapes,
+                        fnshape_names: self.fnshape_names.clone(),
                         restricted_condition: self.restricted_condition,
                         cursor: 0,
                         constant_expression: self.constant_expression,

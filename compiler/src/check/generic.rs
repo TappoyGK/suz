@@ -91,7 +91,11 @@ pub(super) struct Instance {
 pub(super) struct Instances {
     ids: BTreeMap<(usize, GenericTypes), usize>,
     pub queue: VecDeque<Instance>,
-    next_id: usize,
+    pub(super) next_id: usize,
+    pub named: Vec<super::type_parameters::Instance>,
+    pub named_ids: BTreeMap<(usize, Vec<Type>), usize>,
+    pub named_requirements: BTreeSet<(usize, Vec<Type>)>,
+    pub named_cursor: usize,
     pub checked_instances: BTreeSet<usize>,
     pub analyzed_functions: BTreeMap<usize, std::rc::Rc<Analysis>>,
 }
@@ -186,7 +190,9 @@ fn candidates(
             continue;
         }
         let argument = without_groups(argument);
-        if let ExpressionKind::Call { name, arguments } = &argument.kind
+        if let ExpressionKind::Call {
+            name, arguments, ..
+        } = &argument.kind
             && let Some(inner) = scope.functions.get(name)
             && Family::of(inner.result.leaf()) == Some(family)
         {

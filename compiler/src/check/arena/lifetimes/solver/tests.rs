@@ -249,21 +249,28 @@ fn connected_arena_calls_do_not_repeat_dense_propagation_per_call() {
     use crate::ast::{StructDeclaration, StructField};
     let ty = Type::Struct(0);
     let scope = Scope {
-        structs: std::rc::Rc::new(vec![StructDeclaration {
-            external: None,
-            name: "Node".into(),
-            location: HERE,
-            start: 0,
-            end: 0,
-            fields: ["next", "other"]
-                .into_iter()
-                .map(|name| StructField {
-                    name: name.into(),
-                    ty: ty.pointer(),
-                    location: HERE,
-                })
-                .collect(),
-        }]),
+        structs: std::rc::Rc::new(
+            vec![StructDeclaration {
+                external: None,
+                type_parameters: Vec::new(),
+                needs: Vec::new(),
+                application: None,
+                symbolic: false,
+                name: "Node".into(),
+                location: HERE,
+                start: 0,
+                end: 0,
+                fields: ["next", "other"]
+                    .into_iter()
+                    .map(|name| StructField {
+                        name: name.into(),
+                        ty: ty.pointer(),
+                        location: HERE,
+                    })
+                    .collect(),
+            }]
+            .into(),
+        ),
         ..Scope::default()
     };
     for count in [32, 64] {

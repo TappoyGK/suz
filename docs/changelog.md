@@ -2,6 +2,11 @@
 
 利用者に関わる変更をバージョンごとに記載する。
 
+## v0.3.7
+
+- 関数・構造体・`fnshape`に型引数を指定できるようにし、関数呼び出しでは実引数から型引数を推論できるようにした。（[#118](https://github.com/TappoyGK/suz/issues/118)・[#119](https://github.com/TappoyGK/suz/pull/119)）
+- 型引数に必要な演算子やメソッドを`@needs`で宣言し、`needs`で要求の一覧に名前を付けられるようにした。（[#118](https://github.com/TappoyGK/suz/issues/118)・[#119](https://github.com/TappoyGK/suz/pull/119)）
+
 ## v0.3.6
 
 - 参照先の読み出しを`.p`、更新を`#p`に変更し、フィールドへの代入では最後のメンバーを`#`で指定するようにした。（[#106](https://github.com/TappoyGK/suz/issues/106)・[#107](https://github.com/TappoyGK/suz/pull/107)）

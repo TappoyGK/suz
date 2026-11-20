@@ -2,6 +2,7 @@
 //!
 //! 利用元: [`crate::parser`]、[`crate::check`]。
 
+pub(crate) mod generics;
 mod pointer_shape;
 pub(crate) mod visit;
 use pointer_shape::PointerShape;
@@ -147,7 +148,7 @@ pub(crate) struct EnumDeclaration {
 }
 
 /// 汎用数値型を具体化した一つの整数型または浮動小数点型。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum ScalarType {
     Integer(IntegerType),
     Float(FloatType),
@@ -159,7 +160,7 @@ pub(crate) const NUMERIC_COMBINATIONS: usize = 18;
 /// ASTと意味検査で共有する型表現。
 /// 具体的な型に加え、汎用のint・float、型の組み合わせごとの結果、内部の正確な整数を表す。
 /// Structの番号は構造体宣言、Functionの番号は共通化した関数値の型を参照する。汎用の型はC生成までに具体化する。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Type {
     Pointer {
         leaf: PointerLeaf,
@@ -167,6 +168,10 @@ pub(crate) enum Type {
     },
     CPointer,
     CInteger(CIntegerType),
+    Parameter(usize),
+    Application(usize), // 構文中の構造体への型適用。
+    StaticShape(usize), // 構文中の保存可能なfnshapeへの型適用。
+    Shape(usize),       // 構文中の呼び出し専用fnshapeへの型適用。
     GenericInt,
     GenericFloat,
     Numeric([Option<ScalarType>; NUMERIC_COMBINATIONS]), // intとfloatの内部の型関数。
@@ -185,10 +190,14 @@ pub(crate) enum Type {
 }
 
 /// ポインタの末端の値型。各段のnull許容性はPointerShapeで別に持つ。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum PointerLeaf {
     CPointer,
     CInteger(CIntegerType),
+    Parameter(usize),
+    Application(usize),
+    StaticShape(usize),
+    Shape(usize),
     GenericInt,
     GenericFloat,
     Numeric([Option<ScalarType>; NUMERIC_COMBINATIONS]),
@@ -216,6 +225,10 @@ impl Type {
             }
             Self::CPointer => PointerLeaf::CPointer,
             Self::CInteger(v) => PointerLeaf::CInteger(v),
+            Self::Parameter(id) => PointerLeaf::Parameter(id),
+            Self::Application(id) => PointerLeaf::Application(id),
+            Self::StaticShape(id) => PointerLeaf::StaticShape(id),
+            Self::Shape(id) => PointerLeaf::Shape(id),
             Self::GenericInt => PointerLeaf::GenericInt,
             Self::GenericFloat => PointerLeaf::GenericFloat,
             Self::Numeric(v) => PointerLeaf::Numeric(v),
@@ -269,6 +282,10 @@ impl Type {
         Some(match leaf {
             PointerLeaf::CPointer => Self::CPointer,
             PointerLeaf::CInteger(v) => Self::CInteger(v),
+            PointerLeaf::Parameter(id) => Self::Parameter(id),
+            PointerLeaf::Application(id) => Self::Application(id),
+            PointerLeaf::StaticShape(id) => Self::StaticShape(id),
+            PointerLeaf::Shape(id) => Self::Shape(id),
             PointerLeaf::GenericInt => Self::GenericInt,
             PointerLeaf::GenericFloat => Self::GenericFloat,
             PointerLeaf::Numeric(v) => Self::Numeric(v),
@@ -383,6 +400,10 @@ impl Type {
             }
             Self::CPointer => "*const void",
             Self::CInteger(ty) => ty.name(),
+            Self::Parameter(_) => "type parameter",
+            Self::StaticShape(_) => "static fn",
+            Self::Shape(_) => "fn",
+            Self::Application(_) => "generic struct",
             Self::Exact => "exact integer",
             Self::GenericInt => "int",
             Self::GenericFloat => "float",
@@ -411,7 +432,13 @@ impl Type {
             Self::CPointer => "suz_ffi_bytes".into(),
             Self::CInteger(ty) => ty.c_name().into(),
             Self::Exact => "suz_exact".into(),
-            Self::GenericInt | Self::GenericFloat | Self::Numeric(_) => {
+            Self::Parameter(_)
+            | Self::StaticShape(_)
+            | Self::Shape(_)
+            | Self::Application(_)
+            | Self::GenericInt
+            | Self::GenericFloat
+            | Self::Numeric(_) => {
                 unreachable!("generic types are resolved before code generation")
             }
             Self::Struct(id) => format!("suz_struct_{id}"),
@@ -440,6 +467,10 @@ pub(crate) struct StructField {
 /// 構造体の宣言。宣言順のフィールドとトークン範囲を持つ。
 #[derive(Clone)]
 pub(crate) struct StructDeclaration {
+    pub type_parameters: Vec<generics::TypeParameter>,
+    pub needs: Vec<generics::Need>,
+    pub application: Option<generics::Application>,
+    pub symbolic: bool,
     pub external: Option<ExternStruct>,
     pub name: String,
     pub location: Location,
@@ -479,7 +510,7 @@ pub(crate) struct ErrorVariant {
 }
 
 /// 関数値の型。同じ仮引数・戻り値の組を一つの番号へまとめる。
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct FunctionType {
     pub parameters: Vec<Type>,
     pub result: Type,
@@ -489,16 +520,23 @@ pub(crate) struct FunctionType {
 /// fnshapeの名前と宣言位置。型の同一性は名前ではなく仮引数と戻り値の型で決まる。
 #[derive(Clone)]
 pub(crate) struct FnShapeDeclaration {
+    /// 型引数のない名前の型適用番号。使用位置での再登録を省く。
+    pub plain_application: Option<usize>,
+    pub type_parameters: Vec<generics::TypeParameter>,
+    pub needs: Vec<generics::Need>,
     pub name: String,
     pub location: Location,
     pub start: usize,
     pub end: usize,
+    /// Program.function_typesの署名番号。直接の依存先から順に並ぶ。
     pub type_id: usize,
 }
 
 /// 構文解析の結果全体。型宣言・トップレベル束縛・関数とallowの範囲を保持する。
 /// [`crate::check`] が検査して [`crate::check::ir::CheckedProgram`] へ変換する。
 pub(crate) struct Program {
+    pub need_groups: Vec<generics::NeedGroup>,
+    pub applications: Vec<generics::Application>,
     pub externs: Vec<ExternFunction>,
     pub fnshapes: Vec<FnShapeDeclaration>,
     pub function_types: Vec<FunctionType>,
@@ -520,6 +558,8 @@ pub(crate) struct Parameter {
 /// 関数の構文。仮引数・戻り値型・本体の文と、宣言の開始・終了位置を保持する。
 #[derive(Clone)]
 pub(crate) struct Function {
+    pub type_parameters: Vec<generics::TypeParameter>,
+    pub needs: Vec<generics::Need>,
     pub method: Option<Method>,
     pub arena: bool,
     pub keyword_location: Location,
@@ -867,7 +907,10 @@ pub(crate) enum ExpressionKind {
     /// or panicの内部表現。通常の値式としては構文から作らない。
     Panic(Vec<TemplatePart<Expression>>),
     Closure(Box<Closure>),
-    FunctionValue(String),
+    FunctionValue {
+        name: String,
+        type_arguments: Vec<Type>,
+    },
     Invoke {
         target: Box<Expression>,
         arguments: Vec<Expression>,
@@ -882,7 +925,7 @@ pub(crate) enum ExpressionKind {
     Char(u32),
     Template(Vec<TemplatePart<Expression>>),
     Struct {
-        id: usize,
+        ty: Type,
         fields: Vec<FieldInitializer>,
     },
     With {
@@ -899,6 +942,7 @@ pub(crate) enum ExpressionKind {
     },
     Void,
     Call {
+        type_arguments: Vec<Type>,
         name: String,
         arguments: Vec<Expression>,
     },
@@ -963,7 +1007,7 @@ pub(crate) struct Ignore {
 }
 
 /// C環境で幅や符号が決まる整数型。Suzの演算型と分けて保持する。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum CIntegerType {
     Int,
     Uint,

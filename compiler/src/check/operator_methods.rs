@@ -13,15 +13,47 @@ pub(super) fn owner(expr: &Expression, scope: &Scope) -> Option<Type> {
     expression::operand_type(expr, scope).filter(|ty| matches!(ty, Type::Struct(_) | Type::Enum(_)))
 }
 
-fn select<'a>(
+pub(super) fn select<'a>(
     op: &str,
     left: &Expression,
     right: &Expression,
     scope: &'a Scope,
 ) -> Option<&'a str> {
     let owner = owner(left, scope)?;
+    let types = scope.method_arguments(owner);
+    if !types.is_empty() {
+        let prefix = format!("{}.{op}@", scope.method_owner_name(owner));
+        let known = expression::operand_type(right, scope);
+        let float = expression::has_float_source(right, scope) || known.is_some_and(Type::is_float);
+        let mut integer = None;
+        let mut floating = None;
+        for (name, signature) in scope
+            .functions
+            .iter()
+            .filter(|(name, f)| name.starts_with(&prefix) && f.parameters.len() == 2)
+        {
+            let ty = scope
+                .substitute(signature.parameters[1], &types, right.location)
+                .ok()?;
+            if known.is_none_or(Type::is_numeric) {
+                if ty.is_integer() {
+                    integer = Some(name.as_str());
+                }
+                if ty.is_float() {
+                    floating = Some(name.as_str());
+                }
+            } else if Some(ty) == known {
+                return Some(name);
+            }
+        }
+        return if float {
+            floating
+        } else {
+            integer.or(floating)
+        };
+    }
     // 宣言時に付けたキーで直接引く。数値の種類だけを選び、具体型の検査は呼び出しに任せる。
-    let prefix = format!("{}.{}@", scope.type_name(owner), op);
+    let prefix = format!("{}.{}@", scope.method_owner_name(owner), op);
     let lookup = |key: &str| {
         scope
             .functions
@@ -37,8 +69,58 @@ fn select<'a>(
             lookup("integer").or_else(|| lookup("float"))
         }
     } else {
-        lookup(&format!("{:?}", known?))
+        let known = known?;
+        lookup(&format!("{known:?}")).or_else(|| {
+            // 型適用は構文解析後に構造体番号へ変わるため、署名の解決後の型で照合する。
+            scope
+                .functions
+                .iter()
+                .find(|(name, signature)| {
+                    name.starts_with(&prefix) && signature.parameters.get(1) == Some(&known)
+                })
+                .map(|(name, _)| name.as_str())
+        })
     }
+}
+
+/// 型引数の代入で右辺の型が一致しても、定義を選ぶ順序で意味を変えない。
+pub(super) fn validate_instantiation(
+    owner: Type,
+    scope: &Scope,
+    location: crate::ast::Location,
+) -> Result<(), Diagnostic> {
+    let arguments = scope.method_arguments(owner);
+    if arguments.is_empty() || !scope.has_operator_methods {
+        return Ok(());
+    }
+    let owner_name = scope.method_owner_name(owner);
+    let mut signatures = Vec::new();
+    for signature in scope.functions.values() {
+        let Some(method) = signature.method else {
+            continue;
+        };
+        let Some(op) = method.operator else { continue };
+        if signature.parameters.len() != 2 || scope.method_owner_name(method.owner) != owner_name {
+            continue;
+        }
+        let rhs = scope.substitute(signature.parameters[1], &arguments, location)?;
+        if signatures.iter().any(|&(other_op, other): &(&str, Type)| {
+            op == other_op
+                && (rhs == other
+                    || rhs.is_integer() && other.is_integer()
+                    || rhs.is_float() && other.is_float())
+        }) {
+            return Err(location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "operator.overload",
+                    "type arguments make operator {op} definitions overlap"
+                ),
+            ));
+        }
+        signatures.push((op, rhs));
+    }
+    Ok(())
 }
 
 fn resolve<'a>(
@@ -97,7 +179,18 @@ pub(super) fn is_call(expr: &Expression, scope: &Scope) -> bool {
 
 pub(super) fn hint(op: &str, left: &Expression, right: &Expression, scope: &Scope) -> Option<Type> {
     let name = select(op, left, right, scope)?;
-    let result = scope.functions[name].result;
+    let signature = &scope.functions[name];
+    let result = if signature.type_parameters != 0 {
+        scope
+            .substitute(
+                signature.result,
+                &scope.method_arguments(owner(left, scope)?),
+                left.location,
+            )
+            .ok()?
+    } else {
+        signature.result
+    };
     if !result.leaf().generic() {
         return Some(result);
     }
@@ -119,15 +212,25 @@ pub(super) fn unary(expr: &Expression) -> Option<(&'static str, &Expression)> {
     }
 }
 
-fn unary_name(op: &str, operand: &Expression, scope: &Scope) -> Option<String> {
+pub(super) fn unary_name(op: &str, operand: &Expression, scope: &Scope) -> Option<String> {
     Some(format!(
         "{}.{op}@unary",
-        scope.type_name(owner(operand, scope)?)
+        scope.method_owner_name(owner(operand, scope)?)
     ))
 }
 
 pub(super) fn unary_hint(op: &str, operand: &Expression, scope: &Scope) -> Option<Type> {
     let name = unary_name(op, operand, scope)?;
+    let signature = scope.functions.get(&name)?;
+    if signature.type_parameters != 0 {
+        return scope
+            .substitute(
+                signature.result,
+                &scope.method_arguments(owner(operand, scope)?),
+                operand.location,
+            )
+            .ok();
+    }
     super::generic::call_operand_type(&name, std::slice::from_ref(operand), scope)
 }
 
@@ -204,7 +307,12 @@ pub(super) fn compound(
         && supported(*operator)
     {
         let name = resolve(operator.c_symbol(), left, right, scope)?;
-        let result = scope.functions[name].result;
+        let signature = &scope.functions[name];
+        let result = scope.substitute(
+            signature.result,
+            &scope.method_arguments(target),
+            expr.location,
+        )?;
         if result != target {
             return Err(expr.location.error(
                 ErrorKind::InvalidSource,

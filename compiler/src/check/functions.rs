@@ -18,12 +18,23 @@ use std::{collections::BTreeMap, rc::Rc};
 
 pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     super::generic::validate(program)?;
+    let structs = Rc::new(super::type_parameters::structs::Structs::new(program));
+    structs.prepare()?;
     let mut signatures = BTreeMap::new();
     for (id, function) in program.functions.iter().enumerate() {
-        if let Some(method) = function.method {
+        let mut method = function.method;
+        if let Some(method) = &mut method {
+            method.owner = structs.resolve_with_parameters(
+                method.owner,
+                &[],
+                function.location,
+                &function.type_parameters,
+            )?;
+        }
+        if let Some(method) = method {
             let member = function.name.rsplit('.').next().unwrap();
             let collision = match method.owner {
-                Type::Struct(id) => program.structs[id].fields.iter().any(|f| f.name == member),
+                Type::Struct(id) => structs.get(id).fields.iter().any(|f| f.name == member),
                 Type::Enum(ty) => program.enums[ty.id].variants.iter().any(|v| v == member),
                 _ => unreachable!(),
             };
@@ -56,8 +67,8 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
         if signatures.contains_key(&function.name)
             || program.bindings.iter().any(|c| c.name == function.name)
             || program.enums.iter().any(|e| e.name == function.name)
-            || program.structs.iter().any(|s| s.name == function.name)
-            || program.fnshapes.iter().any(|s| s.name == function.name)
+            || structs.contains_name(&function.name)
+            || structs.shapes.contains_name(&function.name)
         {
             return Err(function.location.error(
                 ErrorKind::InvalidSource,
@@ -67,12 +78,39 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
         signatures.insert(
             function.name.clone(),
             Signature {
-                method: function.method,
+                type_parameters: function.type_parameters.len(),
+                type_parameter_names: (!function.type_parameters.is_empty()).then(|| {
+                    Rc::new(
+                        function
+                            .type_parameters
+                            .iter()
+                            .map(|p| p.name.clone())
+                            .collect(),
+                    )
+                }),
+                needs: function.needs.clone(),
+                method,
                 arena: function.arena,
                 external: false,
                 id,
-                parameters: function.parameters.iter().map(|p| p.ty).collect(),
-                result: function.result,
+                parameters: function
+                    .parameters
+                    .iter()
+                    .map(|p| {
+                        structs.resolve_with_parameters(
+                            p.ty,
+                            &[],
+                            p.location,
+                            &function.type_parameters,
+                        )
+                    })
+                    .collect::<Result<_, _>>()?,
+                result: structs.resolve_with_parameters(
+                    function.result,
+                    &[],
+                    function.location,
+                    &function.type_parameters,
+                )?,
                 errors: function.errors.clone(),
             },
         );
@@ -81,23 +119,88 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     let main_id = signatures["main"].id;
     let signatures = Rc::new(signatures);
     let scope = Scope {
+        function_types: structs.shapes.types.clone(),
+        structs,
         has_operator_methods: program
             .functions
             .iter()
             .any(|f| f.method.is_some_and(|m| m.operator.is_some())),
         functions: signatures,
-        fnshapes: Rc::new(program.fnshapes.clone()),
-        function_types: Rc::new(std::cell::RefCell::new(program.function_types.clone())),
         instances: Rc::new(std::cell::RefCell::new(super::generic::Instances::new(
             program.functions.len() + program.externs.len(),
         ))),
         ..Scope::default()
     };
-    let (globals, mut warnings) =
-        declarations::resolve(&program.bindings, &program.enums, &program.structs, scope)?;
+    let (globals, mut warnings) = declarations::resolve(&program.bindings, &program.enums, scope)?;
+    for group in &program.need_groups {
+        definition_scope(
+            &globals,
+            &group.type_parameters,
+            &group.needs,
+            group.location,
+        )?;
+    }
+    for declaration in &program.fnshapes {
+        // 型引数のない宣言には、空の型引数スコープを作らない。
+        let context;
+        let scope = if declaration.type_parameters.is_empty() {
+            &globals
+        } else {
+            context = definition_scope(
+                &globals,
+                &declaration.type_parameters,
+                &declaration.needs,
+                declaration.location,
+            )?;
+            &context
+        };
+        let signature = &program.function_types[declaration.type_id];
+        for &ty in signature.parameters.iter().chain([&signature.result]) {
+            scope.resolve_type_at(ty, declaration.location)?;
+        }
+    }
+    // フィールドの型はprepare/applyで解決済み。ここでは宣言に書かれた要求を確認する。
+    for (id, declaration) in program.structs.iter().enumerate() {
+        let context;
+        let (scope, ty) = if declaration.type_parameters.is_empty() {
+            (&globals, Type::Struct(id))
+        } else {
+            context = definition_scope(
+                &globals,
+                &declaration.type_parameters,
+                &declaration.needs,
+                declaration.location,
+            )?;
+            let ty = context.structs.apply(
+                id,
+                (0..declaration.type_parameters.len())
+                    .map(Type::Parameter)
+                    .collect(),
+                declaration.location,
+            )?;
+            (&context, ty)
+        };
+        super::type_parameters::struct_requirements(ty, scope, declaration.location)?;
+        if scope.structs.shapes.has_generics {
+            for field in &declaration.fields {
+                super::type_parameters::shape_requirements(field.ty, scope, field.location)?;
+            }
+        }
+    }
     let mut functions = Vec::new();
     check_instances(program, &globals, &mut functions, &mut warnings)?;
     for (id, function) in program.functions.iter().enumerate() {
+        if !function.type_parameters.is_empty() {
+            let context = definition_scope(
+                &globals,
+                &function.type_parameters,
+                &function.needs,
+                function.location,
+            )?;
+            let (_, found) = check_function(function, context, id)?;
+            warnings.extend(found);
+            continue;
+        }
         if globals.functions[&function.name].is_generic() {
             match &analyze_once(function, id, &globals).result {
                 Ok(found) => warnings.extend(found.iter().copied()),
@@ -112,6 +215,15 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
         let (checked, found) = result?;
         functions.push(checked);
         warnings.extend(found);
+    }
+    // 名前付き型引数の関数から既存の数値汎用関数を呼ぶ場合と、その逆の両方を処理する。
+    loop {
+        super::type_parameters::check_instances(program, &globals, &mut functions, &mut warnings)?;
+        check_instances(program, &globals, &mut functions, &mut warnings)?;
+        let instances = globals.instances.borrow();
+        if instances.named_cursor == instances.named.len() && instances.queue.is_empty() {
+            break;
+        }
     }
     warnings.sort_by_key(|l| (l.line, l.column));
     // 整数演算の箇所は汎用検査と具体化の両方で集まるため、ソースの演算ごとに一度だけ報告する。
@@ -137,7 +249,7 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
             .collect(),
         constant_texts: globals.outputs.constant_texts.borrow().clone(),
         main_location: program.functions[main_id].keyword_location,
-        structs: program.structs.clone(),
+        structs: globals.structs.snapshot(),
         enums: program.enums.clone(),
         functions,
         main_id,
@@ -347,7 +459,12 @@ pub(super) fn check_with_captures(
     scope.trusted_block = false;
     scope.arena_depth = usize::from(function.arena);
     scope.arena_used = Default::default();
-    if !function.arena && super::arena::contains(function.result, &scope) {
+    if !function.arena
+        && super::arena::contains(
+            scope.resolve_type_at(function.result, function.location)?,
+            &scope,
+        )
+    {
         return Err(function.location.error(
             ErrorKind::InvalidSource,
             crate::diagnostic!(
@@ -366,7 +483,7 @@ pub(super) fn check_with_captures(
         scope.outputs.divisions = Default::default();
     }
     scope.errors = Rc::new(function.errors.clone());
-    scope.result = scope.resolve_type(function.result);
+    scope.result = scope.resolve_type_at(function.result, function.location)?;
     let mut declared = Vec::new();
     for (parameter_id, parameter) in function.parameters.iter().enumerate() {
         if declared.contains(&parameter.name) {
@@ -384,7 +501,7 @@ pub(super) fn check_with_captures(
                 crate::diagnostic!("decl.shadowing", "parameter shadows a top-level name"),
             ));
         }
-        let parameter_type = scope.resolve_type(parameter.ty);
+        let parameter_type = scope.resolve_type_at(parameter.ty, parameter.location)?;
         if let Some(binding) = references.get(&parameter.name) {
             let mut binding = binding.clone();
             binding.id = parameter_id;
@@ -430,8 +547,8 @@ pub(super) fn check_with_captures(
             parameters: function
                 .parameters
                 .iter()
-                .map(|p| scope.resolve_type(p.ty))
-                .collect(),
+                .map(|p| scope.resolve_type_at(p.ty, p.location))
+                .collect::<Result<_, _>>()?,
             result: scope.result,
             fallible: !function.errors.is_empty(),
             statements,
@@ -493,6 +610,13 @@ pub(super) fn call(
             ),
         ));
     }
+    let explicit = match &expr.kind {
+        ExpressionKind::Call { type_arguments, .. } => type_arguments.as_slice(),
+        _ => &[],
+    };
+    if signature.type_parameters != 0 || !explicit.is_empty() {
+        return super::type_parameters::call(expr, signature, explicit, arguments, scope, handler);
+    }
     let generic = signature.is_generic();
     let types = super::generic::resolve(signature, arguments, expected, scope, expr.location)?;
     let concrete = |ty| types.resolve(ty);
@@ -553,4 +677,24 @@ pub(super) fn return_value(
         ));
     }
     expression(value, Some(scope.result), scope)
+}
+
+/// 要求のある定義だけで要求検査を行い、通常の宣言は呼び出し元のスコープを使う。
+fn definition_scope(
+    globals: &Scope,
+    parameters: &[crate::ast::generics::TypeParameter],
+    needs: &[crate::ast::generics::Need],
+    location: crate::ast::Location,
+) -> Result<Scope, Diagnostic> {
+    let mut context = globals.clone();
+    context.named = Rc::new(super::scope::NamedTypes {
+        type_parameters: Rc::new(parameters.to_vec()),
+        needs: Rc::new(needs.to_vec().into()),
+        type_arguments: None,
+        instantiation_path: Rc::default(),
+    });
+    if !needs.is_empty() {
+        super::type_parameters::definition_needs(&context, location)?;
+    }
+    Ok(context)
 }

@@ -97,23 +97,32 @@ fn error(location: Location) -> Diagnostic {
         ),
     )
 }
-// 演算子定義の有無は式全体で一定。入口で経路を選び、定義のないプログラムでは
-// 長い整数式の各節に演算子メソッドの判定を追加しない。
-fn build<const OPERATOR_METHODS: bool>(
+// 演算子定義と要求の有無は式全体で一定。入口で経路を選び、定義のないプログラムでは
+// 長い整数式の各節に演算子メソッドや要求の判定を追加しない。
+fn declared_operation(expr: &Expression, bindings: &Scope) -> bool {
+    super::operator_methods::is_call(expr, bindings)
+        || (bindings.named.type_arguments.is_none()
+            && !bindings.named.needs.is_empty()
+            && super::type_parameters::hint(expr, bindings).is_some())
+}
+
+// 定義時の要求による演算は、その結果型を持つ葉として検査する。
+// 具体化時には要求の葉を使わず元の算術式を組み立て、途中の格納を追加しない。
+fn build<const DECLARED_OPERATIONS: bool>(
     expr: &Expression,
     bindings: &Scope,
 ) -> Result<Exact, Diagnostic> {
     let location = expr.location;
     let (kind, range) = match &expr.kind {
-        ExpressionKind::Group(e) => return build::<OPERATOR_METHODS>(e, bindings),
+        ExpressionKind::Group(e) => return build::<DECLARED_OPERATIONS>(e, bindings),
         ExpressionKind::Integer { digits, negative } => {
             let value = Int::new(*negative, digits.parse().map_err(|_| error(location))?);
             (ExactKind::Literal(value), Some(Range::point(value)))
         }
         ExpressionKind::Negate(e)
-            if !OPERATOR_METHODS || !super::operator_methods::is_call(expr, bindings) =>
+            if !DECLARED_OPERATIONS || !declared_operation(expr, bindings) =>
         {
-            let e = build::<OPERATOR_METHODS>(e, bindings)?;
+            let e = build::<DECLARED_OPERATIONS>(e, bindings)?;
             let range = e.range.map(|r| Range {
                 min: r.max.neg(),
                 max: r.min.neg(),
@@ -124,11 +133,9 @@ fn build<const OPERATOR_METHODS: bool>(
             operator,
             left,
             right,
-        } if is_operator(expr)
-            && (!OPERATOR_METHODS || !super::operator_methods::is_call(expr, bindings)) =>
-        {
-            let left = build::<OPERATOR_METHODS>(left, bindings)?;
-            let right = build::<OPERATOR_METHODS>(right, bindings)?;
+        } if is_operator(expr) && (!DECLARED_OPERATIONS || !declared_operation(expr, bindings)) => {
+            let left = build::<DECLARED_OPERATIONS>(left, bindings)?;
+            let right = build::<DECLARED_OPERATIONS>(right, bindings)?;
             let range = if left.domains.is_some() || right.domains.is_some() {
                 None
             } else {
@@ -233,7 +240,9 @@ pub(super) fn check(
     bindings: &Scope,
     handled: bool,
 ) -> Result<CheckedExpression, Diagnostic> {
-    let exact = if bindings.has_operator_methods {
+    let exact = if bindings.has_operator_methods
+        || (bindings.named.type_arguments.is_none() && !bindings.named.needs.is_empty())
+    {
         build::<true>(expr, bindings)?
     } else {
         build::<false>(expr, bindings)?

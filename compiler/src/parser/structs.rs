@@ -147,13 +147,21 @@ pub(super) fn collect(
     tokens: &[Token<'_>],
     enums: &[EnumDeclaration],
     fnshapes: &[crate::ast::FnShapeDeclaration],
+    applications: crate::ast::generics::Applications,
+    need_groups: std::rc::Rc<super::need_groups::Groups>,
 ) -> Result<Vec<StructDeclaration>, Diagnostic> {
     let mut p = Parser {
+        need_groups,
+        applications,
+        type_parameters: Vec::new(),
+        pending_needs: Vec::new(),
+        generic_functions: Default::default(),
         allows: Vec::new(),
         tokens,
         enums,
         structs: &[],
         fnshapes,
+        fnshape_names: super::function_types::name_index(fnshapes),
         restricted_condition: false,
         cursor: 0,
         constant_expression: false,
@@ -162,10 +170,25 @@ pub(super) fn collect(
         limit_location: None,
     };
     let mut headers = Vec::<StructDeclaration>::new();
+    let mut requirement_ranges = Vec::new();
     let mut depth = 0usize;
     let mut external_header = None;
     let mut c_names = BTreeSet::new();
     while p.token().kind != Kind::End {
+        if depth == 0 && p.token().kind == Kind::Symbol("@") {
+            p.collect_need()?;
+            continue;
+        }
+        if depth == 0
+            && matches!(
+                p.token().kind,
+                Kind::Keyword(
+                    "fn" | "arena" | "fnshape" | "needs" | "fix" | "extern" | "enum" | "error"
+                )
+            )
+        {
+            p.pending_needs.clear();
+        }
         if depth == 0 && p.token().kind == Kind::Keyword("extern") {
             p.cursor += 1;
             let Kind::Header(header) = p.token().kind else {
@@ -242,6 +265,20 @@ pub(super) fn collect(
                 ));
             }
             p.cursor += 1;
+            let type_parameters = if p.token().kind == Kind::Symbol("[") {
+                if external.is_some() {
+                    return Err(p.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "generic.parameters",
+                            "extern structs cannot have type parameters"
+                        ),
+                    ));
+                }
+                p.generic_parameters()?
+            } else {
+                Vec::new()
+            };
             p.expect(FixedToken::Symbol("{"))?;
             let mut braces = 1;
             while braces != 0 {
@@ -258,7 +295,12 @@ pub(super) fn collect(
                 }
                 p.cursor += 1;
             }
+            requirement_ranges.push(std::mem::take(&mut p.pending_needs));
             headers.push(StructDeclaration {
+                symbolic: !type_parameters.is_empty(),
+                type_parameters,
+                needs: Vec::new(),
+                application: None,
                 external,
                 name,
                 location,
@@ -279,12 +321,20 @@ pub(super) fn collect(
         p.cursor += 1;
     }
     p.structs = &headers;
+    p.prepare_need_groups()?;
     let mut declarations = headers.clone();
-    for decl in &mut declarations {
+    for (decl, ranges) in declarations.iter_mut().zip(requirement_ranges) {
         p.cursor = decl.start + 2;
         if decl.external.is_some() && p.token().kind == Kind::Keyword("as") {
             p.cursor += 2;
         }
+        p.type_parameters = if p.token().kind == Kind::Symbol("[") {
+            p.generic_parameters()?
+        } else {
+            Vec::new()
+        };
+        p.pending_needs = ranges;
+        decl.needs = p.declaration_needs()?;
         decl.fields = p.delimited_list("{", "}", Parser::field_declaration)?;
         if decl.fields.is_empty() {
             return Err(decl.location.error(
@@ -311,99 +361,101 @@ pub(super) fn collect(
             }
         }
     }
-    fn visit(
-        id: usize,
-        declarations: &[StructDeclaration],
-        states: &mut [u8],
-    ) -> Result<(), Diagnostic> {
-        if states[id] == 2 {
-            return Ok(());
-        }
-        states[id] = 1;
-        for field in &declarations[id].fields {
-            if let Type::Struct(child) = field.ty {
-                if states[child] == 1 {
-                    return Err(field.location.error(
-                        ErrorKind::InvalidSource,
-                        crate::diagnostic!("struct.recursion", "struct contains itself by value"),
-                    ));
-                }
-                visit(child, declarations, states)?;
-            }
-        }
-        states[id] = 2;
-        Ok(())
+    validate_layout(&declarations)?;
+    Ok(declarations)
+}
+
+pub(crate) fn validate_layout(declarations: &[StructDeclaration]) -> Result<(), Diagnostic> {
+    validate_layout_range(0, declarations.len(), |id| &declarations[id])
+}
+
+/// 既存の宣言を変更しない具体化では、追加した宣言だけを検査する。
+/// 既存部分から追加部分へ新しい辺は生じないため、既に検査した頂点は辿らない。
+pub(crate) fn validate_layout_range<'a>(
+    start: usize,
+    end: usize,
+    declaration: impl Fn(usize) -> &'a StructDeclaration,
+) -> Result<(), Diagnostic> {
+    if start == end {
+        return Ok(());
     }
-    let mut states = vec![0; declarations.len()];
-    for id in 0..declarations.len() {
-        visit(id, &declarations, &mut states)?;
-    }
-    // nullで切れる辺を除き、初期化に既存の実体が必須となる依存だけを調べる。
-    // 値のフィールドも含めるため、構造体で包んでも非nullの循環を隠せない。
-    let dependencies: Vec<Vec<_>> = declarations
-        .iter()
-        .map(|decl| {
-            decl.fields
-                .iter()
-                .filter_map(|field| {
-                    let mut ty = field.ty;
-                    while let Some(inner) = ty.pointee() {
-                        if ty.is_nullable() {
-                            return None;
+    for include_pointers in [false, true] {
+        // 先に値だけの循環を調べ、その後に非nullポインタを含む初期化の循環を調べる。
+        // nullableの辺は初期化をnullで打ち切れるため、後者の依存から除く。
+        let dependencies: Vec<Vec<_>> = (start..end)
+            .map(|id| {
+                let decl = declaration(id);
+                decl.fields
+                    .iter()
+                    .filter_map(|field| {
+                        let mut ty = field.ty;
+                        while include_pointers && let Some(inner) = ty.pointee() {
+                            if ty.is_nullable() {
+                                return None;
+                            }
+                            ty = inner;
                         }
-                        ty = inner;
-                    }
-                    if let Type::Struct(child) = ty {
-                        Some((child, field))
-                    } else {
-                        None
-                    }
-                })
-                .collect()
-        })
-        .collect();
-    let mut states = vec![0; declarations.len()];
-    for root in 0..declarations.len() {
-        if states[root] != 0 {
-            continue;
-        }
-        states[root] = 1;
-        let mut stack = vec![(root, 0)];
-        while let Some(&mut (id, ref mut next)) = stack.last_mut() {
-            if *next == dependencies[id].len() {
-                states[id] = 2;
-                stack.pop();
+                        if let Type::Struct(child) = ty {
+                            (child >= start).then_some((child, field))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            })
+            .collect();
+        let mut states = vec![0; end - start];
+        for root in start..end {
+            if states[root - start] != 0 {
                 continue;
             }
-            let (child, field) = dependencies[id][*next];
-            *next += 1;
-            if states[child] == 1 {
-                let start = stack.iter().position(|&(id, _)| id == child).unwrap();
-                let fields = stack[start..]
-                    .iter()
-                    .map(|&(id, next)| {
-                        format!(
-                            "{}.{}",
-                            declarations[id].name,
-                            dependencies[id][next - 1].1.name
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" -> ");
-                return Err(field.location.error(
-                    ErrorKind::InvalidSource,
-                    crate::diagnostic!(
-                        "arena.recursive-struct",
-                        "non-null initialization cycle: {}",
-                        fields
-                    ),
-                ));
-            }
-            if states[child] == 0 {
-                states[child] = 1;
-                stack.push((child, 0));
+            states[root - start] = 1;
+            let mut stack = vec![(root, 0)];
+            while let Some(&mut (id, ref mut next)) = stack.last_mut() {
+                if *next == dependencies[id - start].len() {
+                    states[id - start] = 2;
+                    stack.pop();
+                    continue;
+                }
+                let (child, field) = dependencies[id - start][*next];
+                *next += 1;
+                if states[child - start] == 1 {
+                    if !include_pointers {
+                        return Err(field.location.error(
+                            ErrorKind::InvalidSource,
+                            crate::diagnostic!(
+                                "struct.recursion",
+                                "struct contains itself by value"
+                            ),
+                        ));
+                    }
+                    let cycle_start = stack.iter().position(|&(id, _)| id == child).unwrap();
+                    let fields = stack[cycle_start..]
+                        .iter()
+                        .map(|&(id, next)| {
+                            format!(
+                                "{}.{}",
+                                declaration(id).name,
+                                dependencies[id - start][next - 1].1.name
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" -> ");
+                    return Err(field.location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "arena.recursive-struct",
+                            "non-null initialization cycle: {}",
+                            fields
+                        ),
+                    ));
+                }
+                if states[child - start] == 0 {
+                    states[child - start] = 1;
+                    stack.push((child, 0));
+                }
             }
         }
     }
-    Ok(declarations)
+    Ok(())
 }

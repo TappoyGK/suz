@@ -14,7 +14,9 @@ use crate::{
 pub(super) fn contains(ty: Type, scope: &Scope) -> bool {
     match ty {
         Type::Pointer { .. } => true,
-        Type::Struct(id) => scope.structs[id]
+        Type::Struct(id) => scope
+            .structs
+            .get(id)
             .fields
             .iter()
             .any(|f| contains(f.ty, scope)),
@@ -207,7 +209,8 @@ pub(super) fn indirect_path(mut ty: Type, fields: &[String], scope: &Scope) -> b
             return true;
         }
         let Type::Struct(id) = ty else { return false };
-        let Some(field) = scope.structs[id].fields.iter().find(|f| &f.name == name) else {
+        let declaration = scope.structs.get(id);
+        let Some(field) = declaration.fields.iter().find(|f| &f.name == name) else {
             return false;
         };
         ty = field.ty;
@@ -334,7 +337,14 @@ pub(super) fn check_lifetimes(
 ) -> Result<(), Diagnostic> {
     if !scope.arena_used.get()
         && !function.arena
-        && !function.parameters.iter().any(|p| contains(p.ty, scope))
+        && !function.parameters.iter().any(|p| {
+            contains(
+                scope
+                    .resolve_type_at(p.ty, p.location)
+                    .expect("parameter type was checked before lifetime analysis"),
+                scope,
+            )
+        })
     {
         return Ok(());
     }

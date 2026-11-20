@@ -298,3 +298,14 @@ mod objection;
 
 #[path = "spec_cases/operator_methods.rs"]
 mod operator_methods;
+
+#[path = "spec_cases/type_parameters.rs"]
+mod type_parameters;
+
+#[path = "spec_cases/generic_structs.rs"]
+mod generic_structs;
+
+#[path = "spec_cases/generic_function_values.rs"]
+mod generic_function_values;
+#[path = "spec_cases/need_groups.rs"]
+mod need_groups;
