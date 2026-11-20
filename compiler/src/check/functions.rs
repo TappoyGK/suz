@@ -690,7 +690,8 @@ fn definition_scope(
     context.named = Rc::new(super::scope::NamedTypes {
         type_parameters: Rc::new(parameters.to_vec()),
         needs: Rc::new(needs.to_vec().into()),
-        ..Default::default()
+        type_arguments: None,
+        instantiation_path: Rc::default(),
     });
     if !needs.is_empty() {
         super::type_parameters::definition_needs(&context, location)?;

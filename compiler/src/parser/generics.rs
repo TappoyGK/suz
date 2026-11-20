@@ -136,25 +136,29 @@ impl Parser<'_, '_> {
                     crate::diagnostic!("generic.needs", "this declaration has no type parameters"),
                 ));
             }
-            for need in self.need_item(end)? {
-                needs.insert(need);
-            }
+            self.need_item(end, &mut needs)?;
         }
         self.cursor = saved;
         Ok(needs.into_vec())
     }
+    /// 直接要求は一つの要素として追加し、受け渡し用の一時Vecを作らない。
     pub(super) fn need_item(
         &mut self,
         end: usize,
-    ) -> Result<Vec<crate::ast::generics::Need>, Diagnostic> {
+        needs: &mut crate::ast::generics::NeedList,
+    ) -> Result<(), Diagnostic> {
         if self
             .tokens
             .get(self.cursor + 1)
-            .is_none_or(|t| t.kind != Kind::Symbol(":"))
+            .is_some_and(|t| t.kind == Kind::Symbol(":"))
         {
-            return self.named_need(end);
+            needs.insert(self.direct_need(end)?);
+        } else {
+            for need in self.named_need(end)? {
+                needs.insert(need);
+            }
         }
-        self.direct_need(end).map(|need| vec![need])
+        Ok(())
     }
 
     fn direct_need(&mut self, end: usize) -> Result<crate::ast::generics::Need, Diagnostic> {

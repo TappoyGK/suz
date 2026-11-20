@@ -489,11 +489,15 @@ impl Parser<'_, '_> {
                 }
             }
         }
-        let mut needs = crate::ast::generics::NeedList::default();
-        for need in self.declaration_needs()?.into_iter().chain(inherited) {
-            needs.insert(need);
+        let mut needs = self.declaration_needs()?;
+        // 継承がなければ、解析済みの要求を再び確保・重複除去しない。
+        if !inherited.is_empty() {
+            let mut combined = crate::ast::generics::NeedList::default();
+            for need in needs.into_iter().chain(inherited) {
+                combined.insert(need);
+            }
+            needs = combined.into_vec();
         }
-        let needs = needs.into_vec();
         if name == "main" && !self.type_parameters.is_empty() {
             return Err(location.error(
                 ErrorKind::InvalidSource,

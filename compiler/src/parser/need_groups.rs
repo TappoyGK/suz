@@ -295,9 +295,7 @@ impl Parser<'_, '_> {
         let mut needs = NeedList::default();
         for &(start, end) in &d.body {
             self.cursor = start;
-            for need in self.need_item(end)? {
-                needs.insert(need);
-            }
+            self.need_item(end, &mut needs)?;
         }
         self.cursor = saved;
         self.type_parameters = parameters;

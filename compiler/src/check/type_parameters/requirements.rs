@@ -435,7 +435,8 @@ pub(super) fn satisfy(
         named: std::rc::Rc::new(crate::check::scope::NamedTypes {
             needs: scope.named.needs.clone(),
             type_parameters: scope.named.type_parameters.clone(),
-            ..Default::default()
+            type_arguments: None,
+            instantiation_path: Default::default(),
         }),
         ..Scope::default()
     };
@@ -579,17 +580,38 @@ pub(super) fn validate_substitution(
     if needs.len() < 2 {
         return Ok(());
     }
+    // 型を置き換えても操作名は変わらない。少数の要求で対象と操作名の重なりが
+    // なければ、矛盾の比較用に署名を具体化する必要はない。各要求の充足は別途検査する。
+    if needs.len() <= crate::ast::generics::SMALL_NEEDS
+        && !needs.iter().enumerate().any(|(i, need)| {
+            let (method, name, _) = need.operation_key();
+            needs[..i].iter().any(|previous| {
+                let (other_method, other_name, _) = previous.operation_key();
+                types[need.parameter] == types[previous.parameter]
+                    && method == other_method
+                    && name == other_name
+            })
+        })
+    {
+        return Ok(());
+    }
     let mut resolved: Vec<(Type, Need)> = Vec::new();
     for need in needs {
         let target = types[need.parameter];
-        let mut concrete = need.clone();
-        concrete.parameter = 0;
-        concrete.parameters = need
-            .parameters
-            .iter()
-            .map(|t| scope.substitute(*t, types, location))
-            .collect::<Result<_, _>>()?;
-        concrete.result = scope.substitute(need.result, types, location)?;
+        // 引数型は置換結果を直接保存し、置換前のVecを複製してすぐ捨てない。
+        let concrete = Need {
+            parameter: 0,
+            operation: need.operation.clone(),
+            parameters: need
+                .parameters
+                .iter()
+                .map(|t| scope.substitute(*t, types, location))
+                .collect::<Result<_, _>>()?,
+            result: scope.substitute(need.result, types, location)?,
+            errors: need.errors.clone(),
+            location: need.location,
+            definition: need.definition,
+        };
         resolved.push((target, concrete));
     }
     let mut signatures = std::collections::BTreeMap::new();
