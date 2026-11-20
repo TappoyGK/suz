@@ -318,3 +318,40 @@ fn generic_struct_recursion_reports_declared_parameter_names() {
         assert!(error.contains(expected), "{error}");
     }
 }
+
+#[test]
+fn generic_struct_recursion_reports_use_and_definition_locations() {
+    for (usage, line, column) in [
+        (
+            "fn a(d: Down[u8]) -> void {}\nfn main() -> u8 { return 0 }",
+            4,
+            6,
+        ),
+        (
+            "fn main() -> u8 {\n    fix x = Down[u8] { next: null }\n    return 0\n}",
+            5,
+            13,
+        ),
+        (
+            "fn a() -> Down[u8] { return Down[u8] { next: null } }\nfn main() -> u8 { return 0 }",
+            4,
+            4,
+        ),
+        (
+            "fn main() -> u8 {\n    fix x: Down[u8] = Down[u8] { next: null }\n    return 0\n}",
+            5,
+            9,
+        ),
+    ] {
+        let source = format!("struct Down[T] {{\n    next: ptr? Down[i32],\n}}\n{usage}");
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(error.rule(), "generic.check", "{error}");
+        assert_eq!((error.line, error.column), (line, column), "{error}");
+        assert!(error.message().contains("Down[u8]"), "{error}");
+        assert_eq!(error.related.len(), 1, "{error}");
+        let cause = &error.related[0];
+        assert_eq!(cause.rule(), "generic.recursion", "{error}");
+        assert_eq!((cause.line, cause.column), (2, 5), "{error}");
+        assert!(cause.message().contains("[u8] to [i32]"), "{error}");
+    }
+}

@@ -332,6 +332,9 @@ impl Structs {
         declaration.type_parameters.clear();
         declaration.application = Some(application.clone());
         declaration.fields.clear();
+        // 具体化の入口を本文に、展開先で起きた違反を注記に残す。
+        // 記号的な定義検査では、違反した定義位置をそのまま報告する。
+        let report_use = path.is_empty() && !declaration.symbolic;
         let id = self.declarations.borrow().len();
         self.declarations
             .borrow_mut()
@@ -340,13 +343,29 @@ impl Structs {
         path.push(application.clone());
         for field in &template.fields {
             let mut field = field.clone();
-            field.ty = self.resolve_inner(
-                field.ty,
-                &application.arguments,
-                field.location,
-                path,
-                parameters,
-            )?;
+            field.ty = self
+                .resolve_inner(
+                    field.ty,
+                    &application.arguments,
+                    field.location,
+                    path,
+                    parameters,
+                )
+                .map_err(|error| {
+                    if !report_use {
+                        return error;
+                    }
+                    let mut diagnostic = location.error(
+                        error.kind,
+                        crate::diagnostic!(
+                            "generic.check",
+                            "generic struct '{}' is invalid for these type arguments",
+                            declaration.name
+                        ),
+                    );
+                    diagnostic.related.push(error);
+                    diagnostic
+                })?;
             if matches!(field.ty, Type::Function(_) | Type::Void) {
                 return Err(field.location.error(
                     ErrorKind::InvalidSource,
