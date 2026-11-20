@@ -1,16 +1,35 @@
 //! 実行順によらない候補の包含制約を解く。各保存場所は自身の寿命を持ち、
 //! 別名経由のメンバーも同じセルへ合流させる。安全でも候補を絞れない保存は拒否する。
 //!
-//! **[impl.lifetime-flow]** ポインタを含みうる値の流れは、すべて制約（Copy・Load・Store・Address）へ
+//! **[impl.lifetime-flow]** ポインタを含みうる値の流れは、すべて制約（Copy・Limit・Load・Store・Address）へ
 //! 変換してから検査し、構文ごとに個別の寿命検査を書かない。式・文・失敗処理で分岐する
 //! match には `_` を使わず全種類を列挙する。
 mod boundaries;
 mod solver;
+mod summaries;
 
 use super::*;
 use crate::check::CheckedHandler;
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    rc::Rc,
+};
 type Node = usize;
+// 実体の所属はCellに残す。関数の戻り値に課す利用期間だけを参照側へ付け、
+// 短く借りた外側の実体を、内側に確保した実体と取り違えない。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct Reference {
+    target: Node,
+    limit: Option<usize>,
+}
+impl Reference {
+    fn object(target: Node) -> Self {
+        Self {
+            target,
+            limit: None,
+        }
+    }
+}
 // 構造体の各ポインタ葉をフィールド番号列で区別する。ポインタ自身の値は空の列。
 type Shape = BTreeMap<Vec<usize>, Node>;
 
@@ -30,23 +49,36 @@ enum Origin {
     Parameter,
     Call,
 }
+#[derive(Clone)]
 struct Region {
     parent: Option<usize>,
     end: Location,
 }
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum Place {
     Direct(Node),
     Indirect(Node, Vec<usize>),
 }
+#[derive(Clone)]
 enum Constraint {
     Copy(Node, Node),
+    // 参照先を変えずに利用期間を制限する関数境界。
+    Limit(Node, Node, usize),
     Load(Node, Place),
     Address(Node, Place),
     Store(Place, Node, Location),
 }
-struct Analysis<'a> {
-    scope: &'a Scope,
+#[derive(Clone)]
+/// 型検査で作った寿命制約。具体化済みの呼び出し先がそろうまで保持する。
+pub(crate) struct Analysis {
+    scope: Scope,
+    function_id: usize,
+    objects: BTreeMap<Node, summaries::Object>,
+    returned: Shape,
+    direct_calls: Vec<summaries::Call>,
+    effect_calls: BTreeMap<usize, Location>,
+    effect_stores: BTreeMap<usize, summaries::StoreInfo>,
+    closures: Vec<Rc<Analysis>>,
     borrowed: BTreeSet<usize>,
     objection: bool,
     // 字句上のobjection内で作ったStoreの添字。呼出し契約由来の制約は含めない。
@@ -59,7 +91,7 @@ struct Analysis<'a> {
     call_groups: Vec<boundaries::CallGroup>,
     call_regions: BTreeMap<Node, usize>,
     // 各値が指しうる保存場所。実体の領域は参照変数の宣言位置から独立している。
-    targets: Vec<BTreeSet<Node>>,
+    targets: Vec<BTreeSet<Reference>>,
     cells: BTreeMap<Node, Cell>,
     projections: BTreeMap<(Node, Vec<usize>), Node>,
     regions: Vec<Region>,
@@ -67,10 +99,17 @@ struct Analysis<'a> {
     locals: BTreeMap<usize, Node>,
 }
 
-impl<'a> Analysis<'a> {
-    fn new(scope: &'a Scope) -> Self {
+impl Analysis {
+    fn new(scope: &Scope) -> Self {
         Self {
-            scope,
+            scope: scope.clone(),
+            function_id: 0,
+            objects: BTreeMap::new(),
+            returned: Shape::new(),
+            direct_calls: Vec::new(),
+            effect_calls: BTreeMap::new(),
+            effect_stores: BTreeMap::new(),
+            closures: Vec::new(),
             borrowed: BTreeSet::new(),
             objection: false,
             objections: BTreeSet::new(),
@@ -240,14 +279,16 @@ impl<'a> Analysis<'a> {
                 let ty = initial.ty;
                 let initial = self.expr(initial, region, arena);
                 let cell = self.cell(arena.expect("new has a lexical arena"), *location, ty);
+                self.objects
+                    .insert(cell, summaries::Object::Allocation(self.function_id, cell));
                 self.write(Place::Direct(cell), initial, *location);
                 let n = self.node();
-                self.targets[n].insert(cell);
+                self.targets[n].insert(Reference::object(cell));
                 self.nonnull_values.insert(n);
                 BTreeMap::from([(vec![], n)])
             }
             Value::Local(id) => {
-                if contains(value.ty, self.scope) {
+                if contains(value.ty, &self.scope) {
                     let cell = self.locals[id];
                     self.read(value.ty, Place::Direct(cell))
                 } else {
@@ -327,37 +368,37 @@ impl<'a> Analysis<'a> {
                 arguments,
                 arena: is_arena,
                 location,
-                ..
+                id,
             } => {
                 let shapes: Vec<_> = arguments
                     .iter()
                     .map(|argument| (argument.ty, self.expr(argument, region, arena)))
                     .collect();
                 if *is_arena {
-                    if let Some(CheckedExpression {
-                        ty,
+                    let receiver = if let Some(CheckedExpression {
                         value:
                             Value::Receiver {
                                 target,
                                 mutable: true,
                             },
+                        ..
                     }) = arguments.first()
                     {
-                        let place = self.place(target, region, arena);
-                        let updated = self.arena_call(
-                            &shapes,
-                            *ty,
-                            arena.expect("checked arena call"),
-                            *location,
-                        );
-                        self.write(place, updated, *location);
-                    }
-                    self.arena_call(
-                        &shapes,
-                        value.ty,
-                        arena.expect("checked arena call"),
-                        *location,
-                    )
+                        Some(self.place(target, region, arena))
+                    } else {
+                        None
+                    };
+                    let result = self.shape(value.ty);
+                    self.direct_calls.push(summaries::Call {
+                        id: *id,
+                        arguments: shapes,
+                        result_ty: value.ty,
+                        result: result.clone(),
+                        receiver,
+                        region: arena.expect("checked arena call"),
+                        location: *location,
+                    });
+                    result
                 } else {
                     Shape::new()
                 }
@@ -396,7 +437,12 @@ impl<'a> Analysis<'a> {
                 self.return_value(return_value.ty, returned, *location);
                 Shape::new()
             }
-            Value::Closure(_) => Shape::new(), // 本体を独立して検査し、捕捉した参照にも通常関数の借用契約を適用する。
+            Value::Closure(closure) => {
+                if let Some(body) = &closure.function.lifetime {
+                    self.closures.push(body.clone());
+                }
+                Shape::new() // 呼び出し専用の関数値には、まだ通常関数の借用契約を適用する。
+            }
             Value::Receiver { target, .. } => self.expr(target, region, arena),
             Value::Cast(v)
             | Value::NonNull(v)
@@ -720,7 +766,9 @@ impl<'a> Analysis<'a> {
             Place::Indirect(n, path) => self.targets[*n]
                 .clone()
                 .into_iter()
-                .map(|cell| self.project(cell, path))
+                .map(|reference| self.project(reference.target, path))
+                .collect::<BTreeSet<_>>()
+                .into_iter()
                 .collect(),
         }
     }
@@ -758,6 +806,12 @@ impl<'a> Analysis<'a> {
             format!(" in member '{}'", names.join("."))
         }
     }
+    fn reference_outlives(&self, source: Reference, destination: usize) -> bool {
+        self.outlives(self.cells[&source.target].region, destination)
+            && source
+                .limit
+                .is_none_or(|limit| self.outlives(limit, destination))
+    }
     fn solve(&mut self) -> Result<(), Diagnostic> {
         // 制約は固定し、候補集合と保存場所だけを更新する。列全体の複製は不要。
         let constraints = std::mem::take(&mut self.constraints);
@@ -765,6 +819,18 @@ impl<'a> Analysis<'a> {
         let result = self.validate(&constraints);
         self.constraints = constraints;
         result
+    }
+    fn call_diagnostic(&self, index: usize, mut error: Diagnostic) -> Diagnostic {
+        if let Some(location) = self.effect_calls.get(&index) {
+            error.related.push(location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "arena.call-diagnostic",
+                    "this call applies the store to its actual arguments"
+                ),
+            ));
+        }
+        error
     }
     // 候補の収束後に判定し、走査順でまだ見えていない参照先を安全と取り違えない。
     fn validate(&mut self, constraints: &[Constraint]) -> Result<(), Diagnostic> {
@@ -793,7 +859,37 @@ impl<'a> Analysis<'a> {
                             "this parameter is borrowed only for the duration of the call"
                         ),
                     ));
-                    return Err(error);
+                    return Err(self.call_diagnostic(index, error));
+                }
+            }
+            // 戻り値の利用期間は明示的な契約であり、objectionでは延長できない。
+            // 実体の所属は変えず、外側の実体でも参照値そのものの持ち出しを拒否する。
+            for &destination in &destinations {
+                for source in &self.targets[*src] {
+                    if let Some(limit) = source.limit
+                        && !self.outlives(limit, self.cells[&destination].region)
+                    {
+                        let message = if self.outlives(
+                            self.cells[&source.target].region,
+                            self.cells[&destination].region,
+                        ) {
+                            crate::diagnostic!(
+                                "arena.return-lifetime",
+                                "returned reference cannot be stored beyond its permitted lifetime"
+                            )
+                        } else {
+                            crate::diagnostic!("arena.store", "reference may outlive its arena")
+                        };
+                        let mut error = location.error(ErrorKind::InvalidSource, message);
+                        error.related.push(self.regions[limit].end.error(
+                            ErrorKind::InvalidSource,
+                            crate::diagnostic!(
+                                "arena.lifetime",
+                                "its permitted lifetime ends here"
+                            ),
+                        ));
+                        return Err(self.call_diagnostic(index, error));
+                    }
                 }
             }
             // 実行される保存について、非nullで全候補対が違反する場合だけを証明済みとする。
@@ -802,17 +898,18 @@ impl<'a> Analysis<'a> {
                 && !destinations.is_empty()
                 && !self.targets[*src].is_empty()
                 && destinations.iter().all(|dst| {
-                    self.targets[*src].iter().all(|source| {
-                        !self.outlives(self.cells[source].region, self.cells[dst].region)
-                    })
+                    self.targets[*src]
+                        .iter()
+                        .all(|source| !self.reference_outlives(*source, self.cells[dst].region))
                 });
             if self.objections.contains(&index) && !proven {
                 continue;
             }
             for destination in destinations {
                 for &source in &self.targets[*src] {
-                    let source = &self.cells[&source];
-                    if !self.outlives(source.region, self.cells[&destination].region) {
+                    if !self.reference_outlives(source, self.cells[&destination].region) {
+                        let lifetime = source.limit.unwrap_or(self.cells[&source.target].region);
+                        let source = &self.cells[&source.target];
                         let mut error = location.error(
                             ErrorKind::InvalidSource,
                             crate::diagnostic!(
@@ -839,11 +936,11 @@ impl<'a> Analysis<'a> {
                                 }
                             ),
                         ));
-                        error.related.push(self.regions[source.region].end.error(
+                        error.related.push(self.regions[lifetime].end.error(
                             ErrorKind::InvalidSource,
                             crate::diagnostic!("arena.lifetime", "its arena ends here"),
                         ));
-                        return Err(error);
+                        return Err(self.call_diagnostic(index, error));
                     }
                 }
             }
@@ -857,9 +954,22 @@ pub(super) fn check(
     scope: &Scope,
     function: &crate::ast::Function,
     references: &BTreeMap<String, super::Binding>,
-) -> Result<(), Diagnostic> {
+    id: usize,
+) -> Result<Rc<Analysis>, Diagnostic> {
     let mut analysis = Analysis::new(scope);
+    analysis.function_id = id;
     let (region, arena) = analysis.parameters(function, references);
     analysis.statements(statements, region, arena);
-    analysis.solve()
+    // 型解決後の制約に必要なのは構造体の定義だけ。局所束縛や具体化の作業待ちを
+    // 関数ごとの要約用データに保持しない。
+    analysis.scope = Scope {
+        structs: scope.structs.clone(),
+        ..Scope::default()
+    };
+    let mut legacy = analysis.clone();
+    legacy.legacy_calls();
+    legacy.solve()?;
+    Ok(Rc::new(analysis))
 }
+
+pub(in crate::check) use summaries::check_program;

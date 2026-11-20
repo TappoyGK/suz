@@ -2,12 +2,14 @@
 //! 本体の実装を呼び出しごとに再解析せず、型と契約から保守的な効果を作る。
 use super::*;
 
+#[derive(Clone)]
 pub(super) struct CallCheck {
     arguments: Vec<(Type, Shape)>,
     region: usize,
     location: Location,
 }
 
+#[derive(Clone)]
 pub(super) struct CallGroup {
     pub region: usize,
     ty: Type,
@@ -15,7 +17,7 @@ pub(super) struct CallGroup {
     local: Node,
 }
 
-impl Analysis<'_> {
+impl Analysis {
     pub(super) fn field_type(&self, mut ty: Type, path: &[usize]) -> Type {
         for &index in path {
             let Type::Struct(id) = ty else {
@@ -56,7 +58,7 @@ impl Analysis<'_> {
                     cell
                 };
                 let field = self.project(object, &path);
-                self.targets[field].insert(target);
+                self.targets[field].insert(Reference::object(target));
             }
             index += 1;
         }
@@ -76,13 +78,12 @@ impl Analysis<'_> {
             0
         };
         self.return_region = function.arena.then_some(0);
-        let mut shared = Vec::new();
         for (id, parameter) in function.parameters.iter().enumerate() {
             let ty = self
                 .scope
                 .resolve_type_at(parameter.ty, parameter.location)
                 .expect("parameter type was checked before lifetime analysis");
-            if !contains(ty, self.scope) {
+            if !contains(ty, &self.scope) {
                 continue;
             }
             let region = if function.arena {
@@ -97,11 +98,7 @@ impl Analysis<'_> {
                 region
             };
             let mut private = Vec::new();
-            let objects = if function.arena {
-                &mut shared
-            } else {
-                &mut private
-            };
+            let objects = &mut private;
             // 参照捕捉の保存場所は呼び出し元にある。値捕捉・通常の仮引数はローカルなコピー。
             let storage = if references.contains_key(&parameter.name) {
                 region
@@ -111,11 +108,20 @@ impl Analysis<'_> {
             let local = self.cell(storage, parameter.location, ty);
             self.cells.get_mut(&local).unwrap().origin = Origin::Parameter;
             self.locals.insert(id, local);
+            if references.contains_key(&parameter.name)
+                || (id == 0 && function.method.is_some_and(|method| method.mutable))
+            {
+                self.objects.insert(local, summaries::Object::Slot(id));
+            }
             for path in self.paths(ty) {
                 let pointee = self.field_type(ty, &path).pointee().unwrap();
                 let object = self.parameter_object(pointee, region, parameter.location, objects);
                 let field = self.project(local, &path);
-                self.targets[field].insert(object);
+                self.targets[field].insert(Reference::object(object));
+            }
+            for &(ty, object) in objects.iter() {
+                self.objects
+                    .insert(object, summaries::Object::Parameter(id, ty));
             }
         }
         (body, function.arena.then_some(0))
@@ -129,6 +135,11 @@ impl Analysis<'_> {
             .return_region
             .expect("ordinary functions cannot return pointer-containing values");
         let result = self.cell(region, location, ty);
+        if self.returned.is_empty() {
+            self.returned = self.shape(ty);
+        }
+        let returned = self.returned.clone();
+        self.join(&returned, value.clone());
         self.write(Place::Direct(result), value, location);
     }
 
@@ -150,7 +161,8 @@ impl Analysis<'_> {
         for (path, &node) in &result {
             let target = self.field_type(result_ty, path).pointee().unwrap();
             let (_, local) = self.call_group(region, target, location);
-            self.constraints.push(Constraint::Copy(node, local));
+            self.constraints
+                .push(Constraint::Limit(node, local, region));
         }
         self.calls.push(CallCheck {
             arguments: arguments.to_vec(),
@@ -197,7 +209,7 @@ impl Analysis<'_> {
             } = self.call_groups[index];
             let allocated = self.cell(region, location, ty);
             self.cells.get_mut(&allocated).unwrap().origin = Origin::Call;
-            self.targets[reachable].insert(allocated);
+            self.targets[reachable].insert(Reference::object(allocated));
             for path in self.paths(ty) {
                 let target = self.field_type(ty, &path).pointee().unwrap();
                 let (other_reachable, other_local) = if let Some(group) = self
@@ -234,7 +246,7 @@ impl Analysis<'_> {
             .filter_map(|group| {
                 self.targets[group.reachable]
                     .iter()
-                    .any(|target| self.cells[target].region != group.region)
+                    .any(|target| self.cells[&target.target].region != group.region)
                     .then_some(group.region)
             })
             .collect();
@@ -255,7 +267,8 @@ impl Analysis<'_> {
             }
             let mut visited = BTreeSet::new();
             while let Some((ty, node, label)) = pending.pop_front() {
-                for &target in &self.targets[node] {
+                for reference in &self.targets[node] {
+                    let target = reference.target;
                     let cell = &self.cells[&target];
                     if cell.region != call.region {
                         let mut error = call.location.error(

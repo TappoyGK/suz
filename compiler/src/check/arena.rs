@@ -10,6 +10,8 @@ use crate::{
     Diagnostic, ErrorKind,
     ast::{Expression, ExpressionKind, Location, Statement, Type},
 };
+pub(crate) use lifetimes::Analysis as LifetimeBody;
+pub(super) use lifetimes::check_program;
 
 pub(super) fn contains(ty: Type, scope: &Scope) -> bool {
     match ty {
@@ -334,7 +336,8 @@ pub(super) fn check_lifetimes(
     scope: &Scope,
     function: &crate::ast::Function,
     references: &std::collections::BTreeMap<String, Binding>,
-) -> Result<(), Diagnostic> {
+    id: usize,
+) -> Result<Option<std::rc::Rc<LifetimeBody>>, Diagnostic> {
     if !scope.arena_used.get()
         && !function.arena
         && !function.parameters.iter().any(|p| {
@@ -346,7 +349,7 @@ pub(super) fn check_lifetimes(
             )
         })
     {
-        return Ok(());
+        return Ok(None);
     }
-    lifetimes::check(statements, scope, function, references)
+    lifetimes::check(statements, scope, function, references, id).map(Some)
 }

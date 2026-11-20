@@ -225,6 +225,7 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
             break;
         }
     }
+    super::arena::check_program(&mut functions)?;
     warnings.sort_by_key(|l| (l.line, l.column));
     // 整数演算の箇所は汎用検査と具体化の両方で集まるため、ソースの演算ごとに一度だけ報告する。
     // 比較・除算の候補は汎用検査からだけ集まる。
@@ -537,11 +538,12 @@ pub(super) fn check_with_captures(
             binding.assigned.set(true);
         }
     }
-    super::arena::check_lifetimes(&statements, &scope, function, references)?;
+    let lifetime = super::arena::check_lifetimes(&statements, &scope, function, references, id)?;
     control::check_return_shape(function)?;
     warnings.extend(diagnostics::unhandled_arithmetic(&statements));
     Ok((
         CheckedFunction {
+            lifetime,
             mutable_receiver: function.method.is_some_and(|m| m.mutable),
             id,
             parameters: function

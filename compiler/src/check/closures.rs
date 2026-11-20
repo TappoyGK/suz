@@ -104,6 +104,10 @@ pub(super) fn check(
     scope.float_hints = Default::default();
     scope.hint_depth = Default::default();
     let (function, _) = functions::check_with_captures(&function, scope, 0, &references)?;
+    if function.lifetime.is_some() {
+        // 本体内の名前付き呼び出しも、具体化済みの関数群がそろってから検査する。
+        outer.arena_used.set(true);
+    }
     for (name, binding) in references {
         if binding.assigned.get() {
             outer.locals[&name].assigned.set(true);

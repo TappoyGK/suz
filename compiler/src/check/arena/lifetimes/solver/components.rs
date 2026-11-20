@@ -1,7 +1,10 @@
 //! 無条件のコピーの閉路と、入力が1つだけの値は、伝播中に同じ代表ノードを使う。
 use super::*;
 
-pub(super) fn representatives(analysis: &Analysis<'_>, constraints: &[Constraint]) -> Vec<Node> {
+pub(in crate::check::arena::lifetimes) fn representatives(
+    analysis: &Analysis,
+    constraints: &[Constraint],
+) -> Vec<Node> {
     let count = analysis.targets.len();
     let mut outgoing = vec![Vec::new(); count];
     let mut incoming = vec![Vec::new(); count];
@@ -11,7 +14,9 @@ pub(super) fn representatives(analysis: &Analysis<'_>, constraints: &[Constraint
             Constraint::Copy(dst, src)
             | Constraint::Load(dst, Place::Direct(src))
             | Constraint::Store(Place::Direct(dst), src, _) => (*dst, *src),
-            Constraint::Load(dst, Place::Indirect(..)) | Constraint::Address(dst, _) => {
+            Constraint::Load(dst, Place::Indirect(..))
+            | Constraint::Address(dst, _)
+            | Constraint::Limit(dst, _, _) => {
                 dynamic[*dst] = true;
                 continue;
             }

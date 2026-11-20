@@ -10,7 +10,7 @@ use pointer_shape::PointerShape;
 use crate::{Diagnostic, ErrorKind};
 
 /// ソース内の1始まりの行・列。構文解析後も診断の位置として保持する。
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct Location {
     pub line: usize,
     pub column: usize,
