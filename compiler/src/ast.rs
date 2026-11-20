@@ -169,7 +169,9 @@ pub(crate) enum Type {
     CPointer,
     CInteger(CIntegerType),
     Parameter(usize),
-    Application(usize),
+    Application(usize), // 構文中の構造体への型適用。
+    StaticShape(usize), // 構文中の保存可能なfnshapeへの型適用。
+    Shape(usize),       // 構文中の呼び出し専用fnshapeへの型適用。
     GenericInt,
     GenericFloat,
     Numeric([Option<ScalarType>; NUMERIC_COMBINATIONS]), // intとfloatの内部の型関数。
@@ -194,6 +196,8 @@ pub(crate) enum PointerLeaf {
     CInteger(CIntegerType),
     Parameter(usize),
     Application(usize),
+    StaticShape(usize),
+    Shape(usize),
     GenericInt,
     GenericFloat,
     Numeric([Option<ScalarType>; NUMERIC_COMBINATIONS]),
@@ -223,6 +227,8 @@ impl Type {
             Self::CInteger(v) => PointerLeaf::CInteger(v),
             Self::Parameter(id) => PointerLeaf::Parameter(id),
             Self::Application(id) => PointerLeaf::Application(id),
+            Self::StaticShape(id) => PointerLeaf::StaticShape(id),
+            Self::Shape(id) => PointerLeaf::Shape(id),
             Self::GenericInt => PointerLeaf::GenericInt,
             Self::GenericFloat => PointerLeaf::GenericFloat,
             Self::Numeric(v) => PointerLeaf::Numeric(v),
@@ -278,6 +284,8 @@ impl Type {
             PointerLeaf::CInteger(v) => Self::CInteger(v),
             PointerLeaf::Parameter(id) => Self::Parameter(id),
             PointerLeaf::Application(id) => Self::Application(id),
+            PointerLeaf::StaticShape(id) => Self::StaticShape(id),
+            PointerLeaf::Shape(id) => Self::Shape(id),
             PointerLeaf::GenericInt => Self::GenericInt,
             PointerLeaf::GenericFloat => Self::GenericFloat,
             PointerLeaf::Numeric(v) => Self::Numeric(v),
@@ -393,6 +401,8 @@ impl Type {
             Self::CPointer => "*const void",
             Self::CInteger(ty) => ty.name(),
             Self::Parameter(_) => "type parameter",
+            Self::StaticShape(_) => "static fn",
+            Self::Shape(_) => "fn",
             Self::Application(_) => "generic struct",
             Self::Exact => "exact integer",
             Self::GenericInt => "int",
@@ -423,6 +433,8 @@ impl Type {
             Self::CInteger(ty) => ty.c_name().into(),
             Self::Exact => "suz_exact".into(),
             Self::Parameter(_)
+            | Self::StaticShape(_)
+            | Self::Shape(_)
             | Self::Application(_)
             | Self::GenericInt
             | Self::GenericFloat
@@ -498,7 +510,7 @@ pub(crate) struct ErrorVariant {
 }
 
 /// 関数値の型。同じ仮引数・戻り値の組を一つの番号へまとめる。
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct FunctionType {
     pub parameters: Vec<Type>,
     pub result: Type,
@@ -508,10 +520,13 @@ pub(crate) struct FunctionType {
 /// fnshapeの名前と宣言位置。型の同一性は名前ではなく仮引数と戻り値の型で決まる。
 #[derive(Clone)]
 pub(crate) struct FnShapeDeclaration {
+    pub type_parameters: Vec<generics::TypeParameter>,
+    pub needs: Vec<generics::Need>,
     pub name: String,
     pub location: Location,
     pub start: usize,
     pub end: usize,
+    /// Program.function_typesの署名番号。直接の依存先から順に並ぶ。
     pub type_id: usize,
 }
 
@@ -889,7 +904,10 @@ pub(crate) enum ExpressionKind {
     /// or panicの内部表現。通常の値式としては構文から作らない。
     Panic(Vec<TemplatePart<Expression>>),
     Closure(Box<Closure>),
-    FunctionValue(String),
+    FunctionValue {
+        name: String,
+        type_arguments: Vec<Type>,
+    },
     Invoke {
         target: Box<Expression>,
         arguments: Vec<Expression>,

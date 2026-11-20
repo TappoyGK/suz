@@ -1,4 +1,4 @@
-//! 汎用構造体を型引数ごとに展開する。宣言番号を安定させ、再帰参照は同じ番号へ戻す。
+//! 構造体とfnshapeを型引数ごとに展開する。両者の相互参照も同じ具体化へ戻す。
 use crate::{
     Diagnostic, ErrorKind,
     ast::{
@@ -15,9 +15,11 @@ use std::{
 /// スコープ間で共有する構造体表。登録済み宣言はRcで読み、展開中に借用を持ち越さない。
 #[derive(Default)]
 pub(in crate::check) struct Structs {
+    pub shapes: super::shapes::Shapes,
     declarations: RefCell<Vec<Rc<StructDeclaration>>>,
     applications: Vec<Application>,
     instances: RefCell<BTreeMap<Application, usize>>,
+    aliases: RefCell<BTreeMap<usize, usize>>,
     names: BTreeSet<String>,
     original_count: usize,
     enums: Vec<crate::ast::EnumDeclaration>,
@@ -36,12 +38,67 @@ impl Structs {
     pub fn new(program: &Program) -> Self {
         Self {
             applications: program.applications.clone(),
+            shapes: super::shapes::Shapes::new(program),
             enums: program.enums.clone(),
             ..Self::from(program.structs.clone())
         }
     }
     pub fn get(&self, id: usize) -> Rc<StructDeclaration> {
-        self.declarations.borrow()[id].clone()
+        self.declarations.borrow()[self.canonical_id(id)].clone()
+    }
+    fn canonical_id(&self, mut id: usize) -> usize {
+        while let Some(&next) = self.aliases.borrow().get(&id) {
+            id = next;
+        }
+        id
+    }
+    fn normalize(&self, ty: Type) -> Type {
+        if let Some(inner) = ty.pointee() {
+            return self
+                .normalize(inner)
+                .pointer()
+                .with_nullable(ty.is_nullable());
+        }
+        match ty {
+            Type::Struct(id) => Type::Struct(self.canonical_id(id)),
+            _ => self.shapes.normalize(ty),
+        }
+    }
+    // 再帰の途中で予約番号を参照したフィールドも、確定した関数型へ揃える。
+    // 型引数に関数型を含む構造体も同じキーで再利用できるよう、双方の表を更新する。
+    fn normalize_instances(&self) {
+        loop {
+            let before = self.shapes.alias_count() + self.aliases.borrow().len();
+            let mut instances = self.instances.borrow_mut();
+            instances.clear();
+            let count = self.declarations.borrow().len();
+            for id in 0..count {
+                if self.aliases.borrow().contains_key(&id) {
+                    continue;
+                }
+                let mut declaration = self.get(id).as_ref().clone();
+                for field in &mut declaration.fields {
+                    field.ty = self.normalize(field.ty);
+                }
+                if let Some(app) = &mut declaration.application {
+                    for argument in &mut app.arguments {
+                        *argument = self.normalize(*argument);
+                    }
+                    declaration.symbolic = app.arguments.iter().any(|ty| self.unresolved(*ty));
+                    if let Some(&existing) = instances.get(app) {
+                        self.aliases.borrow_mut().insert(id, existing);
+                    } else {
+                        instances.insert(app.clone(), id);
+                    }
+                }
+                self.declarations.borrow_mut()[id] = Rc::new(declaration);
+            }
+            drop(instances);
+            self.shapes.recanonicalize(|ty| self.normalize(ty));
+            if before == self.shapes.alias_count() + self.aliases.borrow().len() {
+                break;
+            }
+        }
     }
     pub fn contains_name(&self, name: &str) -> bool {
         self.names.contains(name)
@@ -60,6 +117,27 @@ impl Structs {
         })
     }
     pub fn prepare(&self) -> Result<(), Diagnostic> {
+        // 直接参照する関数型を先に登録し、長い宣言列を再帰でたどらない。
+        let mut order: Vec<_> = (0..self.shapes.declarations.len()).collect();
+        order.sort_by_key(|id| self.shapes.declarations[*id].type_id);
+        for id in order {
+            let declaration = &self.shapes.declarations[id];
+            let app = Application {
+                declaration: id,
+                arguments: (0..declaration.type_parameters.len())
+                    .map(Type::Parameter)
+                    .collect(),
+            };
+            self.transaction(|| {
+                self.instantiate_shape(
+                    app,
+                    declaration.location,
+                    &mut Vec::new(),
+                    &declaration.type_parameters,
+                )
+                .map(Type::StaticFunction)
+            })?;
+        }
         for id in 0..self.original_count {
             let declaration = self.get(id);
             if !declaration.type_parameters.is_empty() {
@@ -73,14 +151,32 @@ impl Structs {
         }
         self.validate_layout(0)
     }
+    pub fn application(&self, id: usize) -> &Application {
+        &self.applications[id]
+    }
     pub fn symbolic(&self, ty: Type) -> bool {
+        self.symbolic_inner(ty, &mut BTreeSet::new())
+    }
+    fn symbolic_inner(&self, ty: Type, seen: &mut BTreeSet<usize>) -> bool {
         match ty.leaf() {
             Type::Parameter(_) => true,
             Type::Struct(id) => self.get(id).symbolic,
-            Type::Application(id) => self.applications[id]
+            Type::StaticFunction(id) | Type::Function(id) => {
+                if !seen.insert(id) {
+                    return false;
+                }
+                let signature = self.shapes.types.borrow()[id].clone();
+                signature
+                    .parameters
+                    .iter()
+                    .chain([&signature.result])
+                    .any(|t| self.symbolic_inner(*t, seen))
+            }
+            Type::Application(id) | Type::StaticShape(id) | Type::Shape(id) => self.applications
+                [id]
                 .arguments
                 .iter()
-                .any(|t| self.symbolic(*t)),
+                .any(|t| self.symbolic_inner(*t, seen)),
             _ => false,
         }
     }
@@ -144,19 +240,32 @@ impl Structs {
         }
     }
     pub fn contains_argument(&self, old: Type, new: Type) -> bool {
-        if old == new {
-            return true;
-        }
-        if let Some(inner) = old.pointee() {
-            return self.contains_argument(inner, new);
-        }
-        if let Type::Struct(id) = old
-            && let Some(app) = &self.get(id).application
-        {
-            return app
-                .arguments
-                .iter()
-                .any(|t| self.contains_argument(*t, new));
+        let mut pending = vec![old];
+        let mut seen = BTreeSet::new();
+        while let Some(ty) = pending.pop() {
+            if ty == new {
+                return true;
+            }
+            if !seen.insert(ty) {
+                continue;
+            }
+            if let Some(inner) = ty.pointee() {
+                pending.push(inner);
+                continue;
+            }
+            match ty {
+                Type::Struct(id) => {
+                    if let Some(app) = &self.get(id).application {
+                        pending.extend(&app.arguments);
+                    }
+                }
+                Type::StaticFunction(id) | Type::Function(id) => {
+                    let signature = &self.shapes.types.borrow()[id];
+                    pending.extend(&signature.parameters);
+                    pending.push(signature.result);
+                }
+                _ => {}
+            }
         }
         false
     }
@@ -195,7 +304,14 @@ impl Structs {
     ) -> Result<Type, Diagnostic> {
         if !matches!(
             ty,
-            Type::Parameter(_) | Type::Application(_) | Type::Struct(_) | Type::Pointer { .. }
+            Type::Parameter(_)
+                | Type::Application(_)
+                | Type::Struct(_)
+                | Type::Pointer { .. }
+                | Type::StaticShape(_)
+                | Type::Shape(_)
+                | Type::StaticFunction(_)
+                | Type::Function(_)
         ) {
             return Ok(ty);
         }
@@ -210,11 +326,30 @@ impl Structs {
         resolve: impl FnOnce() -> Result<Type, Diagnostic>,
     ) -> Result<Type, Diagnostic> {
         let start = self.declarations.borrow().len();
+        let shape_start = self.shapes.checkpoint();
+        let alias_start = self.shapes.revision();
         let result = resolve().and_then(|ty| {
+            // 予約中の関数型はまだ署名が空なので、展開完了後に記号型の有無を確定する。
+            let count = self.declarations.borrow().len();
+            for id in start..count {
+                let declaration = self.get(id);
+                if let Some(app) = &declaration.application {
+                    let symbolic = app.arguments.iter().any(|ty| self.unresolved(*ty));
+                    if symbolic != declaration.symbolic {
+                        let mut resolved = declaration.as_ref().clone();
+                        resolved.symbolic = symbolic;
+                        self.declarations.borrow_mut()[id] = Rc::new(resolved);
+                    }
+                }
+            }
             self.validate_layout(start)?;
-            Ok(ty)
+            if self.shapes.revision() != alias_start {
+                self.normalize_instances();
+            }
+            Ok(self.normalize(ty))
         });
         if result.is_err() {
+            self.shapes.rollback(shape_start);
             let mut declarations = self.declarations.borrow_mut();
             let mut instances = self.instances.borrow_mut();
             for declaration in &declarations[start..] {
@@ -244,6 +379,12 @@ impl Structs {
             }
             return Ok(inner.pointer().with_nullable(ty.is_nullable()));
         }
+        if matches!(
+            ty,
+            Type::StaticShape(_) | Type::Shape(_) | Type::StaticFunction(_) | Type::Function(_)
+        ) {
+            return self.resolve_shape(ty, arguments, location, path, parameters);
+        }
         let application = match ty {
             Type::Parameter(id) => return Ok(arguments.get(id).copied().unwrap_or(ty)),
             Type::Application(id) => self.applications[id].clone(),
@@ -268,16 +409,103 @@ impl Structs {
             parameters,
         )
     }
-    fn instantiate(
+    fn resolve_shape(
+        &self,
+        ty: Type,
+        arguments: &[Type],
+        location: Location,
+        path: &mut Vec<Application>,
+        parameters: &[TypeParameter],
+    ) -> Result<Type, Diagnostic> {
+        if arguments.is_empty() && matches!(ty, Type::StaticFunction(_) | Type::Function(_)) {
+            return Ok(self.normalize(ty));
+        }
+        let (app, static_type) = match ty {
+            Type::StaticShape(id) => (Some(self.applications[id].clone()), true),
+            Type::Shape(id) => (Some(self.applications[id].clone()), false),
+            Type::StaticFunction(id) => (self.shapes.origin(id), true),
+            Type::Function(id) => (self.shapes.origin(id), false),
+            _ => unreachable!(),
+        };
+        let id = if let Some(app) = app {
+            let resolved = app
+                .arguments
+                .iter()
+                .map(|t| self.resolve_inner(*t, arguments, location, path, parameters))
+                .collect::<Result<Vec<_>, _>>()?;
+            let application = Application {
+                declaration: app.declaration,
+                arguments: resolved.clone(),
+            };
+            self.instantiate_shape(application, location, path, parameters)?
+        } else {
+            let id = match ty {
+                Type::StaticFunction(id) | Type::Function(id) => id,
+                _ => unreachable!(),
+            };
+            let mut signature = self.shapes.types.borrow()[id].clone();
+            for ty in signature
+                .parameters
+                .iter_mut()
+                .chain([&mut signature.result])
+            {
+                *ty = self.resolve_inner(*ty, arguments, location, path, parameters)?;
+            }
+            self.shapes.intern(signature)
+        };
+        Ok(if static_type {
+            Type::StaticFunction(id)
+        } else {
+            Type::Function(id)
+        })
+    }
+    fn instantiate_shape(
         &self,
         application: Application,
         location: Location,
         path: &mut Vec<Application>,
         parameters: &[TypeParameter],
-    ) -> Result<Type, Diagnostic> {
+    ) -> Result<usize, Diagnostic> {
+        let resolved = application.arguments.clone();
+        self.validate_recursion(
+            &application,
+            location,
+            &self.shapes.active.borrow(),
+            parameters,
+        )?;
+        self.shapes.instantiate(application, |template| {
+            let mut signature = template.clone();
+            for ty in signature
+                .parameters
+                .iter_mut()
+                .chain([&mut signature.result])
+            {
+                *ty = self.resolve_inner(*ty, &resolved, location, path, parameters)?;
+            }
+            if matches!(signature.result, Type::Function(_))
+                || signature.parameters.contains(&Type::Void)
+            {
+                return Err(location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "generic.storage",
+                        "function types require non-void parameters and a stored return type"
+                    ),
+                ));
+            }
+            Ok(signature)
+        })
+    }
+    fn validate_recursion(
+        &self,
+        application: &Application,
+        location: Location,
+        path: &[Application],
+        parameters: &[TypeParameter],
+    ) -> Result<(), Diagnostic> {
         for previous in path
             .iter()
-            .filter(|a| a.declaration == application.declaration && **a != application)
+            .filter(|a| a.declaration == application.declaration && *a != application)
         {
             let symbolic = previous.arguments.iter().any(|t| self.unresolved(*t));
             // 記号から具体型への置換は、その具体化で判定する。定義時には型を包み続ける
@@ -300,7 +528,7 @@ impl Structs {
                     ErrorKind::InvalidSource,
                     crate::diagnostic!(
                         "generic.recursion",
-                        "recursive struct instantiation changes [{}] to [{}] without shrinking",
+                        "recursive type instantiation changes [{}] to [{}] without shrinking",
                         previous
                             .arguments
                             .iter()
@@ -317,6 +545,16 @@ impl Structs {
                 ));
             }
         }
+        Ok(())
+    }
+    fn instantiate(
+        &self,
+        application: Application,
+        location: Location,
+        path: &mut Vec<Application>,
+        parameters: &[TypeParameter],
+    ) -> Result<Type, Diagnostic> {
+        self.validate_recursion(&application, location, path, parameters)?;
         if let Some(&id) = self.instances.borrow().get(&application) {
             return Ok(Type::Struct(id));
         }

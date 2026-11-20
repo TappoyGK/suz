@@ -56,11 +56,28 @@ impl Need {
     }
 }
 
-/// 汎用構造体への型引数の適用。フィールドは意味検査で具体化する。
+/// 構造体またはfnshapeへの型引数の適用。宣言の種類は参照元のTypeで区別する。
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct Application {
     pub declaration: usize,
     pub arguments: Vec<Type>,
 }
 
-pub(crate) type Applications = std::rc::Rc<std::cell::RefCell<Vec<Application>>>;
+/// 構文解析中の型適用表。fnshapeを多数使っても既存の適用を全件走査しない。
+#[derive(Default)]
+pub(crate) struct ApplicationTable {
+    pub entries: Vec<Application>,
+    ids: std::collections::BTreeMap<Application, usize>,
+}
+impl ApplicationTable {
+    pub fn intern(&mut self, application: Application) -> usize {
+        if let Some(&id) = self.ids.get(&application) {
+            return id;
+        }
+        let id = self.entries.len();
+        self.entries.push(application.clone());
+        self.ids.insert(application, id);
+        id
+    }
+}
+pub(crate) type Applications = std::rc::Rc<std::cell::RefCell<ApplicationTable>>;

@@ -2,6 +2,7 @@
 //! 数値のint・floatとは代入表を分け、演算のASTや格納境界を変更しない。
 mod inference;
 mod requirements;
+mod shapes;
 pub(super) mod structs;
 use super::{
     functions,
@@ -330,4 +331,172 @@ pub(super) fn call_hint(
             .collect::<Option<Vec<_>>>()?
     };
     scope.substitute(signature.result, &types, location).ok()
+}
+
+fn value_arguments(
+    signature: &Signature,
+    explicit: &[Type],
+    scope: &Scope,
+    location: Location,
+) -> Result<Vec<Type>, Diagnostic> {
+    if explicit.len() != signature.type_parameters || signature.type_parameters == 0 {
+        return Err(location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "generic.type-arguments",
+                "function values require all {} type arguments explicitly; found {}",
+                signature.type_parameters,
+                explicit.len()
+            ),
+        ));
+    }
+    explicit
+        .iter()
+        .map(|t| scope.resolve_type_at(*t, location))
+        .collect()
+}
+
+pub(super) fn function_value_type(
+    signature: &Signature,
+    explicit: &[Type],
+    scope: &Scope,
+    location: Location,
+) -> Result<Type, Diagnostic> {
+    let arguments = value_arguments(signature, explicit, scope, location)?;
+    specialized_function_type(signature, &arguments, scope, location)
+}
+
+fn specialized_function_type(
+    signature: &Signature,
+    arguments: &[Type],
+    scope: &Scope,
+    location: Location,
+) -> Result<Type, Diagnostic> {
+    let parameters = signature
+        .parameters
+        .iter()
+        .map(|t| scope.substitute(*t, arguments, location))
+        .collect::<Result<Vec<_>, _>>()?;
+    let result = scope.substitute(signature.result, arguments, location)?;
+    if matches!(result, Type::Function(_)) {
+        return Err(location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "fn.type-call",
+                "call-only function values cannot be returned"
+            ),
+        ));
+    }
+    for ty in parameters.iter().chain([&result]) {
+        if ty.pointee().is_some() && matches!(ty.leaf(), Type::Function(_)) {
+            return Err(location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("arena.ptr-type", "pointer requires a stored value type"),
+            ));
+        }
+    }
+    Ok(scope.intern_function(crate::ast::FunctionType {
+        parameters,
+        result,
+        errors: signature.errors.clone(),
+    }))
+}
+
+pub(super) fn function_value(
+    expr: &Expression,
+    signature: &Signature,
+    explicit: &[Type],
+    expected: Option<Type>,
+    scope: &Scope,
+) -> Result<CheckedExpression, Diagnostic> {
+    let arguments = value_arguments(signature, explicit, scope, expr.location)?;
+    check_requirements(signature, &arguments, scope, expr.location)?;
+    let ty = specialized_function_type(signature, &arguments, scope, expr.location)?;
+    if let Some(required) = expected.filter(|required| *required != ty) {
+        return Err(expr.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "fn.value-from-name",
+                "function type {} does not match required {}",
+                scope.type_name(ty),
+                scope.type_name(required)
+            ),
+        ));
+    }
+    let id = if arguments.iter().any(|ty| scope.structs.unresolved(*ty)) {
+        signature.id
+    } else {
+        request(signature.id, arguments, scope, expr.location)?
+    };
+    Ok(CheckedExpression {
+        ty,
+        value: Value::Function(id),
+    })
+}
+
+/// 名前付き関数型の要求は、構造的に同じ型へまとめる前に使用した宣言で検査する。
+/// 同じ署名を持つ別のfnshapeへ、要求が混入しないようにする。
+pub(super) fn shape_requirements(
+    ty: Type,
+    scope: &Scope,
+    location: Location,
+) -> Result<(), Diagnostic> {
+    let mut pending = vec![ty];
+    let mut seen = std::collections::BTreeSet::new();
+    while let Some(ty) = pending.pop() {
+        let (id, shape) = match ty.leaf() {
+            Type::StaticShape(id) | Type::Shape(id) => (id, true),
+            Type::Application(id) => (id, false),
+            _ => continue,
+        };
+        if !seen.insert((id, shape)) {
+            continue;
+        }
+        let app = scope.structs.application(id);
+        pending.extend(app.arguments.iter().copied());
+        if !shape {
+            continue;
+        }
+        let declaration = &scope.structs.shapes.declarations[app.declaration];
+        let arguments = app
+            .arguments
+            .iter()
+            .map(|t| {
+                scope.substitute(
+                    *t,
+                    scope
+                        .named
+                        .type_arguments
+                        .as_deref()
+                        .map_or(&[], Vec::as_slice),
+                    location,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        requirements::validate_substitution(&declaration.needs, &arguments, scope, location)?;
+        for need in &declaration.needs {
+            requirements::satisfy(need, &arguments, scope, location)?;
+        }
+        for argument in arguments {
+            struct_requirements(argument, scope, location)?;
+        }
+    }
+    Ok(())
+}
+
+/// 要求の型を解決してから、別名を含む重複・矛盾と内側の型の要求を検査する。
+pub(super) fn definition_needs(scope: &Scope, location: Location) -> Result<(), Diagnostic> {
+    if scope.named.needs.is_empty() {
+        return Ok(());
+    }
+    let arguments: Vec<_> = (0..scope.named.type_parameters.len())
+        .map(Type::Parameter)
+        .collect();
+    requirements::validate_substitution(&scope.named.needs, &arguments, scope, location)?;
+    for need in scope.named.needs.iter() {
+        for &ty in need.parameters.iter().chain([&need.result]) {
+            scope.resolve_type_at(ty, need.location)?;
+        }
+    }
+    Ok(())
 }

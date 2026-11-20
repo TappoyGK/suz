@@ -250,7 +250,8 @@ fn generate_program(seed: u64, index: usize) -> String {
 struct Holder[T] { p: ptr? Node[T], q: ptr Node[T] }
 struct Pair[T] { a: Holder[T], b: ptr? Node[T] }
 error ArenaErr { Abort }
-fnshape NodeAction(ptr? Node[i32]) -> i32
+fnshape NodeAction[T](ptr? Node[T]) -> i32
+fn apply_generic[T](f: fn NodeAction[T], arg: ptr? Node[T]) -> i32 { return f(arg) }
 
 fn Holder[T].read_p() -> T {
     let n = self.p { return n.value } else { return self.q.value }
@@ -438,7 +439,13 @@ fn main() -> u8 {
     out.push_str("        outer_opt = outer_opt\n        outer_mut = outer_mut\n        outer_holder = outer_holder\n        outer_pair = outer_pair\n        sink = sink\n    }\n    return 0\n}\n");
     if generic {
         // arena fnの具体化も通す。通常版と同じ値と参照を返す。
+        // コールバックは型引数付きfnshapeと具体化した関数値を経由して転送する。
         out = out
+            .replace("fn NodeAction,", "fn NodeAction[i32],")
+            .replace(
+                "    return f(arg)\n",
+                "    return (fn apply_generic[i32])(f, arg)\n",
+            )
             .replace(
                 "new $Node { value: v, next: tail }",
                 "make_node[i32](v, tail)",

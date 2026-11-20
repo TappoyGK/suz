@@ -2056,7 +2056,20 @@ fn main() -> u8 {
 
 **[generic.fnshape]** `fnshape Less[T](T, T) -> bool`のように、関数の形にも型引数を宣言できる。具体化後の関数の形の同一性、fnとstatic fn、クロージャの制約は既存の規則に従う。要求を付けた関数の形には [generic.forward-needs] を適用する。
 
+fnshapeの使用時には、`fn Less[i32]`や`static fn Less[i32]`のように型引数をすべて明示する。たとえば、`fnshape Identity[T](T) -> T`と`fnshape Same[U](U) -> U`をどちらもi32で具体化した関数型は同じである。関数へ渡す実引数の関数型からは、[generic.inference] に従ってその関数の型引数を推論できる。
+
 **[generic.function-value]** 型引数リストを持つ関数を値にするときは、`fn identity[i32]`のようにすべての型引数を明示する。未具体化の関数を、複数の型で呼べる1つの値として保持することはできない。
+
+```suz
+fnshape Identity[T](T) -> T
+fn identity[T](value: T) -> T { return value }
+fn apply[T](action: fn Identity[T], value: T) -> T { return action(value) }
+fn main() -> u8 {
+    fix action: static fn Identity[i32] = fn identity[i32]
+    fix value = apply(action, 7)
+    return ifexpr value == 7 { 0 } else { 1 }
+}
+```
 
 **[generic.codegen]** 使用する型引数の組み合わせごとに関数・構造体・関数の形を具体化し、同じ宣言・同じ型引数の具体化は再利用する。ジェネリクスのための実行時型判定・型情報の受け渡し・値の箱詰めは行わない。
 

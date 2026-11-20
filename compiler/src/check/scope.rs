@@ -111,16 +111,9 @@ impl Scope {
         }
     }
     pub fn intern_function(&self, signature: crate::ast::FunctionType) -> Type {
-        let mut types = self.function_types.borrow_mut();
-        let id = types
-            .iter()
-            .position(|t| t == &signature)
-            .unwrap_or_else(|| {
-                types.push(signature);
-                types.len() - 1
-            });
-        Type::StaticFunction(id)
+        Type::StaticFunction(self.structs.shapes.intern(signature))
     }
+
     pub fn get(&self, name: &str) -> Option<&Binding> {
         self.locals.get(name).or_else(|| self.constants.get(name))
     }
@@ -160,13 +153,21 @@ impl Scope {
     ) -> Result<Type, crate::Diagnostic> {
         if !matches!(
             ty,
-            Type::Parameter(_) | Type::Application(_) | Type::Struct(_) | Type::Pointer { .. }
+            Type::Parameter(_)
+                | Type::Application(_)
+                | Type::Struct(_)
+                | Type::Pointer { .. }
+                | Type::StaticShape(_)
+                | Type::Shape(_)
+                | Type::StaticFunction(_)
+                | Type::Function(_)
         ) {
             return Ok(match self.mode {
                 Mode::Instance(types) => types.resolve(ty),
                 Mode::Ordinary | Mode::GenericCheck => ty,
             });
         }
+        super::type_parameters::shape_requirements(ty, self, location)?;
         let ty = self.substitute(
             ty,
             self.named
@@ -217,8 +218,21 @@ impl Scope {
                 } else {
                     "fn"
                 };
-                if let Some(declaration) = self.fnshapes.iter().find(|d| d.type_id == id) {
-                    return format!("{prefix} {}", declaration.name);
+                if let Some(app) = self.structs.shapes.origin(id) {
+                    let declaration = &self.fnshapes[app.declaration];
+                    let arguments = if app.arguments.is_empty() {
+                        String::new()
+                    } else {
+                        format!(
+                            "[{}]",
+                            app.arguments
+                                .iter()
+                                .map(|ty| self.type_name(*ty))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )
+                    };
+                    return format!("{prefix} {}{arguments}", declaration.name);
                 }
                 // 名前のない推論型では、違いが分かるよう仮引数と戻り値を表示する。
                 let types = self.function_types.borrow();
@@ -245,6 +259,7 @@ impl Scope {
 }
 impl Default for Scope {
     fn default() -> Self {
+        let structs = Rc::new(super::type_parameters::structs::Structs::default());
         Self {
             named: Rc::default(),
             has_operator_methods: false,
@@ -255,7 +270,7 @@ impl Default for Scope {
             recovery: None,
             loop_depth: 0,
             fnshapes: Rc::default(),
-            function_types: Rc::default(),
+            function_types: structs.shapes.types.clone(),
             mode: Default::default(),
             deferred: None,
             generic_calls: None,
@@ -269,7 +284,7 @@ impl Default for Scope {
             uncaptured: Default::default(),
             constants: Rc::default(),
             enums: Rc::default(),
-            structs: Rc::default(),
+            structs,
             functions: Rc::default(),
             result: Type::Integer(IntegerType::U8),
             errors: Rc::default(),

@@ -54,8 +54,20 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
             operand_type(target, bindings).map(|t| t.pointee().unwrap_or(t))
         }
         ExpressionKind::Closure(_) | ExpressionKind::Panic(_) => None,
-        ExpressionKind::FunctionValue(name) => {
+        ExpressionKind::FunctionValue {
+            name,
+            type_arguments,
+        } => {
             let signature = bindings.functions.get(name)?;
+            if signature.type_parameters != 0 || !type_arguments.is_empty() {
+                return super::type_parameters::function_value_type(
+                    signature,
+                    type_arguments,
+                    bindings,
+                    expr.location,
+                )
+                .ok();
+            }
             if signature.is_generic() || name == "main" {
                 return None;
             }
@@ -518,9 +530,10 @@ fn expression_inner(
                     ),
                 ));
             }
-            ExpressionKind::FunctionValue(name) => {
-                super::function_values::value(expr, name, required, bindings)?
-            }
+            ExpressionKind::FunctionValue {
+                name,
+                type_arguments,
+            } => super::function_values::value(expr, name, type_arguments, required, bindings)?,
             ExpressionKind::Invoke { target, arguments } => {
                 super::function_values::invoke(expr, target, arguments, bindings, None)?
             }

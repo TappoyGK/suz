@@ -95,90 +95,100 @@ fn constrain(
     fixed: &[bool],
     defer_checks: bool,
 ) -> Result<(), Diagnostic> {
-    if let Type::Parameter(id) = parameter {
-        if actual.leaf() == Type::Void {
-            return Err(location.error(
-                ErrorKind::InvalidSource,
-                crate::diagnostic!(
-                    "generic.type-arguments",
-                    "type arguments must be complete value types"
-                ),
-            ));
+    let mut pending = vec![(parameter, actual)];
+    let mut seen = std::collections::BTreeSet::new();
+    while let Some((parameter, actual)) = pending.pop() {
+        if !seen.insert((parameter, actual)) {
+            continue;
         }
-        if fixed.get(id) == Some(&true) {
-            return Ok(());
-        }
-        let (name, candidate) = &mut candidates[id];
-        if let Some(previous) = *candidate {
-            if previous.ty != actual {
-                let conflict = |a, b| {
-                    let mut error = location.error(
-                        ErrorKind::InvalidSource,
-                        crate::diagnostic!(
-                            "generic.inference",
-                            "conflicting types {} and {} for type parameter {}",
-                            scope.type_name(a),
-                            scope.type_name(b),
-                            name
-                        ),
-                    );
-                    error.related.push(previous.location.error(
-                        ErrorKind::InvalidSource,
-                        crate::diagnostic!(
-                            "generic.inference",
-                            "this argument requires {}",
-                            scope.type_name(a)
-                        ),
-                    ));
-                    error
-                };
-                // 既存のint・floatの定義検査では、一部の具体型だけが矛盾することがある。
-                // 通常の数値汎用検査と同じく、その組み合わせを使用時まで保留する。
-                let domain =
-                    super::super::generic::domain::judge(previous.ty, actual, |a, b| a == b);
-                if !domain.possible() {
-                    return Err(conflict(previous.ty, actual));
+        if let Type::Parameter(id) = parameter {
+            if actual.leaf() == Type::Void {
+                return Err(location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "generic.type-arguments",
+                        "type arguments must be complete value types"
+                    ),
+                ));
+            }
+            if fixed.get(id) == Some(&true) {
+                continue;
+            }
+            let (name, candidate) = &mut candidates[id];
+            if let Some(previous) = *candidate {
+                if previous.ty != actual {
+                    let conflict = |a, b| {
+                        let mut error = location.error(
+                            ErrorKind::InvalidSource,
+                            crate::diagnostic!(
+                                "generic.inference",
+                                "conflicting types {} and {} for type parameter {}",
+                                scope.type_name(a),
+                                scope.type_name(b),
+                                name
+                            ),
+                        );
+                        error.related.push(previous.location.error(
+                            ErrorKind::InvalidSource,
+                            crate::diagnostic!(
+                                "generic.inference",
+                                "this argument requires {}",
+                                scope.type_name(a)
+                            ),
+                        ));
+                        error
+                    };
+                    // 既存のint・floatの定義検査では、一部の具体型だけが矛盾することがある。
+                    // 通常の数値汎用検査と同じく、その組み合わせを使用時まで保留する。
+                    let domain =
+                        super::super::generic::domain::judge(previous.ty, actual, |a, b| a == b);
+                    if !domain.possible() {
+                        return Err(conflict(previous.ty, actual));
+                    }
+                    if defer_checks {
+                        scope.defer_rule(|i| {
+                            let a = super::super::generic::domain::at(previous.ty, i)?;
+                            let b = super::super::generic::domain::at(actual, i)?;
+                            (a != b).then(|| conflict(a, b))
+                        });
+                    }
                 }
-                if defer_checks {
-                    scope.defer_rule(|i| {
-                        let a = super::super::generic::domain::at(previous.ty, i)?;
-                        let b = super::super::generic::domain::at(actual, i)?;
-                        (a != b).then(|| conflict(a, b))
-                    });
+            } else {
+                *candidate = Some(Candidate {
+                    ty: actual,
+                    location,
+                });
+            }
+        } else if let (Some(parameter), Some(actual)) = (parameter.pointee(), actual.pointee()) {
+            pending.push((parameter, actual));
+        } else if let (
+            Type::StaticFunction(parameter) | Type::Function(parameter),
+            Type::StaticFunction(actual) | Type::Function(actual),
+        ) = (parameter, actual)
+        {
+            let expected = scope.function_types.borrow()[parameter].clone();
+            let actual = scope.function_types.borrow()[actual].clone();
+            if expected.parameters.len() == actual.parameters.len()
+                && expected.errors == actual.errors
+            {
+                for (&parameter, &actual) in expected
+                    .parameters
+                    .iter()
+                    .chain([&expected.result])
+                    .zip(actual.parameters.iter().chain([&actual.result]))
+                {
+                    pending.push((parameter, actual));
                 }
             }
-        } else {
-            *candidate = Some(Candidate {
-                ty: actual,
-                location,
-            });
-        }
-    } else if let (Some(parameter), Some(actual)) = (parameter.pointee(), actual.pointee()) {
-        constrain(
-            parameter,
-            actual,
-            location,
-            scope,
-            candidates,
-            fixed,
-            defer_checks,
-        )?;
-    } else if let (Type::Struct(parameter), Type::Struct(actual)) = (parameter, actual) {
-        let parameter = scope.structs.get(parameter);
-        let actual = scope.structs.get(actual);
-        if let (Some(parameter), Some(actual)) = (&parameter.application, &actual.application)
-            && parameter.declaration == actual.declaration
-        {
-            for (&parameter, &actual) in parameter.arguments.iter().zip(&actual.arguments) {
-                constrain(
-                    parameter,
-                    actual,
-                    location,
-                    scope,
-                    candidates,
-                    fixed,
-                    defer_checks,
-                )?;
+        } else if let (Type::Struct(parameter), Type::Struct(actual)) = (parameter, actual) {
+            let parameter = scope.structs.get(parameter);
+            let actual = scope.structs.get(actual);
+            if let (Some(parameter), Some(actual)) = (&parameter.application, &actual.application)
+                && parameter.declaration == actual.declaration
+            {
+                for (&parameter, &actual) in parameter.arguments.iter().zip(&actual.arguments) {
+                    pending.push((parameter, actual));
+                }
             }
         }
     }

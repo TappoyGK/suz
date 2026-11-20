@@ -343,6 +343,8 @@ fn constant_bool_raw(expr: &CheckedExpression) -> Option<bool> {
                         | Type::CPointer
                         | Type::CInteger(_)
                         | Type::Application(_)
+                        | Type::StaticShape(_)
+                        | Type::Shape(_)
                         | Type::Parameter(_)
                         | Type::GenericInt
                         | Type::GenericFloat
@@ -465,6 +467,8 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
         | Type::CPointer
         | Type::CInteger(_)
         | Type::Application(_)
+        | Type::StaticShape(_)
+        | Type::Shape(_)
         | Type::Parameter(_)
         | Type::GenericInt
         | Type::GenericFloat

@@ -74,7 +74,7 @@ pub(super) fn dependencies(
         ExpressionKind::Field { target, .. } => dependencies(target, names)?,
         ExpressionKind::Name(name) => names.push((name.clone(), expr.location)),
         ExpressionKind::Null
-        | ExpressionKind::FunctionValue(_)
+        | ExpressionKind::FunctionValue { .. }
         | ExpressionKind::Integer { .. }
         | ExpressionKind::Float(_)
         | ExpressionKind::Char(_)
@@ -212,7 +212,11 @@ impl Resolver<'_> {
         }
         let mut scope = self.bindings.clone();
         scope.constant_initializer = true;
-        let checked = expression(&declaration.initializer, declaration.annotation, &scope)?;
+        let annotation = declaration
+            .annotation
+            .map(|ty| scope.resolve_type_at(ty, declaration.location))
+            .transpose()?;
+        let checked = expression(&declaration.initializer, annotation, &scope)?;
         if super::arena::contains(checked.ty, &self.bindings) {
             return Err(declaration.location.error(
                 ErrorKind::InvalidSource,

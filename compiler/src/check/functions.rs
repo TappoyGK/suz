@@ -118,23 +118,8 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     super::ffi::signatures(program, &mut signatures)?;
     let main_id = signatures["main"].id;
     let signatures = Rc::new(signatures);
-    let mut function_types = program.function_types.clone();
-    for (id, signature) in function_types.iter_mut().enumerate() {
-        let location = program
-            .fnshapes
-            .iter()
-            .find(|d| d.type_id == id)
-            .unwrap()
-            .location;
-        for ty in signature
-            .parameters
-            .iter_mut()
-            .chain([&mut signature.result])
-        {
-            *ty = structs.resolve(*ty, &[], location)?;
-        }
-    }
     let scope = Scope {
+        function_types: structs.shapes.types.clone(),
         structs,
         has_operator_methods: program
             .functions
@@ -142,7 +127,6 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
             .any(|f| f.method.is_some_and(|m| m.operator.is_some())),
         functions: signatures,
         fnshapes: Rc::new(program.fnshapes.clone()),
-        function_types: Rc::new(std::cell::RefCell::new(function_types)),
         instances: Rc::new(std::cell::RefCell::new(super::generic::Instances::new(
             program.functions.len() + program.externs.len(),
         ))),
@@ -151,10 +135,22 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     let (globals, mut warnings) =
         declarations::resolve(&program.bindings, &program.enums, &program.structs, scope)?;
     for declaration in &program.fnshapes {
-        let signature = globals.function_types.borrow()[declaration.type_id].clone();
-        for ty in signature.parameters.into_iter().chain([signature.result]) {
-            super::type_parameters::struct_requirements(ty, &globals, declaration.location)?;
+        let mut context = globals.clone();
+        context.named = Rc::new(super::scope::NamedTypes {
+            type_parameters: Rc::new(declaration.type_parameters.clone()),
+            needs: Rc::new(declaration.needs.clone()),
+            ..Default::default()
+        });
+        super::type_parameters::definition_needs(&context, declaration.location)?;
+        let mut signature = program.function_types[declaration.type_id].clone();
+        for ty in signature
+            .parameters
+            .iter_mut()
+            .chain([&mut signature.result])
+        {
+            *ty = context.resolve_type_at(*ty, declaration.location)?;
         }
+        context.intern_function(signature);
     }
     for (id, declaration) in program
         .structs
@@ -190,6 +186,18 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
         )?;
         super::type_parameters::struct_requirements(ty, &context, declaration.location)?;
     }
+    for declaration in &program.structs {
+        let mut context = globals.clone();
+        context.named = Rc::new(super::scope::NamedTypes {
+            type_parameters: Rc::new(declaration.type_parameters.clone()),
+            needs: Rc::new(declaration.needs.clone()),
+            ..Default::default()
+        });
+        super::type_parameters::definition_needs(&context, declaration.location)?;
+        for field in &declaration.fields {
+            context.resolve_type_at(field.ty, field.location)?;
+        }
+    }
     let mut functions = Vec::new();
     check_instances(program, &globals, &mut functions, &mut warnings)?;
     for (id, function) in program.functions.iter().enumerate() {
@@ -200,6 +208,7 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
                 needs: Rc::new(function.needs.clone()),
                 ..Default::default()
             });
+            super::type_parameters::definition_needs(&context, function.location)?;
             let (_, found) = check_function(function, context, id)?;
             warnings.extend(found);
             continue;

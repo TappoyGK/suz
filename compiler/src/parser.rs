@@ -184,7 +184,7 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
         if !p.pending_needs.is_empty()
             && !matches!(
                 p.token().kind,
-                Kind::Symbol("@") | Kind::Keyword("fn" | "arena" | "struct")
+                Kind::Symbol("@") | Kind::Keyword("fn" | "arena" | "struct" | "fnshape")
             )
         {
             return Err(p.error(
@@ -203,6 +203,7 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
             Kind::Keyword("extern") => externs.extend(p.extern_block()?),
             Kind::Keyword("fix") => bindings.push(p.top_level_binding()?),
             Kind::Keyword("fnshape") => {
+                p.pending_needs.clear();
                 p.cursor = fnshapes.iter().find(|d| d.start == p.cursor).unwrap().end;
             }
             Kind::Keyword("struct") => {
@@ -288,7 +289,7 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
         ));
     }
     Ok(Program {
-        applications: applications.borrow().clone(),
+        applications: applications.borrow().entries.clone(),
         externs,
         allows: p.allows,
         fnshapes,

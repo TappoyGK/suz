@@ -15,6 +15,7 @@ use crate::{
 pub(super) fn value(
     expr: &Expression,
     name: &str,
+    explicit: &[Type],
     expected: Option<Type>,
     scope: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
@@ -41,15 +42,6 @@ pub(super) fn value(
         .get(name)
         .filter(|_| name != "main")
         .ok_or_else(error)?;
-    if signature.type_parameters != 0 {
-        return Err(expr.location.error(
-            ErrorKind::InvalidSource,
-            crate::diagnostic!(
-                "generic.type-arguments",
-                "generic function values require explicit type arguments"
-            ),
-        ));
-    }
     if signature.arena {
         return Err(expr.location.error(
             ErrorKind::InvalidSource,
@@ -67,6 +59,9 @@ pub(super) fn value(
                 "C functions cannot be used as Suz function values"
             ),
         ));
+    }
+    if signature.type_parameters != 0 || !explicit.is_empty() {
+        return super::type_parameters::function_value(expr, signature, explicit, expected, scope);
     }
     let mut types = GenericTypes::default();
     if signature.is_generic() {
@@ -225,10 +220,11 @@ pub(super) fn invoke(
 /// 型注釈のある文は独自の要求を持つため、ここでは分岐の結果だけをたどる。
 pub(super) fn require_context(expr: &Expression, scope: &Scope) -> Result<(), Diagnostic> {
     match &expr.kind {
-        ExpressionKind::FunctionValue(name)
-            if scope.functions.get(name).is_some_and(|s| s.is_generic()) =>
-        {
-            value(expr, name, None, scope)?;
+        ExpressionKind::FunctionValue {
+            name,
+            type_arguments,
+        } if scope.functions.get(name).is_some_and(|s| s.is_generic()) => {
+            value(expr, name, type_arguments, None, scope)?;
         }
         ExpressionKind::Group(v) | ExpressionKind::Block { value: v, .. } => {
             require_context(v, scope)?

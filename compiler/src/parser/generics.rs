@@ -268,14 +268,11 @@ impl Parser<'_, '_> {
                 errors,
                 location,
             };
-            if let Some(previous) = needs.iter().find(|n| n.same_operation(&need)) {
-                if !previous.same_signature(&need) {
-                    return Err(location.error(
-                        ErrorKind::InvalidSource,
-                        crate::diagnostic!("generic.needs", "conflicting requirement signatures"),
-                    ));
-                }
-            } else {
+            // 別名のfnshapeも同じ署名になりうるため、矛盾は型解決後に判定する。
+            if !needs
+                .iter()
+                .any(|n| n.same_operation(&need) && n.same_signature(&need))
+            {
                 needs.push(need);
             }
         }
@@ -321,19 +318,15 @@ impl Parser<'_, '_> {
         declaration: usize,
         arguments: Vec<crate::ast::Type>,
     ) -> crate::ast::Type {
+        crate::ast::Type::Application(self.apply_type(declaration, arguments))
+    }
+
+    pub(super) fn apply_type(&self, declaration: usize, arguments: Vec<crate::ast::Type>) -> usize {
         let application = crate::ast::generics::Application {
             declaration,
             arguments,
         };
-        let mut applications = self.applications.borrow_mut();
-        let id = applications
-            .iter()
-            .position(|a| a == &application)
-            .unwrap_or_else(|| {
-                applications.push(application);
-                applications.len() - 1
-            });
-        crate::ast::Type::Application(id)
+        self.applications.borrow_mut().intern(application)
     }
 
     pub(super) fn struct_type(

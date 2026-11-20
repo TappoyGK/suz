@@ -129,7 +129,7 @@ impl Parser<'_, '_> {
     pub(super) fn parse_type(&mut self) -> Result<Type, Diagnostic> {
         let location = self.location();
         let ty = self.type_atom()?;
-        if matches!(ty, Type::Function(_)) {
+        if matches!(ty, Type::Function(_) | Type::Shape(_)) {
             return Err(location.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(
@@ -194,7 +194,9 @@ impl Parser<'_, '_> {
                 ),
             ));
         }
-        if !layers.is_empty() && (ty == Type::Void || matches!(ty, Type::Function(_))) {
+        if !layers.is_empty()
+            && (ty == Type::Void || matches!(ty, Type::Function(_) | Type::Shape(_)))
+        {
             return Err(self.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!("arena.ptr-type", "pointer requires a stored value type"),
@@ -244,7 +246,11 @@ impl Parser<'_, '_> {
             self.cursor += 1;
         }
         if let Kind::Ident(name) = self.token().kind
-            && let Some(decl) = self.fnshapes.iter().find(|d| d.name == name)
+            && let Some((id, decl)) = self
+                .fnshapes
+                .iter()
+                .enumerate()
+                .find(|(_, d)| d.name == name)
         {
             if !marked {
                 return Err(self.error(
@@ -256,10 +262,36 @@ impl Parser<'_, '_> {
                 ));
             }
             self.cursor += 1;
-            return Ok(if persistent {
-                Type::StaticFunction(decl.type_id)
+            let count = decl.type_parameters.len();
+            let arguments = if self.token().kind == Kind::Symbol("[") {
+                if count == 0 {
+                    return Err(self.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "generic.type-arguments",
+                            "this fnshape has no type parameters"
+                        ),
+                    ));
+                }
+                self.delimited_list("[", "]", Self::type_argument)?
             } else {
-                Type::Function(decl.type_id)
+                Vec::new()
+            };
+            if arguments.len() != count {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "generic.type-arguments",
+                        "fnshape requires all {} type arguments explicitly",
+                        count
+                    ),
+                ));
+            }
+            let application = self.apply_type(id, arguments);
+            return Ok(if persistent {
+                Type::StaticShape(application)
+            } else {
+                Type::Shape(application)
             });
         }
         if marked {
@@ -460,17 +492,10 @@ impl Parser<'_, '_> {
         }
         let mut needs = self.declaration_needs()?;
         for need in inherited {
-            if let Some(previous) = needs.iter().find(|n| n.same_operation(&need)) {
-                if !previous.same_signature(&need) {
-                    return Err(location.error(
-                        ErrorKind::InvalidSource,
-                        crate::diagnostic!(
-                            "generic.needs",
-                            "method requirement conflicts with its struct requirement"
-                        ),
-                    ));
-                }
-            } else {
+            if !needs
+                .iter()
+                .any(|n| n.same_operation(&need) && n.same_signature(&need))
+            {
                 needs.push(need);
             }
         }

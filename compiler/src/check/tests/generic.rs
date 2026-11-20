@@ -87,3 +87,20 @@ fn generic_calls_inside_deep_value_blocks_are_checked_once() {
         }
     }).unwrap().join().unwrap();
 }
+
+#[test]
+fn named_function_values_reuse_direct_call_instances() {
+    let prefix = "fn identity[T](x: T) -> T { return x }\nfn unused[T](x: T) -> T { return x }\n";
+    assert_eq!(
+        function_count(&format!(
+            "{prefix}fn main() -> u8 {{ fix x = identity[i32](1)\nfix f = fn identity[i32]\nfix g = fn identity[i32]\nreturn 0 }}"
+        )),
+        2
+    );
+    assert_eq!(
+        function_count(&format!(
+            "{prefix}fn main() -> u8 {{ fix f = fn identity[i32]\nfix g = fn identity[bool]\nreturn 0 }}"
+        )),
+        3
+    );
+}

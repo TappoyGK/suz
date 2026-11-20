@@ -67,7 +67,7 @@ pub(crate) fn walk_expression<V: Visitor + ?Sized>(
             visitor.expression(target)?
         }
         ExpressionKind::Closure(closure) => visitor.scope(&closure.function.statements, None)?,
-        ExpressionKind::FunctionValue(_) => {}
+        ExpressionKind::FunctionValue { .. } => {}
         ExpressionKind::Invoke { target, arguments }
         | ExpressionKind::MethodCall {
             target, arguments, ..

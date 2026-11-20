@@ -299,6 +299,57 @@ impl Parser<'_, '_> {
         self.nested(self.location(), Self::unary_inner)
     }
 
+    fn function_value_node(
+        &mut self,
+        location: crate::ast::Location,
+    ) -> Result<Expression, Diagnostic> {
+        self.cursor += 1;
+        if self.token().kind == Kind::Symbol("[") {
+            return self.closure_node(location);
+        }
+        let Kind::Ident(name) = self.token().kind else {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("fn.value-mark", "fn requires a function name"),
+            ));
+        };
+        self.cursor += 1;
+        if matches!(self.token().kind, Kind::Symbol("." | "#")) {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "method.no-fn-value",
+                    "methods cannot be extracted as function values"
+                ),
+            ));
+        }
+        let type_arguments = if self.token().kind == Kind::Symbol("[") {
+            let arguments = self.delimited_list("[", "]", Self::type_argument)?;
+            if arguments.is_empty() {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "generic.type-arguments",
+                        "at least one type argument is required"
+                    ),
+                ));
+            }
+            arguments
+        } else {
+            Vec::new()
+        };
+        if matches!(self.token().kind, Kind::Symbol("(" | "." | "[")) {
+            return Err(self.error(ErrorKind::InvalidSource, crate::diagnostic!("fn.value-mark", "fn applies to a function name only; parenthesize the function value before calling it")));
+        }
+        self.primary_node(
+            ExpressionKind::FunctionValue {
+                name: name.into(),
+                type_arguments,
+            },
+            location,
+        )
+    }
+
     fn unary_inner(&mut self) -> Result<Expression, Diagnostic> {
         if self.constant_expression
             && matches!(
@@ -316,32 +367,7 @@ impl Parser<'_, '_> {
         }
         let location = self.location();
         let kind = match self.token().kind {
-            Kind::Keyword("fn") => {
-                self.cursor += 1;
-                if self.token().kind == Kind::Symbol("[") {
-                    return self.closure_node(location);
-                }
-                let Kind::Ident(name) = self.token().kind else {
-                    return Err(self.error(
-                        ErrorKind::InvalidSource,
-                        crate::diagnostic!("fn.value-mark", "fn requires a function name"),
-                    ));
-                };
-                self.cursor += 1;
-                if matches!(self.token().kind, Kind::Symbol("." | "#")) {
-                    return Err(self.error(
-                        ErrorKind::InvalidSource,
-                        crate::diagnostic!(
-                            "method.no-fn-value",
-                            "methods cannot be extracted as function values"
-                        ),
-                    ));
-                }
-                if matches!(self.token().kind, Kind::Symbol("(" | "." | "[")) {
-                    return Err(self.error(ErrorKind::InvalidSource, crate::diagnostic!("fn.value-mark", "fn applies to a function name only; parenthesize the function value before calling it")));
-                }
-                return self.primary_node(ExpressionKind::FunctionValue(name.into()), location);
-            }
+            Kind::Keyword("fn") => return self.function_value_node(location),
             Kind::Keyword("if") => {
                 return Err(self.error(
                     ErrorKind::InvalidSource,

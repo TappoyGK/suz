@@ -304,3 +304,6 @@ mod type_parameters;
 
 #[path = "spec_cases/generic_structs.rs"]
 mod generic_structs;
+
+#[path = "spec_cases/generic_function_values.rs"]
+mod generic_function_values;
