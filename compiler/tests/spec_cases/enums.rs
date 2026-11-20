@@ -142,8 +142,8 @@ fn enum_types_remain_nominal_and_require_checked_conversions() {
     for (body, rule) in [
         ("fix wrong: Second = First.A", "type.expected"),
         ("First.A == Second.A", "type.expected"),
-        ("First.A < First.B", "expr.operator-types"),
-        ("First.A + First.B", "expr.operator-types"),
+        ("First.A < First.B", "operator.overload"),
+        ("First.A + First.B", "operator.overload"),
         ("fix wrong: First = 0", "type.expected"),
         ("fix raw: u8 = 0\nraw as First", "expr.cast-handler"),
         ("256 as First", "const.cast-check"),

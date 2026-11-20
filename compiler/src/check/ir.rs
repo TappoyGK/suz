@@ -31,6 +31,7 @@ pub(crate) struct CheckedProgram {
 /// 名前を関数番号へ置き換え、仮引数と戻り値の型、本体のIRを保持する。
 #[derive(Clone)]
 pub(crate) struct CheckedFunction {
+    pub mutable_receiver: bool,
     pub id: usize,
     pub parameters: Vec<Type>,
     pub result: Type,
@@ -127,6 +128,8 @@ pub(crate) enum CheckedStatement {
     },
     Assign {
         location: Location,
+        // フィールド経路の各段で、通常の構造体かC構造体かを判定するための元変数の型。
+        root_type: Type,
         fields: Vec<usize>,
         id: usize,
         ty: Type,
@@ -221,6 +224,11 @@ impl IntegerOperation {
 /// 値ブロックには捕捉した変数を、汎用リテラルには具体化まで必要な綴りを残す。
 #[derive(Clone)]
 pub(crate) enum Value {
+    /// 呼び出しの第1引数。型は受け手の値の型だが、更新時は実体の位置を渡す。
+    Receiver {
+        target: Box<CheckedExpression>,
+        mutable: bool,
+    },
     New {
         value: Box<CheckedExpression>,
         location: Location,
@@ -358,6 +366,8 @@ pub(crate) enum Value {
         right: Box<CheckedExpression>,
     },
     Comparison {
+        // 空なら全て組み込み比較。Some(id)は比較メソッドの具体化済み関数ID。
+        methods: Vec<Option<usize>>,
         operators: Vec<ComparisonOperator>,
         operands: Vec<CheckedExpression>,
     },
@@ -393,7 +403,7 @@ macro_rules! constant_children_visitor {
                     }
                     return handler(h, visit);
                 }
-                Self::New { value: v, .. } | Self::Deref(v) | Self::NonNull(v) | Self::CBytes(v) | Self::CByteLen { operand: v, .. } | Self::FunctionBorrow(v) | Self::Len(v) | Self::Cast(v) | Self::Negate(v) | Self::Truncate(v) | Self::BitNot(v)
+                Self::Receiver { target: v, .. } | Self::New { value: v, .. } | Self::Deref(v) | Self::NonNull(v) | Self::CBytes(v) | Self::CByteLen { operand: v, .. } | Self::FunctionBorrow(v) | Self::Len(v) | Self::Cast(v) | Self::Negate(v) | Self::Truncate(v) | Self::BitNot(v)
                 | Self::Not(v) | Self::TextView(v) | Self::Intern { operand: v, .. }
                 | Self::Field { target: v, .. } => visit(v),
                 // constant_structはオペランドの解析から得た具体的なキャッシュであり、ソースのオペランドではない。
@@ -406,10 +416,11 @@ macro_rules! constant_children_visitor {
                     visit(left);
                     visit(right);
                 }
-                Self::Comparison { operands, .. } => {
+                Self::Comparison { operands, methods, .. } => {
                     for value in operands {
                         visit(value);
                     }
+                    return !methods.iter().any(Option::is_some);
                 }
                 Self::Template { parts, .. } => {
                     for part in parts {

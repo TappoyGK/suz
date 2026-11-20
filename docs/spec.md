@@ -8,7 +8,7 @@ Suz は、ガベージコレクタを使わない、メモリ安全なプログ�
 
 ### 1.1 範囲
 
-Suzのプログラムはメモリの確保と解放を直接行わない。FFIでは読み取り専用のバイト列を指すポインタの保持・受け渡しだけを認める（[ffi.pointer-type]）。ランタイム内部のメモリ確保はランタイム仕様に従う。値の受け渡しは、[1.3 節](#13-値の受け渡し)の原則に従う。
+Suzのプログラムはメモリの確保と解放を直接行わない。FFIでは文字列のバイト列と、Arena内の対応する型の実体をポインタでCへ渡せる（[ffi.pointer-type]・[ffi.arena-pointer]）。ランタイム内部のメモリ確保はランタイム仕様に従う。値の受け渡しは、[1.3 節](#13-値の受け渡し)の原則に従う。
 
 Suzは次のものを含む。
 
@@ -20,7 +20,7 @@ Suzは次のものを含む。
 
 ### 1.2 安全性
 
-正しい Suz のプログラムは、未定義動作を起こさない。ただし、FFIでは呼び出すC関数の契約を守る責任を呼び出し側が持ち、C側の不正動作はこの保証に含めない（[ffi.unsafe]）。整数演算では、[9 章](#9-実行時の検査)で定める検査に違反し、対応する `or` がないときにパニックする。失敗しうる `as` と、`symbol`・`text` からの `as%` は、変換失敗を `or` で処理する。ラップする算術と `as%` はビット幅に収める規則に従い、浮動小数点数の演算は IEEE 754 に従う。
+正しい Suz のプログラムは、未定義動作を起こさない。ただし、FFIでは呼び出すC関数の契約を守る責任を呼び出し側が持ち、C側の不正動作はこの保証に含めない（[ffi.trusted]）。整数演算では、[9 章](#9-実行時の検査)で定める検査に違反し、対応する `or` がないときにパニックする。失敗しうる `as` と、`symbol`・`text` からの `as%` は、変換失敗を `or` で処理する。ラップする算術と `as%` はビット幅に収める規則に従い、浮動小数点数の演算は IEEE 754 に従う。
 
 ### 1.3 値の受け渡し
 
@@ -71,7 +71,7 @@ Suzは次のものを含む。
 **[src.keywords]** 次の語はキーワードである。
 
 ```text
-fix var fn fnshape static struct enum error extern unsafe arena new ptr null let objection
+fix var fn fnshape self static struct enum error extern trusted arena new ptr null let objection
 if ifexpr elif else while loop for rev in break continue return match matchexpr
 as or not len c_bytes c_byte_len log panic fail ignore recover allow expr with
 true false nan inf
@@ -174,7 +174,9 @@ fix lower = -inf      // f64 の負の無限大
 
 - 文自体は数えない。文に書いた式とブロックは、その文を含むブロックより1段深い。条件、`match`の対象とパターン、`for`・`rev`の反復対象と範囲の両端も同じであり、範囲演算子は別の段として数えない。
 - `if`・`elif`・`else`・`while`・`loop`・`for`・`rev`の本体、`match`の腕、ブロック文、`allow`のブロックは、それぞれ1つのブロックとして数える。腕の本体を式だけで書く場合も、その式を含むブロックを1段として数える。
-- リテラル、名前、丸括弧、単項・二項演算子、`new`、参照解除の`*`、`len`、`as`・`as%`、`or`、関数呼び出し、構造体リテラル、テンプレート、フィールド参照、切り出し・添字、`with`を、それぞれ1つの式として数える。各オペランド、実引数、初期値、添字・切り出しの境界、テンプレートの埋め込みの式は、その式より1段深い。`with`のコピー元と初期値も、その`with`より1段深い。
+- リテラル、名前、丸括弧、単項・二項演算子、`new`、参照解除の`.`、`len`、`as`・`as%`、`or`、関数呼び出し、構造体リテラル、テンプレート、フィールド参照、切り出し・添字、`with`を、それぞれ1つの式として数える。各オペランド、実引数、初期値、添字・切り出しの境界、テンプレートの埋め込みの式は、その式より1段深い。`with`のコピー元と初期値も、その`with`より1段深い。
+- 書き換え対象の`#p`も参照解除と同じく1段として数え、対象の式pをその1段下とする。
+- メソッド呼び出しは全体で1つの式として数え、受け手と各実引数をその1段下とする。フィールドの関数値を`obj.callback(...)`と呼ぶ場合も同じとする。
 - `fn 関数名` は1つの式として数える。名前で呼ぶ `f(x)` の名前は別の段として数えない。それ以外の呼び出しでは、呼び出し対象の式も呼び出しより1段深い。
 - クロージャは1つの式として数える。本体のブロックはその式より1段深く、本体の文の式はさらにその下とする。本体で数え直さない。キャプチャー一覧の名前と仮引数は数えない。
 - 左結合の並びは演算ごとに1段を数える。比較の連鎖は全体で1つの式とし、各オペランドはその1段下とする。
@@ -266,7 +268,7 @@ fn main() -> u8 {
 
 **[type.expected]** 変数・定数の型注釈、代入先の型、関数の仮引数型と戻り値型を、その位置に書く式に要求される型とする。式の型は、認められる暗黙変換を適用した後で、要求される型と一致しなければならない。数値の暗黙変換は [conv.widen]、`symbol` から `text` への暗黙変換は [text.from-symbol] に従う。
 
-**[type.propagation]** 整数の算術式では、結果に要求される型を格納先の型として使う（[arith.store]）。ラップする算術、ビット演算、`~`、論理演算では、結果に要求される型をオペランドにも要求する。浮動小数点演算には [arith.float]、比較・シフト・型変換には [type.propagation-boundary] を適用する。`ifexpr` と `matchexpr` では、結果に要求される型を各分岐へ伝える。値を返すブロックでは、その型を末尾の式へ伝える。
+**[type.propagation]** 演算子メソッドには [operator.call] を適用する。以下は組み込み演算の規則である。整数の算術式では、結果に要求される型を格納先の型として使う（[arith.store]）。ラップする算術、ビット演算、`~`、論理演算では、結果に要求される型をオペランドにも要求する。浮動小数点演算には [arith.float]、比較・シフト・型変換には [type.propagation-boundary] を適用する。`ifexpr` と `matchexpr` では、結果に要求される型を各分岐へ伝える。値を返すブロックでは、その型を末尾の式へ伝える。
 
 ```suz
 fix mask: u8 = 1 | 2  // 両辺と結果は u8
@@ -409,7 +411,7 @@ fn main() -> u8 {
 
 **[struct.with-eval]** 左の式を最初に 1 回だけ評価し、構造体の値を保存する。続いて、初期値を書いた順に 1 回ずつ評価し、保存した値の対応するフィールドを差し替える。初期値の評価中にコピー元の変数が変更されても、保存済みの値には影響しない。
 
-初期値の式から呼ぶ関数が参照先を書き換えるなど、式の評価による副作用は通常どおり発生する。たとえば `state` が `ptr State` のとき、`(*state) with { x: change_state(state) }` で `change_state` が `state.y` を変更しても、結果の `y` は関数を呼ぶ前に保存した値となる。参照先の実体には、その関数による変更が残る。
+初期値の式から呼ぶ関数が参照先を書き換えるなど、式の評価による副作用は通常どおり発生する。たとえば `state` が `ptr State` のとき、`(.state) with { x: change_state(state) }` で `change_state` が `state.y` を変更しても、結果の `y` は関数を呼ぶ前に保存した値となる。参照先の実体には、その関数による変更が残る。
 
 **[struct.with-const]** 左の式と初期値がすべて定数式である `with` 式は、定数式である。[const.expression] の構成要素に加える。
 
@@ -567,7 +569,7 @@ count += 1
 
 ### 6.3 代入
 
-**[assign.target]** 代入は `代入先 = 式` と書く。代入先は、ブロック内の `var` で宣言した変数、またはそのフィールドである。入れ子の構造体のフィールドも代入先にできる。それ以外への代入はコンパイルエラーである。
+**[assign.target]** 代入は `代入先 = 式` と書く。代入先は、ブロック内の `var` で宣言した変数、またはそのフィールドである。フィールドへの代入では、最後のメンバー名の直前だけに`#`を置く。`v#x = 値`、入れ子なら`v.pos#x = 値`と書き、途中の`.`は元の実体のフィールドをたどる。`v.x = 値`や`v#pos#x = 値`は認めない。`v#x`は書き換え対象の指定であり、値式には使えない。変数自身への代入は`v = 値`とする。ポインタを通した更新には [arena.ptr-operations] を適用し、それ以外への代入はコンパイルエラーである。
 
 **[assign.type]** 通常の代入では、右辺に代入先の型を要求し、[conv.widen] と [text.from-symbol] の暗黙変換を認める。算術式の格納には [arith.store] を適用する。要求を満たさない場合はコンパイルエラーである。
 
@@ -586,10 +588,10 @@ var count: i32 = 0
 count += 1
 
 var p = Vec2 { x: 0.0, y: 0.0 }
-p.x = 1.0
+p#x = 1.0
 ```
 
-この例では、`p.x` への代入によって、`p` は [var.never-reassigned] の条件を満たす。
+この例では、`p#x` への代入によって、`p` は [var.never-reassigned] の条件を満たす。
 
 ```suz
 count =
@@ -664,7 +666,7 @@ if p == (Vec2 { x: 0.0, y: 0.0 }) {
 
 ### 7.5 論理否定
 
-**[expr.not]** 論理否定は `not` と書く。`bool` 型の式を受け取り、`true` なら `false`、`false` なら `true` を返す。結果の型は `bool` である。`bool` 以外に使うとコンパイルエラーである。
+**[expr.not]** struct・enumには [operator.unary] を適用する。組み込みの論理否定は `not` と書く。`bool` 型の式を受け取り、`true` なら `false`、`false` なら `true` を返す。結果の型は `bool` である。`bool` と演算子メソッドを定義した型以外に使うとコンパイルエラーである。
 
 **[expr.not-precedence]** `not` は単項演算子であり、単項の `-` と同じ優先順位である。関数呼び出しとフィールド参照より弱く、二項演算より強く結合する。`not not ready` は `not (not ready)` と解釈する。
 
@@ -676,7 +678,7 @@ if not ready {
 
 ### 7.6 演算子と型
 
-**[expr.operator-types]** 演算子が受け付ける型と結果の型は、次のとおりである。条件を満たさない式はコンパイルエラーである。
+**[expr.operator-types]** struct・enumの演算子メソッドには8.15節を適用する。組み込み演算子が受け付ける型と結果の型は、次のとおりである。条件を満たさない式はコンパイルエラーである。
 
 | 演算子 | オペランドの型 | 結果の型 |
 |---|---|---|
@@ -705,7 +707,7 @@ if not ready {
 | 順位 | 演算 |
 |---|---|
 | 1 | 関数呼び出し、フィールド参照、切り出し・添字の `[ ]` |
-| 2 | 単項 `-` `not` `~` `len` `new` `*` |
+| 2 | 単項 `-` `not` `~` `len` `new` `.` |
 | 3 | `as` `as%` |
 | 4 | `*` `/` `%` `*%` |
 | 5 | `+` `-` `+%` `-%` |
@@ -732,9 +734,9 @@ if not ready {
 
 **[expr.int-division]** 整数の `/` は、数学的な商を 0 の方向へ切り捨てる。`%` はその商に対応する剰余であり、`a % b` は数学的な値 `a - (a / b) * b` に等しい。剰余が 0 でなければ、その符号は左辺と同じである。たとえば、`-7 / 3` は `-2`、`-7 % 3` は `-1` である。ゼロ除算と結果の格納時の検査は9.2節に従う。最小値を `-1` で割る場合も商と剰余を正確に求める。
 
-**[expr.bitwise]** `&` はビットごとの AND、`|` は OR、`^` は XOR、`~` は全ビットの反転である。演算は型のビット幅で行う。符号付き整数は 2 の補数表現として扱い、結果も 2 の補数として解釈する。
+**[expr.bitwise]** 以下は組み込み整数に対する規則である。struct・enumには [operator.method]・[operator.unary] を適用する。`&` はビットごとの AND、`|` は OR、`^` は XOR、`~` は全ビットの反転である。演算は型のビット幅で行う。符号付き整数は 2 の補数表現として扱い、結果も 2 の補数として解釈する。
 
-**[expr.shift]** `a << b` は、数学的に `a` に 2^b を掛けた値である。符号付き整数の `>>` は符号ビットで埋め、符号なし整数の `>>` は 0 で埋める。シフト数と左シフトの結果の検査は 9.2 節に従う。
+**[expr.shift]** 以下は組み込み整数に対する規則であり、struct・enumには [operator.method] を適用する。`a << b` は、数学的に `a` に 2^b を掛けた値である。符号付き整数の `>>` は符号ビットで埋め、符号なし整数の `>>` は 0 で埋める。シフト数と左シフトの結果の検査は 9.2 節に従う。
 
 ### 7.10 比較
 
@@ -1041,7 +1043,7 @@ fix first = (line[5:] or ``)[0] or '?'
 
 **[len.expr]** `len 式` は、式を一度だけ評価し、その値の要素の個数を返す。
 
-**[len.targets]** `len` は `symbol` と `text` のUnicodeスカラー値の個数を `len_t` で返す。他の型に使うとコンパイルエラーである。コンテナ型を追加するときは、個数の単位と結果の型をこの規則に追加する。2^31−1を超える要素数を持つコンテナは別の型として定め、より大きな結果の型を使う。
+**[len.targets]** `len` は `symbol` と `text` のUnicodeスカラー値の個数を `len_t` で返す。struct・enumには [operator.unary] の定義を使い、それ以外の型に使うとコンパイルエラーである。組み込みのコンテナ型を追加するときは、個数の単位と結果の型をこの規則に追加する。2^31−1を超える要素数を持つコンテナは別の型として定め、より大きな結果の型を使う。
 
 **[len.limit]** `len` の結果の型が `len_t` であるコンテナの要素数は2^31−1以下である。`symbol` のUnicodeスカラー値の個数はこの上限に従い、その一部を指す `text` も同じ上限に収まる。
 
@@ -1122,7 +1124,7 @@ fix narrow: u8 = a + b or 0 // 格納に失敗し、代替値0を使う
 
 シフト数を除き、以下のビット幅に関する演算の整数型に `len_t` は含めない。
 
-**[width.same-type]** ラップする算術と二項のビット演算では、両オペランドに同じ整数型を要求する。単項の `~` はオペランドの整数型を結果の型とする。シフトは左オペランドの整数型を結果の型とし、右オペランドには任意の整数型または正確な算術式を認める。これらのオペランドには拡大変換を適用しない。
+**[width.same-type]** 以下は組み込み演算の規則であり、演算子メソッドには [operator.overload] を適用する。ラップする算術と二項のビット演算では、両オペランドに同じ整数型を要求する。単項の `~` はオペランドの整数型を結果の型とする。シフトは左オペランドの整数型を結果の型とし、右オペランドには任意の整数型または正確な算術式を認める。これらのオペランドには拡大変換を適用しない。
 
 **[width.boundary]** [width.same-type] の演算のオペランドに算術式を使う場合は、その結果を整数型へ格納してから演算する。格納先の型は、次の順に決める。
 
@@ -1508,14 +1510,14 @@ fn main() -> u8 {
 
 ### 8.11 C関数の呼び出し
 
-**[ffi.decl]** `.suz`のトップレベルに `extern "ヘッダー名" { fn C名(仮引数...) -> 型 }` と書く。関数宣言は改行で区切る。宣言はファイル内だけで有効で、モジュールや別の宣言ファイルを必要としない。本体、`impl fn`、`or Error`は書けない。`.sif`への宣言は認めない。
+**[ffi.decl]** `.suz`のトップレベルに `extern "ヘッダー名" { fn C名(仮引数...) -> 型 }` と書く。関数宣言と [ffi.struct] の構造体宣言は改行で区切る。宣言はファイル内だけで有効で、モジュールや別の宣言ファイルを必要としない。本体、`impl fn`、`or Error`は書けない。`.sif`への宣言は認めない。
 
 ```suz
 extern "stdlib.h" {
     fn abs(value: _int) -> _int
 }
 fn main() -> u8 {
-    unsafe {
+    trusted {
         if abs(-7) != 7 { return 1 }
     }
     return 0
@@ -1526,9 +1528,26 @@ fn main() -> u8 {
 
 **[ffi.name]** `fn C名 as Suz名(...) -> 型`で別名を付ける。C名はCの識別子の綴りとし、Suzの予約語や組み込み型名と同じ綴りも認める。Suz名には通常の関数名の規則と予約語・組み込み名との衝突禁止を適用し、`main`も使えない。`as Suz名`を省略するとC名をSuz名にする。例えばCの`log`は `fn log as natural_log(value: f64) -> f64` と宣言する。照合とリンクはC名で行う。`suz_`で始まるC名はランタイムの内部名として予約し、別名の有無によらず拒否する。
 
-**[ffi.duplicate]** 同じファイル内で同じC名を複数回宣言すると、ヘッダー・別名・型が同じかどうかによらずコンパイルエラーである。Suz名には [decl.duplicate]・[decl.shadowing] を適用する。
+**[ffi.duplicate]** 同じファイル内で同じC関数名または同じC構造体タグを複数回宣言すると、ヘッダー・別名・型が同じかどうかによらずコンパイルエラーである。C関数名とC構造体タグの重複は認める。Suz名には [decl.duplicate]・[decl.shadowing] を適用する。
 
-**[ffi.type]** externの引数・戻り値には固定幅整数型、`f32`・`f64`・`bool`、下記のC固有型を使える。`void`は戻り値だけ、`*const void`は引数だけに使える。`len_t`・`char`・`text`・`symbol`・汎用型・構造体・列挙型・エラー型・関数値は使えない。Cとの対応表は [runtime.ffi-types] に定める。
+**[ffi.type]** externの引数・戻り値には固定幅整数型、`f32`・`f64`・`bool`、下記のC固有型を使える。`void`は戻り値だけに使える。引数にはさらに`*const void`と [ffi.arena-pointer] の型付きポインタを使える。`len_t`・`char`・`text`・`symbol`・汎用型・構造体・列挙型・エラー型・関数値は使えない。Cとの対応表は [runtime.ffi-types] に定める。
+
+**[ffi.struct]** externブロック内に `struct Cタグ as Suz名 { フィールド名: 型, ... }` と宣言できる。Cタグはヘッダーの `struct Cタグ` を指し、typedef名やunion名ではない。Suz名は [name.type] に従い、Cタグがその規則を満たす場合は `as Suz名` を省略できる。`suz_`で始まるCタグは [ffi.name] により拒否する。
+
+フィールドは宣言順に並べ、名前には [name.value] を適用する。使える型はi8〜i64・u8〜u64、f32・f64、C固有整数型である。空の宣言、フィールド名の重複、bool・len_t・char・文字列・ポインタ・構造体・列挙型・関数値のフィールドは認めない。C側の配列、ビットフィールド、const・volatile・atomicのフィールドも対象外とする。
+
+Suz内では通常の構造体と同じく初期化・コピー・フィールドの読み書き・with・メソッド・newに使える。各フィールドの型に応じた通常の制約を適用する。C構造体もextern関数の値引数・戻り値には使えない。ヘッダーとの配置・型の照合は [tool.ffi-header] に従う。
+
+```suz
+extern "time.h" {
+    struct timespec as Timespec {
+        tv_sec: _long,
+        tv_nsec: _long,
+    }
+}
+```
+
+この宣言は、対象環境の `struct timespec` が指定した型・配置と一致する場合に使える。
 
 **[ffi.c-integer]** `_int`・`_uint`・`_long`・`_ulong`・`_size_t`・`_char`はそれぞれCの `int`・`unsigned int`・`long`・`unsigned long`・`size_t`・`char` に対応する別々の組み込み型である。externの内外で使え、値の保持、関数の引数・戻り値、構造体のフィールド、同じ型同士の等値・順序比較を認める。型の幅・符号・範囲はCの対象環境に従う。汎用型`int`には含めない。C固有型は通常の整数型を対象にした算術・ビット演算・反復・添字・テンプレート埋め込みの規則には含めず、それらの操作ではSuzの型へ明示的に変換する。文字列からC固有型およびそれを含む構造体への変換も認めない。
 
@@ -1536,21 +1555,25 @@ fn main() -> u8 {
 
 **[ffi.cast]** C固有型とSuzの整数型・浮動小数点型との変換、およびC固有型同士の変換は明示的に行う。異なる型への暗黙変換はない。`as`でC固有型またはSuzの整数型に変換する場合は、同じ型への変換を除き`or`を必須とし、変換先の範囲外なら既存の失敗処理を行う。浮動小数点からは0方向へ丸めた整数の範囲を検査し、NaN・無限大は失敗する。C固有型から浮動小数点型へは最近接・偶数丸めを行い、`or`を省略できる。`as%`は整数同士だけに認め、変換先のビット幅の下位ビットを使う。符号付きの変換先ではそのビット列を2の補数として解釈する。`len_t`を`as%`の変換先にはできない。整数の`as%`に`or`は付けない。
 
-**[ffi.unsafe]** extern関数の呼び出しと`c_bytes`は字句的に `unsafe { ... }` の内側だけで許可する。通常のブロックと同じスコープを作り、`return`・`break`・`continue`にも既存の規則を適用する。unsafeは別の関数・クロージャの本体へ引き継がない。unsafe内でも型・範囲などの検査を省略しない。呼び出すC APIの契約を守る責任を示す構文であり、Cの不正動作を検出・防止する保証ではない。C固有型の保持・比較・変換にはunsafeは不要である。
+**[ffi.trusted]** extern関数の呼び出しと`c_bytes`は字句的に `trusted { ... }` の内側だけで許可する。通常のブロックと同じスコープを作り、`return`・`break`・`continue`にも既存の規則を適用する。trustedは別の関数・クロージャの本体へ引き継がない。trusted内でも型・範囲・寿命の検査を省略しない。C固有型の保持・比較・変換にはtrustedは不要である。
 
-**[ffi.function-value]** extern関数は名前による直接呼び出しだけに使える。`fn 名前`による関数値化はunsafe内でもコンパイルエラーである。関数値が必要なら、内部のunsafeでC関数を呼ぶ通常のSuz関数を用意し、その関数を値にする。
+Suzが検証できない外部APIの契約をプログラマーが保証する構文である。C側の契約遵守に加え、呼び出し側が引数、実体の寿命、読み書きの範囲、APIが要求する同期などの条件を守ることを含む。Cが参照を保持する場合、ブロックを抜けてもCによる最後の利用まで契約を守る責任は続く。C内部の動作を証明したり、不正動作を検出・防止したりする保証ではない。Suz内の寿命検査が証明できなかった判断への異議を示すobjectionとは役割が異なり、trustedによって寿命検査を解除することはできない。
 
-### 8.12 Cへのバイト列の受け渡し
+**[ffi.function-value]** extern関数は名前による直接呼び出しだけに使える。`fn 名前`による関数値化はtrusted内でもコンパイルエラーである。関数値が必要なら、内部のtrustedでC関数を呼ぶ通常のSuz関数を用意し、その関数を値にする。
 
-**[ffi.pointer-type]** `*const void`はCの`const void *`に対応し、Suzが管理する不変のバイト列を指す。ポインタを作る操作は`c_bytes`だけとする。ローカルの`fix`・`var`、通常のSuz関数の仮引数・戻り値、構造体のフィールドに保持・コピーできる。保持・受け渡し自体にunsafeは不要である。externでは引数だけに使え、ポインタを返すC関数は宣言できない。externで使えるポインタ型はこれだけとする。Suz内の `ptr T` は8.13節に従い、Cとの間では受け渡せない。この型表記内の`const`は修飾語であり、予約語には追加しない。
+### 8.12 Cへのポインタの受け渡し
 
-**[ffi.pointer-operations]** ポインタの比較・算術・ビット演算・型変換・テンプレートへの埋め込み・参照先の読み書きは認めない。ポインタを含む構造体の比較や、文字列からその構造体への変換も認めない。整数や文字列値からの暗黙変換、NULLリテラルもない。
+#### 8.12.1 文字列のバイト列
+
+**[ffi.pointer-type]** `*const void`はCの`const void *`に対応し、Suzが管理する不変のバイト列を指す。ポインタを作る操作は`c_bytes`だけとする。ローカルの`fix`・`var`、通常のSuz関数の仮引数・戻り値、構造体のフィールドに保持・コピーできる。保持・受け渡し自体にtrustedは不要である。externでは引数だけに使え、ポインタを返すC関数は宣言できない。Arenaの実体を渡す型付きポインタは [ffi.arena-pointer] に従う。`*const void`とSuzの`ptr T`の間では変換・受け渡しを認めない。この型表記内の`const`は修飾語であり、予約語には追加しない。
+
+**[ffi.pointer-operations]** `*const void`の比較・算術・ビット演算・型変換・テンプレートへの埋め込み・参照先の読み書きは認めない。ポインタを含む構造体の比較や、文字列からその構造体への変換も認めない。整数や文字列値からの暗黙変換、NULLリテラルもない。
 
 **[ffi.bytes-source]** `c_bytes 式`と`c_byte_len 式`の対象には`symbol`または`text`を要求する。関数ではなく`len`と同じ優先順位の前置構文であり、対象式をそれぞれ1回だけ評価する。`c_bytes make_message()`のように関数の戻り値にも使える。これらの操作はSuzの定数式には含めない。
 
-**[ffi.bytes]** `c_bytes`は対象範囲の先頭を指す`*const void`を返す。字句的にunsafeの内側でだけ使える。文字列の実体をコピーせず、動的確保やNUL終端の追加も行わない。対象式自身が文字列を生成するときの確保はこの制約に含めない。
+**[ffi.bytes]** `c_bytes`は対象範囲の先頭を指す`*const void`を返す。字句的にtrustedの内側でだけ使える。文字列の実体をコピーせず、動的確保やNUL終端の追加も行わない。対象式自身が文字列を生成するときの確保はこの制約に含めない。
 
-**[ffi.byte-len]** `c_byte_len`は対象範囲のUTF-8バイト数を`_size_t`で返す。unsafeの外でも使える。Unicodeスカラー値の個数を返す`len`とは異なり、埋め込みNULも1バイトとして数える。空の範囲のバイト数は0である。
+**[ffi.byte-len]** `c_byte_len`は対象範囲のUTF-8バイト数を`_size_t`で返す。trustedの外でも使える。Unicodeスカラー値の個数を返す`len`とは異なり、埋め込みNULも1バイトとして数える。空の範囲のバイト数は0である。
 
 **[ffi.bytes-contract]** ポインタが指すバイト列は、元のローカル束縛のスコープを抜けてもプロセス終了まで生存する。C側で呼び出し後に保持してよいが、変更・解放してはいけない。ポインタと長さが同じ範囲を表すこと、C側がその範囲だけを読むことは呼び出し側の責任である。切り出したtextは切り出し位置からの範囲を渡す。空の範囲ではC側は1バイトも読んではならない。NUL終端は保証しないため、NUL終端や書き込みバッファを要求するAPIにはC側のラッパーを用意する。
 
@@ -1560,7 +1583,7 @@ extern "output.h" {
 }
 fn main() -> u8 {
     fix msg = `こんにちは\n`
-    unsafe {
+    trusted {
         if output_bytes(c_bytes msg, c_byte_len msg) < 0 { return 1 }
     }
     return 0
@@ -1569,13 +1592,82 @@ fn main() -> u8 {
 
 この例の`output.h`と`output_bytes`の実体はCライブラリ側が提供する。両方の操作へ同じ値を渡すため、メッセージを一度`msg`へ束縛している。
 
+#### 8.12.2 Arenaの実体
+
+**[ffi.arena-pointer]** externの仮引数には、Cが読み取るための `*const T` と、Cが読み書きするための `*T` を指定できる。Tはi8〜i64・u8〜u64、f32・f64、C固有整数型、externで宣言したC構造体のいずれかとする。通常のSuz構造体、bool・len_t・char・文字列・列挙型・関数値・ポインタをTには使えない。`*void`と多段のCポインタも認めない。
+
+この表記はexternの仮引数だけに使い、Suz内の変数や関数には従来の`ptr T`を使う。実引数には同じTの非nullな`ptr T`を要求する。`ptr? T`はletで確認してから渡す。Cで互換な型でも、異なるSuz型のポインタは暗黙変換しない。値そのものや`c_bytes`の結果は渡せない。externの戻り値にはポインタを認めない。
+
+**[ffi.borrow]** 型付きポインタは [ffi.trusted] の内側でCへ渡し、`keep`のない仮引数ではCが実体を使える期間を呼び出し中だけとする。実体のコピーや所有権の移譲は行わない。実引数を左から右へ1回ずつ評価してから呼び出し、後の実引数がポインタ変数を付け替えても、先に評価したポインタが指す実体を渡す。
+
+C側の解放・再確保は禁止し、`*const T`ではそのポインタを通じた書き込みも禁止する。`*T`による更新は同じ実体を指すSuz側の参照にも反映される。Cが渡された実体の範囲を守り、Tとして妥当な値だけを書き込むことはプログラマーが保証する。非同期処理と別スレッドからのアクセスは対象外とする。文字列用の`*const void`の保持期間は [ffi.bytes-contract] のままである。
+
+```suz
+extern "counter.h" {
+    struct counter as Counter { value: i32 }
+    fn counter_read(p: *const Counter) -> i32
+    fn counter_set(p: *Counter, value: i32) -> void
+}
+fn main() -> u8 {
+    arena {
+        fix ptr p = new Counter { value: 0 }
+        trusted {
+            counter_set(p, 7)
+            if counter_read(p) != 7 { return 1 }
+        }
+    }
+    return 0
+}
+```
+
+この例のヘッダーは `struct counter { int32_t value; };`、`int32_t counter_read(const struct counter *);`、`void counter_set(struct counter *, int32_t);` を宣言し、関数の実体をリンク時に用意する。
+
+**[ffi.keep]** externの型付きポインタ仮引数に `keep p: *T` または `keep p: *const T` と書くと、Cが呼び出し後もポインタを保持できる。`keep`はこの位置だけの修飾語であり、名前としての利用は予約しない。数値などの値渡しや、独自の保持契約を持つ`*const void`には付けられない。実引数の型と非nullの要件は [ffi.arena-pointer] と同じである。
+
+プログラマーは、登録解除などによってCの利用が終了するまで、実体を確保したArenaを生かす。`trusted`ブロックや、Cへ登録したSuz関数からの退出は、Cの利用終了を意味しない。mainや特定のArenaには限定せず、通常関数の引数やクロージャの値捕捉からも渡せる。ラッパー関数を作る場合、その関数の呼び出し側も保持期間の条件を満たすように契約を定める。
+
+所有権・解放禁止・読み書きの制約は [ffi.borrow] のままである。Suzは通常の型・寿命検査を行うが、C内部の保持や利用終了を証明せず、Arenaの寿命も延長しない。Suz内で禁止される保存や返却を`keep`で許可するものではない。
+
+例：Cライブラリの`state.h`が次を宣言する。`state_detach`は保持したポインタを破棄し、以降は使用しない契約とする。各関数の実体はリンク時に用意する。
+
+```c
+#include <stdint.h>
+struct state { int32_t value; };
+void state_attach(struct state *p);
+void state_tick(void);
+void state_detach(void);
+```
+
+Suz側の`main.suz`では、Cの利用を終えてからArenaを閉じる。
+
+```suz
+extern "state.h" {
+    struct state as State { value: i32 }
+    fn state_attach(keep p: *State) -> void
+    fn state_tick() -> void
+    fn state_detach() -> void
+}
+fn main() -> u8 {
+    arena {
+        fix ptr p = new State { value: 0 }
+        trusted { state_attach(p) }
+        // 登録したtrustedを抜けた後も、同じ実体をCが利用する。
+        trusted {
+            state_tick()
+            state_detach()
+        }
+    }
+    return 0
+}
+```
+
 ### 8.13 作業領域とポインタ
 
 **[arena.block]** `arena { 文 ... }` は、実体を一時的に置く作業領域と寿命の境界を作る文である。通常のブロックと同じスコープを作り、入れ子にできる。既存の変数宣言の保存場所は変えない。
 
 **[arena.new]** `new 式` は、現在の関数内でその位置を字句的に囲む最内側のarenaへ実体を確保し、`ptr T`を返す。Tは初期値の型である。関数内にそのようなarenaがない場合、`arena fn`では呼び出し元の領域Rへ確保し、通常関数ではコンパイルエラーとする。
 
-**[arena.new-value]** 初期値には保存できる任意の型の値を使える。`void`と呼び出し専用の`fn`型は使えない。既存の変数のアドレスを取得する構文は設けない。`new`と参照解除の`*`は`len`と同じ優先順位で、定数式には含めない。
+**[arena.new-value]** 初期値には保存できる任意の型の値を使える。`void`と呼び出し専用の`fn`型は使えない。既存の変数のアドレスを取得する構文は設けない。`new`と参照解除の`.`は`len`と同じ優先順位で、定数式には含めない。
 
 **[arena.new-order]** 初期値を1回評価し、その後で整列・サイズ・容量を検査して確保し、評価済みの値を格納する。初期値の評価中の確保が先に完了する。失敗時は [rt.arena-allocation] に従う。
 
@@ -1585,7 +1677,7 @@ fn main() -> u8 {
 
 **[arena.ptr-conversion]** 参照先の型Tが完全に同じ場合に限り、`ptr T`から`ptr? T`への暗黙変換を認める。初期化・代入・実引数・戻り値に同じ規則を適用する。実体のコピーや実行時検査は行わず、寿命も変えない。逆方向の暗黙変換と`as`による変換は認めず、`let`で非nullを確認する。
 
-変換できるのは最外側のnull許容性だけである。`ptr ptr T`から`ptr? ptr T`へは変換できるが、`ptr ptr T`から`ptr ptr? T`へは変換できない。内側の型を変えると、別名を通してnullを書き込み、非nullの保証を壊せるためである。関数値の型や構造体のメンバー型をこの変換によって変更することも認めない。
+変換できるのは最外側のnull許容性だけである。`ptr ptr T`から`ptr? ptr T`へは変換できるが、`ptr ptr T`から`ptr ptr? T`へは変換できない。内側の型を変えると、別名を通してnullを書き込み、非nullの保証を壊せるためである。関数値の型や構造体のメンバー型をこの変換によって変更することも認めない（[arena.soundness-premise]）。
 
 **[arena.ptr-join]** 外側から要求される型がない`ifexpr`・`matchexpr`では、参照先の型Tが完全に同じポインタの分岐をそろえる。すべて`ptr T`なら結果も`ptr T`とし、`ptr? T`またはnullの分岐を含む場合は`ptr? T`とする。nullの分岐には、その型を要求する。分岐の記述順には依存しない。すべての分岐がnullで、外側からも型が要求されなければ、Tを決められないためコンパイルエラーである。
 
@@ -1593,7 +1685,13 @@ fn main() -> u8 {
 
 例えば`a`が`ptr Node`、`b.next`が`ptr? Node`なら、`ifexpr ready { a } else { null }`と`ifexpr ready { a } else { b.next }`は、ともに`ptr? Node`となる。
 
-**[arena.ptr-operations]** `*p`は参照先の読み出し、`*p = 値`と`*p += 値`などは更新である。構造体へのポインタの`p.field`は`(*p).field`と同じ意味とする。代入先を1回評価してから右辺を評価する。複合代入では右辺より先に更新前の値を読む。ポインタの算術・比較・添字・型変換・文字列への埋め込みは認めない。ポインタを含む構造体の比較・文字列変換も認めない。
+**[arena.ptr-operations]** `.p`はポインタpの参照先の値を読む式である。参照先全体を更新するときは、代入文の先頭に`#p = 値`、`#p += 値`などと書く。`#p`は書き換え対象の指定であり、式としては使えない。`.p`自体への代入は括弧で囲んでも認めない。単項の`*p`は認めない。乗算とFFIの型表記`*const void`・`*const T`・`*T`には影響しない。
+
+前置の`.`は単項演算子と同じ優先順位で右から結び付く。`..pp`は`.(.pp)`と同じく2段の参照先を読む。`#.pp = 値`は`.pp`が指す実体を更新する。`#`の対象は単項式であり、二項式を対象にするときは括弧が必要である。関数の返すポインタも`.get()`、`#get() = 値`で扱える。
+
+前置の`.`の対象に括弧なしのメンバーアクセスを続ける`.p.field`や`.p.method()`は認めない。参照解除の後でフィールドを選ぶ場合は`(.p).field`、フィールドのポインタを参照解除する場合は`.(p.field)`と書く。構造体へのポインタの`p.field`は`(.p).field`と同じ意味とする。フィールドの更新は`p#field = 値`または`(.p)#field = 値`と書く。`holder.p#field`の途中の`.`はポインタやフィールドをたどり、最後の`#`が更新するメンバーを指定する。前置の`#`とフィールド指定の`#`を1つの代入先で併用することは認めない。
+
+代入先を1回評価してから右辺を評価し、右辺がポインタ変数を変更しても確定済みの参照先へ書き込む。複合代入では右辺より先に更新前の値を読む。`#`は書き換えの許可を追加しない。fixのポインタ変数への再代入禁止、参照先への更新、非nullの要求、寿命と借用の制約には既存の規則を適用する。ポインタの算術・比較・添字・型変換・文字列への埋め込みは認めない。ポインタを含む構造体の比較・文字列変換も認めない。
 
 **[arena.null]** `null`は実体を指さない値である。要求される`ptr? T`の型が分かる位置だけに書ける。[arena.ptr-join]で他の分岐から決まる型も、この要求型に含む。`var ptr p: ptr? Node = null`は有効で、`var ptr p: ptr Node = null`は型違反、`var ptr p = null`は型が決まらないためエラーとする。nullは参照先の領域や寿命を持たない。
 
@@ -1607,8 +1705,8 @@ fn main() -> u8 {
     arena {
         fix ptr a = new Node { value: 1, next: null }
         fix ptr b = new Node { value: 2, next: a }
-        a.next = b
-        let next = a.next { next.value += 1 }
+        a#next = b
+        let next = a.next { next#value += 1 }
     }
     return 0
 }
@@ -1624,7 +1722,7 @@ fn main() -> u8 {
 
 **[arena.exit]** 通常終了、`return`、`fail`、`recover`、`break`、`continue`でarenaを抜けると、そのarenaの開始時の使用位置へ戻す。複数のarenaを抜ける場合は内側から回収する。領域を抜けない移動では回収しない。returnやrecoverで渡す値は回収前に評価する。
 
-**[arena.resources]** 回収するのはメモリだけである。個別の解放、実体の移動、実体ごとの終了処理は行わない。容量が足りない場合は [rt.arena-storage] に従って別のブロックを追加する。ファイルなどの資源を閉じる処理は含まない。
+**[arena.resources]** 回収するのはメモリだけである。個別の解放、実体の移動、実体ごとの終了処理は行わない（[arena.soundness-premise]）。容量が足りない場合は [rt.arena-storage] に従って別のブロックを追加する。ファイルなどの資源を閉じる処理は含まない。
 
 **[arena.lifetime]** 実体の寿命は確保先のarenaで決まり、参照のコピーでは延びない。領域の終了後に利用できる場所へ参照を残してはならない。
 
@@ -1642,20 +1740,20 @@ fn main() -> u8 {
 
 **[arena.parameter-regions]** 各引数に含まれる参照先は未知の領域に属するものとして扱い、引数同士が同じ領域にあるとは仮定しない。引数から参照をたどって到達する実体にも借用の制約を適用する。借りた実体へポインタを保存することは禁止する。`null`の代入、構造体全体の上書き、別名を経由する更新も同じである。参照を含まないメンバーの更新は許す。
 
-**[arena.function-check]** 借用の契約は関数定義で検査する。実引数の寿命に応じて保存・返却の許可を変えない。関数値やクロージャも同じ契約を持つ。値捕捉したポインタは借りた参照として利用できる。参照捕捉した変数へのポインタの再代入は、呼び出し元への保存として禁止する。externにはSuzのポインタやそれを含む値を渡せない。
+**[arena.function-check]** 借用の契約は関数定義で検査する。実引数の寿命に応じて保存・返却の許可を変えない。関数値やクロージャも同じ契約を持つ。値捕捉したポインタは借りた参照として利用できる。参照捕捉した変数へのポインタの再代入は、呼び出し元への保存として禁止する。externへの型付きポインタの受け渡しは [ffi.arena-pointer] に従う。Cが呼び出し後も保持する場合は、[ffi.keep] の保持期間をプログラマーが保証する。
 
 **[arena.call-allocation]** 通常関数は自分の本体で開いたarenaにだけ確保できる。実行時には呼び出し元の領域の内側に積まれ、そのarenaを抜けると回収される。クロージャは、宣言位置を囲むarenaを確保先として引き継がない。
 
 ```suz
 fn increment(p: ptr i32) -> void {
-    *p += 1
+    #p += 1
 }
 
 fn main() -> u8 {
     arena {
         fix ptr count = new (0 as i32)
         increment(count)
-        if *count != 1 { return 1 }
+        if .count != 1 { return 1 }
     }
     return 0
 }
@@ -1715,7 +1813,7 @@ fn main() -> u8 {
             var ptr selected = outer
             selected = inner
             objection [selectedをinnerへ差し替えたので、保存先も参照先も内側のarenaに属する] {
-                selected.next = inner
+                selected#next = inner
             }
         }
     }
@@ -1723,7 +1821,122 @@ fn main() -> u8 {
 }
 ```
 
-この例では、実行順を区別しない解析にouterとinnerの候補が残るため、objectionなしでは保存を拒否する。`outer.next = inner`のように保存先が必ず外側で、保存する参照が必ず内側の非nullの実体を指す場合は、objectionで囲んでも拒否する。
+この例では、実行順を区別しない解析にouterとinnerの候補が残るため、objectionなしでは保存を拒否する。`outer#next = inner`のように保存先が必ず外側で、保存する参照が必ず内側の非nullの実体を指す場合は、objectionで囲んでも拒否する。
+
+#### 寿命検査の前提
+
+**[arena.soundness-premise]** 寿命の検査は、次の前提に依る。これらを変える提案は、寿命の検査のモデルを検証し直し、[test.arena-fuzz] の生成する要素に加えることを条件とする。
+
+- 作業領域の回収で、利用者のコードを動かさない（[arena.resources]）。デストラクタや終了処理を入れない。
+- 書き換えられる大域の保存先がない（トップレベルの`var`を持たない）。トップレベルの`fix`は定数式で、ポインタを持たない。
+- 寿命やnull許容性の変位を認めない。ポインタの暗黙の変換は最外側だけとする（[arena.ptr-conversion]）。汎用の構造体を入れる場合も、型引数は不変（変位なし）を既定とする。
+- Suzが検査する範囲と、プログラマーが保証する外部APIの契約を分ける。通常の関数・クロージャ・arenaの境界はSuzが静的に検査し、`extern`への型付きポインタの受け渡しと`keep`による保持期間は、`trusted`・[ffi.borrow]・[ffi.keep] に従ってプログラマーが保証する。`objection`を使う場合も、その安全性はプログラマーの保証を前提とする（[arena.objection-responsibility]）。
+
+> **経緯と警告**
+>
+> この前提は、Rust の [rust-lang/rust#164250](https://github.com/rust-lang/rust/issues/164250) を受けて明記した。Rust では、型引数の制約 `T: 'static` を、値を作るときには検査するが、後からフィールドへ代入して型が決まるときには検査していなかった。そこへ、スコープの終わりに自動で動くデストラクタと、大域の保存先が組み合わさり、回収済みのスタックを読めた。この穴は 11 年間見つからなかった。
+>
+> Suz にはデストラクタも、書き換えられる大域の保存先も、寿命の変位もないため、同じ形の持ち出しはコンパイル時に拒否する。ただし、それは機能が少ないことによる面がある。上の前提のどれかを崩す機能は、単独では安全に見えても、ほかの機能と組み合わさって同じ種類の穴を作りうる。そうした機能を入れるときは、寿命の検査のモデルを検証し直し、`[test.arena-fuzz]` の生成する要素に加えること。検査の穴は、回収の後・再利用の前のアクセスを AddressSanitizer で実行すれば見つかるが、実行しなければ見つからない。
+
+### 8.14 メソッド
+
+**[method.decl]** メソッドはトップレベルに `fn 型名.名前(仮引数, ...) -> 戻り値型 { 本体 }` または `fn 型名#名前(仮引数, ...) -> 戻り値型 { 本体 }` と定義する。受け手は仮引数一覧に書かない。型名、`.`または`#`、メソッド名の間に空白・改行を置いてはならない。戻り値の`or`によるエラー指定と失敗処理には通常の関数と同じ規則を適用する。
+
+**[method.target-type]** 受け手の型は同じソース内で宣言したstructまたはenumとする。組み込み型、error型、ポインタ型そのものへのメソッド定義は認めない。
+
+**[method.name]** メソッド名は [name.value] に従う。同じ型でのメソッド名の重複は、`.`と`#`が違っても認めない。型のフィールド名・列挙子名とメソッド名の重複も認めない。異なる型では同じメソッド名を使える。
+
+**[method.self-keyword]** `self`はキーワードであり、メソッド本体の受け手を表す。変数・仮引数・関数・型・フィールド・列挙子の名前には使えない。メソッドの外での使用は認めない。クロージャで使うには明示的なキャプチャーを要する。
+
+**[method.self-read]** `.`メソッドのselfは受け手の型の不変の値であり、通常の仮引数と同じく呼び出し時の値を受け取る。self自身や、その値に含まれるフィールドへの代入は認めない。selfのフィールドがポインタを保持する場合、そのポインタの参照先まで読み取り専用にするものではない。
+
+**[method.self-write]** `#`メソッドのselfは呼び出し元の受け手そのものを表す。`self = 値`で全体を、`self#field = 値`でフィールドを更新でき、`self#other(...)`で別の書き換えメソッドを呼べる。受け手をコピーして終了時に書き戻す処理ではない。
+
+**[method.self-capture]** `[self]`は作成時のselfを値キャプチャーする。`#`メソッドでは`[var self]`で受け手を参照キャプチャーできる。`.`メソッドのselfや値キャプチャーしたselfの参照キャプチャーは認めない。その他は既存のクロージャの規則に従う。
+
+**[method.call]** `式.名前(実引数, ...)`、`式#名前(実引数, ...)`で呼び出す。宣言と記号が異なる呼び出しは拒否する。受け手のフィールドは`.`でたどり、`#`は呼び出す書き換えメソッドの直前にだけ置く。`v#pos#shift(1)`はこの規則で拒否し、`v.pos#shift(1)`と書く。構造体または列挙型への`ptr T`も受け手にでき、その参照先へ呼び出す。`ptr? T`はletで非nullを確認してから使う。フィールドに格納した関数値の呼び出しは従来どおり`.`を使う。
+
+**[method.write-target]** `#`メソッドの受け手は、ローカルvar、そのフィールド、参照キャプチャーしたvar、または書き換え可能なポインタの参照先でなければならない。fixの値、通常の仮引数、値キャプチャー、構造体・列挙型の一時値への書き換えメソッド呼び出しは認めない。fixのポインタや関数の返す非nullポインタの参照先は、既存の更新規則に従って受け手にできる。
+
+**[method.eval-order]** 受け手を最初に1回評価し、続いて実引数を左から右へ1回ずつ評価してから本体を実行する。`.`では受け手の値を実引数より先に保持する。`#`では受け手の保存場所を確定し、実引数がポインタを付け替えても確定済みの実体を更新する。
+
+**[method.write-effects]** varが保持する値自身またはその値に含まれるフィールドへの`#`呼び出しは [var.never-reassigned] の再代入として数える。ポインタの参照先の更新は、ポインタ変数への再代入としては数えない。代入の右辺で代入先と重なる受け手への`#`呼び出しは [assign.rhs-write] で拒否する。[for.bound-reference] はメソッドの受け手と実引数にも適用する。
+
+**[method.generic]** 通常関数と同じく、明示した仮引数・戻り値にはint・floatを使える。数値型の推論・具体化は既存の汎用関数の規則に従う。
+
+**[method.arena]** `arena fn 型名.名前(...)`と`arena fn 型名#名前(...)`を認める。受け手の値が保持する参照からたどれる実体と明示した実引数には、既存のarena fnの領域Rの契約を適用する。`#`のselfへの保存も呼び出し元への保存として検査し、呼び出し後は受け手に保存されうる参照を寿命検査へ反映する。通常のメソッドは借用の契約に従い、受け手へポインタを保存することや、ポインタを含む戻り値は認めない。
+
+**[method.no-fn-value]** メソッドを`fn p.name`、`fn Type.name`のように関数値として取り出すことはできない。
+
+```suz
+struct Vec2 { x: i32, y: i32 }
+fn Vec2.length2() -> i32 {
+    return self.x * self.x + self.y * self.y
+}
+fn Vec2#add(other: Vec2) -> void {
+    self#x += other.x
+    self#y += other.y
+}
+fn main() -> u8 {
+    var p = Vec2 { x: 3, y: 4 }
+    p#add(Vec2 { x: 1, y: 2 })
+    return ifexpr p.length2() == 52 { 0 } else { 1 }
+}
+```
+
+### 8.15 演算子メソッド
+
+**[operator.eligibility]** オペランドを通常どおり評価して関数へ渡せる値の演算は、演算子メソッドの対象とする。次の構文・演算は除く。
+
+- 制御を担う `&&`・`||`・`or`、格納先や参照を指定する `=`・`.`・`#`・添字と切り出し、確保と寿命を担う `new`、変換先の型を指定する `as`、呼び出す対象とシグネチャを指定する関数呼び出し。これらは通常の値の引数だけでは契約を表せないため、この機能では定義しない。
+- `==`・`!=` は組み込みの等値関係、`+%`・`-%`・`*%`・`as%` は組み込み整数のラップ・切り捨てとして意味を固定する。
+- `c_bytes`・`c_byte_len` はFFIに渡す実体とバイト数を指定する構文として意味を固定し、ユーザー定義で置き換えない。
+
+演算子メソッドは、受け手を読み取って値を返す通常の関数として定義する。受け手の書き換え、呼び出し元のアリーナの暗黙の使用、呼び出し自体の失敗処理を伴わないことを共通の契約とし、`#`・arena fn・エラー指定を認めない。組み込みの型に対する演算の規則は維持し、ユーザー定義の演算には本節の呼び出し・型選択規則を適用する。
+
+**[operator.method]** 同じソース内で宣言したstruct・enumに、`fn 型名.+(右辺: 型) -> 戻り値型 { 本体 }` の形で二項演算子を定義できる。左辺は読み取りメソッドのselfであり、明示する仮引数は1つである。対象は `+`・`-`・`*`・`/`・`%`・`&`・`|`・`^`・`<<`・`>>` と `<`・`<=`・`>`・`>=` とする。`#`のメソッド、arena fn、orによるエラー指定は認めない。比較以外の二項演算子は左辺と異なる型を返してよいが、voidは返せず、通常関数の借用・返却制約を適用する。比較の戻り値はboolに限る。関数値として取り出すことはできない。
+
+```suz
+struct Vec2 { x: f32, y: f32 }
+fn Vec2.+(other: Vec2) -> Vec2 {
+    return Vec2 { x: self.x + other.x, y: self.y + other.y }
+}
+fn Vec2.*(k: f32) -> Vec2 {
+    return Vec2 { x: self.x * k, y: self.y * k }
+}
+```
+
+**[operator.overload]** 同じ型の同じ演算子を、右辺の型ごとに定義できる。通常のメソッド名の重複禁止の例外であり、通常関数と名前付きメソッドのオーバーロードは認めない。整数型とintの定義は合わせて1つ、浮動小数点型とfloatの定義は合わせて1つまでとする。C固有整数型はこの分類に含めない。それ以外は型が完全に一致する定義を選ぶ。ptr Tとptr? Tも区別し、暗黙変換による選び直しはしない。同じ右辺の型や数値の種類を重複して定義することはできず、戻り値型だけによる区別も認めない。一致する定義がない診断には、受け取れる右辺の型を示す。
+
+数値の右辺では、まず整数か浮動小数かの種類だけを判定し、その種類の定義を選ぶ。整数の定義がなく浮動小数の定義だけがある場合は、浮動小数の定義を候補にする。浮動小数の右辺に整数の定義は選ばない。未確定のリテラルや汎用呼び出しの具体型は、選択後に仮引数型を要求して決める。intを返す汎用呼び出しは整数、floatなら浮動小数である。分岐式では全分岐が整数なら整数、浮動小数を含めば浮動小数とする。種類の判定だけで分岐を具体型へ確定させず、選択後に型をそろえられるか検査する。演算結果の格納先の型は、定義の選択に使わない。
+
+**[operator.call]** 左辺、右辺の順に1回ずつ評価してから呼ぶ。右辺には通常の実引数と同じリテラルの型付け・拡大変換を適用する。例えば上の `v * 0.5` の0.5はf32になる。int・floatの仮引数は既存の汎用メソッドの規則で具体化する。優先順位と結合は既存の演算子と同じで、左右を入れ替えて定義を探さない。左辺のポインタを自動で参照先へ読み替えず、`p + v` は拒否し `.p + v` と書く。右辺のポインタも自動で参照先へ読み替えない。
+
+**[operator.unary]** 仮引数のない `fn 型名.演算子() -> 戻り値型` で単項の `-`・`~`・`not`・`len` を定義できる。`not` の戻り値はbool、`len` の戻り値はlen_tに限る。二項の `-` とは仮引数の数で区別し、両方を同じ型に定義できる。単項の定義は1つの型の各演算子に1つだけ置ける。オペランドを1回だけ評価してから呼び、優先順位と結合は既存の各単項演算子と同じとする。定義と返却には [operator.method] と同じ制約を適用する。受け手と異なる型も返せるがvoidは認めず、`#`・arena fn・orによるエラー指定・関数値としての取り出しは禁止する。[operator.arith-boundary] にも従う。ポインタを自動で参照先へ読み替えず、`-p` は拒否し `-(.p)` と書く。
+
+```suz
+fn Vec2.-() -> Vec2 {
+    return Vec2 { x: -self.x, y: -self.y }
+}
+```
+
+**[operator.no-equality]** ==・!=は定義できない。既存の構造体・列挙型の等値比較を使う。
+
+**[operator.independent]** 順序比較はそれぞれ明示的に定義する。<から<=を生成したり、a > bをb < aとして探したりしない。
+
+**[operator.chain]** 比較連鎖では隣り合うオペランドごとに定義を選び、各オペランドを高々1回評価する。不成立なら残りを評価しない。連鎖に含まれる==は組み込みの等値比較を使う。
+
+**[operator.arith-boundary]** 演算子メソッドは通常の関数呼び出しであり、正確な整数の算術式の一部にはしない。右辺の整数の算術式は仮引数型へ格納して渡し、戻り値は型の決まった値として外側の式で使う。演算子メソッドは定数式ではない。呼び出し自体へのorは認めないが、オペランド内の整数演算と、整数の戻り値を使う外側の算術式には既存のorを使える。
+
+例えば `fn Vec2i.*(other: Vec2i) -> i32` と `fn Vec2i.*(k: i32) -> Vec2i` を定義した場合、`v * (n / d or 1)` は整数倍、`fix b: u8 = (v * w) + 1 or 0` は内積の結果を使う外側の算術式の失敗処理となる。`v * w or 0` と `v * k or v` は、呼び出し自体への失敗処理なので拒否する。
+
+**[operator.compound]** 演算子メソッドの `+`・`-`・`*`・`/`・`%`・`&`・`|`・`^`・`<<`・`>>` の戻り値型が代入先の型と同じなら、対応する `+=`・`-=`・`*=`・`/=`・`%=`・`&=`・`|=`・`^=`・`<<=`・`>>=` を使える。代入先を1回評価して確定し、更新前の値を読んでから右辺を1回評価し、演算子メソッドを呼んで結果を代入する。右辺がポインタ変数を付け替えても、確定済みの代入先へ書き込む。右辺の失敗処理で関数から抜ける場合は、演算子メソッドの呼び出しと結果の代入を行わない。代入先の可変性、最後の書き込みメンバーだけに置く`#`、右辺の書き込みの制限、[var.never-reassigned] での数え方は既存の代入と同じとする。
+
+```suz
+var pos = Vec2 { x: 0.0, y: 0.0 }
+pos += Vec2 { x: 1.0, y: 2.0 }
+pos *= 0.5
+```
 
 ## 9. 実行時の検査
 
@@ -2012,13 +2225,21 @@ Program          ::= NL* ( Declaration NL+ )* Declaration? EOF
 Declaration      ::= TopLevelBinding | FunctionDeclaration
                    | StructDeclaration | EnumDeclaration | ErrorDeclaration | FnShapeDeclaration | ExternBlock
 
-ExternBlock      ::= "extern" HEADER "{" NL* ( ExternFunction NL+ )* ExternFunction? "}"
-ExternFunction   ::= "fn" CNAME ( "as" IDENT )? "(" Parameters? ")" "->" Type
+ExternBlock      ::= "extern" HEADER "{" NL* ( ExternDeclaration NL+ )* ExternDeclaration? "}"
+ExternDeclaration ::= ExternFunction | ExternStruct
+ExternStruct     ::= "struct" CNAME ( "as" IDENT )? "{" NL* Fields "}"
+ExternFunction   ::= "fn" CNAME ( "as" IDENT )? "(" ExternParameters? ")" "->" Type
+ExternParameters ::= ExternParameter ( "," ExternParameter )* ","?
+ExternParameter  ::= "keep"? IDENT ":" ( "*" "const"? Type | Type )
 
 TopLevelBinding  ::= "fix" IDENT TypeAnnotation? "=" ConstExpression AllowClause?
 TypeAnnotation   ::= ":" Type
 
-FunctionDeclaration ::= "arena"? "fn" IDENT "(" Parameters? ")" "->" ReturnType Block
+FunctionDeclaration ::= "arena"? "fn" MethodReceiver? IDENT "(" Parameters? ")" "->" ReturnType Block
+                      | "fn" IDENT "." OperatorMethod "(" Parameters? ")" "->" Type Block
+OperatorMethod  ::= "+" | "-" | "*" | "/" | "%" | "&" | "|" | "^" | "<<" | ">>"
+                  | "<" | "<=" | ">" | ">=" | "~" | "not" | "len"
+MethodReceiver   ::= IDENT ( "." | "#" )
 FnShapeDeclaration ::= "fnshape" IDENT "(" FnShapeParameters? ")" "->" ReturnType
 FnShapeParameters ::= Type ( "," Type )* ","?
 Parameters       ::= Parameter ( "," Parameter )* ","?
@@ -2059,13 +2280,13 @@ Statement        ::= ( VariableDeclaration | Assignment | ReturnStatement
                      | "break" | "continue" | LogStatement | Expression ) AllowClause?
                    | WhileStatement | LoopStatement | ForStatement | RevStatement
                    | IfStatement | MatchStatement | Block | AllowStatement | PanicStatement | FailStatement
-                   | RecoverStatement | IgnoreStatement | "unsafe" Block | "arena" Block | LetStatement
+                   | RecoverStatement | IgnoreStatement | "trusted" Block | "arena" Block | LetStatement
                    | "objection" OBJECTION_REASON Block
 
 VariableDeclaration ::= ( "fix" | "var" ) "ptr"? IDENT TypeAnnotation?
                         "=" Expression
 Assignment       ::= AssignmentTarget AssignmentOperator Expression
-AssignmentTarget ::= IDENT ( "." IDENT )* | "*" Unary | "(" Expression ")" ( "." IDENT )*
+AssignmentTarget ::= IDENT | "#" Unary | Expression "#" IDENT
 LetStatement     ::= "let" IDENT "=" Condition Block ( NL* "else" Block )?
 AssignmentOperator ::= "=" | "+=" | "-=" | "*=" | "/=" | "%="
                      | "+%=" | "-%=" | "*%=" | "&=" | "|=" | "^="
@@ -2123,13 +2344,13 @@ Sum              ::= Product ( ( "+" | "-" | "+%" | "-%" ) Product )*
 Product          ::= Cast ( ( "*" | "/" | "%" | "*%" ) Cast )*
 Cast             ::= Unary ( "as%" Type CastHandler? | "as" Type CastHandler? )*
 CastHandler      ::= "or" ( Expression | "return" Expression? | "panic" TEMPLATE )
-Unary            ::= ( "-" | "not" | "~" | "len" | "c_bytes" | "c_byte_len" | "new" | "*" ) Unary | "fn" IDENT | Postfix
-Postfix          ::= Primary ( "." IDENT | "[" Index "]" IndexHandler?
+Unary            ::= ( "-" | "not" | "~" | "len" | "c_bytes" | "c_byte_len" | "new" | "." ) Unary | "fn" IDENT | Postfix
+Postfix          ::= Primary ( "." IDENT | "#" IDENT "(" Arguments? ")" | "[" Index "]" IndexHandler?
                              | "(" Arguments? ")"
                              | "with" "{" NL* Initializers "}" )*
 Index            ::= Expression | Expression? ":" Expression?
 IndexHandler     ::= "or" ( Expression | "return" Expression? | "panic" TEMPLATE )
-Primary          ::= Literal | IDENT | FunctionCall | StructLiteral | TEMPLATE
+Primary          ::= "self" | Literal | IDENT | FunctionCall | StructLiteral | TEMPLATE
                    | "(" Expression ")" | IfExpression | MatchExpression | BlockExpression
 Literal          ::= INTEGER | FLOAT | CHAR | "true" | "false" | "nan" | "inf" | "null"
 

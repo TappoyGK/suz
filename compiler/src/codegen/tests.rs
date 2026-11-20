@@ -55,6 +55,7 @@ fn generated_bool_values_preserve_negation_and_copies() {
             division_warnings: Vec::new(),
             main_id: 0,
             functions: vec![crate::check::ir::CheckedFunction {
+                mutable_receiver: false,
                 fallible: false,
                 id: 0,
                 parameters: Vec::new(),
@@ -75,6 +76,7 @@ fn generated_bool_values_preserve_negation_and_copies() {
                         initializer: Box::new(boolean(Value::Local(0))),
                     },
                     CheckedStatement::Assign {
+                        root_type: Type::Bool,
                         location: crate::ast::Location { line: 1, column: 1 },
                         fields: Vec::new(),
                         id: 0,
@@ -221,6 +223,7 @@ fn comparison_codegen_sequences_and_reuses_operands() {
             })
             .collect();
         let mut expr = boolean(Value::Comparison {
+            methods: Vec::new(),
             operators,
             operands,
         });
@@ -244,6 +247,7 @@ fn comparison_codegen_sequences_and_reuses_operands() {
             division_warnings: Vec::new(),
             main_id: 0,
             functions: vec![crate::check::ir::CheckedFunction {
+                mutable_receiver: false,
                 fallible: false,
                 id: 0,
                 parameters: Vec::new(),

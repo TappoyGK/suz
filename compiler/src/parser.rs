@@ -201,6 +201,15 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
                         crate::diagnostic!("arena.fn", "main cannot be an arena fn"),
                     ));
                 }
+                if function.method.is_some_and(|m| m.operator.is_some()) {
+                    return Err(location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "operator.method",
+                            "operator methods cannot be arena fn"
+                        ),
+                    ));
+                }
                 function.arena = true;
                 functions.push(function);
             }

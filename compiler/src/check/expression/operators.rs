@@ -27,6 +27,14 @@ pub(super) fn check(
                 call = inner;
             }
             match &call.kind {
+                ExpressionKind::MethodCall { .. } => {
+                    return super::super::methods::call(
+                        call,
+                        expected,
+                        bindings,
+                        fallback.as_ref(),
+                    );
+                }
                 ExpressionKind::Call { name, arguments } => {
                     return super::super::functions::call(
                         call,
@@ -47,6 +55,17 @@ pub(super) fn check(
                     );
                 }
                 _ => {}
+            }
+            if bindings.has_operator_methods
+                && super::super::operator_methods::is_call(call, bindings)
+            {
+                return Err(expr.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "operator.arith-boundary",
+                        "operator method calls cannot have an or handler"
+                    ),
+                ));
             }
             let mut checked = if super::super::exact::is_operator(operand)
                 && super::super::exact::integer(operand, bindings)
@@ -131,6 +150,14 @@ pub(super) fn check(
                     ..
                 }
             );
+            let operator_symbol = match &expr.kind {
+                ExpressionKind::Binary { operator, .. }
+                    if super::super::operator_methods::supported(*operator) =>
+                {
+                    Some(operator.c_symbol())
+                }
+                _ => None,
+            };
             let type_error = |ty: Type| {
                 if ty == Type::Integer(IntegerType::Len)
                     && (!arithmetic
@@ -161,6 +188,18 @@ pub(super) fn check(
                     expr.location.error(
                         ErrorKind::InvalidSource,
                         match ty {
+                            Type::Struct(_) | Type::Enum(_)
+                                if matches!(
+                                    &expr.kind,
+                                    ExpressionKind::Negate(_) | ExpressionKind::BitNot(_)
+                                ) =>
+                            {
+                                crate::diagnostic!(
+                                    "operator.unary",
+                                    "no unary operator {} defined for this type",
+                                    super::super::operator_methods::unary(expr).unwrap().0
+                                )
+                            }
                             Type::Text => crate::diagnostic!(
                                 "text.operations",
                                 "text does not support arithmetic or bitwise operations"
@@ -169,6 +208,13 @@ pub(super) fn check(
                                 "symbol.operations",
                                 "symbol does not support arithmetic or bitwise operations"
                             ),
+                            Type::Struct(_) | Type::Enum(_) if operator_symbol.is_some() => {
+                                crate::diagnostic!(
+                                    "operator.overload",
+                                    "no matching operator {}; accepted right-hand types: none",
+                                    operator_symbol.unwrap()
+                                )
+                            }
                             _ => crate::diagnostic!(
                                 "expr.operator-types",
                                 "invalid operand type for this operator"
@@ -264,7 +310,14 @@ pub(super) fn check(
             if operand.ty != Type::Bool {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
-                    crate::diagnostic!("expr.not", "not requires a bool operand"),
+                    if matches!(operand.ty, Type::Struct(_) | Type::Enum(_)) {
+                        crate::diagnostic!(
+                            "operator.unary",
+                            "no unary operator not defined for this type"
+                        )
+                    } else {
+                        crate::diagnostic!("expr.not", "not requires a bool operand")
+                    },
                 ));
             }
             CheckedExpression {
@@ -303,6 +356,9 @@ pub(super) fn check(
             operators,
             operands,
         } => {
+            if let Some(value) = super::super::operator_methods::comparison(expr, bindings)? {
+                return Ok(value);
+            }
             let ty = super::joined_type(
                 operands
                     .iter()
@@ -385,10 +441,22 @@ pub(super) fn check(
             {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
-                    crate::diagnostic!(
-                        "expr.operator-types",
-                        "ordering comparisons require numeric operands"
-                    ),
+                    if matches!(ty, Type::Struct(_) | Type::Enum(_)) {
+                        crate::diagnostic!(
+                            "operator.overload",
+                            "no matching operator {}; accepted right-hand types: none",
+                            operators
+                                .iter()
+                                .find(|op| !op.is_equality())
+                                .unwrap()
+                                .symbol()
+                        )
+                    } else {
+                        crate::diagnostic!(
+                            "expr.operator-types",
+                            "ordering comparisons require numeric operands"
+                        )
+                    },
                 ));
             }
             for ((op, pair), location) in operators.iter().zip(operands.windows(2)).zip(locations) {
@@ -405,6 +473,7 @@ pub(super) fn check(
             CheckedExpression {
                 ty: Type::Bool,
                 value: Value::Comparison {
+                    methods: Vec::new(),
                     operators: operators.clone(),
                     operands,
                 },

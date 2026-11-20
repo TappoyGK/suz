@@ -63,10 +63,15 @@ pub(crate) fn walk_expression<V: Visitor + ?Sized>(
                 visitor.expression(&field.value)?;
             }
         }
-        ExpressionKind::Field { target, .. } => visitor.expression(target)?,
+        ExpressionKind::Field { target, .. } | ExpressionKind::Receiver { target, .. } => {
+            visitor.expression(target)?
+        }
         ExpressionKind::Closure(closure) => visitor.scope(&closure.function.statements, None)?,
         ExpressionKind::FunctionValue(_) => {}
-        ExpressionKind::Invoke { target, arguments } => {
+        ExpressionKind::Invoke { target, arguments }
+        | ExpressionKind::MethodCall {
+            target, arguments, ..
+        } => {
             visitor.expression(target)?;
             for argument in arguments {
                 visitor.expression(argument)?;
@@ -167,7 +172,7 @@ pub(crate) fn walk_statement<V: Visitor + ?Sized>(
         }
         Statement::Arena { body, .. }
         | Statement::Block(body)
-        | Statement::Unsafe(body)
+        | Statement::Trusted(body)
         | Statement::Objection(body) => visitor.scope(body, None)?,
         Statement::Loop { condition, body } => {
             if let Some(condition) = condition {

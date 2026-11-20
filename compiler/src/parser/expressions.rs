@@ -16,6 +16,22 @@ use crate::{
 impl Parser<'_, '_> {
     pub(super) fn expression(&mut self) -> Result<Expression, Diagnostic> {
         let result = self.expression_before_assignment()?;
+        self.check_value_context()?;
+        Ok(result)
+    }
+
+    // 値式を読み終えた位置で、書き換え対象や代入の続きを拒否する。
+    // 文の解析では、#fieldを代入先として扱う経路とこの検査を分ける。
+    pub(super) fn check_value_context(&self) -> Result<(), Diagnostic> {
+        if self.token().kind == Kind::Symbol("#") {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "assign.target",
+                    "target#field is an assignment target, not a value; use target.field to read the field"
+                ),
+            ));
+        }
         if matches!(
             self.token().kind,
             Kind::Symbol(
@@ -42,7 +58,7 @@ impl Parser<'_, '_> {
                 ),
             ));
         }
-        Ok(result)
+        Ok(())
     }
 
     pub(super) fn expression_before_assignment(&mut self) -> Result<Expression, Diagnostic> {
@@ -279,7 +295,7 @@ impl Parser<'_, '_> {
         Ok(value)
     }
 
-    fn unary(&mut self) -> Result<Expression, Diagnostic> {
+    pub(super) fn unary(&mut self) -> Result<Expression, Diagnostic> {
         self.nested(self.location(), Self::unary_inner)
     }
 
@@ -312,6 +328,15 @@ impl Parser<'_, '_> {
                     ));
                 };
                 self.cursor += 1;
+                if matches!(self.token().kind, Kind::Symbol("." | "#")) {
+                    return Err(self.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "method.no-fn-value",
+                            "methods cannot be extracted as function values"
+                        ),
+                    ));
+                }
                 if matches!(self.token().kind, Kind::Symbol("(" | "." | "[")) {
                     return Err(self.error(ErrorKind::InvalidSource, crate::diagnostic!("fn.value-mark", "fn applies to a function name only; parenthesize the function value before calling it")));
                 }
@@ -371,10 +396,52 @@ impl Parser<'_, '_> {
                 self.cursor += 1;
                 ExpressionKind::Bool(value)
             }
-            Kind::Symbol("~" | "*")
-            | Kind::Keyword("len" | "not" | "c_bytes" | "c_byte_len" | "new") => {
+            Kind::Symbol("*") => {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "arena.ptr-operations",
+                        "unary *p is not supported; use .p to read the pointee or #p to assign to it"
+                    ),
+                ));
+            }
+            Kind::Symbol("#") => {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "arena.ptr-operations",
+                        "#p is an assignment target, not a value; use .p to read the pointee"
+                    ),
+                ));
+            }
+            Kind::Symbol(".") => {
+                self.cursor += 1;
+                let operand = self.unary()?;
+                // .p.field は参照解除とフィールド選択の順が読み取りにくい。
+                // Groupで区切った (.p).field / .(p.field) は区別して受け付ける。
+                let mut target = &operand;
+                while let ExpressionKind::Invoke { target: inner, .. }
+                | ExpressionKind::Slice { target: inner, .. }
+                | ExpressionKind::With { target: inner, .. } = &target.kind
+                {
+                    target = inner;
+                }
+                if matches!(
+                    target.kind,
+                    ExpressionKind::Field { .. } | ExpressionKind::MethodCall { .. }
+                ) {
+                    return Err(location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "arena.ptr-operations",
+                            "parenthesize dereference and field access: (.p).field or .(p.field)"
+                        ),
+                    ));
+                }
+                ExpressionKind::Deref(Box::new(operand))
+            }
+            Kind::Symbol("~") | Kind::Keyword("len" | "not" | "c_bytes" | "c_byte_len" | "new") => {
                 let constructor: fn(Box<Expression>) -> ExpressionKind = match self.token().kind {
-                    Kind::Symbol("*") => ExpressionKind::Deref,
                     Kind::Keyword("new") => ExpressionKind::New,
                     Kind::Symbol("~") => ExpressionKind::BitNot,
                     Kind::Keyword("len") => ExpressionKind::Len,
@@ -386,7 +453,7 @@ impl Parser<'_, '_> {
                 self.cursor += 1;
                 constructor(Box::new(self.unary()?))
             }
-            Kind::Ident(name) => {
+            Kind::Ident(name) | Kind::Keyword(name @ "self") => {
                 self.cursor += 1;
                 if self.constant_expression && self.token().kind == Kind::Symbol("(") {
                     return Err(location.error(
@@ -485,7 +552,16 @@ impl Parser<'_, '_> {
         while matches!(
             self.token().kind,
             Kind::Symbol("." | "[" | "(") | Kind::Keyword("with")
-        ) {
+        ) || (self.token().kind == Kind::Symbol("#")
+            && self
+                .tokens
+                .get(self.cursor + 1)
+                .is_some_and(|t| matches!(t.kind, Kind::Ident(_)))
+            && self
+                .tokens
+                .get(self.cursor + 2)
+                .is_some_and(|t| t.kind == Kind::Symbol("(")))
+        {
             if self.token().kind == Kind::Symbol("(") {
                 let location = self.location();
                 if self.constant_expression {
@@ -560,6 +636,7 @@ impl Parser<'_, '_> {
                 continue;
             }
             self.check_height(result.height, self.location())?;
+            let mutable = self.token().kind == Kind::Symbol("#");
             self.cursor += 1;
             let location = self.location();
             let Kind::Ident(name) = self.token().kind else {
@@ -569,6 +646,28 @@ impl Parser<'_, '_> {
                 ));
             };
             self.cursor += 1;
+            if self.token().kind == Kind::Symbol("(") {
+                if self.constant_expression {
+                    return Err(location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "const.expression",
+                            "method calls are not constant expressions"
+                        ),
+                    ));
+                }
+                let arguments = self.list(Self::parenthesized_expression)?;
+                result = self.primary_node(
+                    ExpressionKind::MethodCall {
+                        target: Box::new(result),
+                        name: name.into(),
+                        mutable,
+                        arguments,
+                    },
+                    location,
+                )?;
+                continue;
+            }
             result = self.primary_node(
                 ExpressionKind::Field {
                     target: Box::new(result),
@@ -576,6 +675,35 @@ impl Parser<'_, '_> {
                 },
                 location,
             )?;
+        }
+        // #fieldは代入先として文の解析へ残す。ただし後ろにメソッド呼び出しが
+        // 続く形は、ポインタ代入ではなく受け手のたどり方の誤りとして診断する。
+        if self.token().kind == Kind::Symbol("#") {
+            let mut cursor = self.cursor;
+            while self
+                .tokens
+                .get(cursor)
+                .is_some_and(|t| matches!(t.kind, Kind::Symbol("." | "#")))
+                && self
+                    .tokens
+                    .get(cursor + 1)
+                    .is_some_and(|t| matches!(t.kind, Kind::Ident(_)))
+            {
+                cursor += 2;
+            }
+            if self
+                .tokens
+                .get(cursor)
+                .is_some_and(|t| t.kind == Kind::Symbol("("))
+            {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "method.call",
+                        "use . to access receiver fields before calling a method"
+                    ),
+                ));
+            }
         }
         Ok(result)
     }

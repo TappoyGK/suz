@@ -1,9 +1,14 @@
 //! 実行順によらない候補の包含制約を解く。各保存場所は自身の寿命を持ち、
 //! 別名経由のメンバーも同じセルへ合流させる。安全でも候補を絞れない保存は拒否する。
+//!
+//! **[impl.lifetime-flow]** ポインタを含みうる値の流れは、すべて制約（Copy・Load・Store・Address）へ
+//! 変換してから検査し、構文ごとに個別の寿命検査を書かない。式・文・失敗処理で分岐する
+//! match には `_` を使わず全種類を列挙する。
 mod boundaries;
 mod solver;
 
 use super::*;
+use crate::check::CheckedHandler;
 use std::collections::{BTreeMap, BTreeSet};
 type Node = usize;
 // 構造体の各ポインタ葉をフィールド番号列で区別する。ポインタ自身の値は空の列。
@@ -326,6 +331,24 @@ impl<'a> Analysis<'a> {
                     .map(|argument| (argument.ty, self.expr(argument, region, arena)))
                     .collect();
                 if *is_arena {
+                    if let Some(CheckedExpression {
+                        ty,
+                        value:
+                            Value::Receiver {
+                                target,
+                                mutable: true,
+                            },
+                    }) = arguments.first()
+                    {
+                        let place = self.place(target, region, arena);
+                        let updated = self.arena_call(
+                            &shapes,
+                            *ty,
+                            arena.expect("checked arena call"),
+                            *location,
+                        );
+                        self.write(place, updated, *location);
+                    }
                     self.arena_call(
                         &shapes,
                         value.ty,
@@ -371,11 +394,101 @@ impl<'a> Analysis<'a> {
                 Shape::new()
             }
             Value::Closure(_) => Shape::new(), // 本体を独立して検査し、捕捉した参照にも通常関数の借用契約を適用する。
-            _ => {
+            Value::Receiver { target, .. } => self.expr(target, region, arena),
+            Value::Cast(v)
+            | Value::NonNull(v)
+            | Value::CBytes(v)
+            | Value::CByteLen { operand: v, .. }
+            | Value::FunctionBorrow(v)
+            | Value::Len(v)
+            | Value::Negate(v)
+            | Value::Truncate(v)
+            | Value::BitNot(v)
+            | Value::Not(v)
+            | Value::TextView(v)
+            | Value::Intern { operand: v, .. } => {
+                self.expr(v, region, arena);
+                Shape::new()
+            }
+            Value::CheckedCast {
+                operand, fallback, ..
+            } => {
+                self.expr(operand, region, arena);
+                self.expr(fallback, region, arena);
+                Shape::new()
+            }
+            Value::Binary { left, right, .. } | Value::Logical { left, right, .. } => {
+                self.expr(left, region, arena);
+                self.expr(right, region, arena);
+                Shape::new()
+            }
+            // 比較メソッドはarena fnではなくboolを返す通常関数。引数の評価以外の
+            // 寿命への効果はないので、組み込み比較と同じく各オペランドを一度だけ訪問する。
+            Value::Comparison { operands, .. } => {
+                for operand in operands {
+                    self.expr(operand, region, arena);
+                }
+                Shape::new()
+            }
+            Value::Template { parts, .. } => {
+                for part in parts {
+                    if let crate::ast::TemplatePart::Value(v) = part {
+                        self.expr(v, region, arena);
+                    }
+                }
+                Shape::new()
+            }
+            Value::Slice {
+                target,
+                start,
+                end,
+                handler,
+                ..
+            } => {
+                self.expr(target, region, arena);
+                for v in [start, end].into_iter().flatten() {
+                    self.expr(v, region, arena);
+                }
+                self.checked_handler(handler.as_ref(), region, arena);
+                Shape::new()
+            }
+            Value::IntegerArithmetic { handler, .. } => {
+                value.value.visit_constant_children(&mut |child| {
+                    self.expr(child, region, arena);
+                });
+                self.checked_handler(handler.as_ref(), region, arena);
+                Shape::new()
+            }
+            Value::Exact(_) => {
                 value.value.visit_constant_children(&mut |child| {
                     self.expr(child, region, arena);
                 });
                 Shape::new()
+            }
+            Value::CIntegerLiteral { .. }
+            | Value::GenericNumericLiteral { .. }
+            | Value::Integer { .. }
+            | Value::Float(_)
+            | Value::Function(_)
+            | Value::Bool(_)
+            | Value::Text { .. }
+            | Value::Void => Shape::new(),
+        }
+    }
+    fn checked_handler(
+        &mut self,
+        handler: Option<&CheckedHandler>,
+        region: usize,
+        arena: Option<usize>,
+    ) {
+        match handler {
+            None => {}
+            Some(CheckedHandler::Value(v)) => {
+                self.expr(v, region, arena);
+            }
+            Some(CheckedHandler::Return { value, location }) => {
+                let returned = self.expr(value, region, arena);
+                self.return_value(value.ty, returned, *location);
             }
         }
     }
@@ -413,7 +526,7 @@ impl<'a> Analysis<'a> {
                 self.expr(v, region, arena);
                 Shape::new()
             }
-            _ => Shape::new(),
+            CallHandler::Fail(None) | CallHandler::Ignore(_) => Shape::new(),
         }
     }
     fn block(&mut self, body: &[CheckedStatement], region: usize, arena: Option<usize>) {

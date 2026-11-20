@@ -14,7 +14,13 @@ pub(super) fn declaration(function: &CheckedFunction) -> String {
         .parameters
         .iter()
         .enumerate()
-        .map(|(id, ty)| format!("const {} suz_local_{id}", ty.c_name()))
+        .map(|(id, ty)| {
+            if id == 0 && function.mutable_receiver {
+                format!("{} *const suz_ref_0", ty.c_name())
+            } else {
+                format!("const {} suz_local_{id}", ty.c_name())
+            }
+        })
         .collect::<Vec<_>>()
         .join(", ");
     if function.fallible {
@@ -36,6 +42,10 @@ pub(super) fn declaration(function: &CheckedFunction) -> String {
 }
 
 pub(super) fn emit(function: &CheckedFunction, context: &mut ExpressionContext) -> String {
+    context.references.clear();
+    if function.mutable_receiver {
+        context.references.insert(0);
+    }
     context.function_result = Some(function.result);
     context.temporaries.clear();
     context.closure_environments.clear();
@@ -56,7 +66,7 @@ pub(super) fn emit(function: &CheckedFunction, context: &mut ExpressionContext) 
     let mut c = format!("{} {{\n", declaration(function));
     for id in 0..function.parameters.len() {
         // Suzでは未使用の引数を認めるため、Cコンパイラの警告を抑える。
-        writeln!(c, "    (void)suz_local_{id};").unwrap();
+        writeln!(c, "    (void){};", context.local(id)).unwrap();
     }
     for (index, ty) in context.temporaries.iter().enumerate() {
         writeln!(c, "    {} suz_cmp_{index};", ty.c_name()).unwrap();
@@ -79,9 +89,25 @@ pub(super) fn call(
     let mut names = Vec::new();
     for argument in arguments {
         let index = context.temporaries.len();
-        context.temporaries.push(argument.ty);
+        let by_reference = matches!(
+            argument.value,
+            crate::check::ir::Value::Receiver { mutable: true, .. }
+        );
+        context.temporaries.push(if by_reference {
+            argument.ty.pointer()
+        } else {
+            argument.ty
+        });
         let name = format!("suz_cmp_{index}");
-        setup.push(format!("{name} = {}", expression(argument, context)));
+        let value = expression(argument, context);
+        setup.push(format!(
+            "{name} = {}",
+            if by_reference {
+                format!("&({value})")
+            } else {
+                value
+            }
+        ));
         names.push(name);
     }
     if let Some(error) = error {

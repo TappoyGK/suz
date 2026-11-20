@@ -50,7 +50,7 @@ fnshape Message() -> symbol
 fn message(make: fn Message) -> symbol { return make() }
 fn make_data(value: i32) -> Data {
     fix message_text = `x${value}`
-    unsafe { return Data { pointer: c_bytes message_text, size: c_byte_len message_text } }
+    trusted { return Data { pointer: c_bytes message_text, size: c_byte_len message_text } }
 }
 fn forward(pointer: *const void) -> *const void { return pointer }
 fnshape Get() -> *const void
@@ -61,7 +61,7 @@ fn main() -> u8 {
 return `Aあ\0B` })
     fix part = original[1:3] or return 1
     if c_byte_len original != 6 || c_byte_len part != 4 || len original != 4 { return 2 }
-    unsafe {
+    trusted {
         if identity(c_bytes original, c_byte_len original) != 1 { return 3 }
         if view(c_bytes original, c_byte_len original, c_bytes part, c_byte_len part) != 1 { return 4 }
         if identity(c_bytes message(fn [var calls]() -> symbol { calls += 1
@@ -74,10 +74,10 @@ return `Aあ\0B` })) != 1 || calls != 3 { return 5 }
         save(current, stored.size)
     }
     for i in 0..<100 { fix churn = `new${i}` }
-    unsafe { if retained() != 1 { return 6 } }
+    trusted { if retained() != 1 { return 6 } }
     fix empty = original[4:4] or return 7
     if c_byte_len empty != 0 || c_byte_len `` != 0 { return 8 }
-    unsafe { if identity(c_bytes ``, c_byte_len ``) != 1 { return 9 } }
+    trusted { if identity(c_bytes ``, c_byte_len ``) != 1 { return 9 } }
     return 0
 }
 "#;
@@ -99,64 +99,64 @@ return `Aあ\0B` })) != 1 || calls != 3 { return 5 }
 }
 
 #[test]
-fn ffi_pointer_operations_and_unsafe_boundaries_are_rejected() {
+fn ffi_pointer_operations_and_trusted_boundaries_are_rejected() {
     for (body, rule) in [
-        ("fix p = c_bytes `x`", "ffi.unsafe"),
-        ("unsafe { }\nfix p = c_bytes `x`", "ffi.unsafe"),
+        ("fix p = c_bytes `x`", "ffi.trusted"),
+        ("trusted { }\nfix p = c_bytes `x`", "ffi.trusted"),
         ("fix n = c_byte_len 42", "ffi.bytes-source"),
-        ("unsafe { fix p = c_bytes 42 }", "ffi.bytes-source"),
+        ("trusted { fix p = c_bytes 42 }", "ffi.bytes-source"),
         (
-            "unsafe { fix p = c_bytes `x`\nfix q = p == p }",
+            "trusted { fix p = c_bytes `x`\nfix q = p == p }",
             "ffi.pointer-operations",
         ),
         (
-            "unsafe { fix p = c_bytes `x`\nfix q = p < p }",
+            "trusted { fix p = c_bytes `x`\nfix q = p < p }",
             "ffi.pointer-operations",
         ),
         (
-            "unsafe { fix p = c_bytes `x`\nfix q = p + 1 }",
+            "trusted { fix p = c_bytes `x`\nfix q = p + 1 }",
             "expr.operator-types",
         ),
         (
-            "unsafe { fix p = c_bytes `x`\nfix q = p as u64 or 0 }",
+            "trusted { fix p = c_bytes `x`\nfix q = p as u64 or 0 }",
             "ffi.pointer-operations",
         ),
         (
-            "unsafe { fix p = 0 as *const void or c_bytes `x` }",
+            "trusted { fix p = 0 as *const void or c_bytes `x` }",
             "ffi.pointer-operations",
         ),
         ("fix p: *const void = 0", "type.expected"),
         (
-            "unsafe { fix p = c_bytes `x`\nlog info `${p}` }",
+            "trusted { fix p = c_bytes `x`\nlog info `${p}` }",
             "symbol.interpolation",
         ),
         (
-            "unsafe { fix p = c_bytes `x`\nfix q = `${p}` }",
+            "trusted { fix p = c_bytes `x`\nfix q = `${p}` }",
             "symbol.interpolation",
         ),
         (
-            "unsafe { fix p = c_bytes `x`\nfix n = c_byte_len p }",
+            "trusted { fix p = c_bytes `x`\nfix n = c_byte_len p }",
             "ffi.bytes-source",
         ),
         (
-            "unsafe { fix a = Data { pointer: c_bytes `x` }\nfix b = a == a }",
+            "trusted { fix a = Data { pointer: c_bytes `x` }\nfix b = a == a }",
             "ffi.pointer-operations",
         ),
         (
             "fix p = `Data { pointer: 0 }` as Data or return 1",
             "symbol.cast",
         ),
-        ("unsafe { fix p: *void = c_bytes `x` }", "ffi.pointer-type"),
+        ("trusted { fix p: *void = c_bytes `x` }", "ffi.pointer-type"),
         (
-            "unsafe { fix p: *const u8 = c_bytes `x` }",
+            "trusted { fix p: *const u8 = c_bytes `x` }",
             "ffi.pointer-type",
         ),
         (
-            "unsafe { fix p = call(fn []() -> *const void { return c_bytes `x` }) }",
-            "ffi.unsafe",
+            "trusted { fix p = call(fn []() -> *const void { return c_bytes `x` }) }",
+            "ffi.trusted",
         ),
         (
-            "unsafe { fix p: *const _int = c_bytes `x` }",
+            "trusted { fix p: *const _int = c_bytes `x` }",
             "ffi.pointer-type",
         ),
         (
@@ -181,7 +181,7 @@ fn ffi_pointer_operations_and_unsafe_boundaries_are_rejected() {
     for operand in ["'a'", "Item { n: 1 }", "native"] {
         for operation in ["c_bytes", "c_byte_len"] {
             let source = format!(
-                "struct Item {{ n: i32 }}\nfn main() -> u8 {{ fix native: _int = 1\nunsafe {{ fix n = {operation} {operand} }}\nreturn 0 }}"
+                "struct Item {{ n: i32 }}\nfn main() -> u8 {{ fix native: _int = 1\ntrusted {{ fix n = {operation} {operand} }}\nreturn 0 }}"
             );
             let error = suz::compile(source.as_bytes()).unwrap_err();
             assert_eq!(error.rule(), "ffi.bytes-source", "{source}: {error:?}");

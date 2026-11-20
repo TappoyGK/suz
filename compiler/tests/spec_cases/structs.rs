@@ -10,10 +10,10 @@ fix ORIGIN = Point { x: 0, y: 2 }
 fix PLAYER = Player { pos: RIGHT, name: `old`, view: `abc`[:] }
 fix UPDATED = PLAYER with { pos: RIGHT with { y: 3 }, name: `new` }
 struct State { point: Point, trace: i32 }
-fn base(state: ptr State) -> Point { state.trace = state.trace * 10 + 1
+fn base(state: ptr State) -> Point { state#trace = state.trace * 10 + 1
     return state.point }
-fn mark(state: ptr State, n: i32) -> i32 { state.trace = state.trace * 10 + n
-    state.point.y = 99
+fn mark(state: ptr State, n: i32) -> i32 { state#trace = state.trace * 10 + n
+    state.point#y = 99
     return n }
 fn generic(n: int) -> Point { return ORIGIN with { x: n as i32 or 0 } }
 fn accepts(p: Point) -> bool { return p.x == 8 }
@@ -22,7 +22,7 @@ fn main() -> u8 {
     fix ptr state = new State { point: ORIGIN with { x: 5 }, trace: 0 }
     fix snapshot = base(state) with { x: mark(state, 2) }
     if state.trace != 12 || snapshot.x != 2 || snapshot.y != 2 || state.point.y != 99 { return 1 }
-    state.trace = 0
+    state#trace = 0
     fix ordered = base(state) with { y: mark(state, 2), x: mark(state, 3) }
     if state.trace != 123 || ordered.x != 3 || ordered.y != 2 { return 2 }
     fix x: u8 = 8
@@ -31,7 +31,7 @@ fn main() -> u8 {
     fix nested = PLAYER with { pos: PLAYER.pos with { y: 3 }, name: `new` }
     if nested != UPDATED || PLAYER.pos.y != 2 || PLAYER.name != `old` { return 4 }
     var copy = nested
-    copy.pos.x = 100
+    copy.pos#x = 100
     if nested.pos.x != 1 { return 5 }
     if not accepts(ORIGIN with { x }) || (ORIGIN with { x }).x != 8 { return 6 }
     fix direct = ORIGIN with { x: 9 }.x
@@ -43,7 +43,7 @@ fn main() -> u8 {
     if branch.y != 7 { return 9 }
     var local = ORIGIN
     fix saved = local with {
-        x: expr { local.y = 20
+        x: expr { local#y = 20
             10 },
     }
     if saved.x != 10 || saved.y != 2 || local.y != 20 { return 10 }
@@ -86,14 +86,14 @@ fn struct_with_rejects_invalid_targets_fields_and_hidden_writes() {
         ("fix q = (p\nwith { x: 1 })", "struct.with-line"),
         ("fix q = p with { x.y: 1 }", "struct.with-nested"),
         ("fix with = 1", "src.ident"),
-        ("p = p with { x: expr { p.y = 1\n2 }, }", "assign.rhs-write"),
+        ("p = p with { x: expr { p#y = 1\n2 }, }", "assign.rhs-write"),
         (
             "fix q = p with { x: 300 as u8 or return 0 }",
             "expr.or-return-position",
         ),
     ] {
         let source = format!(
-            "struct Point {{ x: i32, y: i32 }}\nfn main() -> u8 {{\nfix x: i32 = 1\nvar p = Point {{ x, y: 0 }}\np.x = 2\n{body}\nreturn 0\n}}"
+            "struct Point {{ x: i32, y: i32 }}\nfn main() -> u8 {{\nfix x: i32 = 1\nvar p = Point {{ x, y: 0 }}\np#x = 2\n{body}\nreturn 0\n}}"
         );
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.rule(), rule, "{source}: {error}");
@@ -158,7 +158,7 @@ fn main() -> u8 {
     }
     fix label = `original`
     fix boxed = Box { pair, label }
-    pair.x = 4
+    pair#x = 4
     if boxed.pair.x != 3 || boxed.label != label { return 2 }
     for i in 0..<(2 as len_t) {
         fix index = Index { i }
@@ -250,8 +250,8 @@ fn field_compound_assignment_saves_old_value_and_handles_failure() {
 struct Box { pair: Pair }
 fn failing() -> u8 {
     var value = Box { pair: Pair { x: 255, y: 0 } }
-    value.pair.x += expr {
-        value.pair.y = 7
+    value.pair#x += expr {
+        value.pair#y = 7
         255 as u8
     } + 1 or return expr {
         ifexpr value.pair.x == 255 && value.pair.y == 7 { 0 } else { 1 }
@@ -260,14 +260,14 @@ fn failing() -> u8 {
 }
 fn main() -> u8 {
     var value = Box { pair: Pair { x: 10, y: 0 } }
-    value.pair.x += expr {
-        value.pair.y = 7
+    value.pair#x += expr {
+        value.pair#y = 7
         value.pair.x
     }
     if value.pair.x != 20 || value.pair.y != 7 { return 3 }
-    value.pair.x = value.pair.x * 255 or 8
+    value.pair#x = value.pair.x * 255 or 8
     if value.pair.x != 8 { return 4 }
-    value.pair.x = 300 as u8 or return failing()
+    value.pair#x = 300 as u8 or return failing()
     return 5
 }
 "#;
@@ -318,27 +318,27 @@ fn struct_fields_reject_invalid_declarations_access_and_overlapping_writes() {
         ),
         (
             "struct Item { x: u8 }",
-            "var p = Item { x: 1 }\np.z = 0",
+            "var p = Item { x: 1 }\np#z = 0",
             "struct.access",
         ),
         (
             "struct Item { x: u8 }",
             "fix p = Item { x: 1 }\np < p",
-            "expr.operator-types",
+            "operator.overload",
         ),
         (
             "struct Item { x: u8 }",
             "fix p = Item { x: 1 }\np + p",
-            "expr.operator-types",
+            "operator.overload",
         ),
         (
             "struct Item { x: u8 }",
-            "var p = Item { x: 1 }\np.x = expr {\np.x = 2\n0\n}",
+            "var p = Item { x: 1 }\np#x = expr {\np#x = 2\n0\n}",
             "assign.rhs-write",
         ),
         (
             "struct Item { x: u8 }",
-            "var p = Item { x: 1 }\np.x = ifexpr false { expr {\np.x = 2\n0\n} } else { 0 }",
+            "var p = Item { x: 1 }\np#x = ifexpr false { expr {\np#x = 2\n0\n} } else { 0 }",
             "assign.rhs-write",
         ),
         (

@@ -20,6 +20,39 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     super::generic::validate(program)?;
     let mut signatures = BTreeMap::new();
     for (id, function) in program.functions.iter().enumerate() {
+        if let Some(method) = function.method {
+            let member = function.name.rsplit('.').next().unwrap();
+            let collision = match method.owner {
+                Type::Struct(id) => program.structs[id].fields.iter().any(|f| f.name == member),
+                Type::Enum(ty) => program.enums[ty.id].variants.iter().any(|v| v == member),
+                _ => unreachable!(),
+            };
+            if method.operator.is_some() && signatures.contains_key(&function.name) {
+                return Err(function.location.error(
+                    ErrorKind::InvalidSource,
+                    if function.parameters.len() == 1 {
+                        crate::diagnostic!(
+                            "operator.unary",
+                            "duplicate unary operator definition"
+                        )
+                    } else {
+                        crate::diagnostic!(
+                            "operator.overload",
+                            "duplicate operator definition for this right-hand type or numeric family"
+                        )
+                    },
+                ));
+            }
+            if collision || signatures.contains_key(&function.name) {
+                return Err(function.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "method.name",
+                        "method name conflicts with a field, variant or another method"
+                    ),
+                ));
+            }
+        }
         if signatures.contains_key(&function.name)
             || program.bindings.iter().any(|c| c.name == function.name)
             || program.enums.iter().any(|e| e.name == function.name)
@@ -34,6 +67,7 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
         signatures.insert(
             function.name.clone(),
             Signature {
+                method: function.method,
                 arena: function.arena,
                 external: false,
                 id,
@@ -47,6 +81,10 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     let main_id = signatures["main"].id;
     let signatures = Rc::new(signatures);
     let scope = Scope {
+        has_operator_methods: program
+            .functions
+            .iter()
+            .any(|f| f.method.is_some_and(|m| m.operator.is_some())),
         functions: signatures,
         fnshapes: Rc::new(program.fnshapes.clone()),
         function_types: Rc::new(std::cell::RefCell::new(program.function_types.clone())),
@@ -287,7 +325,14 @@ pub(super) fn check_function(
     scope: Scope,
     id: usize,
 ) -> Result<(CheckedFunction, Vec<crate::ast::Location>), Diagnostic> {
-    check_with_captures(function, scope, id, &BTreeMap::new())
+    let mut references = BTreeMap::new();
+    if let Some(method) = function.method.filter(|m| m.mutable) {
+        references.insert(
+            "self".into(),
+            Binding::local(0, method.owner, true, false, function.location),
+        );
+    }
+    check_with_captures(function, scope, id, &references)
 }
 
 // 参照キャプチャーは外側の束縛への別名。未代入の判定は外側のスコープで行い、
@@ -299,7 +344,7 @@ pub(super) fn check_with_captures(
     references: &BTreeMap<String, Binding>,
 ) -> Result<(CheckedFunction, Vec<crate::ast::Location>), Diagnostic> {
     control::validate_return_positions(&function.statements)?;
-    scope.unsafe_block = false;
+    scope.trusted_block = false;
     scope.arena_depth = usize::from(function.arena);
     scope.arena_used = Default::default();
     if !function.arena && super::arena::contains(function.result, &scope) {
@@ -380,6 +425,7 @@ pub(super) fn check_with_captures(
     warnings.extend(diagnostics::unhandled_arithmetic(&statements));
     Ok((
         CheckedFunction {
+            mutable_receiver: function.method.is_some_and(|m| m.mutable),
             id,
             parameters: function
                 .parameters
@@ -432,10 +478,10 @@ pub(super) fn call(
             ),
         ));
     }
-    if signature.external && !scope.unsafe_block {
+    if signature.external && !scope.trusted_block {
         return Err(expr.location.error(
             ErrorKind::InvalidSource,
-            crate::diagnostic!("ffi.unsafe", "C calls require an unsafe block"),
+            crate::diagnostic!("ffi.trusted", "C calls require a trusted block"),
         ));
     }
     if arguments.len() != signature.parameters.len() {

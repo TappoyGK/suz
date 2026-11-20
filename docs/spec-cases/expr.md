@@ -2209,3 +2209,66 @@ fn main() -> u8 {
 | 通常 | 正常終了 | 0 | 0 |
 
 整数をf64へ丸めず、1の差を保つ。符号の異なる整数、NaN、負のゼロもそれぞれの値の規則で比較する。
+
+### expr-078 ポインタの読み出しと更新対象の指定
+
+主根拠：`[arena.ptr-operations]`。
+
+**ソース：**
+
+```suz
+struct Point { x: i32 }
+struct Holder { value: ptr i32 }
+arena fn select(holder: ptr Holder, calls: ptr i32) -> ptr i32 {
+    #calls += 1
+    return holder.value
+}
+arena fn select_point(point: ptr Point, calls: ptr i32) -> ptr Point {
+    #calls += 1
+    return point
+}
+fn main() -> u8 {
+    arena {
+        fix ptr first = new (7 as i32)
+        fix ptr second = new (20 as i32)
+        fix ptr holder = new Holder { value: first }
+        fix ptr calls = new (0 as i32)
+        // 対象は1回だけ評価し、右辺がポインタを付け替えても元の実体を更新する。
+        #select(holder, calls) = expr { holder#value = second
+            9 }
+        if .calls != 1 || .first != 9 || .second != 20 { return 1 }
+        // 複合代入の元の値も、右辺の実行より先に読む。
+        #select(holder, calls) += expr { #second = 40
+            holder#value = first
+            2 }
+        if .calls != 2 || .second != 22 { return 2 }
+        if .select(holder, calls) != 9 || .calls != 3 { return 3 }
+        fix ptr pp = new first
+        #.pp += 1
+        if ..pp != 10 || .(.pp) != 10 { return 4 }
+        if .(holder.value) != 10 { return 5 }
+        fix ptr point = new Point { x: 1 }
+        fix copy = .point
+        (.point)#x = 2
+        point#x += 1
+        if copy.x != 1 || (.point).x != 3 { return 6 }
+        #point = Point { x: 4 }
+        if point.x != 4 { return 7 }
+        select_point(point, calls)#x += expr { point#x = 40
+            2 }
+        if point.x != 6 || .calls != 4 { return 10 }
+        var value = Point { x: 1 }
+        value#x = 2
+        if value.x != 2 { return 8 }
+        // 乗算の * は変わらない。
+        if .first * 2 != 20 { return 9 }
+    }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |

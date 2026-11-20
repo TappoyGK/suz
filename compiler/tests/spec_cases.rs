@@ -4,6 +4,8 @@ mod allows;
 mod arena;
 #[path = "spec_cases/arena_functions.rs"]
 mod arena_functions;
+#[path = "spec_cases/arena_fuzz.rs"]
+mod arena_fuzz;
 #[path = "spec_cases/arithmetic.rs"]
 mod arithmetic;
 #[path = "spec_cases/arithmetic_handlers.rs"]
@@ -42,6 +44,10 @@ mod ffi;
 mod ffi_bytes;
 #[path = "spec_cases/ffi_link.rs"]
 mod ffi_link;
+#[path = "spec_cases/ffi_pointers.rs"]
+mod ffi_pointers;
+#[path = "spec_cases/ffi_structs.rs"]
+mod ffi_structs;
 #[path = "spec_cases/float_logs.rs"]
 mod float_logs;
 #[path = "spec_cases/floats.rs"]
@@ -68,6 +74,8 @@ mod log_filter;
 mod logs;
 #[path = "spec_cases/matches.rs"]
 mod matches;
+#[path = "spec_cases/methods.rs"]
+mod methods;
 #[path = "spec_cases/names.rs"]
 mod names;
 #[path = "spec_cases/native_cli.rs"]
@@ -287,3 +295,6 @@ mod log_ignore;
 
 #[path = "spec_cases/objection.rs"]
 mod objection;
+
+#[path = "spec_cases/operator_methods.rs"]
+mod operator_methods;

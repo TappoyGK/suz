@@ -33,6 +33,7 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
         return super::exact::stored(expr, context);
     }
     match expr.value {
+        Value::Receiver { ref target, .. } => expression(target, context),
         Value::New {
             ref value,
             location,
@@ -141,7 +142,8 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             super::structs::literal(id, fields, context)
         }
         Value::Field { ref target, index } => {
-            format!("({}).suz_field_{index}", expression(target, context))
+            let name = super::structs::field_name(target.ty, index, context);
+            format!("({}).{name}", expression(target, context))
         }
         Value::Void => String::new(),
         Value::Call {
@@ -399,6 +401,7 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             expression(right, context)
         ),
         Value::Comparison {
+            ref methods,
             ref operators,
             ref operands,
         } => {
@@ -427,29 +430,6 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                     operand.clone()
                 })
                 .collect();
-            let unsigned = operands[0]
-                .ty
-                .integer_storage()
-                .is_some_and(|ty| ty.bounds().0 == 0);
-            let text = operands[0].ty.is_text();
-            let view = operands[0].ty == Type::Text;
-            let floating = matches!(operands[0].ty, Type::Float(_));
-            let structure = if let Type::Struct(id) = operands[0].ty {
-                context.struct_equals.insert(id);
-                Some(id)
-            } else {
-                None
-            };
-            if !floating
-                && !text
-                && structure.is_none()
-                && !matches!(
-                    operands[0].ty,
-                    Type::Integer(_) | Type::Exact | Type::CInteger(_)
-                )
-            {
-                context.helpers.insert(unsigned);
-            }
             // 宣言には評価の副作用がない。代入は式の中に残し、論理演算の短絡評価とループの再評価を保つ。
             let names: Vec<_> = operands
                 .iter()
@@ -463,7 +443,34 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                 .iter()
                 .map(|operand| expression(operand, context))
                 .collect();
-            let compare = |index: usize| {
+            let mut compare = |index: usize| {
+                if let Some(Some(id)) = methods.get(index) {
+                    return format!("suz_fn_{id}({}, {})", names[index], names[index + 1]);
+                }
+                let unsigned = operands[index]
+                    .ty
+                    .integer_storage()
+                    .is_some_and(|ty| ty.bounds().0 == 0);
+                let text = operands[index].ty.is_text();
+                let view = operands[index].ty == Type::Text;
+                let floating = matches!(operands[index].ty, Type::Float(_));
+                let structure = if let Type::Struct(id) = operands[index].ty {
+                    context.struct_equals.insert(id);
+                    Some(id)
+                } else {
+                    None
+                };
+                if !floating
+                    && !text
+                    && structure.is_none()
+                    && !matches!(
+                        operands[index].ty,
+                        Type::Integer(_) | Type::Exact | Type::CInteger(_)
+                    )
+                {
+                    context.helpers.insert(unsigned);
+                }
+
                 if let Some(id) = structure {
                     return format!(
                         "{}suz_equal_{id}({}, {})",

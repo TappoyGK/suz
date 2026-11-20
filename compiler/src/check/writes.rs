@@ -14,9 +14,32 @@ use crate::{
 struct Writes<'a> {
     name: &'a str,
     fields: &'a [String],
+    scope: &'a super::scope::Scope,
 }
 impl Visitor for Writes<'_> {
     fn expression(&mut self, expr: &Expression) -> Result<(), Diagnostic> {
+        if let ExpressionKind::MethodCall {
+            target,
+            mutable: true,
+            ..
+        } = &expr.kind
+            && let Some((name, fields)) = super::methods::path(target)
+            && self.scope.get(name).is_some_and(|binding| {
+                !super::arena::indirect_path(binding.ty, &fields, self.scope)
+            })
+            && !super::expression::operand_type(target, self.scope)
+                .is_some_and(|ty| ty.pointee().is_some())
+            && name == self.name
+            && (fields.starts_with(self.fields) || self.fields.starts_with(&fields))
+        {
+            return Err(expr.location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "assign.rhs-write",
+                    "assignment RHS calls a # method on the assignment target"
+                ),
+            ));
+        }
         // 本体へ同じ変数が引き継がれるのは、参照キャプチャーの場合だけ。
         if let ExpressionKind::Closure(closure) = &expr.kind
             && !closure
@@ -49,6 +72,16 @@ impl Visitor for Writes<'_> {
         visit::walk_statement(self, statement)
     }
 }
-pub(super) fn check(value: &Expression, name: &str, fields: &[String]) -> Result<(), Diagnostic> {
-    Writes { name, fields }.expression(value)
+pub(super) fn check(
+    value: &Expression,
+    name: &str,
+    fields: &[String],
+    scope: &super::scope::Scope,
+) -> Result<(), Diagnostic> {
+    Writes {
+        name,
+        fields,
+        scope,
+    }
+    .expression(value)
 }

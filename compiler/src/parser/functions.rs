@@ -6,7 +6,7 @@
 use super::{FixedToken, Parser};
 use crate::{
     Diagnostic, ErrorKind,
-    ast::{Function, Parameter, Type},
+    ast::{Function, Method, Parameter, Type},
     lexer::Kind,
 };
 
@@ -78,7 +78,7 @@ impl Parser<'_, '_> {
         }
     }
 
-    pub(super) fn parameter(&mut self) -> Result<Parameter, Diagnostic> {
+    pub(super) fn parameter_name(&mut self) -> Result<(String, crate::ast::Location), Diagnostic> {
         let location = self.location();
         let Kind::Ident(name) = self.token().kind else {
             return Err(self.error(
@@ -96,6 +96,26 @@ impl Parser<'_, '_> {
             ));
         }
         self.cursor += 1;
+        Ok((name, location))
+    }
+
+    pub(super) fn parameter(&mut self) -> Result<Parameter, Diagnostic> {
+        // keep: 型は通常の名前。keep 名前: 型だけをextern専用の修飾語として診断する。
+        if self.token().kind == Kind::Ident("keep")
+            && self
+                .tokens
+                .get(self.cursor + 1)
+                .is_some_and(|t| matches!(t.kind, Kind::Ident(_)))
+        {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "ffi.keep",
+                    "keep is only allowed on extern typed C pointer parameters"
+                ),
+            ));
+        }
+        let (name, location) = self.parameter_name()?;
         let ty = self.function_parameter_type()?;
         if ty == Type::Void {
             return Err(location.error(
@@ -183,14 +203,14 @@ impl Parser<'_, '_> {
             if self.token().kind != Kind::Ident("const") {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
-                    crate::diagnostic!("ffi.pointer-type", "only *const void is supported"),
+                    crate::diagnostic!("ffi.pointer-type", "typed C pointers are only allowed on extern parameters; use ptr T for Suz pointers"),
                 ));
             }
             self.cursor += 1;
             if self.token().kind != Kind::TypeName("void") {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
-                    crate::diagnostic!("ffi.pointer-type", "only *const void is supported"),
+                    crate::diagnostic!("ffi.pointer-type", "typed C pointers are only allowed on extern parameters; use ptr T for Suz pointers"),
                 ));
             }
             self.cursor += 1;
@@ -273,16 +293,117 @@ impl Parser<'_, '_> {
         let keyword_location = self.location();
         self.cursor += 1;
         let location = self.location();
-        let Kind::Ident(name) = self.token().kind else {
+        let (Kind::Ident(name) | Kind::TypeName(name)) = self.token().kind else {
             return Err(self.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!("src.ident", "expected a function name"),
             ));
         };
-        super::names::check(super::names::Shape::Value, name, location)?;
-        let name = name.to_owned();
+        let owner_name = name;
+        let ordinary_name = matches!(self.token().kind, Kind::Ident(_));
         self.cursor += 1;
-        let (parameters, result) = if name == "main" {
+        let (mut name, method) = if matches!(self.token().kind, Kind::Symbol("." | "#")) {
+            let mutable = self.token().kind == Kind::Symbol("#");
+            let owner = self
+                .structs
+                .iter()
+                .position(|s| s.name == owner_name)
+                .map(Type::Struct)
+                .or_else(|| {
+                    self.enums
+                        .iter()
+                        .find(|e| e.name == owner_name && !e.ty.is_error)
+                        .map(|e| Type::Enum(e.ty))
+                })
+                .ok_or_else(|| {
+                    location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "method.target-type",
+                            "methods require a struct or enum declared in this source"
+                        ),
+                    )
+                })?;
+            let owner_token = &self.tokens[self.cursor - 1];
+            let separator = self.token();
+            self.cursor += 1;
+            let (method_name, operator) = match self.token().kind {
+                Kind::Ident(name) => (name, None),
+                Kind::Symbol(
+                    op @ ("+" | "-" | "*" | "/" | "%" | "&" | "|" | "^" | "<<" | ">>" | "~" | "<"
+                    | "<=" | ">" | ">="),
+                )
+                | Kind::Keyword(op @ ("not" | "len")) => {
+                    let symbol = match op {
+                        "+" => "+",
+                        "-" => "-",
+                        "*" => "*",
+                        "/" => "/",
+                        "%" => "%",
+                        "&" => "&",
+                        "|" => "|",
+                        "^" => "^",
+                        "<<" => "<<",
+                        ">>" => ">>",
+                        "~" => "~",
+                        "not" => "not",
+                        "len" => "len",
+                        "<" => "<",
+                        "<=" => "<=",
+                        ">" => ">",
+                        ">=" => ">=",
+                        _ => unreachable!(),
+                    };
+                    (op, Some(symbol))
+                }
+                Kind::Symbol("==" | "!=") => {
+                    return Err(self.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "operator.no-equality",
+                            "equality operators cannot be defined"
+                        ),
+                    ));
+                }
+                _ => {
+                    return Err(self.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "operator.method",
+                            "expected a method name or a supported operator"
+                        ),
+                    ));
+                }
+            };
+            if owner_token.span.end != separator.span.start
+                || separator.span.end != self.token().span.start
+            {
+                return Err(self.error(ErrorKind::InvalidSource, crate::diagnostic!("method.decl", "method declarations cannot separate the type, receiver symbol and method name")));
+            }
+            if operator.is_none() {
+                super::names::check(super::names::Shape::Value, method_name, self.location())?;
+            }
+            let name = format!("{owner_name}.{method_name}");
+            self.cursor += 1;
+            (
+                name,
+                Some(Method {
+                    owner,
+                    mutable,
+                    operator,
+                }),
+            )
+        } else {
+            if !ordinary_name {
+                return Err(location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("src.ident", "expected a function name"),
+                ));
+            }
+            super::names::check(super::names::Shape::Value, owner_name, location)?;
+            (owner_name.to_owned(), None)
+        };
+        let (mut parameters, result) = if name == "main" {
             if has_main {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
@@ -318,7 +439,49 @@ impl Parser<'_, '_> {
             self.cursor += 1;
             (parameters, self.parse_type()?)
         };
+        if let Some(method) = method {
+            if let Some(operator) = method.operator {
+                if method.mutable
+                    || !match operator {
+                        "~" | "not" | "len" => parameters.is_empty(),
+                        "-" => parameters.len() <= 1,
+                        _ => parameters.len() == 1,
+                    }
+                    || result == Type::Void
+                    || (matches!(operator, "<" | "<=" | ">" | ">=" | "not") && result != Type::Bool)
+                    || (operator == "len" && result != Type::Integer(crate::ast::IntegerType::Len))
+                {
+                    return Err(location.error(ErrorKind::InvalidSource, crate::diagnostic!(
+                        "operator.method", "operator methods require a read receiver and a value result; binary operators take one parameter, unary operators take none, comparisons and not return bool, len returns len_t")));
+                }
+                // 引数のない単項と二項を区別する。二項の数値は種類ごと、その他は型ごとに一意にする。
+                let key = if parameters.is_empty() {
+                    "unary".into()
+                } else if parameters[0].ty.is_integer() {
+                    "integer".into()
+                } else if parameters[0].ty.is_float() {
+                    "float".into()
+                } else {
+                    format!("{:?}", parameters[0].ty)
+                };
+                name.push_str(&format!("@{key}"));
+            }
+            parameters.insert(
+                0,
+                Parameter {
+                    name: "self".into(),
+                    ty: method.owner,
+                    location,
+                },
+            );
+        }
         let errors = self.error_spec()?;
+        if method.is_some_and(|m| m.operator.is_some()) && !errors.is_empty() {
+            return Err(location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("operator.method", "operator methods cannot return errors"),
+            ));
+        }
         if name == "main" && !errors.is_empty() {
             return Err(location.error(
                 ErrorKind::InvalidSource,
@@ -327,6 +490,7 @@ impl Parser<'_, '_> {
         }
         let (statements, end) = self.block()?;
         Ok(Function {
+            method,
             arena: false,
             keyword_location,
             name,

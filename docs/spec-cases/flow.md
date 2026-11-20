@@ -41,7 +41,7 @@ struct Point { x: i32 }
 struct Box { point: Point }
 
 fn change(value: Box) -> void {
-    value.point.x = 9
+    value.point#x = 9
 }
 
 fn main() -> u8 { return 0 }
@@ -1769,7 +1769,7 @@ struct Limits { end: u8 }
 fn main() -> u8 {
     var limits = Limits { end: 3 }
     for i in 0..<limits.end {
-        limits.end = 0
+        limits#end = 0
     }
     return 0
 }
@@ -2692,3 +2692,126 @@ fn main() -> int {
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
 | 通常 | `[prog.main]` | 1 | 14 |
+
+### flow-090 メソッドの受け手とselfのキャプチャー
+
+主根拠：`[method.eval-order]`。
+
+**ソース：**
+
+```suz
+struct Counter { value: i32 }
+struct Holder { counter: Counter, pointer: ptr Counter }
+enum Mode: u8 { Off, On }
+fnshape Read() -> i32
+fnshape Action() -> void
+fn read(f: fn Read) -> i32 { return f() }
+fn act(f: fn Action) -> void { f() }
+fn Counter.get() -> i32 { return self.value }
+fn Counter.get_after(ignored: i32) -> i32 { return self.value }
+fn Counter#add(n: int) -> void { self#value += n as i32 or 0 }
+fn Counter.echo(n: int) -> int { return n }
+fn Counter.echo_float(n: float) -> float { return n }
+fn Counter.sum(n: int) -> int {
+    if n == 0 { return 0 }
+    return self.sum(n - 1) + n
+}
+fn Counter#reset() -> void { self = Counter { value: 0 } }
+fn Counter#twice() -> void { self#add(1 as i16)
+    self#add(1 as i16) }
+fn Counter#capture() -> i32 {
+    act(fn [var self]() -> void { self#twice() })
+    return read(fn [self]() -> i32 { return self.get() })
+}
+fn Counter#observe_alias(other: ptr Counter) -> i32 {
+    self#value = 30
+    return other.value
+}
+fn Holder.bump_pointer() -> void { self.pointer#add(1 as u8) }
+fn Mode.enabled() -> bool { return self == Mode.On }
+fn Mode#toggle() -> void { self = ifexpr self == Mode.On { Mode.Off } else { Mode.On } }
+fn main() -> u8 {
+    var count = Counter { value: 1 }
+    count#add(2 as i16)
+    if count.get() != 3 || count.echo(9 as u16) != 9 { return 1 }
+    if count.echo(1 as u8) + count.echo(300 as u16) != 301 { return 13 }
+    if count.echo_float(1.25 as f32) + count.echo_float(2.5 as f64) != 3.75 { return 14 }
+    if count.sum(3 as u8) != 6 { return 15 }
+    if count#capture() != 5 || count.value != 5 { return 2 }
+    count#reset()
+    if count.value != 0 { return 3 }
+    var mode = Mode.Off
+    mode#toggle()
+    if not mode.enabled() { return 4 }
+    if not Mode.On.enabled() { return 5 }
+    if (Counter { value: 8 }).get() != 8 { return 6 }
+    arena {
+        fix ptr first = new Counter { value: 10 }
+        fix ptr second = new Counter { value: 20 }
+        var ptr selected = first
+        selected#add(expr { selected = second
+            2 as i16 })
+        if first.value != 12 || second.value != 20 { return 7 }
+        if first.get_after(expr { first#value = 15
+            0 }) != 12 { return 8 }
+        if first#observe_alias(first) != 30 { return 9 }
+        var holder = Holder { counter: Counter { value: 2 }, pointer: first }
+        holder.counter#add(3 as i8)
+        holder.bump_pointer()
+        if holder.counter.value != 5 || first.value != 31 { return 10 }
+        fix ptr maybe: ptr? Counter = first
+        let p = maybe { p#reset() }
+        if first.value != 0 { return 11 }
+        selected = expr { selected#reset()
+            first }
+        if selected.get() != 0 || second.get() != 0 { return 12 }
+    }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### flow-091 Arenaメソッドと失敗処理
+
+主根拠：`[method.arena]`。
+
+**ソース：**
+
+```suz
+struct Node { next: ptr? Node, value: i32 }
+error Trouble { Empty }
+arena fn Node#append(value: i32) -> ptr Node {
+    fix ptr child = new Node { next: null, value }
+    self#next = child
+    return child
+}
+arena fn Node.follow() -> ptr? Node { return self.next }
+fn Node.read() -> i32 or Trouble {
+    if self.value == 0 { fail Trouble.Empty }
+    return self.value
+}
+arena fn make() -> ptr Node { return new Node { next: null, value: 0 } }
+fn main() -> u8 {
+    arena {
+        fix ptr p = make()
+        fix ptr child = p#append(9)
+        if (child.read() or 0) != 9 { return 1 }
+        fix ptr next = p.follow()
+        let n = next { if n.value != 9 { return 2 } } else { return 3 }
+        if (p.read() or 7) != 7 { return 4 }
+        make()#append(4)
+    }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |

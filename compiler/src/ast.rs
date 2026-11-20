@@ -440,11 +440,19 @@ pub(crate) struct StructField {
 /// 構造体の宣言。宣言順のフィールドとトークン範囲を持つ。
 #[derive(Clone)]
 pub(crate) struct StructDeclaration {
+    pub external: Option<ExternStruct>,
     pub name: String,
     pub location: Location,
     pub fields: Vec<StructField>,
     pub start: usize,
     pub end: usize,
+}
+
+/// ヘッダーのstructタグとの照合に使うC側の名前。
+#[derive(Clone)]
+pub(crate) struct ExternStruct {
+    pub header: String,
+    pub c_name: String,
 }
 
 /// 構造体リテラルに書いたフィールド名・初期化式・位置。意味検査でフィールド番号へ解決する。
@@ -512,6 +520,7 @@ pub(crate) struct Parameter {
 /// 関数の構文。仮引数・戻り値型・本体の文と、宣言の開始・終了位置を保持する。
 #[derive(Clone)]
 pub(crate) struct Function {
+    pub method: Option<Method>,
     pub arena: bool,
     pub keyword_location: Location,
     pub name: String,
@@ -521,6 +530,14 @@ pub(crate) struct Function {
     pub errors: Vec<ErrorVariant>,
     pub statements: Vec<Statement>,
     pub end: Location,
+}
+
+/// メソッドの受け手。暗黙の第1仮引数selfの型と更新の可否を保持する。
+#[derive(Clone, Copy)]
+pub(crate) struct Method {
+    pub operator: Option<&'static str>,
+    pub owner: Type,
+    pub mutable: bool,
 }
 
 impl Function {
@@ -573,7 +590,7 @@ pub(crate) enum Statement {
         location: Location,
     },
 
-    Unsafe(Vec<Statement>),
+    Trusted(Vec<Statement>),
     Objection(Vec<Statement>),
     Log {
         level: LogLevel,
@@ -833,6 +850,17 @@ pub(crate) struct Capture {
 /// 式の構文ごとの内容。名前・リテラルの綴り・子の式を保持し、意味検査で [`crate::check::ir::Value`] へ変換する。
 #[derive(Clone)]
 pub(crate) enum ExpressionKind {
+    MethodCall {
+        target: Box<Expression>,
+        name: String,
+        mutable: bool,
+        arguments: Vec<Expression>,
+    },
+    /// メソッド呼び出しを通常の呼び出しへ渡す際の受け手。ソースからは直接作らない。
+    Receiver {
+        target: Box<Expression>,
+        mutable: bool,
+    },
     New(Box<Expression>),
     Deref(Box<Expression>),
     Null,
@@ -993,7 +1021,17 @@ pub(crate) struct ExternFunction {
     pub header: String,
     pub c_name: String,
     pub name: String,
-    pub parameters: Vec<Parameter>,
+    pub parameters: Vec<ExternParameter>,
     pub result: Type,
     pub location: Location,
+}
+
+/// 外部関数の仮引数。型付きCポインタはSuz側では非nullのptr Tとして検査する。
+#[derive(Clone)]
+pub(crate) struct ExternParameter {
+    pub name: String,
+    pub ty: Type,
+    pub location: Location,
+    /// 型付きポインタの参照先にCのconstを付ける。Suzのptr型自体は変更しない。
+    pub read_only: bool,
 }
