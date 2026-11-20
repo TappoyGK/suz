@@ -429,21 +429,22 @@ impl Parser<'_, '_> {
         if let Some(method) = method {
             if let Some(operator) = method.operator {
                 if method.mutable
-                    || parameters.len() != 1
+                    || !(parameters.len() == 1 || (operator == "-" && parameters.is_empty()))
                     || result == Type::Void
                     || (matches!(operator, "<" | "<=" | ">" | ">=") && result != Type::Bool)
                 {
                     return Err(location.error(ErrorKind::InvalidSource, crate::diagnostic!(
-                        "operator.method", "binary operator methods require a read receiver, one parameter and a value result; comparisons must return bool")));
+                        "operator.method", "operator methods require a read receiver and a value result; binary operators take one parameter, unary - takes none, comparisons return bool")));
                 }
-                // 数値は種類ごとに1定義。その他は型ごとの一意な内部名にする。
-                let rhs = parameters[0].ty;
-                let key = if rhs.is_integer() {
+                // 引数のない単項と二項を区別する。二項の数値は種類ごと、その他は型ごとに一意にする。
+                let key = if parameters.is_empty() {
+                    "unary".into()
+                } else if parameters[0].ty.is_integer() {
                     "integer".into()
-                } else if rhs.is_float() {
+                } else if parameters[0].ty.is_float() {
                     "float".into()
                 } else {
-                    format!("{rhs:?}")
+                    format!("{:?}", parameters[0].ty)
                 };
                 name.push_str(&format!("@{key}"));
             }

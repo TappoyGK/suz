@@ -225,6 +225,10 @@ fn operator_methods_in_constants_are_source_errors() {
     let directory = crate::test_util::TemporaryDirectory::new();
     for (declarations, initializer) in [
         (
+            "fn Num.-() -> i32 { return 1 }",
+            "fix VALUE = -(Num { v: 1 })",
+        ),
+        (
             "fn Num.+(n: i32) -> i32 { return n }",
             "fix VALUE: i32 = Num { v: 1 } + 1",
         ),
@@ -302,4 +306,128 @@ fn missing_operator_diagnostics_include_the_symbol_without_any_definitions() {
             );
         }
     }
+}
+
+#[test]
+fn unary_minus_methods_preserve_precedence_evaluation_and_result_types() {
+    let output = compile_and_run_c23(
+        r#"
+struct Num { v: i32 }
+fn Num.-() -> Num { return Num { v: -self.v } }
+fn Num.-(n: Num) -> Num { return Num { v: self.v - n.v } }
+fn make(counter: ptr i32, v: i32) -> Num {
+    #counter = .counter * 10 + v
+    return Num { v: v }
+}
+struct Scalar { v: i32 }
+fn Scalar.-() -> i32 { return -self.v }
+struct Fraction { v: f32 }
+fn Fraction.-() -> f32 { return -self.v }
+enum Direction: u8 { Left, Right }
+fn Direction.-() -> Direction {
+    return ifexpr self == Direction.Left { Direction.Right } else { Direction.Left }
+}
+fn main() -> u8 {
+    arena {
+        fix ptr counter = new (0 as i32)
+        fix n = -make(counter, 1) - make(counter, 2)
+        if n.v != -3 || .counter != 12 { return 1 }
+        #counter = 0
+        if (-(-make(counter, 3))).v != 3 || .counter != 3 { return 2 }
+        fix ptr p = new Num { v: 4 }
+        if (-(.p)).v != -4 { return 3 }
+    }
+    fix s = Scalar { v: 3 }
+    fix k: u8 = (-s) + 260 or 7
+    if k != 7 { return 4 }
+    if -(-s) != 3 { return 5 }
+    fix f = Fraction { v: 2.0 }
+    if (-f) + 0.5 != -1.5 { return 6 }
+    if -Direction.Left != Direction.Right { return 7 }
+    return 0
+}
+"#,
+        "unary-operators.suz",
+    );
+    assert!(output.status.success(), "{output:?}");
+}
+
+#[test]
+fn unary_minus_methods_reject_invalid_definitions_and_call_contexts() {
+    for (declaration, body, rule) in [
+        (
+            "fn Num.-() -> Num { return self }\nfn Num.-() -> i32 { return 0 }",
+            "",
+            "operator.unary-minus",
+        ),
+        ("fn Num.-() -> void {}", "", "operator.method"),
+        ("fn Num#-() -> Num { return self }", "", "operator.method"),
+        (
+            "arena fn Num.-() -> Num { return self }",
+            "",
+            "operator.method",
+        ),
+        (
+            "fn Num.-() -> Num or Err { return self }",
+            "",
+            "operator.method",
+        ),
+        ("fn Num.+() -> Num { return self }", "", "operator.method"),
+        (
+            "fn Num.-(a: Num, b: Num) -> Num { return a }",
+            "",
+            "operator.method",
+        ),
+        ("", "fix a = -n", "operator.unary-minus"),
+        (
+            "fn Num.-(a: Num) -> Num { return a }",
+            "fix a = -n",
+            "operator.unary-minus",
+        ),
+        (
+            "fn Num.-() -> Num { return self }",
+            "fix a = n - n",
+            "operator.overload",
+        ),
+        (
+            "fn Num.-() -> Num { return self }",
+            "fix a = -n or n",
+            "operator.arith-boundary",
+        ),
+        (
+            "fn Num.-() -> i32 { return 1 }",
+            "fix a = (-n) or 0",
+            "operator.arith-boundary",
+        ),
+        (
+            "fn Num.-() -> Num { return self }",
+            "arena { fix ptr p = new n\nfix a = -p }",
+            "expr.operator-types",
+        ),
+    ] {
+        let source = format!(
+            "struct Num {{ v: i32 }}\nerror Err {{ Bad }}\n{declaration}\nfn main() -> u8 {{ fix n = Num {{ v: 1 }}\n{body}\nreturn 0 }}"
+        );
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(
+            error.kind,
+            suz::ErrorKind::InvalidSource,
+            "{source}\n{error}"
+        );
+        assert_eq!(error.rule(), rule, "{source}\n{error}");
+    }
+    let error = suz::compile(b"struct Ref { p: ptr i32 }\nfn Ref.-() -> ptr i32 { return self.p }\nfn main() -> u8 { return 0 }").unwrap_err();
+    assert_eq!(error.rule(), "arena.parameter", "{error}");
+}
+
+#[test]
+fn unary_minus_generates_the_same_call_as_a_named_method() {
+    let source = "struct Num { v: f32 }\nfn Num.-() -> Num {\nreturn Num { v: -self.v }\n}\nfn main() -> u8 {\nfix a = Num { v: 2.0 }\nfix b = -a\nreturn ifexpr b.v == -2.0 { 0 } else { 1 }\n}";
+    let named = source
+        .replace("Num.-()", "Num.neg()")
+        .replace("b = -a", "b = a.neg()");
+    assert_eq!(
+        suz::compile(source.as_bytes()).unwrap(),
+        suz::compile(named.as_bytes()).unwrap()
+    );
 }

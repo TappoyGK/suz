@@ -56,7 +56,9 @@ pub(super) fn check(
                 }
                 _ => {}
             }
-            if super::super::operator_methods::binary(call, bindings) {
+            if bindings.has_operator_methods
+                && super::super::operator_methods::is_call(call, bindings)
+            {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
                     crate::diagnostic!(
@@ -186,6 +188,14 @@ pub(super) fn check(
                     expr.location.error(
                         ErrorKind::InvalidSource,
                         match ty {
+                            Type::Struct(_) | Type::Enum(_)
+                                if matches!(&expr.kind, ExpressionKind::Negate(_)) =>
+                            {
+                                crate::diagnostic!(
+                                    "operator.unary-minus",
+                                    "no unary operator - defined for this type"
+                                )
+                            }
                             Type::Text => crate::diagnostic!(
                                 "text.operations",
                                 "text does not support arithmetic or bitwise operations"

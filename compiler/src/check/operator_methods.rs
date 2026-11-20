@@ -1,5 +1,5 @@
-//! 演算子の右辺から定義を選び、通常の関数呼び出しへ接続する。
-//! 種類の判定は型付けに先行し、リテラルを既定の具体型へ確定させない。
+//! 演算子の定義を選び、通常の関数呼び出しへ接続する。
+//! 二項演算の右辺では種類の判定が型付けに先行し、リテラルを既定の具体型へ確定させない。
 use super::{expression, functions, ir::CheckedExpression, scope::Scope};
 use crate::{
     Diagnostic, ErrorKind,
@@ -53,8 +53,9 @@ fn resolve<'a>(
             .functions
             .values()
             .filter(|f| {
-                f.method
-                    .is_some_and(|m| Some(m.owner) == owner && m.operator == Some(op))
+                f.method.is_some_and(|m| {
+                    Some(m.owner) == owner && m.operator == Some(op) && f.parameters.len() == 2
+                })
             })
             .map(|f| scope.type_name(f.parameters[1]))
             .collect::<Vec<_>>()
@@ -79,9 +80,17 @@ pub(super) fn supported(op: crate::ast::BinaryOperator) -> bool {
     matches!(op, Add | Subtract | Multiply | Divide)
 }
 
-pub(super) fn binary(expr: &Expression, scope: &Scope) -> bool {
-    scope.has_operator_methods
-        && matches!(&expr.kind, ExpressionKind::Binary { operator, left, .. } if supported(*operator) && owner(left, scope).is_some())
+pub(super) fn is_call(expr: &Expression, scope: &Scope) -> bool {
+    if !scope.has_operator_methods {
+        return false;
+    }
+    match &expr.kind {
+        ExpressionKind::Binary { operator, left, .. } if supported(*operator) => {
+            owner(left, scope).is_some()
+        }
+        ExpressionKind::Negate(operand) => owner(operand, scope).is_some(),
+        _ => false,
+    }
 }
 
 pub(super) fn hint(op: &str, left: &Expression, right: &Expression, scope: &Scope) -> Option<Type> {
@@ -97,11 +106,53 @@ pub(super) fn hint(op: &str, left: &Expression, right: &Expression, scope: &Scop
     super::generic::call_operand_type(name, &[left.clone(), right.clone()], &hints)
 }
 
+fn unary_name(operand: &Expression, scope: &Scope) -> Option<String> {
+    Some(format!(
+        "{}.-@unary",
+        scope.type_name(owner(operand, scope)?)
+    ))
+}
+
+pub(super) fn unary_hint(operand: &Expression, scope: &Scope) -> Option<Type> {
+    let name = unary_name(operand, scope)?;
+    super::generic::call_operand_type(&name, std::slice::from_ref(operand), scope)
+}
+
+pub(super) fn unary_call(
+    expr: &Expression,
+    operand: &Expression,
+    expected: Option<Type>,
+    scope: &Scope,
+) -> Result<CheckedExpression, Diagnostic> {
+    let name = unary_name(operand, scope).expect("operator receiver checked");
+    if !scope.functions.contains_key(&name) {
+        return Err(expr.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "operator.unary-minus",
+                "no unary operator - defined for this type"
+            ),
+        ));
+    }
+    invoke(expr, &name, std::slice::from_ref(operand), expected, scope)
+}
+
 pub(super) fn call(
     expr: &Expression,
     op: &str,
     left: &Expression,
     right: &Expression,
+    expected: Option<Type>,
+    scope: &Scope,
+) -> Result<CheckedExpression, Diagnostic> {
+    let name = resolve(op, left, right, scope)?;
+    invoke(expr, name, &[left.clone(), right.clone()], expected, scope)
+}
+
+fn invoke(
+    expr: &Expression,
+    name: &str,
+    arguments: &[Expression],
     expected: Option<Type>,
     scope: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
@@ -114,17 +165,9 @@ pub(super) fn call(
             ),
         ));
     }
-    let name = resolve(op, left, right, scope)?;
     scope.type_hints.borrow_mut().clear();
     scope.float_hints.borrow_mut().clear();
-    let result = functions::call(
-        expr,
-        name,
-        &[left.clone(), right.clone()],
-        expected,
-        scope,
-        None,
-    );
+    let result = functions::call(expr, name, arguments, expected, scope, None);
     scope.type_hints.borrow_mut().clear();
     scope.float_hints.borrow_mut().clear();
     result

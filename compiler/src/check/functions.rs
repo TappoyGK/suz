@@ -30,10 +30,17 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
             if method.operator.is_some() && signatures.contains_key(&function.name) {
                 return Err(function.location.error(
                     ErrorKind::InvalidSource,
-                    crate::diagnostic!(
-                        "operator.overload",
-                        "duplicate operator definition for this right-hand type or numeric family"
-                    ),
+                    if function.parameters.len() == 1 {
+                        crate::diagnostic!(
+                            "operator.unary-minus",
+                            "duplicate unary operator - definition"
+                        )
+                    } else {
+                        crate::diagnostic!(
+                            "operator.overload",
+                            "duplicate operator definition for this right-hand type or numeric family"
+                        )
+                    },
                 ));
             }
             if collision || signatures.contains_key(&function.name) {

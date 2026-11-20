@@ -116,6 +116,12 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
         ExpressionKind::Char(_) => Some(Type::Char),
         ExpressionKind::Integer { .. } | ExpressionKind::Float(_) => None,
         ExpressionKind::Name(name) => bindings.get(name).map(|binding| binding.ty),
+        ExpressionKind::Negate(inner)
+            if bindings.has_operator_methods
+                && super::operator_methods::owner(inner, bindings).is_some() =>
+        {
+            super::operator_methods::unary_hint(inner, bindings)
+        }
         ExpressionKind::ArithmeticHandler { operand: inner, .. }
         | ExpressionKind::Group(inner)
         | ExpressionKind::BitNot(inner)
@@ -212,6 +218,11 @@ fn has_float_source_inner<const OPERATOR_METHODS: bool>(
             blocks::has_float_source(statements, value, bindings)
         }
         ExpressionKind::Float(_) => true,
+        ExpressionKind::Negate(inner)
+            if OPERATOR_METHODS && super::operator_methods::owner(inner, bindings).is_some() =>
+        {
+            super::operator_methods::unary_hint(inner, bindings).is_some_and(Type::is_float)
+        }
         ExpressionKind::ArithmeticHandler { operand: inner, .. }
         | ExpressionKind::Group(inner)
         | ExpressionKind::BitNot(inner)
@@ -418,6 +429,11 @@ fn expression_inner(
             inference_hint,
             bindings,
         )?
+    } else if bindings.has_operator_methods
+        && let ExpressionKind::Negate(operand) = &expr.kind
+        && super::operator_methods::owner(operand, bindings).is_some()
+    {
+        super::operator_methods::unary_call(expr, operand, inference_hint, bindings)?
     } else if super::exact::is_operator(expr) && super::exact::integer(expr, bindings) {
         super::exact::check(expr, inference_hint, bindings, false)?
     } else {

@@ -110,7 +110,9 @@ fn build<const OPERATOR_METHODS: bool>(
             let value = Int::new(*negative, digits.parse().map_err(|_| error(location))?);
             (ExactKind::Literal(value), Some(Range::point(value)))
         }
-        ExpressionKind::Negate(e) => {
+        ExpressionKind::Negate(e)
+            if !OPERATOR_METHODS || !super::operator_methods::is_call(expr, bindings) =>
+        {
             let e = build::<OPERATOR_METHODS>(e, bindings)?;
             let range = e.range.map(|r| Range {
                 min: r.max.neg(),
@@ -123,7 +125,7 @@ fn build<const OPERATOR_METHODS: bool>(
             left,
             right,
         } if is_operator(expr)
-            && (!OPERATOR_METHODS || !super::operator_methods::binary(expr, bindings)) =>
+            && (!OPERATOR_METHODS || !super::operator_methods::is_call(expr, bindings)) =>
         {
             let left = build::<OPERATOR_METHODS>(left, bindings)?;
             let right = build::<OPERATOR_METHODS>(right, bindings)?;
