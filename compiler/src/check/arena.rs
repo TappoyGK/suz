@@ -307,11 +307,11 @@ fn store(
             right: Box::new(value.clone()),
         },
     });
-    let result = expression::coerced(
-        compound.as_ref().unwrap_or(value),
-        Some(target.ty),
-        context.bindings,
-    );
+    let result = if let Some(compound) = &compound {
+        super::operator_methods::compound(compound, target.ty, context.bindings)
+    } else {
+        expression::coerced(value, Some(target.ty), context.bindings)
+    };
     context.bindings.locals.remove(&name);
     let mut value = result?;
     let mut body = Vec::new();

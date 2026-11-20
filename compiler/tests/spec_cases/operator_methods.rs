@@ -431,3 +431,196 @@ fn unary_minus_generates_the_same_call_as_a_named_method() {
         suz::compile(named.as_bytes()).unwrap()
     );
 }
+
+#[test]
+fn compound_operator_methods_update_locals_fields_and_reference_captures() {
+    let output = compile_and_run_c23(
+        r#"
+struct Num { v: i32 }
+struct Body { pos: Num }
+fn Num.+(n: Num) -> Num { return Num { v: self.v + n.v } }
+fn Num.-(n: Num) -> Num { return Num { v: self.v - n.v } }
+fn Num.*(k: int) -> Num { return Num { v: self.v * k } }
+fn Num./(k: i32) -> Num { return Num { v: self.v / k } }
+enum Step: u8 { Low, High }
+fn Step.+(n: Step) -> Step { return n }
+fnshape Action() -> void
+fn execute(f: fn Action) -> void { f() }
+fn main() -> u8 {
+    var n = Num { v: 10 }
+    n += Num { v: 2 }
+    n -= Num { v: 4 }
+    n *= 3
+    n /= 2
+    if n.v != 12 { return 1 }
+    var body = Body { pos: n }
+    body#pos += Num { v: 3 }
+    if body.pos.v != 15 { return 2 }
+    execute(fn [var n, var body]() -> void {
+        n *= 2
+        body#pos -= Num { v: 5 }
+    })
+    if n.v != 24 || body.pos.v != 10 { return 3 }
+    var captured = Num { v: 1 }
+    execute(fn [var captured]() -> void { captured += Num { v: 2 } })
+    if captured.v != 3 { return 7 }
+    var step = Step.Low
+    step += Step.High
+    if step != Step.High { return 4 }
+    arena {
+        fix ptr p = new Body { pos: Num { v: 5 } }
+        p#pos *= 3
+        if p.pos.v != 15 { return 5 }
+        fix ptr q = new Num { v: 8 }
+        #q /= 2
+        if q.v != 4 { return 6 }
+    }
+    return 0
+}
+"#,
+        "compound-operators.suz",
+    );
+    assert!(output.status.success(), "{output:?}");
+}
+
+#[test]
+fn compound_operator_methods_save_destination_and_read_before_rhs() {
+    let output = compile_and_run_c23(
+        r#"
+struct Num { v: i32 }
+struct Body { pos: Num }
+fn Num.+(n: Num) -> Num { return Num { v: self.v + n.v } }
+arena fn select(p: ptr Body, count: ptr i32) -> ptr Body {
+    #count = .count * 10 + 1
+    return p
+}
+fn main() -> u8 {
+    arena {
+        fix ptr count = new (0 as i32)
+        fix ptr first = new Body { pos: Num { v: 10 } }
+        fix ptr second = new Body { pos: Num { v: 20 } }
+        var ptr p = first
+        select(p, count)#pos += expr {
+            p = second
+            first#pos = Num { v: 99 }
+            #count = .count * 10 + 2
+            Num { v: 3 }
+        }
+        if .count != 12 || first.pos.v != 13 || second.pos.v != 20 || p.pos.v != 20 { return 1 }
+        p#pos += expr {
+            p = first
+            second#pos = Num { v: 88 }
+            Num { v: 4 }
+        }
+        if second.pos.v != 24 || p.pos.v != 13 { return 2 }
+        fix ptr n = new Num { v: 7 }
+        #n += expr { #n = Num { v: 77 }
+            Num { v: 2 } }
+        if n.v != 9 { return 3 }
+    }
+    return 0
+}
+"#,
+        "compound-operator-order.suz",
+    );
+    assert!(output.status.success(), "{output:?}");
+}
+
+#[test]
+fn compound_operator_methods_require_same_result_type_and_mutable_target() {
+    for (method, statement, rule) in [
+        (
+            "fn Num.+(n: Num) -> Num { return n }",
+            "fix n = Num { v: 1 }\nn += n",
+            "var.fix-assign",
+        ),
+        (
+            "fn Num.+(n: Num) -> Num { return n }",
+            "fix b = Body { pos: Num { v: 1 } }\nb#pos += Num { v: 2 }",
+            "var.fix-assign",
+        ),
+        (
+            "fn Num.+(n: Num) -> Num { return n }",
+            "var n = Num { v: 1 }\nn += expr { n = Num { v: 2 }\nNum { v: 3 } }",
+            "assign.rhs-write",
+        ),
+        (
+            "fn Num.+(n: Num) -> i32 { return 1 }",
+            "var n = Num { v: 1 }\nn += n",
+            "operator.compound",
+        ),
+        (
+            "fn Num.+(n: Num) -> Other { return Other { v: 1 } }",
+            "var b = Body { pos: Num { v: 1 } }\nb#pos += b.pos",
+            "operator.compound",
+        ),
+        (
+            "fn Num.*(n: int) -> int { return n }",
+            "var n = Num { v: 1 }\nn *= 2",
+            "operator.compound",
+        ),
+        (
+            "fn Num.+(n: Num) -> i32 { return 1 }",
+            "arena { fix ptr p = new Num { v: 1 }\n#p += .p }",
+            "operator.compound",
+        ),
+        (
+            "fn Num.+(n: Num) -> i32 { return 1 }",
+            "arena { fix ptr p = new Body { pos: Num { v: 1 } }\np#pos += p.pos }",
+            "operator.compound",
+        ),
+        (
+            "fn Num.+(n: Num) -> i32 { return 1 }",
+            "var n = Num { v: 1 }\nexecute(fn [var n]() -> void { n += n })",
+            "operator.compound",
+        ),
+    ] {
+        let source = format!(
+            "struct Num {{ v: i32 }}\nstruct Other {{ v: i32 }}\nstruct Body {{ pos: Num }}\nfnshape Action() -> void\nfn execute(f: fn Action) -> void {{ f() }}\n{method}\nfn main() -> u8 {{ {statement}\nreturn 0 }}"
+        );
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(
+            error.kind,
+            suz::ErrorKind::InvalidSource,
+            "{source}\n{error}"
+        );
+        assert_eq!(error.rule(), rule, "{source}\n{error}");
+    }
+}
+
+#[test]
+fn compound_operator_methods_preserve_rhs_return_handlers() {
+    let output = compile_and_run_c23(
+        r#"
+struct Num { v: i32 }
+fn Num.*(k: i32) -> Num { return Num { v: self.v * k } }
+error Err { Bad }
+fn amount(d: i32) -> i32 or Err {
+    if d == 0 { fail Err.Bad }
+    return 6 / d
+}
+fn update(p: ptr Num, d: i32) -> u8 {
+    #p *= (expr { #p = Num { v: 99 }
+        6 } / d or return 7)
+    return 0
+}
+fn local(d: i32) -> i32 {
+    var n = Num { v: 7 }
+    n *= amount(d) or return -1
+    return n.v
+}
+fn main() -> u8 {
+    arena {
+        fix ptr p = new Num { v: 7 }
+        if update(p, 2) != 0 || p.v != 21 { return 1 }
+        #p = Num { v: 7 }
+        if update(p, 0) != 7 || p.v != 99 { return 2 }
+    }
+    if local(2) != 21 || local(0) != -1 { return 3 }
+    return 0
+}
+"#,
+        "compound-operator-handlers.suz",
+    );
+    assert!(output.status.success(), "{output:?}");
+}

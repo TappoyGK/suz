@@ -173,6 +173,40 @@ fn invoke(
     result
 }
 
+/// 複合代入は、通常の呼び出しと代入の評価順を使う。
+/// 戻り値には代入による変換ではなく、代入先の型との一致を要求する。
+pub(super) fn compound(
+    expr: &Expression,
+    target: Type,
+    scope: &Scope,
+) -> Result<CheckedExpression, Diagnostic> {
+    if scope.has_operator_methods
+        && matches!(target, Type::Struct(_) | Type::Enum(_))
+        && let ExpressionKind::Binary {
+            operator,
+            left,
+            right,
+        } = &expr.kind
+        && supported(*operator)
+    {
+        let name = resolve(operator.c_symbol(), left, right, scope)?;
+        let result = scope.functions[name].result;
+        if result != target {
+            return Err(expr.location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "operator.compound",
+                    "operator {}= requires a result of type {}, found {}",
+                    operator.c_symbol(),
+                    scope.type_name(target),
+                    scope.type_name(result)
+                ),
+            ));
+        }
+    }
+    expression::coerced(expr, Some(target), scope)
+}
+
 /// 中間の値は検査済みの値として次の比較へ渡す。IRにも各オペランドを一つだけ残し、
 /// コード生成では通常の比較と同じ一時変数と短絡評価を使う。
 pub(super) fn comparison(
