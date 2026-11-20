@@ -6,6 +6,21 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define SUZ_ARENA_ASAN 1
+#endif
+#endif
+#if defined(__SANITIZE_ADDRESS__) && !defined(SUZ_ARENA_ASAN)
+#define SUZ_ARENA_ASAN 1
+#endif
+#ifdef SUZ_ARENA_ASAN
+#include <sanitizer/asan_interface.h>
+/* 対応環境のASanは8バイトを1単位として管理する。実体同士で単位を共有しない。 */
+#define SUZ_ARENA_ASAN_UNIT 8
+static_assert(alignof(max_align_t) >= SUZ_ARENA_ASAN_UNIT);
+#endif
+
 /* ブロックを追加しても既存の実体を移動しない。currentより後ろは回収済みで再利用できる。
    容量の上限は管理情報を除く全ブロックの合計に適用し、整列の余白も容量を消費する。 */
 typedef struct suz_arena_chunk {
@@ -47,6 +62,10 @@ _Noreturn __attribute__((cold)) void suz_arena_overflow(const char *source, size
 _Noreturn __attribute__((cold)) void suz_arena_capacity_exceeded(size_t size, const char *source, size_t line, size_t column);
 /* 現在のブロックに入らない実体は、回収済みのブロックか新しいブロックの先頭に置く。 */
 suz_arena_cursor suz_arena_expand(suz_arena_chunk *current, size_t size, const char *source, size_t line, size_t column);
+#ifdef SUZ_ARENA_ASAN
+/* 保存位置以後の実体を無効化する。ブロックの管理情報には触れない。 */
+void suz_arena_poison_reclaimed(suz_arena_chunk *saved, size_t used, suz_arena_cursor current);
+#endif
 
 static inline void suz_arena_init(uint64_t initial, uint64_t grow, uint64_t limit, const char *source, size_t line, size_t column) {
     suz_arena_position = suz_arena_storage_init(initial, grow, limit, source, line, column);
@@ -54,6 +73,12 @@ static inline void suz_arena_init(uint64_t initial, uint64_t grow, uint64_t limi
 
 /* 初期値は呼出し前に評価済み。size>0、alignmentは2のべき乗でmax_align_t以下。 */
 static inline __attribute__((always_inline)) void *suz_arena_alloc(size_t size, size_t alignment, const char *source, size_t line, size_t column) {
+#ifdef SUZ_ARENA_ASAN
+    size_t object_size = size;
+    if (ckd_add(&size, size, SUZ_ARENA_ASAN_UNIT - 1)) suz_arena_overflow(source, line, column);
+    size &= ~(size_t)(SUZ_ARENA_ASAN_UNIT - 1);
+    if (alignment < SUZ_ARENA_ASAN_UNIT) alignment = SUZ_ARENA_ASAN_UNIT;
+#endif
     size_t padding = (-suz_arena_position.used) & (alignment - 1);
     size_t additional, end;
 #if defined(SUZ_ARENA_GROW) && SUZ_ARENA_GROW == 0
@@ -69,11 +94,17 @@ static inline __attribute__((always_inline)) void *suz_arena_alloc(size_t size, 
     /* 現在のブロック内の加算があふれても、新しいブロックなら収まる場合がある。 */
     if (__builtin_expect(ckd_add(&additional, padding, size) || ckd_add(&end, suz_arena_position.used, additional) || end > suz_arena_position.capacity, 0)) {
         suz_arena_position = suz_arena_expand(suz_arena_position.current, size, source, line, column);
+#ifdef SUZ_ARENA_ASAN
+        __asan_unpoison_memory_region(suz_arena_position.bytes, object_size);
+#endif
         return suz_arena_position.bytes;
     }
 #endif
     void *result = suz_arena_position.bytes + suz_arena_position.used + padding;
     suz_arena_position.used = end;
+#ifdef SUZ_ARENA_ASAN
+    __asan_unpoison_memory_region(result, object_size);
+#endif
     return result;
 }
 
@@ -89,8 +120,14 @@ static inline __attribute__((always_inline)) suz_arena_mark suz_arena_save(void)
    内容の消去や解放は行わず、保存したブロックと使用位置へ戻す。 */
 static inline __attribute__((always_inline)) void suz_arena_restore(suz_arena_mark *mark) {
 #if defined(SUZ_ARENA_GROW) && SUZ_ARENA_GROW == 0
+#ifdef SUZ_ARENA_ASAN
+    suz_arena_poison_reclaimed(suz_arena_position.current, *mark, suz_arena_position);
+#endif
     suz_arena_position.used = *mark;
 #else
+#ifdef SUZ_ARENA_ASAN
+    suz_arena_poison_reclaimed(mark->chunk, mark->used, suz_arena_position);
+#endif
     if (__builtin_expect(suz_arena_position.current != mark->chunk, 0)) {
         suz_arena_position.current = mark->chunk;
         suz_arena_position.bytes = mark->chunk ? mark->chunk->bytes : NULL;

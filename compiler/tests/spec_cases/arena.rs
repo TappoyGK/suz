@@ -486,12 +486,15 @@ fn main() -> u8 {
             "64",
         ],
     ] {
-        for optimization in ["-O0", "-O2"] {
+        // ASanでも生成Cのcleanup経由で回収・再利用できることを確認する。
+        for (optimization, sanitizer) in [("-O0", ""), ("-O2", ""), ("-O2", "-fsanitize=address")] {
             let result = Command::new(env!("CARGO_BIN_EXE_suz"))
                 .arg("run")
                 .arg(&source)
                 .args(&flags)
                 .arg(optimization)
+                .env("SUZ_CFLAGS", sanitizer)
+                .env("ASAN_OPTIONS", "detect_leaks=0")
                 .output()
                 .unwrap();
             assert_eq!(
@@ -735,6 +738,77 @@ fn pointer_access_diagnostics_explain_how_to_read_and_write() {
         assert_eq!(error.rule(), rule, "{body}: {error}");
         for hint in hints {
             assert!(error.to_string().contains(hint), "{body}: {error}");
+        }
+    }
+}
+
+// コンパイラに拒否されるアクセスはCの内部APIで作り、実際のASan診断まで確認する。
+#[test]
+fn arena_asan_detects_reclaimed_access_and_preserves_live_values_and_reuse() {
+    let directory = TemporaryDirectory::new();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    for fixed in [false, true] {
+        for optimization in ["-O0", "-O2"] {
+            let executable = directory.0.join(format!("asan-{fixed}-{optimization}"));
+            let mut command =
+                Command::new(std::env::var_os("CC").unwrap_or_else(|| "clang".into()));
+            command
+                .args([
+                    optimization,
+                    "-std=c23",
+                    "-Wall",
+                    "-Wextra",
+                    "-Werror",
+                    "-fsanitize=address,undefined",
+                    "-fno-sanitize-recover=all",
+                    "-iquote",
+                ])
+                .arg(root.join("runtime"))
+                .arg(root.join("compiler/tests/spec_cases/arena_asan.c"))
+                .arg(root.join("runtime/suz_arena.c"))
+                .arg(root.join("runtime/suz_runtime.c"))
+                .args(["-lm", "-o"])
+                .arg(&executable);
+            if fixed {
+                command.arg("-DSUZ_ARENA_GROW=0");
+            }
+            let built = command.output().unwrap();
+            assert!(built.status.success(), "{built:?}");
+            for mode in [
+                "success",
+                "growth",
+                "lazy",
+                "stale-read",
+                "stale-write",
+                "stale-growth",
+                "padding",
+                "overflow",
+            ] {
+                if fixed && matches!(mode, "growth" | "lazy" | "stale-growth") {
+                    continue;
+                }
+                let output = Command::new(&executable)
+                    .arg(mode)
+                    .env(
+                        "ASAN_OPTIONS",
+                        "detect_leaks=0:abort_on_error=0:exitcode=86",
+                    )
+                    .output()
+                    .unwrap();
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                if mode.starts_with("stale-") || mode == "padding" {
+                    assert!(!output.status.success(), "{mode}: {output:?}");
+                    assert!(
+                        stderr.contains("AddressSanitizer") && stderr.contains("use-after-poison"),
+                        "{mode}: {output:?}"
+                    );
+                } else if mode == "overflow" {
+                    assert_eq!(output.status.code(), Some(101), "{output:?}");
+                    assert!(stderr.contains("size calculation overflow"), "{output:?}");
+                } else {
+                    assert!(output.status.success(), "{mode}: {output:?}");
+                }
+            }
         }
     }
 }
