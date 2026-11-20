@@ -293,3 +293,225 @@ return 0 }
     let error = suz::compile(source.as_bytes()).unwrap_err();
     assert_eq!(error.rule(), "generic.needs-check");
 }
+
+#[test]
+fn inferred_type_arguments_use_fixed_inputs_before_literal_defaults() {
+    let output = compile_and_run_c23(
+        r#"
+fn first[T](a: T, b: T) -> T { return a }
+fn identity[T](a: T) -> T { return a }
+fn integer_default(a: i64) -> i64 { return a }
+fn float_default(a: f64) -> f64 { return a }
+fn main() -> u8 {
+    fix small: i8 = 3
+    fix real: f32 = 2.5
+    if first(small, 4) != 3 { return 1 }
+    if first(4, small) != 4 { return 2 }
+    if first(real, 4.5) != 2.5 { return 3 }
+    if first(4.5, real) != 4.5 { return 4 }
+    if integer_default(identity(3)) != 3 { return 5 }
+    if float_default(identity(2.5)) != 2.5 { return 6 }
+    if identity(identity(small)) != 3 { return 7 }
+    if first(1 + 2, small) != 3 { return 8 }
+    return 0
+}
+"#,
+        "generic-inference-literals.suz",
+    );
+    assert!(output.status.success(), "{output:?}");
+}
+
+#[test]
+fn inferred_types_follow_nested_structures_pointers_and_forwarded_requirements() {
+    let output = compile_and_run_c23(
+        r#"
+struct Box[T] { value: T }
+fn unbox[T](box: Box[T]) -> T { return box.value }
+fn read[T](p: ptr T) -> T { return .p }
+fn nullable[T](p: ptr? T, value: T) -> T { let q = p { return .q }
+return value }
+@needs T: +(T) -> T
+fn add[T](a: T, b: T) -> T { return a + b }
+@needs Item: +(Item) -> Item
+fn forward[Item](a: Item, b: Item) -> Item { return add(a, b) }
+fn main() -> u8 {
+    fix box = Box[Box[i32]] { value: Box[i32] { value: 9 } }
+    if unbox(unbox(box)) != 9 { return 1 }
+    fix n: i32 = 3
+    if forward(n, 4) != 7 { return 2 }
+    arena {
+        fix ptr p = new n
+        if read(p) != 3 { return 3 }
+        if nullable(null, n) != 3 { return 4 }
+        if nullable(p, n) != 3 { return 5 }
+        if read(new 4) != 4 { return 6 }
+    }
+    return 0
+}
+"#,
+        "generic-inference-structure.suz",
+    );
+    assert!(output.status.success(), "{output:?}");
+}
+
+#[test]
+fn inference_conflicts_identify_both_arguments_without_widening() {
+    for (a, b) in [("a", "b"), ("b", "a"), ("1", "1.0"), ("1.0", "1")] {
+        let source = format!(
+            "fn first[T](a: T, b: T) -> T {{ return a }}\nfn main() -> u8 {{\nfix a: i8 = 1\nfix b: i32 = 1\nfirst({a},\n{b})\nreturn 0\n}}"
+        );
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(error.rule(), "generic.inference", "{error}");
+        assert_eq!(error.line, 6, "{error}");
+        assert_eq!(error.related.len(), 1, "{error}");
+        assert_eq!(error.related[0].line, 5, "{error}");
+        assert!(error.message().contains("conflicting types"), "{error}");
+    }
+}
+
+#[test]
+fn inference_conflicts_preserve_declared_names_in_nested_types() {
+    let source = "struct Box[T] { value: T }\nfn first[T](a: T, b: T) -> T { return a }\nfn conflict[Left, Right](a: Box[Left], b: Box[Right]) -> void { first(a, b) }\nfn main() -> u8 { return 0 }";
+    let error = suz::compile(source.as_bytes()).unwrap_err();
+    assert_eq!(error.rule(), "generic.inference", "{error}");
+    assert!(error.message().contains("Box[Left]"), "{error}");
+    assert!(error.message().contains("Box[Right]"), "{error}");
+}
+
+#[test]
+fn inference_requires_evidence_and_preserves_explicit_arguments() {
+    for (definition, usage, rule) in [
+        ("fn empty[T]() -> void {}", "empty()", "generic.inference"),
+        (
+            "fn identity[T](a: T) -> T { return a }",
+            "fix n: ptr? i32 = identity(null)",
+            "generic.inference",
+        ),
+        (
+            "fn identity[T](a: T) -> T { return a }",
+            "fix n: i8 = identity(1)",
+            "type.expected",
+        ),
+        (
+            "fn pair[T, U](a: T, b: U) -> T { return a }",
+            "pair[i32](1, 2)",
+            "generic.type-arguments",
+        ),
+        (
+            "@needs T: +(T) -> T\nfn add[T](a: T, b: T) -> T { return a + b }",
+            "add(true, false)",
+            "generic.needs-check",
+        ),
+        (
+            "fn first[T](a: T, b: T) -> T { return a }",
+            "fix n: i8 = 1\nfirst(n, 128)",
+            "lit.range",
+        ),
+    ] {
+        let source = format!("{definition}\nfn main() -> u8 {{ {usage}\nreturn 0 }}");
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert!(error.to_string().contains(rule), "{source}\n{error}");
+    }
+    suz::compile(b"fn first[T](a: T, b: T) -> T { return a }\nfn main() -> u8 { fix a: i8 = 1\nfix b: i32 = 2\nfirst[i32](a, b)\nreturn 0 }").unwrap();
+}
+
+#[test]
+fn inferred_calls_preserve_lifetimes_and_function_value_restrictions() {
+    for source in [
+        "arena fn identity[T](value: T) -> T { return value }\nfn main() -> u8 { arena { var ptr saved: ptr? i32 = null\narena { fix ptr p = new (1 as i32)\nsaved = identity(p) } }\nreturn 0 }",
+        "fn identity[T](value: T) -> T { return value }\nfn main() -> u8 { arena { fix ptr p = new (1 as i32)\nidentity(p) }\nreturn 0 }",
+        "fn identity[T](value: T) -> T { return value }\nfn main() -> u8 { identity(fn [](n: i32) -> i32 { return n })\nreturn 0 }",
+        "fn nothing() -> void {}\nfn consume[T](v: T) -> void {}\nfn main() -> u8 { consume(nothing())\nreturn 0 }",
+    ] {
+        assert!(suz::compile(source.as_bytes()).is_err(), "{source}");
+    }
+    let output = compile_and_run_c23(
+        r#"
+fn consume[T](v: T) -> void {}
+fn identity[T](v: T) -> T { return v }
+fn plain(v: i32) -> i32 { return v }
+fn main() -> u8 {
+    consume(fn [](v: i32) -> i32 { return v })
+    fix f = identity(fn plain)
+    if f(3) != 3 { return 1 }
+    return 0
+}
+"#,
+        "inferred-function-values.suz",
+    );
+    assert!(output.status.success(), "{output:?}");
+}
+
+#[test]
+fn inferred_named_calls_inside_numeric_generic_functions() {
+    let output = compile_and_run_c23(
+        r#"
+fn identity[T](v: T) -> T { return v }
+struct Box[T] { value: T }
+fn pack[T](v: T) -> Box[T] { return Box[T] { value: v } }
+fn unbox[T](v: Box[T]) -> T { return v.value }
+@needs T: +(T) -> T
+fn sum[T](a: T, b: T) -> T { return a + b }
+fn numeric(v: int) -> int { return unbox(pack(identity(v))) }
+fn real(v: float) -> float { return identity(v) }
+fn doubled(v: int) -> int { return sum(v, v) }
+fn main() -> u8 {
+    fix a: i8 = 3
+    fix b: f32 = 2.5
+    if numeric(a) != 3 { return 1 }
+    if real(b) != 2.5 { return 2 }
+    if doubled(a) != 6 { return 3 }
+    return 0
+}
+"#,
+        "inferred-numeric-forward.suz",
+    );
+    assert!(output.status.success(), "{output:?}");
+}
+
+#[test]
+fn inferred_numeric_conflicts_are_deferred_only_for_compatible_specializations() {
+    let definition = "fn first[T](a: T, b: T) -> T { return a }\nfn numeric(a: int, b: i8) -> int { return first(a, b) }\n";
+    suz::compile(format!("{definition}fn main() -> u8 {{ return 0 }}").as_bytes()).unwrap();
+    suz::compile(format!("{definition}fn main() -> u8 {{ fix a: i8 = 1\nfix b: i8 = 2\nnumeric(a, b)\nreturn 0 }}").as_bytes()).unwrap();
+    let source = format!(
+        "{definition}fn main() -> u8 {{ fix a: i32 = 1\nfix b: i8 = 2\nnumeric(a, b)\nreturn 0 }}"
+    );
+    let error = suz::compile(source.as_bytes()).unwrap_err();
+    assert!(error.to_string().contains("generic.inference"), "{error}");
+}
+
+#[test]
+fn inference_preserves_branch_defaults_and_pointer_invariance() {
+    let output = compile_and_run_c23(
+        r#"
+fn identity[T](v: T) -> T { return v }
+fn main() -> u8 {
+    fix a = identity(ifexpr true { 1 } else { 2.5 })
+    fix b = identity(ifexpr true { 2.5 } else { 1 })
+    if a != 1.0 { return 1 }
+    if b != 2.5 { return 2 }
+    return 0
+}
+"#,
+        "inferred-branch-defaults.suz",
+    );
+    assert!(output.status.success(), "{output:?}");
+    for source in [
+        "struct Box[T] { value: T }\nfn take[T](b: Box[ptr? T]) -> void {}\nfn main() -> u8 { arena { fix ptr p = new (1 as i32)\ntake(Box[ptr i32] { value: p }) }\nreturn 0 }",
+        "arena fn same[T](a: T, b: T) -> void {}\nfn main() -> u8 { arena { fix ptr p = new (1 as i32)\nfix ptr q: ptr? i32 = p\nsame(p, q) }\nreturn 0 }",
+    ] {
+        assert!(suz::compile(source.as_bytes()).is_err(), "{source}");
+    }
+}
+
+#[test]
+fn inferred_and_explicit_calls_generate_the_same_code() {
+    let source = "fn first[T](a: T, b: T) -> T { return a }\nfn main() -> u8 { fix n: i32 = 3\nif first[i32](n, 4) != 3 { return 1 }\nreturn 0 }";
+    // 引数の列位置も揃え、位置情報を含む生成Cそのものを比較する。
+    let inferred = source.replace("first[i32]", "first     ");
+    assert_eq!(
+        suz::compile(source.as_bytes()).unwrap(),
+        suz::compile(inferred.as_bytes()).unwrap()
+    );
+}

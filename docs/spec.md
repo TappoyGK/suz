@@ -2038,6 +2038,20 @@ symbol・textから具体化済みの構造体へ変換する場合も、入力�
 
 **[generic.inference]** 型引数をすべて省略した場合は、実引数の型と仮引数の型の構造から決める。型の確定した実引数を先に使い、数値リテラルには決まった要求型を適用する。それでも決まらないリテラルには既存の既定型を使う。同じ型引数に異なる具体型が要求される場合は、共通の大きな型を探さず拒否する。引数順で結果を変えない。戻り値の要求型からは逆算せず、nullだけでは型を決めない。決定できなければ型引数を明示する必要がある。
 
+```suz
+fn first[T](a: T, b: T) -> T { return a }
+fn main() -> u8 {
+    fix small: i8 = 3
+    fix wide: i32 = 4
+    fix a = first(1, small)       // Tはi8。引数の順序を逆にしてもi8
+    fix b = first(1, 2)           // 型の手がかりがないのでTはi64
+    fix c = first[i32](small, wide) // 明示した後は通常の引数変換を適用する
+    return 0
+}
+```
+
+`first(small, wide)`はi8とi32が矛盾するため拒否する。`fix x: i8 = first(1, 2)`も、戻り値の要求型を推論に使わないため拒否する。`Box[T]`に`Box[i32]`を渡せばTはi32になるが、構造体リテラル自体の型引数は [generic.struct] に従って明示する。
+
 **[generic.numeric-existing]** 型引数リストを持つ宣言では、int・floatによる匿名の汎用数値型を併用しない。既存のint・floatは [num.fn-check]・[num.fn-check-judge] に従い、型引数リストを持つ宣言は [generic.check] に従う。
 
 **[generic.fnshape]** `fnshape Less[T](T, T) -> bool`のように、関数の形にも型引数を宣言できる。具体化後の関数の形の同一性、fnとstatic fn、クロージャの制約は既存の規則に従う。要求を付けた関数の形には [generic.forward-needs] を適用する。

@@ -45,7 +45,7 @@ pub(super) fn has_float_source(input: &[Statement], value: &Expression, bindings
     super::has_float_source(value, &local_hints(input, bindings))
 }
 
-fn local_hints(input: &[Statement], bindings: &Scope) -> Scope {
+pub(in crate::check) fn local_hints(input: &[Statement], bindings: &Scope) -> Scope {
     // ここではローカルの型だけを調べる。文の検査を呼ぶと、入れ子の引数全体を何度も構築・再検査してしまう。
     // 名前と値はcheck()で一度だけ検査し、型のヒント取得ではエラーを報告しない。
     let mut local = bindings.clone();

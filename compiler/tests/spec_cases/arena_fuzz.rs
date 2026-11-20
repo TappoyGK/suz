@@ -448,6 +448,10 @@ fn main() -> u8 {
                 "make_node[i32](v, next)",
             );
     }
+    // 汎用版の半数は型引数を推論し、明示した場合と同じ寿命検査・実行を通す。
+    if generic && index % 4 == 3 {
+        out = out.replace("make_node[i32]", "make_node");
+    }
     for (placeholder, concrete, applied) in [
         ("$Node", "Node", "Node[i32]"),
         ("$Holder", "Holder", "Holder[i32]"),
@@ -495,14 +499,21 @@ fn arena_fuzz_accepted_programs_never_trigger_asan() {
 
     let directory = TemporaryDirectory::new();
     let mut accepted: Vec<(usize, String, PathBuf)> = Vec::new();
-    let mut accepted_by_kind = [0usize; 2];
-    let mut rejected_by_kind = [0usize; 2];
+    let mut accepted_by_kind = [0usize; 3];
+    let mut rejected_by_kind = [0usize; 3];
 
     for index in 0..count {
         let source = generate_program(seed, index);
+        let kind = if index.is_multiple_of(2) {
+            0
+        } else if index % 4 == 1 {
+            1
+        } else {
+            2
+        };
         match suz::compile(source.as_bytes()) {
             Ok(compiled) => {
-                accepted_by_kind[index % 2] += 1;
+                accepted_by_kind[kind] += 1;
                 let c_path = directory.0.join(format!("case-{index}.c"));
                 fs::write(&c_path, compiled).unwrap();
                 accepted.push((index, source, c_path));
@@ -512,12 +523,15 @@ fn arena_fuzz_accepted_programs_never_trigger_asan() {
                     error.rule().starts_with("arena."),
                     "unexpected non-arena compile error at seed={seed}, case={index}: {error}\n{source}"
                 );
-                rejected_by_kind[index % 2] += 1;
+                rejected_by_kind[kind] += 1;
             }
         }
     }
 
-    for (kind, name) in ["ordinary", "generic"].into_iter().enumerate() {
+    for (kind, name) in ["ordinary", "generic-explicit", "generic-inferred"]
+        .into_iter()
+        .enumerate()
+    {
         let total = accepted_by_kind[kind] + rejected_by_kind[kind];
         assert!(
             accepted_by_kind[kind] * 10 >= total && rejected_by_kind[kind] * 10 >= total,

@@ -1,5 +1,6 @@
 //! 名前付き型引数を、要求による定義時検査と具体型での通常検査へ接続する。
 //! 数値のint・floatとは代入表を分け、演算のASTや格納境界を変更しない。
+mod inference;
 mod requirements;
 pub(super) mod structs;
 use super::{
@@ -48,7 +49,9 @@ pub(super) fn call(
     } else {
         explicit
     };
-    if explicit.len() != signature.type_parameters {
+    if (signature.method.is_some() || !explicit.is_empty())
+        && explicit.len() != signature.type_parameters
+    {
         return Err(expr.location.error(
             ErrorKind::InvalidSource,
             crate::diagnostic!(
@@ -61,6 +64,8 @@ pub(super) fn call(
     }
     let types: Vec<_> = if signature.method.is_some() {
         explicit.to_vec()
+    } else if explicit.is_empty() {
+        inference::resolve(signature, arguments, scope, expr.location, true)?
     } else {
         explicit
             .iter()
@@ -98,7 +103,7 @@ pub(super) fn call(
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let symbolic = types.iter().any(|t| scope.structs.symbolic(*t));
+    let symbolic = types.iter().any(|t| scope.structs.unresolved(*t));
     let id = if symbolic {
         signature.id
     } else {
@@ -132,7 +137,7 @@ fn check_requirements(
     if signature.needs.is_empty() {
         return Ok(());
     }
-    let concrete = !arguments.iter().any(|t| scope.structs.symbolic(*t));
+    let concrete = !arguments.iter().any(|t| scope.structs.unresolved(*t));
     let key = (signature.id, arguments.to_vec());
     if concrete && scope.instances.borrow().named_requirements.contains(&key) {
         return Ok(());
@@ -302,4 +307,26 @@ pub(super) fn struct_requirements(
         pending.extend(declaration.fields.iter().map(|f| f.ty));
     }
     Ok(())
+}
+
+/// 呼び出し結果の型ヒントも、実際の呼び出しと同じ引数推論を使う。
+pub(super) fn call_hint(
+    signature: &Signature,
+    explicit: &[Type],
+    arguments: &[Expression],
+    scope: &Scope,
+    location: Location,
+) -> Option<Type> {
+    let types = if explicit.is_empty() {
+        inference::resolve(signature, arguments, scope, location, false).ok()?
+    } else {
+        if explicit.len() != signature.type_parameters {
+            return None;
+        }
+        explicit
+            .iter()
+            .map(|ty| scope.resolve_type_at(*ty, location).ok())
+            .collect::<Option<Vec<_>>>()?
+    };
+    scope.substitute(signature.result, &types, location).ok()
 }

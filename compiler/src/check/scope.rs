@@ -200,7 +200,15 @@ impl Scope {
                 self.type_name(ty.pointee().unwrap())
             ),
             Type::Enum(ty) => self.enums[ty.id].name.clone(),
-            Type::Struct(id) => self.structs.get(id).name.clone(),
+            Type::Struct(id) => {
+                let declaration = self.structs.get(id);
+                if declaration.symbolic {
+                    self.structs
+                        .name_with_parameters(ty, &self.named.type_parameters)
+                } else {
+                    declaration.name.clone()
+                }
+            }
             Type::StaticFunction(id) | Type::Function(id) => {
                 let prefix = if matches!(ty, Type::StaticFunction(_)) {
                     "static fn"

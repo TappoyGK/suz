@@ -119,16 +119,13 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
                 .get(name)
                 .filter(|s| s.type_parameters != 0)
             {
-                if signature.type_parameters != type_arguments.len() {
-                    return None;
-                }
-                let args: Vec<_> = type_arguments
-                    .iter()
-                    .map(|t| bindings.resolve_type_at(*t, expr.location).ok())
-                    .collect::<Option<_>>()?;
-                return bindings
-                    .substitute(signature.result, &args, expr.location)
-                    .ok();
+                return super::type_parameters::call_hint(
+                    signature,
+                    type_arguments,
+                    arguments,
+                    bindings,
+                    expr.location,
+                );
             }
             super::generic::call_operand_type(name, arguments, bindings)
         }

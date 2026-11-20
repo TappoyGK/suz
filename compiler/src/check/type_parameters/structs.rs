@@ -84,6 +84,10 @@ impl Structs {
             _ => false,
         }
     }
+    /// コード生成前に解決する型。名前付き型引数と、既存のint・floatの両方を含む。
+    pub fn unresolved(&self, ty: Type) -> bool {
+        ty.leaf().symbolic() || self.symbolic(ty)
+    }
     pub fn name(&self, ty: Type) -> String {
         if let Some(inner) = ty.pointee() {
             return format!(
@@ -111,7 +115,7 @@ impl Structs {
             _ => ty.name().into(),
         }
     }
-    fn name_with_parameters(&self, ty: Type, parameters: &[TypeParameter]) -> String {
+    pub fn name_with_parameters(&self, ty: Type, parameters: &[TypeParameter]) -> String {
         if let Some(inner) = ty.pointee() {
             return format!(
                 "ptr{} {}",
@@ -275,7 +279,7 @@ impl Structs {
             .iter()
             .filter(|a| a.declaration == application.declaration && **a != application)
         {
-            let symbolic = previous.arguments.iter().any(|t| self.symbolic(*t));
+            let symbolic = previous.arguments.iter().any(|t| self.unresolved(*t));
             // 記号から具体型への置換は、その具体化で判定する。定義時には型を包み続ける
             // 拡大だけを止め、固定された型への遷移や型引数の入れ替えを展開できるようにする。
             let invalid = if symbolic {
@@ -328,7 +332,7 @@ impl Structs {
                 .collect::<Vec<_>>()
                 .join(", ")
         );
-        declaration.symbolic = application.arguments.iter().any(|t| self.symbolic(*t));
+        declaration.symbolic = application.arguments.iter().any(|t| self.unresolved(*t));
         declaration.type_parameters.clear();
         declaration.application = Some(application.clone());
         declaration.fields.clear();
