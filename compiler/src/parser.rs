@@ -18,7 +18,7 @@ mod logs;
 mod names;
 pub(crate) mod nesting;
 mod statements;
-mod structs;
+pub(crate) mod structs;
 
 use crate::{
     Diagnostic, ErrorKind,
@@ -32,6 +32,7 @@ enum FixedToken {
 }
 
 struct Parser<'a, 's> {
+    applications: crate::ast::generics::Applications,
     type_parameters: Vec<crate::ast::generics::TypeParameter>,
     pending_needs: Vec<(usize, usize)>,
     generic_functions: std::rc::Rc<std::collections::BTreeSet<String>>,
@@ -148,9 +149,17 @@ impl<'a, 's> Parser<'a, 's> {
 pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
     let enums = enums::collect(tokens)?;
     let mut fnshapes = function_types::headers(tokens)?;
-    let mut structs = structs::collect(tokens, &enums, &fnshapes)?;
-    let function_types = function_types::resolve(tokens, &enums, &mut structs, &mut fnshapes)?;
+    let applications = crate::ast::generics::Applications::default();
+    let mut structs = structs::collect(tokens, &enums, &fnshapes, applications.clone())?;
+    let function_types = function_types::resolve(
+        tokens,
+        &enums,
+        &mut structs,
+        &mut fnshapes,
+        applications.clone(),
+    )?;
     let mut p = Parser {
+        applications: applications.clone(),
         type_parameters: Vec::new(),
         pending_needs: Vec::new(),
         generic_functions: std::rc::Rc::new(generics::function_names(tokens)),
@@ -175,7 +184,7 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
         if !p.pending_needs.is_empty()
             && !matches!(
                 p.token().kind,
-                Kind::Symbol("@") | Kind::Keyword("fn" | "arena")
+                Kind::Symbol("@") | Kind::Keyword("fn" | "arena" | "struct")
             )
         {
             return Err(p.error(
@@ -197,6 +206,8 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
                 p.cursor = fnshapes.iter().find(|d| d.start == p.cursor).unwrap().end;
             }
             Kind::Keyword("struct") => {
+                // 構造体の要求は前方宣言の収集時に、その型引数のスコープで解析済み。
+                p.pending_needs.clear();
                 p.cursor = structs
                     .iter()
                     .find(|decl| decl.start == p.cursor)
@@ -277,6 +288,7 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
         ));
     }
     Ok(Program {
+        applications: applications.borrow().clone(),
         externs,
         allows: p.allows,
         fnshapes,

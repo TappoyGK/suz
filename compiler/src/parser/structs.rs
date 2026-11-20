@@ -147,8 +147,10 @@ pub(super) fn collect(
     tokens: &[Token<'_>],
     enums: &[EnumDeclaration],
     fnshapes: &[crate::ast::FnShapeDeclaration],
+    applications: crate::ast::generics::Applications,
 ) -> Result<Vec<StructDeclaration>, Diagnostic> {
     let mut p = Parser {
+        applications,
         type_parameters: Vec::new(),
         pending_needs: Vec::new(),
         generic_functions: Default::default(),
@@ -165,10 +167,23 @@ pub(super) fn collect(
         limit_location: None,
     };
     let mut headers = Vec::<StructDeclaration>::new();
+    let mut requirement_ranges = Vec::new();
     let mut depth = 0usize;
     let mut external_header = None;
     let mut c_names = BTreeSet::new();
     while p.token().kind != Kind::End {
+        if depth == 0 && p.token().kind == Kind::Symbol("@") {
+            p.collect_need()?;
+            continue;
+        }
+        if depth == 0
+            && matches!(
+                p.token().kind,
+                Kind::Keyword("fn" | "arena" | "fnshape" | "fix" | "extern" | "enum" | "error")
+            )
+        {
+            p.pending_needs.clear();
+        }
         if depth == 0 && p.token().kind == Kind::Keyword("extern") {
             p.cursor += 1;
             let Kind::Header(header) = p.token().kind else {
@@ -245,6 +260,20 @@ pub(super) fn collect(
                 ));
             }
             p.cursor += 1;
+            let type_parameters = if p.token().kind == Kind::Symbol("[") {
+                if external.is_some() {
+                    return Err(p.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "generic.parameters",
+                            "extern structs cannot have type parameters"
+                        ),
+                    ));
+                }
+                p.generic_parameters()?
+            } else {
+                Vec::new()
+            };
             p.expect(FixedToken::Symbol("{"))?;
             let mut braces = 1;
             while braces != 0 {
@@ -261,7 +290,12 @@ pub(super) fn collect(
                 }
                 p.cursor += 1;
             }
+            requirement_ranges.push(std::mem::take(&mut p.pending_needs));
             headers.push(StructDeclaration {
+                symbolic: !type_parameters.is_empty(),
+                type_parameters,
+                needs: Vec::new(),
+                application: None,
                 external,
                 name,
                 location,
@@ -283,11 +317,18 @@ pub(super) fn collect(
     }
     p.structs = &headers;
     let mut declarations = headers.clone();
-    for decl in &mut declarations {
+    for (decl, ranges) in declarations.iter_mut().zip(requirement_ranges) {
         p.cursor = decl.start + 2;
         if decl.external.is_some() && p.token().kind == Kind::Keyword("as") {
             p.cursor += 2;
         }
+        p.type_parameters = if p.token().kind == Kind::Symbol("[") {
+            p.generic_parameters()?
+        } else {
+            Vec::new()
+        };
+        p.pending_needs = ranges;
+        decl.needs = p.declaration_needs()?;
         decl.fields = p.delimited_list("{", "}", Parser::field_declaration)?;
         if decl.fields.is_empty() {
             return Err(decl.location.error(
@@ -314,6 +355,11 @@ pub(super) fn collect(
             }
         }
     }
+    validate_layout(&declarations)?;
+    Ok(declarations)
+}
+
+pub(crate) fn validate_layout(declarations: &[StructDeclaration]) -> Result<(), Diagnostic> {
     fn visit(
         id: usize,
         declarations: &[StructDeclaration],
@@ -339,7 +385,7 @@ pub(super) fn collect(
     }
     let mut states = vec![0; declarations.len()];
     for id in 0..declarations.len() {
-        visit(id, &declarations, &mut states)?;
+        visit(id, declarations, &mut states)?;
     }
     // nullで切れる辺を除き、初期化に既存の実体が必須となる依存だけを調べる。
     // 値のフィールドも含めるため、構造体で包んでも非nullの循環を隠せない。
@@ -408,5 +454,5 @@ pub(super) fn collect(
             }
         }
     }
-    Ok(declarations)
+    Ok(())
 }

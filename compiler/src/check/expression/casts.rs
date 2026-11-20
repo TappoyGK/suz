@@ -24,7 +24,7 @@ pub(in crate::check) fn check(
             target: annotation,
             fallback,
         } => {
-            let target = bindings.resolve_type(*annotation);
+            let target = bindings.resolve_type_at(*annotation, expr.location)?;
             if *wrap {
                 let allowed = |ty| ty != Type::Integer(crate::ast::IntegerType::Len);
                 let error = || {
@@ -106,6 +106,15 @@ pub(in crate::check) fn check(
                 });
             }
             if operand.ty.is_text() {
+                if bindings.structs.symbolic(target) {
+                    return Err(expr.location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "generic.operations",
+                            "text conversion requires a concrete target type"
+                        ),
+                    ));
+                }
                 let valid = if *wrap {
                     target.is_integer()
                 } else {

@@ -84,7 +84,7 @@ pub(super) struct Scope {
     // 不変の宣言は共有し、ローカル束縛の状態だけを複製する。
     pub constants: Rc<BTreeMap<String, Binding>>,
     pub enums: Rc<Vec<crate::ast::EnumDeclaration>>,
-    pub structs: Rc<Vec<crate::ast::StructDeclaration>>,
+    pub structs: Rc<super::type_parameters::structs::Structs>,
     pub functions: Rc<BTreeMap<String, Signature>>,
     pub result: Type,
     pub errors: Rc<Vec<crate::ast::ErrorVariant>>,
@@ -93,7 +93,9 @@ impl Scope {
     pub fn contains_function(&self, ty: Type) -> bool {
         match ty {
             Type::StaticFunction(_) | Type::Function(_) => true,
-            Type::Struct(id) => self.structs[id]
+            Type::Struct(id) => self
+                .structs
+                .get(id)
                 .fields
                 .iter()
                 .any(|f| self.contains_function(f.ty)),
@@ -117,15 +119,46 @@ impl Scope {
     pub fn contains_key(&self, name: &str) -> bool {
         self.get(name).is_some()
     }
-    pub fn resolve_type(&self, ty: Type) -> Type {
-        let ty = self
-            .type_arguments
-            .as_ref()
-            .map_or(ty, |args| super::type_parameters::substitute(ty, args));
-        match self.mode {
+    pub fn substitute(
+        &self,
+        ty: Type,
+        arguments: &[Type],
+        location: crate::ast::Location,
+    ) -> Result<Type, crate::Diagnostic> {
+        self.structs.resolve(ty, arguments, location)
+    }
+    pub fn method_arguments(&self, ty: Type) -> Vec<Type> {
+        if let Type::Struct(id) = ty.pointee().unwrap_or(ty)
+            && let Some(app) = &self.structs.get(id).application
+        {
+            return app.arguments.clone();
+        }
+        Vec::new()
+    }
+    pub fn method_owner_name(&self, ty: Type) -> String {
+        if let Type::Struct(id) = ty.pointee().unwrap_or(ty)
+            && let Some(app) = &self.structs.get(id).application
+        {
+            return self.structs.get(app.declaration).name.clone();
+        }
+        self.type_name(ty.pointee().unwrap_or(ty))
+    }
+    pub fn resolve_type_at(
+        &self,
+        ty: Type,
+        location: crate::ast::Location,
+    ) -> Result<Type, crate::Diagnostic> {
+        let ty = self.substitute(
+            ty,
+            self.type_arguments.as_deref().map_or(&[], Vec::as_slice),
+            location,
+        )?;
+        let ty = match self.mode {
             Mode::Instance(types) => types.resolve(ty),
             Mode::Ordinary | Mode::GenericCheck => ty,
-        }
+        };
+        super::type_parameters::struct_requirements(ty, self, location)?;
+        Ok(ty)
     }
     pub fn generic_check(&self) -> bool {
         matches!(self.mode, Mode::GenericCheck)
@@ -146,7 +179,7 @@ impl Scope {
                 self.type_name(ty.pointee().unwrap())
             ),
             Type::Enum(ty) => self.enums[ty.id].name.clone(),
-            Type::Struct(id) => self.structs[id].name.clone(),
+            Type::Struct(id) => self.structs.get(id).name.clone(),
             Type::StaticFunction(id) | Type::Function(id) => {
                 let prefix = if matches!(ty, Type::StaticFunction(_)) {
                     "static fn"

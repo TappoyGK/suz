@@ -253,7 +253,6 @@ pub(super) fn resolve(
         declarations: BTreeMap::new(),
         bindings: Scope {
             enums: std::rc::Rc::new(enums.to_vec()),
-            structs: std::rc::Rc::new(structs.to_vec()),
             ..scope
         },
         visiting: BTreeSet::new(),

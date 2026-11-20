@@ -464,7 +464,7 @@ impl Parser<'_, '_> {
                         ),
                     ));
                 }
-                if self.token().kind == Kind::Symbol("{")
+                if matches!(self.token().kind, Kind::Symbol("{" | "["))
                     && self.structs.iter().any(|decl| decl.name == name)
                 {
                     if self.restricted_condition {
@@ -481,8 +481,9 @@ impl Parser<'_, '_> {
                         .iter()
                         .position(|decl| decl.name == name)
                         .unwrap();
+                    let ty = self.struct_type(id)?;
                     ExpressionKind::Struct {
-                        id,
+                        ty,
                         fields: self.delimited_list("{", "}", Self::field_initializer)?,
                     }
                 } else if self.token().kind == Kind::Symbol(".")

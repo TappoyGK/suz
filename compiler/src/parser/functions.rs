@@ -274,6 +274,12 @@ impl Parser<'_, '_> {
             self.cursor += 1;
             return Ok(Type::Parameter(index));
         }
+        if let Kind::Ident(name) = self.token().kind
+            && let Some(id) = self.structs.iter().position(|d| d.name == name)
+        {
+            self.cursor += 1;
+            return self.struct_type(id);
+        }
         let ty = match self.token().kind {
             Kind::TypeName(name) => Type::from_name(name).unwrap(),
             Kind::Ident(name) => self
@@ -423,16 +429,51 @@ impl Parser<'_, '_> {
             super::names::check(super::names::Shape::Value, owner_name, location)?;
             (owner_name.to_owned(), None)
         };
-        if method.is_some() && !self.type_parameters.is_empty() {
-            return Err(location.error(
-                ErrorKind::InvalidSource,
-                crate::diagnostic!(
-                    "generic.receiver-parameters",
-                    "receiver parameters must match the struct declaration"
-                ),
-            ));
+        let mut method = method;
+        let mut inherited = Vec::new();
+        if let Some(receiver) = &mut method {
+            let declared = if let Type::Struct(id) = receiver.owner {
+                self.structs[id].type_parameters.as_slice()
+            } else {
+                &[]
+            };
+            if !declared
+                .iter()
+                .map(|p| &p.name)
+                .eq(self.type_parameters.iter().map(|p| &p.name))
+            {
+                return Err(location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "generic.receiver-parameters",
+                        "receiver parameters must match the struct declaration"
+                    ),
+                ));
+            }
+            if let Type::Struct(id) = receiver.owner {
+                inherited = self.structs[id].needs.clone();
+                if !declared.is_empty() {
+                    receiver.owner =
+                        self.apply_struct(id, (0..declared.len()).map(Type::Parameter).collect());
+                }
+            }
         }
-        let needs = self.declaration_needs()?;
+        let mut needs = self.declaration_needs()?;
+        for need in inherited {
+            if let Some(previous) = needs.iter().find(|n| n.same_operation(&need)) {
+                if !previous.same_signature(&need) {
+                    return Err(location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "generic.needs",
+                            "method requirement conflicts with its struct requirement"
+                        ),
+                    ));
+                }
+            } else {
+                needs.push(need);
+            }
+        }
         if name == "main" && !self.type_parameters.is_empty() {
             return Err(location.error(
                 ErrorKind::InvalidSource,

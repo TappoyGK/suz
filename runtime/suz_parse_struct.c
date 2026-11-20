@@ -41,8 +41,21 @@ static bool equal(reader *r, uint64_t start, uint64_t length, const char *expect
     return length == strlen(expected) && memcmp(r->bytes + start, expected, (size_t)length) == 0;
 }
 static bool named(reader *r, const char *expected) {
-    uint64_t start, length;
-    return name(r, &start, &length) && equal(r, start, length, expected);
+    /* 型引数を含む名前もスキーマと照合する。字句間の空白は通常の構造体名と同じ扱い。 */
+    while (*expected) {
+        if (*expected == ' ') { ++expected; continue; }
+        if (first((unsigned char)*expected)) {
+            uint64_t start, length;
+            size_t size = 1;
+            while (rest((unsigned char)expected[size])) ++size;
+            if (!name(r, &start, &length) || length != size ||
+                memcmp(r->bytes + start, expected, size) != 0) return false;
+            expected += size;
+        } else {
+            if (!symbol(r, *expected++)) return false;
+        }
+    }
+    return true;
 }
 static bool value(reader *r, const suz_parse_type *type, suz_parsed_value *output);
 

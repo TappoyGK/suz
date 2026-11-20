@@ -301,3 +301,6 @@ mod operator_methods;
 
 #[path = "spec_cases/type_parameters.rs"]
 mod type_parameters;
+
+#[path = "spec_cases/generic_structs.rs"]
+mod generic_structs;

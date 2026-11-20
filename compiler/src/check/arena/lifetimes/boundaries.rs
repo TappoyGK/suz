@@ -21,7 +21,7 @@ impl Analysis<'_> {
             let Type::Struct(id) = ty else {
                 unreachable!("checked field path")
             };
-            ty = self.scope.structs[id].fields[index].ty;
+            ty = self.scope.structs.get(id).fields[index].ty;
         }
         ty
     }
@@ -78,7 +78,10 @@ impl Analysis<'_> {
         self.return_region = function.arena.then_some(0);
         let mut shared = Vec::new();
         for (id, parameter) in function.parameters.iter().enumerate() {
-            let ty = self.scope.resolve_type(parameter.ty);
+            let ty = self
+                .scope
+                .resolve_type_at(parameter.ty, parameter.location)
+                .expect("parameter type was checked before lifetime analysis");
             if !contains(ty, self.scope) {
                 continue;
             }
@@ -310,7 +313,7 @@ impl Analysis<'_> {
             let Type::Struct(id) = ty else {
                 unreachable!("checked field path")
             };
-            let field = &self.scope.structs[id].fields[index];
+            let field = &self.scope.structs.get(id).fields[index];
             label.push('.');
             label.push_str(&field.name);
             ty = field.ty;

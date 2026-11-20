@@ -55,3 +55,12 @@ impl Need {
             && self.errors == other.errors
     }
 }
+
+/// 汎用構造体への型引数の適用。フィールドは意味検査で具体化する。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Application {
+    pub declaration: usize,
+    pub arguments: Vec<Type>,
+}
+
+pub(crate) type Applications = std::rc::Rc<std::cell::RefCell<Vec<Application>>>;

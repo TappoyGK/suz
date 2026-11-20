@@ -437,6 +437,9 @@ pub(super) fn check(
                     ),
                 ));
             }
+            if matches!(ty, Type::Struct(_)) && operators.iter().all(|op| op.is_equality()) {
+                crate::check::type_parameters::struct_equality(ty, bindings, expr.location)?;
+            }
             if ty == Type::Void
                 || (matches!(ty, Type::Bool | Type::Enum(_) | Type::Struct(_))
                     && operators.iter().any(|operator| !operator.is_equality()))

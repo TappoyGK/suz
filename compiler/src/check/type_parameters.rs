@@ -1,6 +1,7 @@
 //! 名前付き型引数を、要求による定義時検査と具体型での通常検査へ接続する。
 //! 数値のint・floatとは代入表を分け、演算のASTや格納境界を変更しない。
 mod requirements;
+pub(super) mod structs;
 use super::{
     functions,
     ir::{CheckedExpression, CheckedFunction, Value},
@@ -10,7 +11,7 @@ use crate::{
     Diagnostic, ErrorKind,
     ast::{Expression, FailureHandler, Location, Program, Type},
 };
-pub(super) use requirements::{hint, operation};
+pub(super) use requirements::{hint, operation, struct_equality};
 use std::rc::Rc;
 
 /// 具体化待ちの関数。依存経路は型引数が増え続ける再帰を検出するために保持する。
@@ -23,18 +24,6 @@ pub(super) struct Instance {
     location: Location,
 }
 
-pub(super) fn substitute(ty: Type, arguments: &[Type]) -> Type {
-    if let Some(inner) = ty.pointee() {
-        substitute(inner, arguments)
-            .pointer()
-            .with_nullable(ty.is_nullable())
-    } else if let Type::Parameter(id) = ty {
-        arguments[id]
-    } else {
-        ty
-    }
-}
-
 pub(super) fn call(
     expr: &Expression,
     signature: &Signature,
@@ -43,6 +32,22 @@ pub(super) fn call(
     scope: &Scope,
     handler: Option<&FailureHandler>,
 ) -> Result<CheckedExpression, Diagnostic> {
+    let receiver_arguments;
+    let explicit = if signature.method.is_some() {
+        let receiver = arguments
+            .first()
+            .and_then(|a| super::expression::operand_type(a, scope))
+            .ok_or_else(|| {
+                expr.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("method.call", "cannot determine receiver type"),
+                )
+            })?;
+        receiver_arguments = scope.method_arguments(receiver);
+        receiver_arguments.as_slice()
+    } else {
+        explicit
+    };
     if explicit.len() != signature.type_parameters {
         return Err(expr.location.error(
             ErrorKind::InvalidSource,
@@ -54,12 +59,19 @@ pub(super) fn call(
             ),
         ));
     }
-    let types: Vec<_> = explicit.iter().map(|t| scope.resolve_type(*t)).collect();
-    requirements::validate_substitution(&signature.needs, &types, expr.location)?;
+    let types: Vec<_> = if signature.method.is_some() {
+        explicit.to_vec()
+    } else {
+        explicit
+            .iter()
+            .map(|t| scope.resolve_type_at(*t, expr.location))
+            .collect::<Result<_, _>>()?
+    };
+    requirements::validate_substitution(&signature.needs, &types, scope, expr.location)?;
     for need in &signature.needs {
         requirements::satisfy(need, &types, scope, expr.location)?;
     }
-    let result = substitute(signature.result, &types);
+    let result = scope.substitute(signature.result, &types, expr.location)?;
     if matches!(result, Type::Function(_)) {
         return Err(expr.location.error(
             ErrorKind::InvalidSource,
@@ -70,7 +82,7 @@ pub(super) fn call(
         ));
     }
     for &ty in signature.parameters.iter().chain([&signature.result]) {
-        let ty = substitute(ty, &types);
+        let ty = scope.substitute(ty, &types, expr.location)?;
         if ty.pointee().is_some() && matches!(ty.leaf(), Type::Function(_)) {
             return Err(expr.location.error(
                 ErrorKind::InvalidSource,
@@ -81,9 +93,15 @@ pub(super) fn call(
     let checked_arguments = arguments
         .iter()
         .zip(&signature.parameters)
-        .map(|(arg, ty)| super::function_values::argument(arg, substitute(*ty, &types), scope))
+        .map(|(arg, ty)| {
+            super::function_values::argument(
+                arg,
+                scope.substitute(*ty, &types, expr.location)?,
+                scope,
+            )
+        })
         .collect::<Result<Vec<_>, _>>()?;
-    let symbolic = types.iter().any(|t| matches!(t.leaf(), Type::Parameter(_)));
+    let symbolic = types.iter().any(|t| scope.structs.symbolic(*t));
     let id = if symbolic {
         signature.id
     } else {
@@ -118,21 +136,10 @@ fn request(
         if *previous_function != function || *previous == arguments {
             continue;
         }
-        let contained = |mut old: Type, new: Type| {
-            loop {
-                if old == new {
-                    return true;
-                }
-                let Some(inner) = old.pointee() else {
-                    return false;
-                };
-                old = inner;
-            }
-        };
         if !previous
             .iter()
             .zip(&arguments)
-            .all(|(&a, &b)| contained(a, b))
+            .all(|(&a, &b)| scope.structs.contains_argument(a, b))
         {
             return Err(location.error(
                 ErrorKind::InvalidSource,
@@ -208,6 +215,70 @@ pub(super) fn check_instances(
             })?;
         output.push(checked);
         warnings.extend(found);
+    }
+    Ok(())
+}
+
+/// メソッドの署名を受け手の型引数で置き換える。本体の具体化は実際の呼び出し時に行う。
+pub(super) fn method_signature(
+    signature: &Signature,
+    receiver: Type,
+    scope: &Scope,
+    location: Location,
+) -> Result<Signature, Diagnostic> {
+    let arguments = scope.method_arguments(receiver);
+    let mut resolved = signature.clone();
+    if signature.type_parameters == 0 {
+        return Ok(resolved);
+    }
+    requirements::validate_substitution(&signature.needs, &arguments, scope, location)?;
+    for need in &signature.needs {
+        requirements::satisfy(need, &arguments, scope, location)?;
+    }
+    resolved.parameters = signature
+        .parameters
+        .iter()
+        .map(|t| scope.substitute(*t, &arguments, location))
+        .collect::<Result<_, _>>()?;
+    resolved.result = scope.substitute(signature.result, &arguments, location)?;
+    if let Some(method) = &mut resolved.method {
+        method.owner = scope.substitute(method.owner, &arguments, location)?;
+    }
+    resolved.type_parameters = 0;
+    Ok(resolved)
+}
+
+/// 型を使う位置で、構造体本体とフィールドに含まれる型の要求を確認する。
+/// メソッド固有の要求はここでは検査しない。
+pub(super) fn struct_requirements(
+    ty: Type,
+    scope: &Scope,
+    location: Location,
+) -> Result<(), Diagnostic> {
+    let mut pending = vec![ty];
+    let mut seen = std::collections::BTreeSet::new();
+    while let Some(ty) = pending.pop() {
+        let Type::Struct(id) = ty.leaf() else {
+            continue;
+        };
+        if !seen.insert(id) {
+            continue;
+        }
+        let declaration = scope.structs.get(id);
+        if let Some(app) = &declaration.application {
+            pending.extend(app.arguments.iter().copied());
+            super::operator_methods::validate_instantiation(ty.leaf(), scope, location)?;
+            requirements::validate_substitution(
+                &declaration.needs,
+                &app.arguments,
+                scope,
+                location,
+            )?;
+            for need in &declaration.needs {
+                requirements::satisfy(need, &app.arguments, scope, location)?;
+            }
+        }
+        pending.extend(declaration.fields.iter().map(|f| f.ty));
     }
     Ok(())
 }

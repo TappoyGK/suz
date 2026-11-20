@@ -88,14 +88,16 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
             }
         }
         ExpressionKind::Template(_) => Some(Type::Symbol),
-        ExpressionKind::Struct { id, .. } => Some(Type::Struct(*id)),
+        ExpressionKind::Struct { ty, .. } => bindings.resolve_type_at(*ty, expr.location).ok(),
         ExpressionKind::With { target, .. } => operand_type(target, bindings),
         ExpressionKind::Field { target, name } => {
             let known = operand_type(target, bindings)?;
             let Type::Struct(id) = known.pointee().unwrap_or(known) else {
                 return None;
             };
-            bindings.structs[id]
+            bindings
+                .structs
+                .get(id)
                 .fields
                 .iter()
                 .find(|field| &field.name == name)
@@ -122,9 +124,11 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
                 }
                 let args: Vec<_> = type_arguments
                     .iter()
-                    .map(|t| bindings.resolve_type(*t))
-                    .collect();
-                return Some(super::type_parameters::substitute(signature.result, &args));
+                    .map(|t| bindings.resolve_type_at(*t, expr.location).ok())
+                    .collect::<Option<_>>()?;
+                return bindings
+                    .substitute(signature.result, &args, expr.location)
+                    .ok();
             }
             super::generic::call_operand_type(name, arguments, bindings)
         }
@@ -134,7 +138,9 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
         ExpressionKind::Match { arms, .. } => {
             branch_type(arms.iter().map(|arm| &arm.body), bindings)
         }
-        ExpressionKind::Cast { target, .. } => Some(bindings.resolve_type(*target)),
+        ExpressionKind::Cast { target, .. } => {
+            bindings.resolve_type_at(*target, expr.location).ok()
+        }
         ExpressionKind::If {
             branches,
             otherwise,

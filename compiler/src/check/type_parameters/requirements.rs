@@ -1,5 +1,4 @@
 //! 宣言した操作だけを定義内で許可し、具体化時には実際の操作の署名と照合する。
-use super::substitute;
 use crate::check::{
     expression,
     ir::{CheckedExpression, Value},
@@ -40,9 +39,40 @@ fn find<'a>(
             && &n.operation == operation
             && n.parameters.len() == args.len()
             && n.parameters.iter().zip(args).all(|(ty, arg)| {
-                expression::operand_type(arg, scope).is_none_or(|known| known == *ty)
+                expression::operand_type(arg, scope).is_none_or(|known| {
+                    scope.resolve_type_at(*ty, arg.location).ok() == Some(known)
+                })
             })
     })
+}
+
+/// 構造体の等値比較は各フィールドの==を使うため、型引数のフィールドにも要求が必要。
+pub(in crate::check) fn struct_equality(
+    ty: Type,
+    scope: &Scope,
+    location: Location,
+) -> Result<(), Diagnostic> {
+    if !scope.structs.symbolic(ty) {
+        return Ok(());
+    }
+    let mut pending = vec![ty];
+    while let Some(ty) = pending.pop() {
+        match ty {
+            Type::Struct(id) => pending.extend(scope.structs.get(id).fields.iter().map(|f| f.ty)),
+            Type::Parameter(id)
+                if !scope.needs.iter().any(|n| {
+                    n.parameter == id
+                        && n.operation == RequiredOperation::Operator("==")
+                        && n.parameters == [ty]
+                        && n.result == Type::Bool
+                }) =>
+            {
+                return Err(missing_operator(location, id, "==", scope));
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 fn missing_operator(location: Location, parameter: usize, op: &str, scope: &Scope) -> Diagnostic {
@@ -76,14 +106,14 @@ pub(in crate::check) fn hint(expr: &Expression, scope: &Scope) -> Option<Type> {
             &[],
             scope,
         )
-        .map(|n| n.result);
+        .and_then(|n| scope.resolve_type_at(n.result, expr.location).ok());
     }
     match &expr.kind {
-        ExpressionKind::Binary { operator, left, right } => find(target(left, scope)?, &RequiredOperation::Operator(operator.c_symbol()), std::slice::from_ref(right), scope).map(|n| n.result),
+        ExpressionKind::Binary { operator, left, right } => find(target(left, scope)?, &RequiredOperation::Operator(operator.c_symbol()), std::slice::from_ref(right), scope).and_then(|n| scope.resolve_type_at(n.result, expr.location).ok()),
         ExpressionKind::MethodCall { target: receiver, name, mutable, arguments } => scope.needs.iter().find(|n| {
             Some(n.parameter) == method_target(receiver, scope) && n.parameters.len() == arguments.len()
                 && matches!(&n.operation, RequiredOperation::Method { name: member, mutable: write, .. } if name == member && mutable == write)
-        }).map(|n| n.result),
+        }).and_then(|n| scope.resolve_type_at(n.result, expr.location).ok()),
         _ => None,
     }
 }
@@ -117,14 +147,16 @@ fn invoke(
     let mut checked = vec![receiver];
     for (argument, &ty) in arguments.iter().zip(&need.parameters) {
         checked.push(crate::check::function_values::argument(
-            argument, ty, scope,
+            argument,
+            scope.resolve_type_at(ty, argument.location)?,
+            scope,
         )?);
     }
     // 定義時だけの仮の呼び出し。具体化では元のASTを通常検査するので、
     // この値がC生成へ届いたり、組み込み算術へ呼び出し境界を追加したりすることはない。
     crate::check::errors::finish(
         CheckedExpression {
-            ty: need.result,
+            ty: scope.resolve_type_at(need.result, expr.location)?,
             value: Value::Call {
                 id: usize::MAX,
                 arguments: checked,
@@ -301,9 +333,9 @@ pub(super) fn satisfy(
     let parameters: Vec<_> = need
         .parameters
         .iter()
-        .map(|t| substitute(*t, types))
-        .collect();
-    let result = substitute(need.result, types);
+        .map(|t| scope.substitute(*t, types, location))
+        .collect::<Result<_, _>>()?;
+    let result = scope.substitute(need.result, types, location)?;
     let error = || {
         let mut error = location.error(
             ErrorKind::InvalidSource,
@@ -341,8 +373,13 @@ pub(super) fn satisfy(
         return if scope.needs.iter().any(|n| {
             n.parameter == parameter
                 && n.operation == need.operation
-                && n.parameters == parameters
-                && n.result == result
+                && n.parameters
+                    .iter()
+                    .map(|t| scope.substitute(*t, &[], location))
+                    .collect::<Result<Vec<_>, _>>()
+                    .ok()
+                    == Some(parameters.clone())
+                && scope.substitute(n.result, &[], location).ok() == Some(result)
                 && n.errors == need.errors
         }) {
             Ok(())
@@ -356,7 +393,6 @@ pub(super) fn satisfy(
     context.hint_depth = Default::default();
     context.type_arguments = None;
     context.type_parameters = Rc::default();
-    context.needs = Rc::default();
     context.constant_initializer = false;
     let mut argument = |index: usize, ty: Type| {
         let name = format!("$requirement{index}");
@@ -382,8 +418,9 @@ pub(super) fn satisfy(
             mutable,
             arena,
         } => {
-            let key = format!("{}.{}", scope.type_name(target), name);
+            let key = format!("{}.{}", scope.method_owner_name(target), name);
             let signature = scope.functions.get(&key).ok_or_else(error)?;
+            let signature = super::method_signature(signature, target, scope, location)?;
             if signature.method.is_none_or(|m| m.mutable != *mutable)
                 || signature.arena != *arena
                 || signature.parameters[1..] != parameters
@@ -420,11 +457,17 @@ pub(super) fn satisfy(
     };
     if let Some(name) = selected {
         let signature = scope.functions.get(&name).ok_or_else(error)?;
+        let signature = super::method_signature(signature, target, scope, location)?;
         let mut arguments = vec![receiver];
         arguments.extend(args);
-        let resolved =
-            crate::check::generic::resolve(signature, &arguments, Some(result), &context, location)
-                .map_err(|_| error())?;
+        let resolved = crate::check::generic::resolve(
+            &signature,
+            &arguments,
+            Some(result),
+            &context,
+            location,
+        )
+        .map_err(|_| error())?;
         let actual = resolved.concrete();
         if actual.resolve(signature.result) != result
             || signature.parameters[1..]
@@ -485,6 +528,7 @@ fn operator(
 pub(super) fn validate_substitution(
     needs: &[Need],
     types: &[Type],
+    scope: &Scope,
     location: Location,
 ) -> Result<(), Diagnostic> {
     let mut resolved: Vec<(Type, Need)> = Vec::new();
@@ -495,9 +539,9 @@ pub(super) fn validate_substitution(
         concrete.parameters = need
             .parameters
             .iter()
-            .map(|t| substitute(*t, types))
-            .collect();
-        concrete.result = substitute(need.result, types);
+            .map(|t| scope.substitute(*t, types, location))
+            .collect::<Result<_, _>>()?;
+        concrete.result = scope.substitute(need.result, types, location)?;
         for (previous_target, previous) in &resolved {
             if *previous_target == target
                 && previous.same_operation(&concrete)

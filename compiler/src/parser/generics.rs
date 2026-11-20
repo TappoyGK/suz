@@ -303,3 +303,61 @@ pub(super) fn function_names(
         })
         .collect()
 }
+
+impl Parser<'_, '_> {
+    /// 型適用はASTの表へ保存し、同じ適用には同じ番号を付ける。
+    pub(super) fn apply_struct(
+        &self,
+        declaration: usize,
+        arguments: Vec<crate::ast::Type>,
+    ) -> crate::ast::Type {
+        let application = crate::ast::generics::Application {
+            declaration,
+            arguments,
+        };
+        let mut applications = self.applications.borrow_mut();
+        let id = applications
+            .iter()
+            .position(|a| a == &application)
+            .unwrap_or_else(|| {
+                applications.push(application);
+                applications.len() - 1
+            });
+        crate::ast::Type::Application(id)
+    }
+
+    pub(super) fn struct_type(
+        &mut self,
+        declaration: usize,
+    ) -> Result<crate::ast::Type, Diagnostic> {
+        let count = self.structs[declaration].type_parameters.len();
+        if self.token().kind != Kind::Symbol("[") {
+            if count == 0 {
+                return Ok(crate::ast::Type::Struct(declaration));
+            }
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "generic.type-arguments",
+                    "generic struct requires explicit type arguments"
+                ),
+            ));
+        }
+        let location = self.location();
+        let arguments = self.nested(location, |p| {
+            p.delimited_list("[", "]", Self::type_argument)
+        })?;
+        if count == 0 || count != arguments.len() {
+            return Err(location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "generic.type-arguments",
+                    "expected {} type arguments, found {}",
+                    count,
+                    arguments.len()
+                ),
+            ));
+        }
+        Ok(self.apply_struct(declaration, arguments))
+    }
+}

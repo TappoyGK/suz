@@ -10,12 +10,11 @@ use crate::{
 };
 
 fn name(ty: Type, member: &str, scope: &Scope) -> Option<String> {
-    let owner = match ty.pointee().unwrap_or(ty) {
-        Type::Struct(id) => &scope.structs[id].name,
-        Type::Enum(ty) if !ty.is_error => &scope.enums.iter().find(|e| e.ty == ty)?.name,
-        _ => return None,
-    };
-    Some(format!("{owner}.{member}"))
+    match ty.pointee().unwrap_or(ty) {
+        Type::Struct(_) => Some(format!("{}.{member}", scope.method_owner_name(ty))),
+        Type::Enum(e) if !e.is_error => Some(format!("{}.{member}", scope.method_owner_name(ty))),
+        _ => None,
+    }
 }
 
 fn arguments(target: &Expression, mutable: bool, arguments: &[Expression]) -> Vec<Expression> {
@@ -44,12 +43,22 @@ pub(super) fn hint(
         let Type::Struct(id) = ty.pointee().unwrap_or(ty) else {
             return None;
         };
-        let field = scope.structs[id].fields.iter().find(|f| f.name == member)?;
+        let declaration = scope.structs.get(id);
+        let field = declaration.fields.iter().find(|f| f.name == member)?;
         let (Type::StaticFunction(shape) | Type::Function(shape)) = field.ty else {
             return None;
         };
         return Some(scope.function_types.borrow()[shape].result);
     };
+    if signature.type_parameters != 0 {
+        return scope
+            .substitute(
+                signature.result,
+                &scope.method_arguments(ty),
+                target.location,
+            )
+            .ok();
+    }
     // 一時的に作るself引数のアドレスを、元のASTのヒントキャッシュへ残さない。
     let mut hints = scope.clone();
     hints.type_hints = Default::default();
@@ -139,7 +148,12 @@ fn call_inner(
     // フィールドに格納した関数値は従来の呼び出しを使う。名前衝突は宣言時に拒否する。
     if !mutable
         && let Type::Struct(id) = ty.pointee().unwrap_or(ty)
-        && scope.structs[id].fields.iter().any(|f| f.name == *member)
+        && scope
+            .structs
+            .get(id)
+            .fields
+            .iter()
+            .any(|f| f.name == *member)
     {
         let field = Expression {
             kind: ExpressionKind::Field {

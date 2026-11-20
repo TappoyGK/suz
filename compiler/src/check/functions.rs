@@ -18,12 +18,18 @@ use std::{collections::BTreeMap, rc::Rc};
 
 pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     super::generic::validate(program)?;
+    let structs = Rc::new(super::type_parameters::structs::Structs::new(program));
+    structs.prepare()?;
     let mut signatures = BTreeMap::new();
     for (id, function) in program.functions.iter().enumerate() {
-        if let Some(method) = function.method {
+        let mut method = function.method;
+        if let Some(method) = &mut method {
+            method.owner = structs.resolve(method.owner, &[], function.location)?;
+        }
+        if let Some(method) = method {
             let member = function.name.rsplit('.').next().unwrap();
             let collision = match method.owner {
-                Type::Struct(id) => program.structs[id].fields.iter().any(|f| f.name == member),
+                Type::Struct(id) => structs.get(id).fields.iter().any(|f| f.name == member),
                 Type::Enum(ty) => program.enums[ty.id].variants.iter().any(|v| v == member),
                 _ => unreachable!(),
             };
@@ -69,12 +75,16 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
             Signature {
                 type_parameters: function.type_parameters.len(),
                 needs: function.needs.clone(),
-                method: function.method,
+                method,
                 arena: function.arena,
                 external: false,
                 id,
-                parameters: function.parameters.iter().map(|p| p.ty).collect(),
-                result: function.result,
+                parameters: function
+                    .parameters
+                    .iter()
+                    .map(|p| structs.resolve(p.ty, &[], p.location))
+                    .collect::<Result<_, _>>()?,
+                result: structs.resolve(function.result, &[], function.location)?,
                 errors: function.errors.clone(),
             },
         );
@@ -82,14 +92,31 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     super::ffi::signatures(program, &mut signatures)?;
     let main_id = signatures["main"].id;
     let signatures = Rc::new(signatures);
+    let mut function_types = program.function_types.clone();
+    for (id, signature) in function_types.iter_mut().enumerate() {
+        let location = program
+            .fnshapes
+            .iter()
+            .find(|d| d.type_id == id)
+            .unwrap()
+            .location;
+        for ty in signature
+            .parameters
+            .iter_mut()
+            .chain([&mut signature.result])
+        {
+            *ty = structs.resolve(*ty, &[], location)?;
+        }
+    }
     let scope = Scope {
+        structs,
         has_operator_methods: program
             .functions
             .iter()
             .any(|f| f.method.is_some_and(|m| m.operator.is_some())),
         functions: signatures,
         fnshapes: Rc::new(program.fnshapes.clone()),
-        function_types: Rc::new(std::cell::RefCell::new(program.function_types.clone())),
+        function_types: Rc::new(std::cell::RefCell::new(function_types)),
         instances: Rc::new(std::cell::RefCell::new(super::generic::Instances::new(
             program.functions.len() + program.externs.len(),
         ))),
@@ -97,6 +124,43 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     };
     let (globals, mut warnings) =
         declarations::resolve(&program.bindings, &program.enums, &program.structs, scope)?;
+    for declaration in &program.fnshapes {
+        let signature = globals.function_types.borrow()[declaration.type_id].clone();
+        for ty in signature.parameters.into_iter().chain([signature.result]) {
+            super::type_parameters::struct_requirements(ty, &globals, declaration.location)?;
+        }
+    }
+    for (id, declaration) in program
+        .structs
+        .iter()
+        .enumerate()
+        .filter(|(_, d)| d.type_parameters.is_empty())
+    {
+        super::type_parameters::struct_requirements(
+            Type::Struct(id),
+            &globals,
+            declaration.location,
+        )?;
+    }
+    // 未使用の汎用構造体も、型引数と自身の要求だけでフィールド型を検査する。
+    for (id, declaration) in program
+        .structs
+        .iter()
+        .enumerate()
+        .filter(|(_, d)| !d.type_parameters.is_empty())
+    {
+        let mut context = globals.clone();
+        context.type_parameters = Rc::new(declaration.type_parameters.clone());
+        context.needs = Rc::new(declaration.needs.clone());
+        let ty = context.structs.apply(
+            id,
+            (0..declaration.type_parameters.len())
+                .map(Type::Parameter)
+                .collect(),
+            declaration.location,
+        )?;
+        super::type_parameters::struct_requirements(ty, &context, declaration.location)?;
+    }
     let mut functions = Vec::new();
     check_instances(program, &globals, &mut functions, &mut warnings)?;
     for (id, function) in program.functions.iter().enumerate() {
@@ -156,7 +220,7 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
             .collect(),
         constant_texts: globals.outputs.constant_texts.borrow().clone(),
         main_location: program.functions[main_id].keyword_location,
-        structs: program.structs.clone(),
+        structs: globals.structs.snapshot(),
         enums: program.enums.clone(),
         functions,
         main_id,
@@ -366,7 +430,12 @@ pub(super) fn check_with_captures(
     scope.trusted_block = false;
     scope.arena_depth = usize::from(function.arena);
     scope.arena_used = Default::default();
-    if !function.arena && super::arena::contains(scope.resolve_type(function.result), &scope) {
+    if !function.arena
+        && super::arena::contains(
+            scope.resolve_type_at(function.result, function.location)?,
+            &scope,
+        )
+    {
         return Err(function.location.error(
             ErrorKind::InvalidSource,
             crate::diagnostic!(
@@ -385,7 +454,7 @@ pub(super) fn check_with_captures(
         scope.outputs.divisions = Default::default();
     }
     scope.errors = Rc::new(function.errors.clone());
-    scope.result = scope.resolve_type(function.result);
+    scope.result = scope.resolve_type_at(function.result, function.location)?;
     let mut declared = Vec::new();
     for (parameter_id, parameter) in function.parameters.iter().enumerate() {
         if declared.contains(&parameter.name) {
@@ -403,7 +472,7 @@ pub(super) fn check_with_captures(
                 crate::diagnostic!("decl.shadowing", "parameter shadows a top-level name"),
             ));
         }
-        let parameter_type = scope.resolve_type(parameter.ty);
+        let parameter_type = scope.resolve_type_at(parameter.ty, parameter.location)?;
         if let Some(binding) = references.get(&parameter.name) {
             let mut binding = binding.clone();
             binding.id = parameter_id;
@@ -449,8 +518,8 @@ pub(super) fn check_with_captures(
             parameters: function
                 .parameters
                 .iter()
-                .map(|p| scope.resolve_type(p.ty))
-                .collect(),
+                .map(|p| scope.resolve_type_at(p.ty, p.location))
+                .collect::<Result<_, _>>()?,
             result: scope.result,
             fallible: !function.errors.is_empty(),
             statements,

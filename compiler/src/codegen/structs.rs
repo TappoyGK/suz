@@ -64,6 +64,9 @@ pub(super) fn with(
 
 pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
     for (id, declaration) in context.structs.iter().enumerate() {
+        if declaration.symbolic {
+            continue;
+        }
         let tag = declaration
             .external
             .as_ref()
@@ -80,7 +83,7 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
         if !emitted.insert(id) {
             return;
         }
-        if context.structs[id].external.is_some() {
+        if context.structs[id].external.is_some() || context.structs[id].symbolic {
             return;
         }
         for field in &context.structs[id].fields {

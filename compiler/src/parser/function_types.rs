@@ -51,6 +51,7 @@ pub(super) fn resolve(
     enums: &[EnumDeclaration],
     structs: &mut [StructDeclaration],
     declarations: &mut [FnShapeDeclaration],
+    applications: crate::ast::generics::Applications,
 ) -> Result<Vec<FunctionType>, Diagnostic> {
     let mut names = std::collections::BTreeSet::new();
     for d in declarations.iter() {
@@ -65,6 +66,7 @@ pub(super) fn resolve(
         }
     }
     let mut p = Parser {
+        applications: applications.clone(),
         type_parameters: Vec::new(),
         pending_needs: Vec::new(),
         generic_functions: Default::default(),
@@ -162,10 +164,104 @@ pub(super) fn resolve(
         d.type_id = ids[id].unwrap();
         d.end = ends[id];
     }
-    for field in structs.iter_mut().flat_map(|s| &mut s.fields) {
-        field.ty = remap(field.ty, &ids);
+    for declaration in structs.iter_mut() {
+        for field in &mut declaration.fields {
+            field.ty = remap(field.ty, &ids);
+        }
+        for need in &mut declaration.needs {
+            for ty in need.parameters.iter_mut().chain([&mut need.result]) {
+                *ty = remap(*ty, &ids);
+            }
+        }
+    }
+    for application in applications.borrow_mut().iter_mut() {
+        for ty in &mut application.arguments {
+            *ty = remap(*ty, &ids);
+        }
+    }
+    // 関数型の別名を型引数に使っても、同じ構造体と同じ関数型になる。
+    // 関数型の統合で型引数が一致し、さらに外側の関数型が一致する場合も収束までまとめる。
+    loop {
+        let mut applications = applications.borrow_mut();
+        let mut app_ids = Vec::new();
+        for id in 0..applications.len() {
+            for ty in &mut applications[id].arguments {
+                *ty = remap_application(*ty, &app_ids);
+            }
+            let canonical = applications[..id]
+                .iter()
+                .position(|a| a == &applications[id])
+                .unwrap_or(id);
+            app_ids.push(canonical);
+        }
+        for signature in &mut types {
+            for ty in signature
+                .parameters
+                .iter_mut()
+                .chain([&mut signature.result])
+            {
+                *ty = remap_application(*ty, &app_ids);
+            }
+        }
+        let mut canonical = Vec::new();
+        let mut merged = Vec::new();
+        for signature in &types {
+            let id = merged
+                .iter()
+                .position(|s| s == signature)
+                .unwrap_or_else(|| {
+                    merged.push(signature.clone());
+                    merged.len() - 1
+                });
+            canonical.push(Some(id));
+        }
+        let changed = merged.len() != types.len();
+        let map = |ty| remap(remap_application(ty, &app_ids), &canonical);
+        for signature in &mut merged {
+            for ty in signature
+                .parameters
+                .iter_mut()
+                .chain([&mut signature.result])
+            {
+                *ty = map(*ty);
+            }
+        }
+        for application in applications.iter_mut() {
+            for ty in &mut application.arguments {
+                *ty = map(*ty);
+            }
+        }
+        for declaration in declarations.iter_mut() {
+            declaration.type_id = canonical[declaration.type_id].unwrap();
+        }
+        for declaration in structs.iter_mut() {
+            for field in &mut declaration.fields {
+                field.ty = map(field.ty);
+            }
+            for need in &mut declaration.needs {
+                for ty in need.parameters.iter_mut().chain([&mut need.result]) {
+                    *ty = map(*ty);
+                }
+            }
+        }
+        types = merged;
+        if !changed {
+            break;
+        }
     }
     Ok(types)
+}
+
+fn remap_application(ty: Type, ids: &[usize]) -> Type {
+    if let Some(inner) = ty.pointee() {
+        return remap_application(inner, ids)
+            .pointer()
+            .with_nullable(ty.is_nullable());
+    }
+    match ty {
+        Type::Application(id) => Type::Application(ids[id]),
+        _ => ty,
+    }
 }
 
 // ptrで包まれた関数型にも、宣言番号から正規化後の番号への置き換えを適用する。

@@ -59,7 +59,7 @@ fn local_hints(input: &[Statement], bindings: &Scope) -> Scope {
         } = statement
         {
             let ty = annotation
-                .map(|ty| bindings.resolve_type(ty))
+                .and_then(|ty| bindings.resolve_type_at(ty, *location).ok())
                 .or_else(|| super::operand_type(initializer, &local))
                 .unwrap_or_else(|| super::default_type(initializer, &local));
             local
