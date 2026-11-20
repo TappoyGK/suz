@@ -283,6 +283,9 @@ pub(super) fn struct_requirements(
     scope: &Scope,
     location: Location,
 ) -> Result<(), Diagnostic> {
+    if !matches!(ty.leaf(), Type::Struct(_)) {
+        return Ok(());
+    }
     let mut pending = vec![ty];
     let mut seen = std::collections::BTreeSet::new();
     while let Some(ty) = pending.pop() {
@@ -441,6 +444,15 @@ pub(super) fn shape_requirements(
     scope: &Scope,
     location: Location,
 ) -> Result<(), Diagnostic> {
+    // 要求を持てるのは型引数付きfnshapeだけ。既存の型では探索用の領域も作らない。
+    if !scope.structs.shapes.has_generics
+        || !matches!(
+            ty.leaf(),
+            Type::StaticShape(_) | Type::Shape(_) | Type::Application(_)
+        )
+    {
+        return Ok(());
+    }
     let mut pending = vec![ty];
     let mut seen = std::collections::BTreeSet::new();
     while let Some(ty) = pending.pop() {

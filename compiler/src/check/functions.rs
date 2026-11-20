@@ -68,7 +68,7 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
             || program.bindings.iter().any(|c| c.name == function.name)
             || program.enums.iter().any(|e| e.name == function.name)
             || structs.contains_name(&function.name)
-            || program.fnshapes.iter().any(|s| s.name == function.name)
+            || structs.shapes.contains_name(&function.name)
         {
             return Err(function.location.error(
                 ErrorKind::InvalidSource,
@@ -126,7 +126,6 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
             .iter()
             .any(|f| f.method.is_some_and(|m| m.operator.is_some())),
         functions: signatures,
-        fnshapes: Rc::new(program.fnshapes.clone()),
         instances: Rc::new(std::cell::RefCell::new(super::generic::Instances::new(
             program.functions.len() + program.externs.len(),
         ))),
@@ -135,80 +134,62 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     let (globals, mut warnings) =
         declarations::resolve(&program.bindings, &program.enums, &program.structs, scope)?;
     for declaration in &program.fnshapes {
-        let mut context = globals.clone();
-        context.named = Rc::new(super::scope::NamedTypes {
-            type_parameters: Rc::new(declaration.type_parameters.clone()),
-            needs: Rc::new(declaration.needs.clone()),
-            ..Default::default()
-        });
-        super::type_parameters::definition_needs(&context, declaration.location)?;
-        let mut signature = program.function_types[declaration.type_id].clone();
-        for ty in signature
-            .parameters
-            .iter_mut()
-            .chain([&mut signature.result])
-        {
-            *ty = context.resolve_type_at(*ty, declaration.location)?;
+        // 型引数のない宣言には、空の型引数スコープを作らない。
+        let context;
+        let scope = if declaration.type_parameters.is_empty() {
+            &globals
+        } else {
+            context = definition_scope(
+                &globals,
+                &declaration.type_parameters,
+                &declaration.needs,
+                declaration.location,
+            )?;
+            &context
+        };
+        let signature = &program.function_types[declaration.type_id];
+        for &ty in signature.parameters.iter().chain([&signature.result]) {
+            scope.resolve_type_at(ty, declaration.location)?;
         }
-        context.intern_function(signature);
     }
-    for (id, declaration) in program
-        .structs
-        .iter()
-        .enumerate()
-        .filter(|(_, d)| d.type_parameters.is_empty())
-    {
-        super::type_parameters::struct_requirements(
-            Type::Struct(id),
-            &globals,
-            declaration.location,
-        )?;
-    }
-    // 未使用の汎用構造体も、型引数と自身の要求だけでフィールド型を検査する。
-    for (id, declaration) in program
-        .structs
-        .iter()
-        .enumerate()
-        .filter(|(_, d)| !d.type_parameters.is_empty())
-    {
-        let mut context = globals.clone();
-        context.named = Rc::new(super::scope::NamedTypes {
-            type_parameters: Rc::new(declaration.type_parameters.clone()),
-            needs: Rc::new(declaration.needs.clone()),
-            ..Default::default()
-        });
-        let ty = context.structs.apply(
-            id,
-            (0..declaration.type_parameters.len())
-                .map(Type::Parameter)
-                .collect(),
-            declaration.location,
-        )?;
-        super::type_parameters::struct_requirements(ty, &context, declaration.location)?;
-    }
-    for declaration in &program.structs {
-        let mut context = globals.clone();
-        context.named = Rc::new(super::scope::NamedTypes {
-            type_parameters: Rc::new(declaration.type_parameters.clone()),
-            needs: Rc::new(declaration.needs.clone()),
-            ..Default::default()
-        });
-        super::type_parameters::definition_needs(&context, declaration.location)?;
-        for field in &declaration.fields {
-            context.resolve_type_at(field.ty, field.location)?;
+    // フィールドの型はprepare/applyで解決済み。ここでは宣言に書かれた要求を確認する。
+    for (id, declaration) in program.structs.iter().enumerate() {
+        let context;
+        let (scope, ty) = if declaration.type_parameters.is_empty() {
+            (&globals, Type::Struct(id))
+        } else {
+            context = definition_scope(
+                &globals,
+                &declaration.type_parameters,
+                &declaration.needs,
+                declaration.location,
+            )?;
+            let ty = context.structs.apply(
+                id,
+                (0..declaration.type_parameters.len())
+                    .map(Type::Parameter)
+                    .collect(),
+                declaration.location,
+            )?;
+            (&context, ty)
+        };
+        super::type_parameters::struct_requirements(ty, scope, declaration.location)?;
+        if scope.structs.shapes.has_generics {
+            for field in &declaration.fields {
+                super::type_parameters::shape_requirements(field.ty, scope, field.location)?;
+            }
         }
     }
     let mut functions = Vec::new();
     check_instances(program, &globals, &mut functions, &mut warnings)?;
     for (id, function) in program.functions.iter().enumerate() {
         if !function.type_parameters.is_empty() {
-            let mut context = globals.clone();
-            context.named = Rc::new(super::scope::NamedTypes {
-                type_parameters: Rc::new(function.type_parameters.clone()),
-                needs: Rc::new(function.needs.clone()),
-                ..Default::default()
-            });
-            super::type_parameters::definition_needs(&context, function.location)?;
+            let context = definition_scope(
+                &globals,
+                &function.type_parameters,
+                &function.needs,
+                function.location,
+            )?;
             let (_, found) = check_function(function, context, id)?;
             warnings.extend(found);
             continue;
@@ -689,4 +670,23 @@ pub(super) fn return_value(
         ));
     }
     expression(value, Some(scope.result), scope)
+}
+
+/// 要求のある定義だけで要求検査を行い、通常の宣言は呼び出し元のスコープを使う。
+fn definition_scope(
+    globals: &Scope,
+    parameters: &[crate::ast::generics::TypeParameter],
+    needs: &[crate::ast::generics::Need],
+    location: crate::ast::Location,
+) -> Result<Scope, Diagnostic> {
+    let mut context = globals.clone();
+    context.named = Rc::new(super::scope::NamedTypes {
+        type_parameters: Rc::new(parameters.to_vec()),
+        needs: Rc::new(needs.to_vec()),
+        ..Default::default()
+    });
+    if !needs.is_empty() {
+        super::type_parameters::definition_needs(&context, location)?;
+    }
+    Ok(context)
 }

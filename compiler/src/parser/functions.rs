@@ -246,12 +246,9 @@ impl Parser<'_, '_> {
             self.cursor += 1;
         }
         if let Kind::Ident(name) = self.token().kind
-            && let Some((id, decl)) = self
-                .fnshapes
-                .iter()
-                .enumerate()
-                .find(|(_, d)| d.name == name)
+            && let Some(&id) = self.fnshape_names.get(name)
         {
+            let decl = &self.fnshapes[id];
             if !marked {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
@@ -263,6 +260,7 @@ impl Parser<'_, '_> {
             }
             self.cursor += 1;
             let count = decl.type_parameters.len();
+            let plain_application = decl.plain_application;
             let arguments = if self.token().kind == Kind::Symbol("[") {
                 if count == 0 {
                     return Err(self.error(
@@ -282,12 +280,13 @@ impl Parser<'_, '_> {
                     ErrorKind::InvalidSource,
                     crate::diagnostic!(
                         "generic.type-arguments",
-                        "fnshape requires all {} type arguments explicitly",
-                        count
+                        "expected {} explicit type arguments, found {}",
+                        count,
+                        arguments.len()
                     ),
                 ));
             }
-            let application = self.apply_type(id, arguments);
+            let application = plain_application.unwrap_or_else(|| self.apply_type(id, arguments));
             return Ok(if persistent {
                 Type::StaticShape(application)
             } else {

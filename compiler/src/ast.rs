@@ -520,6 +520,8 @@ pub(crate) struct FunctionType {
 /// fnshapeの名前と宣言位置。型の同一性は名前ではなく仮引数と戻り値の型で決まる。
 #[derive(Clone)]
 pub(crate) struct FnShapeDeclaration {
+    /// 型引数のない名前の型適用番号。使用位置での再登録を省く。
+    pub plain_application: Option<usize>,
     pub type_parameters: Vec<generics::TypeParameter>,
     pub needs: Vec<generics::Need>,
     pub name: String,

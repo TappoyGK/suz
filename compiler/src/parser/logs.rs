@@ -134,6 +134,7 @@ impl Parser<'_, '_> {
                         enums: self.enums,
                         structs: self.structs,
                         fnshapes: self.fnshapes,
+                        fnshape_names: self.fnshape_names.clone(),
                         restricted_condition: self.restricted_condition,
                         cursor: 0,
                         constant_expression: self.constant_expression,

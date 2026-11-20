@@ -117,10 +117,14 @@ impl Structs {
         })
     }
     pub fn prepare(&self) -> Result<(), Diagnostic> {
+        self.shapes.prepare_plain();
         // 直接参照する関数型を先に登録し、長い宣言列を再帰でたどらない。
         let mut order: Vec<_> = (0..self.shapes.declarations.len()).collect();
         order.sort_by_key(|id| self.shapes.declarations[*id].type_id);
         for id in order {
+            if self.shapes.plain_types.borrow()[id].is_some() {
+                continue;
+            }
             let declaration = &self.shapes.declarations[id];
             let app = Application {
                 declaration: id,
@@ -128,7 +132,7 @@ impl Structs {
                     .map(Type::Parameter)
                     .collect(),
             };
-            self.transaction(|| {
+            let ty = self.transaction(|| {
                 self.instantiate_shape(
                     app,
                     declaration.location,
@@ -137,6 +141,12 @@ impl Structs {
                 )
                 .map(Type::StaticFunction)
             })?;
+            if declaration.type_parameters.is_empty() {
+                let Type::StaticFunction(type_id) = ty else {
+                    unreachable!()
+                };
+                self.shapes.plain_types.borrow_mut()[id] = Some(type_id);
+            }
         }
         for id in 0..self.original_count {
             let declaration = self.get(id);
@@ -151,11 +161,40 @@ impl Structs {
         }
         self.validate_layout(0)
     }
+    /// 型引数のないfnshapeはprepareで解決済みなので、使用ごとに具体化表を引かない。
+    pub fn plain_shape(&self, ty: Type) -> Option<Type> {
+        let (id, persistent) = match ty {
+            Type::StaticShape(id) => (id, true),
+            Type::Shape(id) => (id, false),
+            _ => return None,
+        };
+        let declaration = self.applications[id].declaration;
+        let id = self.shapes.plain_types.borrow()[declaration]?;
+        let id = self.shapes.canonical_id(id);
+        Some(if persistent {
+            Type::StaticFunction(id)
+        } else {
+            Type::Function(id)
+        })
+    }
     pub fn application(&self, id: usize) -> &Application {
         &self.applications[id]
     }
+    #[inline]
     pub fn symbolic(&self, ty: Type) -> bool {
-        self.symbolic_inner(ty, &mut BTreeSet::new())
+        match ty.leaf() {
+            Type::Parameter(_) => true,
+            Type::Struct(id) => self.get(id).symbolic,
+            Type::Application(id) | Type::StaticShape(id) | Type::Shape(id) => self.applications
+                [id]
+                .arguments
+                .iter()
+                .any(|ty| self.symbolic(*ty)),
+            Type::StaticFunction(_) | Type::Function(_) => {
+                self.symbolic_inner(ty, &mut BTreeSet::new())
+            }
+            _ => false,
+        }
     }
     fn symbolic_inner(&self, ty: Type, seen: &mut BTreeSet<usize>) -> bool {
         match ty.leaf() {
@@ -240,6 +279,9 @@ impl Structs {
         }
     }
     pub fn contains_argument(&self, old: Type, new: Type) -> bool {
+        if old == new {
+            return true;
+        }
         let mut pending = vec![old];
         let mut seen = BTreeSet::new();
         while let Some(ty) = pending.pop() {
@@ -302,18 +344,22 @@ impl Structs {
         location: Location,
         parameters: &[TypeParameter],
     ) -> Result<Type, Diagnostic> {
-        if !matches!(
-            ty,
-            Type::Parameter(_)
-                | Type::Application(_)
-                | Type::Struct(_)
-                | Type::Pointer { .. }
-                | Type::StaticShape(_)
-                | Type::Shape(_)
-                | Type::StaticFunction(_)
-                | Type::Function(_)
-        ) {
+        // 型引数自体の置換では新しい型を展開しない。確定した実引数をそのまま使う。
+        if let Type::Parameter(id) = ty {
+            return Ok(self.normalize(arguments.get(id).copied().unwrap_or(ty)));
+        }
+        if let Some(ty) = self.plain_shape(ty) {
             return Ok(ty);
+        }
+        match ty.leaf() {
+            Type::Application(_) | Type::StaticShape(_) | Type::Shape(_) => {}
+            Type::Parameter(_) | Type::Struct(_) | Type::StaticFunction(_) | Type::Function(_) => {
+                // 既に解決した型へ置き換える型引数がなければ、展開表に触れない。
+                if arguments.is_empty() {
+                    return Ok(self.normalize(ty));
+                }
+            }
+            _ => return Ok(ty),
         }
         self.transaction(|| {
             self.resolve_inner(ty, arguments, location, &mut Vec::new(), parameters)
@@ -326,30 +372,40 @@ impl Structs {
         resolve: impl FnOnce() -> Result<Type, Diagnostic>,
     ) -> Result<Type, Diagnostic> {
         let start = self.declarations.borrow().len();
-        let shape_start = self.shapes.checkpoint();
-        let alias_start = self.shapes.revision();
+        // 関数型のないプログラムでは、関数型表の巻き戻しや予約番号の更新は不要。
+        let shape_state = (!self.shapes.declarations.is_empty()
+            || !self.shapes.types.borrow().is_empty())
+        .then(|| (self.shapes.checkpoint(), self.shapes.revision()));
         let result = resolve().and_then(|ty| {
-            // 予約中の関数型はまだ署名が空なので、展開完了後に記号型の有無を確定する。
-            let count = self.declarations.borrow().len();
-            for id in start..count {
-                let declaration = self.get(id);
-                if let Some(app) = &declaration.application {
-                    let symbolic = app.arguments.iter().any(|ty| self.unresolved(*ty));
-                    if symbolic != declaration.symbolic {
-                        let mut resolved = declaration.as_ref().clone();
-                        resolved.symbolic = symbolic;
-                        self.declarations.borrow_mut()[id] = Rc::new(resolved);
+            if shape_state.is_some() {
+                // 予約中の関数型はまだ署名が空なので、展開完了後に記号型の有無を確定する。
+                let count = self.declarations.borrow().len();
+                for id in start..count {
+                    let declaration = self.get(id);
+                    if let Some(app) = &declaration.application {
+                        let symbolic = app.arguments.iter().any(|ty| self.unresolved(*ty));
+                        if symbolic != declaration.symbolic {
+                            let mut resolved = declaration.as_ref().clone();
+                            resolved.symbolic = symbolic;
+                            self.declarations.borrow_mut()[id] = Rc::new(resolved);
+                        }
                     }
                 }
             }
             self.validate_layout(start)?;
-            if self.shapes.revision() != alias_start {
-                self.normalize_instances();
+            if let Some((_, alias_start)) = shape_state {
+                if self.shapes.revision() != alias_start {
+                    self.normalize_instances();
+                }
+                Ok(self.normalize(ty))
+            } else {
+                Ok(ty)
             }
-            Ok(self.normalize(ty))
         });
         if result.is_err() {
-            self.shapes.rollback(shape_start);
+            if let Some((shape_start, _)) = shape_state {
+                self.shapes.rollback(shape_start);
+            }
             let mut declarations = self.declarations.borrow_mut();
             let mut instances = self.instances.borrow_mut();
             for declaration in &declarations[start..] {
@@ -369,6 +425,9 @@ impl Structs {
         path: &mut Vec<Application>,
         parameters: &[TypeParameter],
     ) -> Result<Type, Diagnostic> {
+        if let Some(ty) = self.plain_shape(ty) {
+            return Ok(ty);
+        }
         if let Some(inner) = ty.pointee() {
             let inner = self.resolve_inner(inner, arguments, location, path, parameters)?;
             if matches!(inner.leaf(), Type::Function(_)) {
@@ -428,6 +487,10 @@ impl Structs {
             _ => unreachable!(),
         };
         let id = if let Some(app) = app {
+            if app.arguments.is_empty() && matches!(ty, Type::StaticFunction(_) | Type::Function(_))
+            {
+                return Ok(self.normalize(ty));
+            }
             let resolved = app
                 .arguments
                 .iter()

@@ -63,6 +63,23 @@ pub(super) fn value(
     if signature.type_parameters != 0 || !explicit.is_empty() {
         return super::type_parameters::function_value(expr, signature, explicit, expected, scope);
     }
+    // 注釈や仮引数の型が既に確定している通常関数は、その署名と直接照合できる。
+    // 同じ関数値を保存するたびに署名を複製して型表へ登録し直さない。
+    if !signature.is_generic()
+        && let Some(Type::StaticFunction(id)) = expected
+    {
+        let types = scope.function_types.borrow();
+        let required = &types[id];
+        if signature.parameters == required.parameters
+            && signature.result == required.result
+            && signature.errors == required.errors
+        {
+            return Ok(CheckedExpression {
+                ty: Type::StaticFunction(id),
+                value: Value::Function(signature.id),
+            });
+        }
+    }
     let mut types = GenericTypes::default();
     if signature.is_generic() {
         let Some(Type::StaticFunction(id)) = expected else {

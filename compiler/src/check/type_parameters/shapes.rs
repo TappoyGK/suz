@@ -11,6 +11,9 @@ use std::{
 
 #[derive(Default)]
 pub(in crate::check) struct Shapes {
+    names: BTreeSet<String>,
+    pub has_generics: bool,
+    pub plain_types: RefCell<Vec<Option<usize>>>,
     pub types: Rc<RefCell<Vec<FunctionType>>>,
     pub declarations: Vec<FnShapeDeclaration>,
     pub templates: Vec<FunctionType>,
@@ -27,9 +30,51 @@ pub(in crate::check) struct Shapes {
 impl Shapes {
     pub fn new(program: &crate::ast::Program) -> Self {
         Self {
+            names: program.fnshapes.iter().map(|d| d.name.clone()).collect(),
+            plain_types: RefCell::new(vec![None; program.fnshapes.len()]),
+            has_generics: program
+                .fnshapes
+                .iter()
+                .any(|d| !d.type_parameters.is_empty()),
             declarations: program.fnshapes.clone(),
             templates: program.function_types.clone(),
             ..Self::default()
+        }
+    }
+    pub fn contains_name(&self, name: &str) -> bool {
+        self.names.contains(name)
+    }
+    /// 型適用を含まない通常の署名には予約枠も具体化表も不要。
+    /// 構造体名は既に宣言番号を持つので、相互参照でもその番号を使える。
+    pub fn prepare_plain(&self) {
+        for (id, declaration) in self.declarations.iter().enumerate() {
+            let signature = &self.templates[declaration.type_id];
+            if !declaration.type_parameters.is_empty()
+                || signature
+                    .parameters
+                    .iter()
+                    .chain([&signature.result])
+                    .any(|ty| {
+                        matches!(
+                            ty.leaf(),
+                            Type::Application(_)
+                                | Type::StaticShape(_)
+                                | Type::Shape(_)
+                                | Type::Parameter(_)
+                        )
+                    })
+            {
+                continue;
+            }
+            let type_id = self.intern(signature.clone());
+            self.plain_types.borrow_mut()[id] = Some(type_id);
+            self.origins
+                .borrow_mut()
+                .entry(type_id)
+                .or_insert_with(|| Application {
+                    declaration: id,
+                    arguments: Vec::new(),
+                });
         }
     }
     pub fn origin(&self, id: usize) -> Option<Application> {

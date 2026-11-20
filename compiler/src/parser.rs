@@ -41,6 +41,7 @@ struct Parser<'a, 's> {
     enums: &'a [crate::ast::EnumDeclaration],
     structs: &'a [crate::ast::StructDeclaration],
     fnshapes: &'a [crate::ast::FnShapeDeclaration],
+    fnshape_names: std::rc::Rc<std::collections::BTreeMap<String, usize>>,
     restricted_condition: bool,
     cursor: usize,
     constant_expression: bool,
@@ -150,6 +151,16 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
     let enums = enums::collect(tokens)?;
     let mut fnshapes = function_types::headers(tokens)?;
     let applications = crate::ast::generics::Applications::default();
+    for (id, declaration) in fnshapes.iter_mut().enumerate() {
+        if declaration.type_parameters.is_empty() {
+            declaration.plain_application = Some(applications.borrow_mut().intern(
+                crate::ast::generics::Application {
+                    declaration: id,
+                    arguments: Vec::new(),
+                },
+            ));
+        }
+    }
     let mut structs = structs::collect(tokens, &enums, &fnshapes, applications.clone())?;
     let function_types = function_types::resolve(
         tokens,
@@ -167,6 +178,7 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
         enums: &enums,
         structs: &structs,
         fnshapes: &fnshapes,
+        fnshape_names: function_types::name_index(&fnshapes),
         restricted_condition: false,
         tokens,
         cursor: 0,

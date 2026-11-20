@@ -74,7 +74,6 @@ pub(super) struct Scope {
     pub recovery: Option<Type>,
     // 式のerror腕からbreak・continueできるかを調べるため、文のループ深さを渡す。
     pub loop_depth: usize,
-    pub fnshapes: Rc<Vec<crate::ast::FnShapeDeclaration>>,
     pub function_types: Rc<std::cell::RefCell<Vec<crate::ast::FunctionType>>>,
     pub mode: Mode,
     pub deferred: Option<Rc<std::cell::RefCell<Vec<super::generic::Deferred>>>>,
@@ -167,7 +166,12 @@ impl Scope {
                 Mode::Ordinary | Mode::GenericCheck => ty,
             });
         }
-        super::type_parameters::shape_requirements(ty, self, location)?;
+        if let Some(ty) = self.structs.plain_shape(ty) {
+            return Ok(ty);
+        }
+        if self.structs.shapes.has_generics {
+            super::type_parameters::shape_requirements(ty, self, location)?;
+        }
         let ty = self.substitute(
             ty,
             self.named
@@ -219,7 +223,7 @@ impl Scope {
                     "fn"
                 };
                 if let Some(app) = self.structs.shapes.origin(id) {
-                    let declaration = &self.fnshapes[app.declaration];
+                    let declaration = &self.structs.shapes.declarations[app.declaration];
                     let arguments = if app.arguments.is_empty() {
                         String::new()
                     } else {
@@ -252,7 +256,7 @@ impl Scope {
         }
     }
     pub fn is_type_name(&self, name: &str) -> bool {
-        self.fnshapes.iter().any(|d| d.name == name)
+        self.structs.shapes.contains_name(name)
             || self.enums.iter().any(|decl| decl.name == name)
             || self.structs.contains_name(name)
     }
@@ -269,7 +273,6 @@ impl Default for Scope {
             trusted_block: false,
             recovery: None,
             loop_depth: 0,
-            fnshapes: Rc::default(),
             function_types: structs.shapes.types.clone(),
             mode: Default::default(),
             deferred: None,

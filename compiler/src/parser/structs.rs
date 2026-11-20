@@ -159,6 +159,7 @@ pub(super) fn collect(
         enums,
         structs: &[],
         fnshapes,
+        fnshape_names: super::function_types::name_index(fnshapes),
         restricted_condition: false,
         cursor: 0,
         constant_expression: false,

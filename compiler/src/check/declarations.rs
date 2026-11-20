@@ -265,9 +265,9 @@ pub(super) fn resolve(
     for declaration in declarations {
         if resolver
             .bindings
-            .fnshapes
-            .iter()
-            .any(|d| d.name == declaration.name)
+            .structs
+            .shapes
+            .contains_name(&declaration.name)
             || structs.iter().any(|s| s.name == declaration.name)
             || enums.iter().any(|e| e.name == declaration.name)
             || declaration.name == "main"

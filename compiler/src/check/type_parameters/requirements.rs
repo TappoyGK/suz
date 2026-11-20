@@ -413,7 +413,6 @@ pub(super) fn satisfy(
         functions: scope.functions.clone(),
         structs: scope.structs.clone(),
         enums: scope.enums.clone(),
-        fnshapes: scope.fnshapes.clone(),
         function_types: scope.function_types.clone(),
         has_operator_methods: scope.has_operator_methods,
         named: std::rc::Rc::new(crate::check::scope::NamedTypes {

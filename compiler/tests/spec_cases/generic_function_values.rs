@@ -32,6 +32,9 @@ fn generic_shapes_check_declared_requirements_before_erasing_names() {
         "fn unused[T](f: static fn Add[T]) -> void {}\nfn main() -> u8 { return 0 }",
         "fnshape Outer[T](static fn Add[T]) -> void\nfn main() -> u8 { return 0 }",
         "struct Holder[T] { f: static fn Add[T] }\nfn main() -> u8 { return 0 }",
+        "fnshape Outer(static fn Add[bool]) -> void\nfn main() -> u8 { return 0 }",
+        "struct Holder { f: static fn Add[bool] }\nfn main() -> u8 { return 0 }",
+        "fn unused(f: static fn Add[bool]) -> void {}\nfn main() -> u8 { return 0 }",
     ] {
         let error = suz::compile(format!("{prefix}{body}").as_bytes()).unwrap_err();
         assert!(error.to_string().contains("generic.needs-check"), "{error}");
@@ -219,4 +222,26 @@ fn main() -> u8 {
     assert!(output.status.success(), "{output:?}");
     let bad = source.replace("fnshape Same[T](T) -> T", "fnshape Same[T](T) -> bool");
     assert!(suz::compile(bad.as_bytes()).is_err());
+}
+
+#[test]
+fn generic_shape_argument_counts_report_expected_and_actual() {
+    for (parameters, arguments, expected, actual) in [
+        ("T", "[i32, i32]", 1, 2),
+        ("T, U", "[i32]", 2, 1),
+        ("T", "", 1, 0),
+        ("T", "[]", 1, 0),
+    ] {
+        let source = format!(
+            "fnshape Act[{parameters}](T) -> T\nfn main() -> u8 {{ fix f: static fn Act{arguments} = panic `x`\nreturn 0 }}"
+        );
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(error.rule(), "generic.type-arguments");
+        assert!(
+            error.message().contains(&format!(
+                "expected {expected} explicit type arguments, found {actual}"
+            )),
+            "{error}"
+        );
+    }
 }

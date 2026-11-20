@@ -37,7 +37,7 @@ impl Parser<'_, '_> {
         names::check(names::Shape::TypeParameter, name, location)?;
         if self.structs.iter().any(|d| d.name == name)
             || self.enums.iter().any(|d| d.name == name)
-            || self.fnshapes.iter().any(|d| d.name == name)
+            || self.fnshape_names.contains_key(name)
         {
             return Err(location.error(
                 ErrorKind::InvalidSource,

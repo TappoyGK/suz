@@ -6,6 +6,19 @@ use crate::{
     lexer::{Kind, Token},
 };
 
+/// 型引数などの情報が増えても、名前の解決で宣言を毎回全件走査しない。
+pub(super) fn name_index(
+    declarations: &[FnShapeDeclaration],
+) -> std::rc::Rc<std::collections::BTreeMap<String, usize>> {
+    std::rc::Rc::new(
+        declarations
+            .iter()
+            .enumerate()
+            .map(|(id, d)| (d.name.clone(), id))
+            .collect(),
+    )
+}
+
 fn parser<'a, 's>(
     tokens: &'a [Token<'s>],
     enums: &'a [EnumDeclaration],
@@ -23,6 +36,7 @@ fn parser<'a, 's>(
         enums,
         structs,
         fnshapes: declarations,
+        fnshape_names: name_index(declarations),
         restricted_condition: false,
         cursor: 0,
         constant_expression: false,
@@ -55,6 +69,7 @@ pub(super) fn headers(tokens: &[Token<'_>]) -> Result<Vec<FnShapeDeclaration>, D
                 Vec::new()
             };
             result.push(FnShapeDeclaration {
+                plain_application: None,
                 name: name.into(),
                 location,
                 start,
@@ -99,23 +114,26 @@ pub(super) fn resolve(
     }
     let mut p = parser(tokens, enums, structs, declarations, applications.clone());
     let mut ranges = std::collections::BTreeMap::new();
-    let mut depth = 0usize;
-    while p.token().kind != Kind::End {
-        if depth == 0 && p.token().kind == Kind::Symbol("@") {
-            p.collect_need()?;
-            continue;
+    // @needsを持たないソースでは、要求の位置を探す二度目の構文走査を行わない。
+    if tokens.iter().any(|token| token.kind == Kind::Symbol("@")) {
+        let mut depth = 0usize;
+        while p.token().kind != Kind::End {
+            if depth == 0 && p.token().kind == Kind::Symbol("@") {
+                p.collect_need()?;
+                continue;
+            }
+            if depth == 0 && p.token().kind == Kind::Keyword("fnshape") {
+                ranges.insert(p.cursor, std::mem::take(&mut p.pending_needs));
+            } else if depth == 0 && matches!(p.token().kind, Kind::Keyword(_)) {
+                p.pending_needs.clear();
+            }
+            match p.token().kind {
+                Kind::Symbol("{" | "(" | "[") => depth += 1,
+                Kind::Symbol("}" | ")" | "]") => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+            p.cursor += 1;
         }
-        if depth == 0 && p.token().kind == Kind::Keyword("fnshape") {
-            ranges.insert(p.cursor, std::mem::take(&mut p.pending_needs));
-        } else if depth == 0 && matches!(p.token().kind, Kind::Keyword(_)) {
-            p.pending_needs.clear();
-        }
-        match p.token().kind {
-            Kind::Symbol("{" | "(" | "[") => depth += 1,
-            Kind::Symbol("}" | ")" | "]") => depth = depth.saturating_sub(1),
-            _ => {}
-        }
-        p.cursor += 1;
     }
     let mut raw = Vec::new();
     let mut metadata = Vec::new();
