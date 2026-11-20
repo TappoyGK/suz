@@ -29,7 +29,7 @@ impl Rng {
 }
 
 fn pick_opt_ptr(rng: &mut Rng, has_inner: bool) -> &'static str {
-    if has_inner && rng.chance(1, 3) {
+    if has_inner && rng.chance(1, 5) {
         let inner = ["inner_a", "inner_opt", "inner_holder.p"];
         return inner[rng.pick(inner.len())];
     }
@@ -44,7 +44,7 @@ fn pick_opt_ptr(rng: &mut Rng, has_inner: bool) -> &'static str {
 }
 
 fn pick_nonnull_ptr(rng: &mut Rng, has_inner: bool) -> &'static str {
-    if has_inner && rng.chance(1, 3) {
+    if has_inner && rng.chance(1, 5) {
         let inner = ["inner_a", "inner_holder.q"];
         return inner[rng.pick(inner.len())];
     }
@@ -61,7 +61,7 @@ fn emit_inner_ops(out: &mut String, rng: &mut Rng, phase: usize, in_loop: bool, 
     };
     let flag_var = format!("flag_{phase}");
     for op_idx in 0..op_count {
-        let kind = rng.pick(12);
+        let kind = rng.pick(15);
         match kind {
             0 => {
                 let src = pick_opt_ptr(rng, true);
@@ -172,13 +172,31 @@ fn emit_inner_ops(out: &mut String, rng: &mut Rng, phase: usize, in_loop: bool, 
                 let _ = writeln!(out, "{indent}sink = borrow_read({opt})");
                 let _ = writeln!(out, "{indent}sink = borrow_holder(outer_holder)");
             }
-            _ => {
+            11 => {
                 let tail = pick_opt_ptr(rng, true);
                 if rng.chance(1, 2) {
                     let _ = writeln!(out, "{indent}outer_opt = build_chain(5, {tail}, 1)");
                 } else {
                     let _ = writeln!(out, "{indent}outer_opt = maybe_alloc({flag_var}, {tail})");
                 }
+            }
+            12 => {
+                let q = pick_nonnull_ptr(rng, true);
+                let h_var = format!("h_arg_{phase}_{op_idx}");
+                let _ = writeln!(
+                    out,
+                    "{indent}fix ptr {h_var} = new Holder {{ p: null, q: {q} }}"
+                );
+                let _ = writeln!(out, "{indent}attach({h_var})");
+            }
+            13 => {
+                let _ = writeln!(out, "{indent}outer_holder#bump_q(1)");
+                let _ = writeln!(out, "{indent}outer_mut#bump(1)");
+                let _ = writeln!(out, "{indent}sink = outer_holder.read_p()");
+            }
+            _ => {
+                let q = pick_nonnull_ptr(rng, true);
+                let _ = writeln!(out, "{indent}#pp_outer = {q}");
             }
         }
     }
@@ -211,6 +229,7 @@ fn emit_post_rewind_access(out: &mut String, indent: &str) {
         "{indent}let p_pb = outer_pair.b {{\n{indent}    fix v = p_pb.value\n{indent}    p_pb#value = v + 1\n{indent}}}"
     );
     let _ = writeln!(out, "{indent}sink = outer_mut.value");
+    let _ = writeln!(out, "{indent}sink = (.pp_outer).value");
     let _ = writeln!(out, "{indent}sink = outer_holder.q.value");
     let _ = writeln!(
         out,
@@ -227,7 +246,22 @@ fn generate_program(seed: u64, index: usize) -> String {
         r#"struct Node { value: i32, next: ptr? Node }
 struct Holder { p: ptr? Node, q: ptr Node }
 struct Pair { a: Holder, b: ptr? Node }
+error ArenaErr { Abort }
 fnshape NodeAction(ptr? Node) -> i32
+
+fn Holder.read_p() -> i32 {
+    let n = self.p { return n.value } else { return self.q.value }
+}
+
+fn Holder#bump_q(delta: i32) -> void {
+    self.q#value += delta
+    return
+}
+
+fn Node#bump(delta: i32) -> void {
+    self#value += delta
+    return
+}
 
 fn borrow_read(p: ptr? Node) -> i32 {
     let n = p { return n.value } else { return 0 }
@@ -244,6 +278,11 @@ fn borrow_holder(h: Holder) -> i32 {
 
 fn apply_action(f: fn NodeAction, arg: ptr? Node) -> i32 {
     return f(arg)
+}
+
+arena fn attach(h: ptr Holder) -> void {
+    h.q#next = new Node { value: 7, next: null }
+    return
 }
 
 arena fn build_chain(v: i32, tail: ptr? Node, depth: i32) -> ptr Node {
@@ -271,9 +310,20 @@ fn helper_return_inside_arena(outer_p: ptr Node, flag: bool) -> i32 {
     return borrow_read(outer_p)
 }
 
+fn may_fail_inside_arena(outer_p: ptr Node, do_fail: bool) -> i32 or ArenaErr {
+    arena {
+        fix ptr local_n = new Node { value: 88, next: outer_p }
+        if do_fail {
+            fail ArenaErr.Abort
+        }
+        return borrow_read(local_n)
+    }
+}
+
 fn main() -> u8 {
     arena {
         fix ptr outer_a = new Node { value: 10, next: null }
+        fix ptr pp_outer: ptr ptr Node = new outer_a
         var ptr outer_opt: ptr? Node = null
         var ptr outer_mut: ptr Node = outer_a
         var outer_holder = Holder { p: null, q: outer_a }
@@ -334,6 +384,10 @@ fn main() -> u8 {
         let _ = writeln!(
             out,
             "        sink = helper_return_inside_arena(outer_mut, flag_{phase})"
+        );
+        let _ = writeln!(
+            out,
+            "        sink = may_fail_inside_arena(outer_mut, flag_{phase}) or error {{ ArenaErr.Abort => {{ recover 0 }} }}"
         );
         if rng.chance(1, 2) {
             // 回収後の再利用も通常どおり動くことを確かめる。
