@@ -2,6 +2,14 @@
 
 利用者に関わる変更をバージョンごとに記載する。
 
+## v0.3.6
+
+- 参照先の読み出しを`.p`、更新を`#p`に変更し、フィールドへの代入では最後のメンバーを`#`で指定するようにした。（[#106](https://github.com/TappoyGK/suz/issues/106)・[#107](https://github.com/TappoyGK/suz/pull/107)）
+- 構造体・列挙型に読み取りメソッドと書き換えメソッドを定義できるようにした。（[#83](https://github.com/TappoyGK/suz/issues/83)・[#109](https://github.com/TappoyGK/suz/pull/109)）
+- `unsafe`を`trusted`に変更した。C構造体と型付きポインタに対応し、Arenaの実体をCへ渡せるようにした。Cが呼び出し後もポインタを保持する仮引数には`keep`を指定する。（[#99](https://github.com/TappoyGK/suz/issues/99)・[#110](https://github.com/TappoyGK/suz/pull/110)）
+- ASan使用時に、Arenaの回収後・再利用前のアクセスと確保領域の余白へのアクセスを検出するようにした。（[#105](https://github.com/TappoyGK/suz/issues/105)・[#111](https://github.com/TappoyGK/suz/pull/111)）
+- 構造体・列挙型に算術・ビット演算・シフト・順序比較・`not`・`len`の演算子メソッドを定義できるようにした。対応する複合代入も使えるようにした。（[#112](https://github.com/TappoyGK/suz/issues/112)・[#113](https://github.com/TappoyGK/suz/pull/113)）
+
 ## v0.3.5
 
 - 理由を出力して終了する`panic`文を追加した。（[#80](https://github.com/TappoyGK/suz/issues/80)・[#87](https://github.com/TappoyGK/suz/pull/87)）
