@@ -25,6 +25,7 @@ const KEYWORDS: &[&str] = &[
     "fn",
     "self",
     "fnshape",
+    "needs",
     "static",
     "struct",
     "enum",
@@ -68,7 +69,7 @@ const SYMBOLS: &[&str] = &[
     "(", ")", "[", "]", "{", "}", ",", ":", ".", "->", "=>", "=", "+=", "-=", "*=", "/=", "%=",
     "+%=", "-%=", "*%=", "&=", "|=", "^=", "<<=", ">>=", "+", "-", "*", "/", "%", "+%", "-%", "*%",
     "&", "|", "^", "~", "<<", ">>", "==", "!=", "<", "<=", ">", ">=", "&&", "||", "..<", "..=",
-    "?", "#",
+    "?", "#", "@",
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -87,7 +88,15 @@ pub(crate) enum Kind<'a> {
     Symbol(&'a str),
     Wildcard,
     Newline,
+    /// コメントだけの行と区別する、要求の隣接検査用の空行。
+    BlankLine,
     End,
+}
+
+impl Kind<'_> {
+    pub fn is_newline(self) -> bool {
+        matches!(self, Self::Newline | Self::BlankLine)
+    }
 }
 
 #[derive(Debug)]
@@ -276,7 +285,17 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
             '\n' => {
                 if !matches!(delimiters.last(), Some(&"(" | &"[")) && !continuation {
                     tokens.push(Token {
-                        kind: Kind::Newline,
+                        kind: if source[..offset]
+                            .rsplit('\n')
+                            .next()
+                            .unwrap()
+                            .trim()
+                            .is_empty()
+                        {
+                            Kind::BlankLine
+                        } else {
+                            Kind::Newline
+                        },
                         line,
                         column,
                         span: offset..offset + 1,
@@ -437,6 +456,7 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
             ));
         } else if let Some(symbol) = SYMBOLS
             .iter()
+            .filter(|symbol| symbol.as_bytes()[0] == rest.as_bytes()[0])
             .filter(|symbol| rest.starts_with(**symbol))
             .max_by_key(|symbol| symbol.len())
         {
@@ -489,12 +509,14 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
             let touches_left = if index == 0 {
                 token.span.start == 0
             } else {
-                !matches!(tokens[index - 1].kind, Kind::Newline | Kind::End)
-                    && tokens[index - 1].span.end == token.span.start
+                !matches!(
+                    tokens[index - 1].kind,
+                    Kind::Newline | Kind::BlankLine | Kind::End
+                ) && tokens[index - 1].span.end == token.span.start
             };
-            let touches_right = tokens.get(index + 1).is_some_and(|next| {
-                next.kind != Kind::Newline && next.span.start == token.span.end
-            });
+            let touches_right = tokens
+                .get(index + 1)
+                .is_some_and(|next| !next.kind.is_newline() && next.span.start == token.span.end);
             if !touches_left || !touches_right {
                 return Err(error(
                     token.line,

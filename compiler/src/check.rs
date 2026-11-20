@@ -25,6 +25,7 @@ mod statements;
 mod text;
 mod text_parse;
 mod text_structure;
+mod type_parameters;
 mod writes;
 
 use crate::{Diagnostic, ast::Program};

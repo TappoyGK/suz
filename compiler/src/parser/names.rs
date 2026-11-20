@@ -9,6 +9,7 @@ pub(super) enum Shape {
     TopLevelBinding,
     Value,
     Type,
+    TypeParameter,
     Variant,
 }
 
@@ -44,6 +45,15 @@ pub(super) fn check(shape: Shape, name: &str, location: Location) -> Result<(), 
                     .any(|pair| pair.iter().all(u8::is_ascii_uppercase)),
             "name.type",
             "type names must start with an uppercase letter, contain only letters and digits, include a lowercase letter, and have no adjacent uppercase letters",
+        ),
+        Shape::TypeParameter => (
+            first.is_ascii_uppercase()
+                && bytes.iter().all(u8::is_ascii_alphanumeric)
+                && !bytes
+                    .windows(2)
+                    .any(|pair| pair.iter().all(u8::is_ascii_uppercase)),
+            "name.type-parameter",
+            "type parameter names must start with an uppercase letter, contain only letters and digits, and have no adjacent uppercase letters",
         ),
         Shape::Variant => (
             first.is_ascii_uppercase() && bytes.iter().all(u8::is_ascii_alphanumeric),

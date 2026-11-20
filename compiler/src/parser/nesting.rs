@@ -214,7 +214,7 @@ fn kind_height(kind: &ExpressionKind) -> usize {
             .height
             .max(arguments.iter().map(|v| v.height).max().unwrap_or(0)),
         Closure(closure) => block_height(&closure.function.statements),
-        FunctionValue(_) => 0,
+        FunctionValue { .. } => 0,
         Call { arguments, .. } => arguments.iter().map(|v| v.height).max().unwrap_or(0),
         Block { statements, value } => block_height(statements).max(1 + value.height),
         Match { target, arms } => target.height.max(

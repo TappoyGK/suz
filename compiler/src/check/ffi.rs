@@ -32,6 +32,9 @@ pub(super) fn signatures(
         signatures.insert(
             function.name.clone(),
             Signature {
+                type_parameters: 0,
+                type_parameter_names: None,
+                needs: Vec::new(),
                 method: None,
                 arena: false,
                 external: true,
@@ -70,7 +73,9 @@ use crate::ast::{Expression, ExpressionKind, FailureHandler, Location, Type};
 pub(super) fn contains_c_type(ty: Type, scope: &Scope) -> bool {
     match ty {
         Type::CPointer | Type::CInteger(_) => true,
-        Type::Struct(id) => scope.structs[id]
+        Type::Struct(id) => scope
+            .structs
+            .get(id)
             .fields
             .iter()
             .any(|f| contains_c_type(f.ty, scope)),
@@ -207,7 +212,9 @@ pub(super) fn cast(
 pub(super) fn contains_pointer(ty: Type, scope: &Scope) -> bool {
     match ty {
         Type::Pointer { .. } | Type::CPointer => true,
-        Type::Struct(id) => scope.structs[id]
+        Type::Struct(id) => scope
+            .structs
+            .get(id)
             .fields
             .iter()
             .any(|f| contains_pointer(f.ty, scope)),

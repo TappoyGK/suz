@@ -126,11 +126,17 @@ impl Parser<'_, '_> {
 // 関数と式のブロックは区切りの深さを使って読み飛ばす。
 pub(super) fn collect(tokens: &[Token<'_>]) -> Result<Vec<EnumDeclaration>, Diagnostic> {
     let mut p = Parser {
+        applications: Default::default(),
+        type_parameters: Vec::new(),
+        pending_needs: Vec::new(),
+        need_groups: Default::default(),
+        generic_functions: Default::default(),
         allows: Vec::new(),
         tokens,
         enums: &[],
         structs: &[],
         fnshapes: &[],
+        fnshape_names: Default::default(),
         restricted_condition: false,
         cursor: 0,
         constant_expression: false,

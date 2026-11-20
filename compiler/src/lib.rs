@@ -311,6 +311,8 @@ mod tests {
     fn statement_storage_stays_within_budget() {
         // ポインタの情報でTypeが大きくなると、ポインタを使わない式や文も肥大化する。
         // 大きな入力の検査速度を落とさないよう、型と文の格納サイズを制限する。
+        // トークンは入力全体の分を保持するため、補助情報で全要素を肥大化させない。
+        assert!(std::mem::size_of::<lexer::Token<'_>>() <= 56);
         assert!(std::mem::size_of::<ast::Type>() <= 48);
         assert!(std::mem::size_of::<ast::Statement>() <= 200);
         assert!(std::mem::size_of::<check::ir::CheckedStatement>() <= 208);

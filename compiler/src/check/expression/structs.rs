@@ -24,7 +24,7 @@ pub(super) fn check(expr: &Expression, scope: &Scope) -> Result<CheckedExpressio
                     crate::diagnostic!("struct.with-target", "with requires a struct value"),
                 ));
             };
-            let declaration = &scope.structs[id];
+            let declaration = &scope.structs.get(id);
             let indices = field_indices(declaration, fields, expr.location, false)?;
             let fields = fields
                 .iter()
@@ -44,8 +44,11 @@ pub(super) fn check(expr: &Expression, scope: &Scope) -> Result<CheckedExpressio
                 },
             })
         }
-        ExpressionKind::Struct { id, fields } => {
-            let declaration = &scope.structs[*id];
+        ExpressionKind::Struct { ty, fields } => {
+            let Type::Struct(id) = scope.resolve_type_at(*ty, expr.location)? else {
+                unreachable!("struct type resolved");
+            };
+            let declaration = &scope.structs.get(id);
             let indices = initializer_indices(declaration, fields, expr.location)?;
             let values = fields
                 .iter()
@@ -58,7 +61,7 @@ pub(super) fn check(expr: &Expression, scope: &Scope) -> Result<CheckedExpressio
                 })
                 .collect::<Result<_, Diagnostic>>()?;
             Ok(CheckedExpression {
-                ty: Type::Struct(*id),
+                ty: Type::Struct(id),
                 value: Value::Struct { fields: values },
             })
         }
@@ -94,7 +97,9 @@ pub(crate) fn field(
             crate::diagnostic!("struct.access", "field access requires a struct value"),
         ));
     };
-    scope.structs[id]
+    scope
+        .structs
+        .get(id)
         .fields
         .iter()
         .enumerate()

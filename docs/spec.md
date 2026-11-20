@@ -71,7 +71,7 @@ Suzは次のものを含む。
 **[src.keywords]** 次の語はキーワードである。
 
 ```text
-fix var fn fnshape self static struct enum error extern trusted arena new ptr null let objection
+fix var fn fnshape needs self static struct enum error extern trusted arena new ptr null let objection
 if ifexpr elif else while loop for rev in break continue return match matchexpr
 as or not len c_bytes c_byte_len log panic fail ignore recover allow expr with
 true false nan inf
@@ -216,9 +216,9 @@ fn main() -> u8 {
 
 ### 4.1 宣言とスコープ
 
-**[decl.top-level]** トップレベルには、`fix`・関数・構造体・列挙型・エラー型・`fnshape` の宣言、およびexternブロックだけを書ける。これらの名前は、ファイル内の宣言順序によらず参照できる。
+**[decl.top-level]** トップレベルには、`fix`・関数・構造体・列挙型・エラー型・`fnshape`・名前付きの要求一覧の宣言、およびexternブロックだけを書ける。これらの名前は、ファイル内の宣言順序によらず参照できる。
 
-**[decl.location]** `fix` はトップレベルとブロック内で宣言できる。`var` はブロック内でのみ宣言でき、トップレベルに書くとコンパイルエラーである。関数、構造体、列挙型、エラー型、`fnshape`、externブロックはトップレベルで宣言する。それぞれの宣言をこれらの場所以外に書くとコンパイルエラーである。
+**[decl.location]** `fix` はトップレベルとブロック内で宣言できる。`var` はブロック内でのみ宣言でき、トップレベルに書くとコンパイルエラーである。関数、構造体、列挙型、エラー型、`fnshape`、名前付きの要求一覧、externブロックはトップレベルで宣言する。それぞれの宣言をこれらの場所以外に書くとコンパイルエラーである。
 
 **[decl.duplicate]** 同じスコープで同じ名前を宣言するとコンパイルエラーである。定数、変数、仮引数、関数、型など、宣言の種類が違っても同じである。
 
@@ -232,7 +232,9 @@ fn main() -> u8 {
 
 **[name.value]** 関数、ブロック内の `fix`・`var`、仮引数、構造体のフィールド、`for` と `rev` のループ変数の名前はASCIIの小文字で始まり、小文字・数字・`_` だけからなる。`_` は末尾に置かず、連続させない。例は `read_count`、`count`、`x2` である。
 
-**[name.type]** 構造体・列挙型・エラー型・`fnshape` の名前はASCIIの大文字で始まり、英字と数字だけからなる。小文字を1文字以上含み、大文字を連続させない。例は `Vec2`、`IoError` である。`IOError`、`T`、`Load_Error` は認めない。
+**[name.type]** 型引数の名前を除き、構造体・列挙型・エラー型・`fnshape`・名前付きの要求一覧の名前はASCIIの大文字で始まり、英字と数字だけからなる。小文字を1文字以上含み、大文字を連続させない。例は `Vec2`、`IoError` である。`IOError`、`T`、`Load_Error` は認めない。
+
+**[name.type-parameter]** 型引数の名前はASCIIの大文字で始まり、英字と数字だけからなる。大文字を連続させない。小文字は必須ではなく、`T`・`T2`・`Item`を認める。`TT`・`t`・`T_Item`は認めない。
 
 **[name.variant]** 列挙子の名前はASCIIの大文字で始まり、英字と数字だけからなる。例は `Ready`、`A`、`F1`、`ESC` である。
 
@@ -1938,6 +1940,173 @@ pos += Vec2 { x: 1.0, y: 2.0 }
 pos *= 0.5
 ```
 
+### 8.16 型引数を持つ宣言
+
+**[generic.parameters]** 関数・構造体・fnshapeの名前の直後に `[T, U]` のように1個以上の型引数を宣言できる。名前には [name.type-parameter] を適用し、同じ宣言内の重複を認めない。型引数はその宣言の中で型として使え、実行時の値にはならない。列挙型・エラー型・extern宣言には型引数を付けられない。
+
+**[generic.type-arguments]** 型引数には、その位置で使用できる値の型を渡す。void、未具体化のint・float、型引数を渡していない汎用宣言名は渡せない。汎用宣言の内部では、スコープ内の型引数を `Box[T]` や `identity[T](value)` のように別の宣言へ渡せる。具体化時に、それらを具体型へ置き換える。型引数の個数は宣言と一致しなければならない。型引数の既定値・部分指定・値の引数・型を作る関数の引数は設けない。
+
+```suz
+struct Box[T] {
+    value: T,
+}
+fn wrap[T](value: T) -> Box[T] {
+    return Box[T] { value: value }
+}
+```
+
+#### 要求と定義時の検査
+
+**[generic.needs]** `@needs` は直後の汎用宣言に付く構文であり、1行に1つの要求を書く。複数行を書いた場合はすべての要求を満たす必要がある。対象はその宣言の型引数と、メソッドが受け手から引き継ぐ型引数とする。要求の型名は宣言位置で解決する。自身にも受け手にも型引数を持たない宣言に@needsを付けると、コンパイルエラーである。直接要求の対象がその宣言で有効な型引数でない場合もコンパイルエラーとする。`@needs i32: ...`や、対象位置に書いたスコープ外の型引数・具体的な構造体名は認めない。
+
+**[generic.needs-adjacent]** 要求の行どうしの間と、最後の要求と宣言の間には、コメント行と行末コメントを置ける。空行は置けない。対象宣言が続かない要求はコンパイルエラーである。
+
+**[generic.needs-shape]** 二項演算子は `@needs T: *(U) -> V` の形で、左辺・右辺・結果の型を示す。単項演算子は `@needs T: -() -> T` のように、仮引数を空にする。対象の演算子は [operator.method]・[operator.unary] の演算子と、組み込みの `==`・`!=` とする。引数数と結果型の制限も各演算子の規則に従う。
+
+メソッドは `@needs T: .name(U) -> V` または `@needs T: #name(U) -> V` と書き、受け手の読み取り・書き換えを区別する。エラーを返すメソッドには、通常の戻り値と同じ `or Error` の指定を付ける。フィールド・型変換・リテラルからの生成を要求する構文は設けない。
+
+**[generic.needs-arena]** `@needs T: arena .copy() -> ptr T` のように、メソッドの要求にはarenaを付けられる。arena付きの要求はarena fnのメソッド、arenaなしの要求は通常のメソッドが満たす。`.`と`#`の両方に適用し、演算子の要求にはarenaを付けられない。定義時の呼び出し検査にもこの区別を使い、呼び出し位置・返却・保存には [method.arena] と既存のArenaの規則を適用する。
+
+```suz
+@needs T: arena .copy() -> ptr T
+arena fn duplicate[T](value: T) -> ptr T {
+    return value.copy()
+}
+```
+
+**[generic.operations]** 型引数の値の保持・コピー・代入・引数渡し・返却には要求を必要としない。比較・算術・メソッド呼び出しには、その形に対応する有効な要求が必要である。具体型に存在する操作を、要求なしに使うことはできない。
+
+宣言済みの `Box[T]` のフィールドの読み書き、明示的なptr Tの参照先の読み書き、nullの確認、宣言済みの関数の形による呼び出しには、T自身への操作の要求を必要としない。通常の型・可変性・使用位置の規則は適用する。型引数のフィールドを含む構造体の等値比較には、そのフィールドの型に対する`==`の要求が必要である。任意のTのフィールド参照や、要求で表していない型依存の操作は認めない。
+
+**[generic.check]** 汎用宣言は使用されなくても定義時に構文・名前・型を検査する。型引数に依存する操作は有効な要求に基づいて検査し、要求の不足、引数・結果の型の不一致、失敗処理の欠落は定義側のコンパイルエラーとする。実行時に通らない分岐にも適用する。具体化時には、具体型による要求の充足と、値域・配置・共有・寿命・保存の制約を検査する。
+
+**[generic.needs-check]** メソッドの要求は、型引数を置き換えた後の引数・結果・エラー指定・読み取り／書き換え・arenaの有無が、具体型のメソッドと一致しなければならない。演算子メソッドは [operator.overload] の選択規則で選び、仮引数と結果の型を要求と照合する。組み込み演算は [generic.needs-builtin] で照合する。要求した操作を本体で使っていなくても、具体型がその要求を満たさなければコンパイルエラーである。要求の充足によって別の汎用宣言を選ぶことや、不成立時に別の実装を探すことはない。
+
+**[generic.needs-builtin]** 組み込み演算の要求は、置換後の対象型を左辺または単項のオペランドの型、括弧内の型を右辺の型として、次の条件で照合する。オペランドには型が確定した値を用い、各演算のオペランド型の制限を適用する。C固有整数型をSuzの整数型に含めない。
+
+| 演算 | 要求の結果型を満たす条件 |
+|---|---|
+| 整数同士の `+`・`-`・`*`・`/`・`%`、整数の単項 `-` | 結果型が整数型なら、その型を格納先にできるため満たす。浮動小数点型なら、オペランドの型の全値域から演算の範囲を求め、[arith.store-float] を満たす場合に限る。 |
+| 浮動小数点数を含む `+`・`-`・`*`・`/`、浮動小数点数の単項 `-` | 要求の結果型を要求型として [arith.float]・[arith.mix] を適用でき、決まる結果型が要求と一致する。 |
+| `<`・`<=`・`>`・`>=`・`==`・`!=` | オペランドの型がその比較を使え、要求の結果型がboolである。 |
+| `&`・`\|`・`^`・`~`・`<<`・`>>` | [width.same-type] の条件を満たし、結果型が要求と一致する。 |
+| `not` | 対象型と要求の結果型がともにboolである。 |
+| `len` | 対象型がsymbolまたはtextで、要求の結果型がlen_tである。 |
+
+整数算術の要求は、全入力で結果が格納範囲内に収まることまでは保証しない。実際の本体には [arith.width] などの静的検査と、格納時の範囲検査・ゼロ除算の検査を適用する。要求の照合自体は本体に格納を挿入せず、複合した式の格納位置は [generic.arithmetic] に従う。
+
+例えば `@needs T: *(T) -> T`も`@needs T: *(T) -> i64`も、Tがi8なら満たす。前者の結果をi8へ格納する際は範囲検査を行い、後者の結果をi64へ格納する際はi64の範囲を使う。どちらも、整数算術の途中の積を要求の照合によって格納することはない。
+
+**[generic.needs-equality]** `==`・`!=`の要求は、具体型が [expr.equality] の組み込み比較を使えることを要求する。演算子メソッドの定義は要求しない。ポインタや関数値を含む構造体など、組み込みの等値比較を使えない型は満たさない。
+
+**[generic.arithmetic]** 演算子の要求は、操作と型の関係を示し、演算ごとの格納や関数呼び出しを指定しない。具体化後の式には具体型の演算規則を適用する。整数の `a * b + c` は [arith.store] に従い、演算子メソッドは [operator.arith-boundary] に従う。
+
+```suz
+@needs T: *(T) -> T
+@needs T: +(T) -> T
+fn multiply_add[T](a: T, b: T, c: T) -> T {
+    return a * b + c
+}
+// multiply_add[i8](100, 2, -100) は100を返す。途中の200をi8へ格納しない。
+```
+
+**[generic.arithmetic-handler]** 型引数に依存する演算子の呼び出しへ、算術の失敗処理としてorを付けることはできず、定義時に拒否する。エラーを返すと宣言された関数・メソッドの呼び出しへのorは、その宣言のエラー指定に従って使える。汎用定義内であっても、型引数に依存しない整数算術には既存の失敗処理を適用する。
+
+**[generic.lookup]** 型に依存しない名前は定義位置で解決する。型引数に依存する操作は、定義時には有効な要求から解決し、具体化時には具体型の操作で要求を確認する。呼び出し側の同名関数は探索しない。操作の存在による条件分岐・特殊化・定義の選び直しは行わない。
+
+**[generic.forward-needs]** 別の汎用宣言を使う場合は、その型引数を置き換えた要求を使用元で満たす必要がある。具体型が既知ならその型の操作で確認し、型引数のままなら使用元の有効な要求で確認する。呼び出し先の本体から要求を自動で取り込まない。
+
+#### 構造体とメソッド
+
+**[generic.struct]** 構造体の型注釈とリテラルでは型引数をすべて明示する。`Box { value: 10 }`から型引数を推論しない。同じ宣言・同じ型引数の組み合わせは同じ型、異なる組み合わせは別の型とする。
+
+symbol・textから具体化済みの構造体へ変換する場合も、入力の構造体名に型引数を明示する。例えば、Box[i32]への入力は `Box[i32] { value: 10 }` とする。型名と記号の間の空白は [symbol.cast-struct] に従う。
+
+**[generic.composition]** `Box[Box[i32]]`のような入れ子と、`next: ptr? Node[T]`のような再帰を認める。構造体の実体サイズと必須初期化の循環には、既存の構造体の規則を適用する。
+
+**[generic.invariance]** 型引数は不変である。`Box[ptr T]`と`Box[ptr? T]`は別の型であり、相互に暗黙変換しない。ポインタの最外側のnull許容性の変換を、構造体の型引数の内側には適用しない。
+
+**[generic.receiver-parameters]** `fn Box[T].get(...)`のTは、構造体宣言の型引数を個数・名前・順序も含めてそのまま使う。メソッド固有の型引数は追加できない。読み取り・書き換え・演算子メソッドに適用する。
+
+**[generic.needs-owner]** 構造体に付けた要求は、その構造体の具体化時に検査し、すべてのメソッドへ引き継ぐ。メソッドの追加要求は、そのメソッドの具体化時だけに検査する。構造体側の要求を削除・上書きできない。要求の名前解決は、それぞれを宣言した位置で行う。
+
+**[generic.storage]** 具体化は実体の確保ではない。構造体リテラル・new・コピーなどが確保・共有を決める。具体化した本体の寿命・借用・保存・返却は、具体型を直接書いた場合と同じ規則で検査する。型引数を介したフィールドへの代入にも同じ検査を適用する。arena fnの領域Rと実引数からたどれる実体は [arena.fn-call] に従う。型引数に包んでも、呼び出し中限定の関数値や借用した参照の保存・返却制限は変わらない。
+
+#### 呼び出しと具体化
+
+**[generic.call]** `identity[i32](10)`のように型引数をすべて明示できる。型引数が決まった後は、通常の実引数の変換規則を適用する。
+
+**[generic.inference]** 型引数をすべて省略した場合は、実引数の型と仮引数の型の構造から決める。型の確定した実引数を先に使い、数値リテラルには決まった要求型を適用する。それでも決まらないリテラルには既存の既定型を使う。同じ型引数に異なる具体型が要求される場合は、共通の大きな型を探さず拒否する。引数順で結果を変えない。戻り値の要求型からは逆算せず、nullだけでは型を決めない。決定できなければ型引数を明示する必要がある。
+
+```suz
+fn first[T](a: T, b: T) -> T { return a }
+fn main() -> u8 {
+    fix small: i8 = 3
+    fix wide: i32 = 4
+    fix a = first(1, small)       // Tはi8。引数の順序を逆にしてもi8
+    fix b = first(1, 2)           // 型の手がかりがないのでTはi64
+    fix c = first[i32](small, wide) // 明示した後は通常の引数変換を適用する
+    return 0
+}
+```
+
+`first(small, wide)`はi8とi32が矛盾するため拒否する。`fix x: i8 = first(1, 2)`も、戻り値の要求型を推論に使わないため拒否する。`Box[T]`に`Box[i32]`を渡せばTはi32になるが、構造体リテラル自体の型引数は [generic.struct] に従って明示する。
+
+**[generic.numeric-existing]** 型引数リストを持つ宣言では、int・floatによる匿名の汎用数値型を併用しない。既存のint・floatは [num.fn-check]・[num.fn-check-judge] に従い、型引数リストを持つ宣言は [generic.check] に従う。
+
+**[generic.fnshape]** `fnshape Less[T](T, T) -> bool`のように、関数の形にも型引数を宣言できる。具体化後の関数の形の同一性、fnとstatic fn、クロージャの制約は既存の規則に従う。要求を付けた関数の形には [generic.forward-needs] を適用する。
+
+fnshapeの使用時には、`fn Less[i32]`や`static fn Less[i32]`のように型引数をすべて明示する。たとえば、`fnshape Identity[T](T) -> T`と`fnshape Same[U](U) -> U`をどちらもi32で具体化した関数型は同じである。関数へ渡す実引数の関数型からは、[generic.inference] に従ってその関数の型引数を推論できる。
+
+**[generic.function-value]** 型引数リストを持つ関数を値にするときは、`fn identity[i32]`のようにすべての型引数を明示する。未具体化の関数を、複数の型で呼べる1つの値として保持することはできない。
+
+```suz
+fnshape Identity[T](T) -> T
+fn identity[T](value: T) -> T { return value }
+fn apply[T](action: fn Identity[T], value: T) -> T { return action(value) }
+fn main() -> u8 {
+    fix action: static fn Identity[i32] = fn identity[i32]
+    fix value = apply(action, 7)
+    return ifexpr value == 7 { 0 } else { 1 }
+}
+```
+
+**[generic.codegen]** 使用する型引数の組み合わせごとに関数・構造体・関数の形を具体化し、同じ宣言・同じ型引数の具体化は再利用する。ジェネリクスのための実行時型判定・型情報の受け渡し・値の箱詰めは行わない。
+
+**[generic.recursion]** 同じ具体化に戻る再帰は再利用する。具体化の依存関係で同じ宣言に異なる型引数で再び到達した場合は、各型引数が以前の対応する型引数と同じかその真部分式であり、少なくとも1つが真部分式である場合に限り続行する。それ以外はコンパイルエラーとする。実体サイズが有限かどうかは別途検査する。
+
+**[generic.diagnostic]** 要求不足は定義内の操作と不足する要求を示す。具体化での違反は、使用位置・具体型・該当する要求または本体の位置を示す。推論の矛盾は異なる型を要求した実引数を示す。再帰の制限で拒否する場合は型引数の変化と適用した制限を示す。内部生成名だけの診断にしない。
+
+#### 名前付きの要求一覧
+
+**[generic.needs-group]** `needs Ordered[T] { ... }`は要求一覧のトップレベル宣言である。名前には型名の規則を適用し、ほかの型名との重複を認めない。一覧には1行以上の直接要求または別の一覧の使用を書き、各行に@needsは付けない。一覧の使用は `@needs Ordered[T]` と書く。型引数は複数宣言でき、使用時にはすべて明示する。コメント行と空行は一覧の中に置ける。
+
+```suz
+needs Ordered[T] {
+    T: <(T) -> bool
+    T: <=(T) -> bool
+}
+
+@needs Ordered[T]
+fn in_range[T](value: T, low: T, high: T) -> bool {
+    if value < low { return false }
+    return value <= high
+}
+
+needs Comparable[T] {
+    Ordered[T]
+    T: ==(T) -> bool
+}
+```
+
+**[generic.needs-expand]** 一覧は型引数を置き換えてその場所に要求を列挙した場合と同じ意味を持つ。直接要求との混在、別の一覧の使用、構造体からメソッドへの継承を認める。直接・間接の循環を宣言時に拒否する。展開順序には意味がなく、同じ要求の重複は1つとする。同じ操作へ矛盾する形を要求する場合はエラーとし、型の置換後に判明する矛盾はその使用時に示す。未使用の一覧も検査する。展開後の直接要求の対象にも [generic.needs] を適用し、その宣言で有効な型引数でなければならない。
+
+**[generic.needs-structural]** 要求の充足に、型側の実装宣言や登録は必要ない。通常の規則で使える操作の形を検査する。比較の推移性など、振る舞いの数学的な性質は要求一覧の名前から保証しない。
+
+**[generic.needs-group-scope]** 一覧内の名前は一覧の定義位置で解決する。展開した操作の使用可否は、一覧を使う宣言の位置で検査する。
+
+**[generic.needs-group-limits]** 一覧は型や値として使えず、実装本体・既定メソッド・関連型・関連定数を持たない。型や実装の選択、実行時のトレイト値は作らない。
+
 ## 9. 実行時の検査
 
 ### 9.1 パニック
@@ -2222,8 +2391,8 @@ CharEscape ::= "\" ( "0" | "n" | "r" | "t" | "\" | "'"
 
 ```ebnf
 Program          ::= NL* ( Declaration NL+ )* Declaration? EOF
-Declaration      ::= TopLevelBinding | FunctionDeclaration
-                   | StructDeclaration | EnumDeclaration | ErrorDeclaration | FnShapeDeclaration | ExternBlock
+Declaration      ::= TopLevelBinding | NeedsDeclaration | EnumDeclaration | ErrorDeclaration | ExternBlock
+                   | Needs* ( FunctionDeclaration | StructDeclaration | FnShapeDeclaration )
 
 ExternBlock      ::= "extern" HEADER "{" NL* ( ExternDeclaration NL+ )* ExternDeclaration? "}"
 ExternDeclaration ::= ExternFunction | ExternStruct
@@ -2235,17 +2404,18 @@ ExternParameter  ::= "keep"? IDENT ":" ( "*" "const"? Type | Type )
 TopLevelBinding  ::= "fix" IDENT TypeAnnotation? "=" ConstExpression AllowClause?
 TypeAnnotation   ::= ":" Type
 
-FunctionDeclaration ::= "arena"? "fn" MethodReceiver? IDENT "(" Parameters? ")" "->" ReturnType Block
-                      | "fn" IDENT "." OperatorMethod "(" Parameters? ")" "->" Type Block
+FunctionDeclaration ::= "arena"? "fn" IDENT TypeParameters? "(" Parameters? ")" "->" ReturnType Block
+                      | "arena"? "fn" MethodReceiver IDENT "(" Parameters? ")" "->" ReturnType Block
+                      | "fn" IDENT TypeParameters? "." OperatorMethod "(" Parameters? ")" "->" Type Block
 OperatorMethod  ::= "+" | "-" | "*" | "/" | "%" | "&" | "|" | "^" | "<<" | ">>"
                   | "<" | "<=" | ">" | ">=" | "~" | "not" | "len"
-MethodReceiver   ::= IDENT ( "." | "#" )
-FnShapeDeclaration ::= "fnshape" IDENT "(" FnShapeParameters? ")" "->" ReturnType
+MethodReceiver   ::= IDENT TypeParameters? ( "." | "#" )
+FnShapeDeclaration ::= "fnshape" IDENT TypeParameters? "(" FnShapeParameters? ")" "->" ReturnType
 FnShapeParameters ::= Type ( "," Type )* ","?
 Parameters       ::= Parameter ( "," Parameter )* ","?
 Parameter        ::= IDENT ":" Type
 
-StructDeclaration ::= "struct" IDENT "{" NL* Fields "}"
+StructDeclaration ::= "struct" IDENT TypeParameters? "{" NL* Fields "}"
 Fields           ::= Field ( "," NL* Field )* ","? NL*
 Field            ::= IDENT ":" Type
 
@@ -2258,11 +2428,22 @@ ErrorSpecItem    ::= IDENT ( "." IDENT )?
 Variants         ::= IDENT ( "," NL* IDENT )* ","? NL*
 
 Type             ::= IntegerType | "len_t" | "f32" | "f64" | "bool" | "char" | "symbol" | "text" | "void"
-                   | "ptr" "?"? Type | "int" | "float" | IDENT | "static" "fn" IDENT | "fn" IDENT | CIntegerType | "*" "const" "void"
+                   | "ptr" "?"? Type | "int" | "float" | IDENT TypeArguments?
+                   | "static" "fn" IDENT TypeArguments? | "fn" IDENT TypeArguments? | CIntegerType | "*" "const" "void"
+TypeParameters   ::= "[" IDENT ( "," IDENT )* ","? "]"
+TypeArguments    ::= "[" Type ( "," Type )* ","? "]"
+Needs            ::= "@needs" NeedItem NL+
+NeedItem         ::= DirectNeed | IDENT TypeArguments
+DirectNeed       ::= IDENT ":" RequiredOp "(" TypeList? ")" "->" ReturnType
+RequiredOp       ::= OperatorMethod | "==" | "!=" | "arena"? ( "." | "#" ) IDENT
+TypeList         ::= Type ( "," Type )* ","?
+NeedsDeclaration ::= "needs" IDENT TypeParameters "{" NL* ( NeedItem NL+ )+ "}"
 CIntegerType     ::= "_int" | "_uint" | "_long" | "_ulong" | "_size_t" | "_char"
 IntegerType      ::= "i8" | "i16" | "i32" | "i64"
                    | "u8" | "u16" | "u32" | "u64"
 ```
+
+`Needs`の改行には [generic.needs-adjacent] の物理行の制約を適用する。演算子の要求にはエラー指定を付けられない。`MethodReceiver`の型引数には [generic.receiver-parameters] を適用する。
 
 `HEADER`は [ffi.header] のヘッダー名、`CNAME`は [ffi.name] のC側の名前である。
 
@@ -2344,7 +2525,7 @@ Sum              ::= Product ( ( "+" | "-" | "+%" | "-%" ) Product )*
 Product          ::= Cast ( ( "*" | "/" | "%" | "*%" ) Cast )*
 Cast             ::= Unary ( "as%" Type CastHandler? | "as" Type CastHandler? )*
 CastHandler      ::= "or" ( Expression | "return" Expression? | "panic" TEMPLATE )
-Unary            ::= ( "-" | "not" | "~" | "len" | "c_bytes" | "c_byte_len" | "new" | "." ) Unary | "fn" IDENT | Postfix
+Unary            ::= ( "-" | "not" | "~" | "len" | "c_bytes" | "c_byte_len" | "new" | "." ) Unary | "fn" IDENT TypeArguments? | Postfix
 Postfix          ::= Primary ( "." IDENT | "#" IDENT "(" Arguments? ")" | "[" Index "]" IndexHandler?
                              | "(" Arguments? ")"
                              | "with" "{" NL* Initializers "}" )*
@@ -2354,13 +2535,13 @@ Primary          ::= "self" | Literal | IDENT | FunctionCall | StructLiteral | T
                    | "(" Expression ")" | IfExpression | MatchExpression | BlockExpression
 Literal          ::= INTEGER | FLOAT | CHAR | "true" | "false" | "nan" | "inf" | "null"
 
-FunctionCall     ::= IDENT "(" Arguments? ")"
+FunctionCall     ::= IDENT TypeArguments? "(" Arguments? ")"
 Arguments        ::= Argument ( "," Argument )* ","?
 Argument         ::= Expression | ClosureExpression
 ClosureExpression ::= "fn" "[" Captures? "]" "(" Parameters? ")" "->" ReturnType Block
 Captures         ::= Capture ( "," Capture )* ","?
 Capture          ::= "var"? IDENT
-StructLiteral    ::= IDENT "{" NL* Initializers? "}"
+StructLiteral    ::= IDENT TypeArguments? "{" NL* Initializers? "}"
 Initializers     ::= Initializer ( "," NL* Initializer )* ","? NL*
 Initializer      ::= IDENT ":" Expression | IDENT
 ```
@@ -2371,9 +2552,9 @@ Initializer      ::= IDENT ":" Expression | IDENT
 
 `Index` と `IndexHandler` には [text.slice]、[text.index]、[text.slice-handler] を適用する。
 
-`"fn" IDENT` には [fn.value-from-name] と [fn.value-mark]、後置の呼び出しには [fn.value-call] を適用する。名前の直後の `(` は `FunctionCall` として読む。
+`"fn" IDENT TypeArguments?` には [generic.function-value]・[fn.value-from-name] と [fn.value-mark]、後置の呼び出しには [fn.value-call] を適用する。名前の直後の `(` は `FunctionCall` として読む。
 
-`IDENT` と `FunctionCall`、`StructLiteral` は、後続の `(`、`{` を含めて区別する。列挙子の `Wave.Sine` とフィールド参照の `p.x` は、名前を解決して区別する。
+`IDENT` と `FunctionCall`、`StructLiteral` は、型引数と後続の `(`、`{` を含めて区別する。名前が汎用宣言を指す場合だけ、直後の角括弧を型引数として読む。それ以外は添字・切り出しとして読む。型引数は任意の実行時の式には付けられない。列挙子の `Wave.Sine` とフィールド参照の `p.x` は、名前を解決して区別する。
 
 **[expr.cast-wrap-handler-syntax]** `as%` の `CastHandler` は、変換元が `symbol` または `text` の場合に必須とする。変換元が整数型の場合に付けるとコンパイルエラーである。整数型から整数型への `as%` は [expr.as-trunc] に従う。
 

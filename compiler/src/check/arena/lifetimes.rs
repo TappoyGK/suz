@@ -136,7 +136,10 @@ impl<'a> Analysis<'a> {
     fn paths(&self, ty: Type) -> Vec<Vec<usize>> {
         match ty {
             Type::Pointer { .. } => vec![vec![]],
-            Type::Struct(id) => self.scope.structs[id]
+            Type::Struct(id) => self
+                .scope
+                .structs
+                .get(id)
                 .fields
                 .iter()
                 .enumerate()
@@ -744,8 +747,9 @@ impl<'a> Analysis<'a> {
             let Type::Struct(id) = ty else {
                 unreachable!("checked member path")
             };
-            let field = &self.scope.structs[id].fields[index];
-            names.push(field.name.as_str());
+            let declaration = self.scope.structs.get(id);
+            let field = &declaration.fields[index];
+            names.push(field.name.clone());
             ty = field.ty;
         }
         if names.is_empty() {

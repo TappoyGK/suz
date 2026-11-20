@@ -74,7 +74,7 @@ pub(super) fn dependencies(
         ExpressionKind::Field { target, .. } => dependencies(target, names)?,
         ExpressionKind::Name(name) => names.push((name.clone(), expr.location)),
         ExpressionKind::Null
-        | ExpressionKind::FunctionValue(_)
+        | ExpressionKind::FunctionValue { .. }
         | ExpressionKind::Integer { .. }
         | ExpressionKind::Float(_)
         | ExpressionKind::Char(_)
@@ -212,7 +212,11 @@ impl Resolver<'_> {
         }
         let mut scope = self.bindings.clone();
         scope.constant_initializer = true;
-        let checked = expression(&declaration.initializer, declaration.annotation, &scope)?;
+        let annotation = declaration
+            .annotation
+            .map(|ty| scope.resolve_type_at(ty, declaration.location))
+            .transpose()?;
+        let checked = expression(&declaration.initializer, annotation, &scope)?;
         if super::arena::contains(checked.ty, &self.bindings) {
             return Err(declaration.location.error(
                 ErrorKind::InvalidSource,
@@ -246,14 +250,12 @@ impl Resolver<'_> {
 pub(super) fn resolve(
     declarations: &[TopLevelBinding],
     enums: &[crate::ast::EnumDeclaration],
-    structs: &[crate::ast::StructDeclaration],
     scope: Scope,
 ) -> Result<(Scope, Vec<Location>), Diagnostic> {
     let mut resolver = Resolver {
         declarations: BTreeMap::new(),
         bindings: Scope {
             enums: std::rc::Rc::new(enums.to_vec()),
-            structs: std::rc::Rc::new(structs.to_vec()),
             ..scope
         },
         visiting: BTreeSet::new(),
@@ -262,10 +264,10 @@ pub(super) fn resolve(
     for declaration in declarations {
         if resolver
             .bindings
-            .fnshapes
-            .iter()
-            .any(|d| d.name == declaration.name)
-            || structs.iter().any(|s| s.name == declaration.name)
+            .structs
+            .shapes
+            .contains_name(&declaration.name)
+            || resolver.bindings.structs.contains_name(&declaration.name)
             || enums.iter().any(|e| e.name == declaration.name)
             || declaration.name == "main"
             || resolver

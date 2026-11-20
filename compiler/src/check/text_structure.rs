@@ -96,7 +96,7 @@ impl Schema {
             Type::Struct(id) => {
                 entry.kind = 5;
                 entry.slots = 0;
-                let declaration = &scope.structs[id];
+                let declaration = &scope.structs.get(id);
                 entry.name = self.name(&declaration.name);
                 let mut fields = Vec::new();
                 for field in &declaration.fields {
@@ -118,6 +118,10 @@ impl Schema {
             | Type::CInteger(_)
             | Type::StaticFunction(_)
             | Type::Function(_)
+            | Type::Application(_)
+            | Type::StaticShape(_)
+            | Type::Shape(_)
+            | Type::Parameter(_)
             | Type::GenericInt
             | Type::GenericFloat
             | Type::Numeric(_)
@@ -165,7 +169,9 @@ pub(super) fn parse(text: &str, id: usize, scope: &Scope) -> Option<CheckedExpre
         scope: &Scope,
     ) -> Option<CheckedExpression> {
         if let Type::Struct(id) = ty {
-            let fields = scope.structs[id]
+            let fields = scope
+                .structs
+                .get(id)
                 .fields
                 .iter()
                 .enumerate()
