@@ -77,11 +77,15 @@ impl Parser<'_, '_> {
         let start = self.cursor;
         let line = self.token().line;
         self.cursor += 1;
-        while !matches!(self.token().kind, Kind::Newline | Kind::End) && self.token().line == line {
+        while !matches!(
+            self.token().kind,
+            Kind::Newline | Kind::BlankLine | Kind::End
+        ) && self.token().line == line
+        {
             self.cursor += 1;
         }
         self.pending_needs.push((start, self.cursor));
-        if self.token().kind != Kind::Newline {
+        if !self.token().kind.is_newline() {
             return Err(self.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(
@@ -91,8 +95,8 @@ impl Parser<'_, '_> {
             ));
         }
         self.cursor += 1;
-        while self.token().kind == Kind::Newline {
-            if self.token().blank_line {
+        while self.token().kind.is_newline() {
+            if self.token().kind == Kind::BlankLine {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
                     crate::diagnostic!(
@@ -135,6 +139,12 @@ impl Parser<'_, '_> {
                 ));
             }
             self.cursor += 1;
+            if self.type_parameters.is_empty() {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("generic.needs", "this declaration has no type parameters"),
+                ));
+            }
             let Kind::Ident(target) = self.token().kind else {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
@@ -150,7 +160,7 @@ impl Parser<'_, '_> {
                         ErrorKind::InvalidSource,
                         crate::diagnostic!(
                             "generic.needs",
-                            "a requirement targets a type parameter declared here"
+                            "'{target}' is not a type parameter of this declaration"
                         ),
                     )
                 })?;

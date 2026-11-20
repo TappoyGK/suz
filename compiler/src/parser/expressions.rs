@@ -102,7 +102,7 @@ impl Parser<'_, '_> {
             self.cursor += 1;
             let value = if matches!(
                 self.token().kind,
-                Kind::Newline | Kind::Symbol("}" | ")" | ",") | Kind::End
+                Kind::Newline | Kind::BlankLine | Kind::Symbol("}" | ")" | ",") | Kind::End
             ) {
                 None
             } else {
@@ -124,7 +124,7 @@ impl Parser<'_, '_> {
             self.cursor += 1;
             if matches!(
                 self.token().kind,
-                Kind::Newline | Kind::Symbol("}" | ")" | ",") | Kind::End
+                Kind::Newline | Kind::BlankLine | Kind::Symbol("}" | ")" | ",") | Kind::End
             ) {
                 return Ok(FailureHandler::Return {
                     value: Box::new(Expression {

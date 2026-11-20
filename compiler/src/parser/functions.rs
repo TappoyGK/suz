@@ -35,7 +35,7 @@ impl Parser<'_, '_> {
         loop {
             items.push(item(self)?);
             let end_line = self.tokens[self.cursor - 1].line;
-            let separated = self.token().kind == Kind::Newline;
+            let separated = self.token().kind.is_newline();
             self.newlines();
             let comma = self.token().kind == Kind::Symbol(",");
             if separated && comma {

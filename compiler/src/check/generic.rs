@@ -93,6 +93,8 @@ pub(super) struct Instances {
     pub queue: VecDeque<Instance>,
     pub(super) next_id: usize,
     pub named: Vec<super::type_parameters::Instance>,
+    pub named_ids: BTreeMap<(usize, Vec<Type>), usize>,
+    pub named_requirements: BTreeSet<(usize, Vec<Type>)>,
     pub named_cursor: usize,
     pub checked_instances: BTreeSet<usize>,
     pub analyzed_functions: BTreeMap<usize, std::rc::Rc<Analysis>>,

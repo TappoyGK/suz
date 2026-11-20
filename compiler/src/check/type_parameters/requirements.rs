@@ -34,7 +34,7 @@ fn find<'a>(
     args: &[Expression],
     scope: &'a Scope,
 ) -> Option<&'a Need> {
-    scope.needs.iter().find(|n| {
+    scope.named.needs.iter().find(|n| {
         n.parameter == parameter
             && &n.operation == operation
             && n.parameters.len() == args.len()
@@ -60,7 +60,7 @@ pub(in crate::check) fn struct_equality(
         match ty {
             Type::Struct(id) => pending.extend(scope.structs.get(id).fields.iter().map(|f| f.ty)),
             Type::Parameter(id)
-                if !scope.needs.iter().any(|n| {
+                if !scope.named.needs.iter().any(|n| {
                     n.parameter == id
                         && n.operation == RequiredOperation::Operator("==")
                         && n.parameters == [ty]
@@ -110,7 +110,7 @@ pub(in crate::check) fn hint(expr: &Expression, scope: &Scope) -> Option<Type> {
     }
     match &expr.kind {
         ExpressionKind::Binary { operator, left, right } => find(target(left, scope)?, &RequiredOperation::Operator(operator.c_symbol()), std::slice::from_ref(right), scope).and_then(|n| scope.resolve_type_at(n.result, expr.location).ok()),
-        ExpressionKind::MethodCall { target: receiver, name, mutable, arguments } => scope.needs.iter().find(|n| {
+        ExpressionKind::MethodCall { target: receiver, name, mutable, arguments } => scope.named.needs.iter().find(|n| {
             Some(n.parameter) == method_target(receiver, scope) && n.parameters.len() == arguments.len()
                 && matches!(&n.operation, RequiredOperation::Method { name: member, mutable: write, .. } if name == member && mutable == write)
         }).and_then(|n| scope.resolve_type_at(n.result, expr.location).ok()),
@@ -316,11 +316,31 @@ fn method(
         unreachable!()
     };
     let parameter = method_target(receiver, scope).unwrap();
-    let need = scope.needs.iter().find(|n| {
+    let need = scope.named.needs.iter().find(|n| {
         n.parameter == parameter && n.parameters.len() == arguments.len()
             && matches!(&n.operation, RequiredOperation::Method { name: member, mutable: write, .. } if member == name && write == mutable)
     }).ok_or_else(|| missing_operator(expr.location, parameter, name, scope))?;
     invoke(need, receiver, arguments, expr, scope, handler)
+}
+
+fn error_spec(errors: &[crate::ast::ErrorVariant], scope: &Scope) -> String {
+    if errors.is_empty() {
+        return String::new();
+    }
+    let mut names = Vec::new();
+    for group in errors.chunk_by(|a, b| a.type_id == b.type_id) {
+        let declaration = &scope.enums[group[0].type_id];
+        if group.len() == declaration.variants.len() {
+            names.push(declaration.name.clone());
+        } else {
+            names.extend(
+                group
+                    .iter()
+                    .map(|e| format!("{}.{}", declaration.name, declaration.variants[e.variant])),
+            );
+        }
+    }
+    format!(" or {}", names.join(", "))
 }
 
 pub(super) fn satisfy(
@@ -341,7 +361,7 @@ pub(super) fn satisfy(
             ErrorKind::InvalidSource,
             crate::diagnostic!(
                 "generic.needs-check",
-                "type {} does not satisfy {}({}) -> {}",
+                "type {} does not satisfy {}({}) -> {}{}",
                 scope.type_name(target),
                 match &need.operation {
                     RequiredOperation::Operator(op) => (*op).to_owned(),
@@ -360,7 +380,8 @@ pub(super) fn satisfy(
                     .map(|t| scope.type_name(*t))
                     .collect::<Vec<_>>()
                     .join(", "),
-                scope.type_name(result)
+                scope.type_name(result),
+                error_spec(&need.errors, scope)
             ),
         );
         error.related.push(need.location.error(
@@ -370,7 +391,7 @@ pub(super) fn satisfy(
         error
     };
     if let Type::Parameter(parameter) = target {
-        return if scope.needs.iter().any(|n| {
+        return if scope.named.needs.iter().any(|n| {
             n.parameter == parameter
                 && n.operation == need.operation
                 && n.parameters
@@ -387,13 +408,21 @@ pub(super) fn satisfy(
             Err(error())
         };
     }
-    let mut context = scope.clone();
-    context.type_hints = Default::default();
-    context.float_hints = Default::default();
-    context.hint_depth = Default::default();
-    context.type_arguments = None;
-    context.type_parameters = Rc::default();
-    context.constant_initializer = false;
+    // 操作の照合に必要なのは宣言と仮のオペランドだけ。呼び出し元の局所変数は複製しない。
+    let mut context = Scope {
+        functions: scope.functions.clone(),
+        structs: scope.structs.clone(),
+        enums: scope.enums.clone(),
+        fnshapes: scope.fnshapes.clone(),
+        function_types: scope.function_types.clone(),
+        has_operator_methods: scope.has_operator_methods,
+        named: std::rc::Rc::new(crate::check::scope::NamedTypes {
+            needs: scope.named.needs.clone(),
+            type_parameters: scope.named.type_parameters.clone(),
+            ..Default::default()
+        }),
+        ..Scope::default()
+    };
     let mut argument = |index: usize, ty: Type| {
         let name = format!("$requirement{index}");
         context.locals.insert(
@@ -491,7 +520,6 @@ pub(super) fn satisfy(
     Ok(())
 }
 
-use std::rc::Rc;
 fn operator(
     op: &str,
     receiver: Expression,

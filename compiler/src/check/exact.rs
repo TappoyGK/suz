@@ -101,8 +101,8 @@ fn error(location: Location) -> Diagnostic {
 // 長い整数式の各節に演算子メソッドや要求の判定を追加しない。
 fn declared_operation(expr: &Expression, bindings: &Scope) -> bool {
     super::operator_methods::is_call(expr, bindings)
-        || (bindings.type_arguments.is_none()
-            && !bindings.needs.is_empty()
+        || (bindings.named.type_arguments.is_none()
+            && !bindings.named.needs.is_empty()
             && super::type_parameters::hint(expr, bindings).is_some())
 }
 
@@ -241,7 +241,7 @@ pub(super) fn check(
     handled: bool,
 ) -> Result<CheckedExpression, Diagnostic> {
     let exact = if bindings.has_operator_methods
-        || (bindings.type_arguments.is_none() && !bindings.needs.is_empty())
+        || (bindings.named.type_arguments.is_none() && !bindings.named.needs.is_empty())
     {
         build::<true>(expr, bindings)?
     } else {

@@ -131,6 +131,12 @@ impl Structs {
         arguments: &[Type],
         location: Location,
     ) -> Result<Type, Diagnostic> {
+        if !matches!(
+            ty,
+            Type::Parameter(_) | Type::Application(_) | Type::Struct(_) | Type::Pointer { .. }
+        ) {
+            return Ok(ty);
+        }
         self.transaction(|| self.resolve_inner(ty, arguments, location, &mut Vec::new()))
     }
     // 型ヒントは診断を捨てて再検査することがある。失敗した展開を表に残すと、

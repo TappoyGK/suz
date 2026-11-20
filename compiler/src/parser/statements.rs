@@ -244,7 +244,11 @@ impl Parser<'_, '_> {
                 self.cursor += 1;
                 if !matches!(
                     self.token().kind,
-                    Kind::Newline | Kind::Symbol("}") | Kind::End | Kind::Keyword("allow")
+                    Kind::Newline
+                        | Kind::BlankLine
+                        | Kind::Symbol("}")
+                        | Kind::End
+                        | Kind::Keyword("allow")
                 ) {
                     return Err(self.error(
                         ErrorKind::InvalidSource,
@@ -419,7 +423,11 @@ impl Parser<'_, '_> {
                 self.cursor += 1;
                 if matches!(
                     self.token().kind,
-                    Kind::Newline | Kind::Symbol("}") | Kind::End | Kind::Keyword("allow")
+                    Kind::Newline
+                        | Kind::BlankLine
+                        | Kind::Symbol("}")
+                        | Kind::End
+                        | Kind::Keyword("allow")
                 ) {
                     return Ok(Statement::Return(Expression {
                         kind: ExpressionKind::Void,
@@ -465,7 +473,7 @@ impl Parser<'_, '_> {
             }
             statements.push(self.statement()?);
             match self.token().kind {
-                Kind::Newline => self.newlines(),
+                Kind::Newline | Kind::BlankLine => self.newlines(),
                 Kind::Symbol("}") => {}
                 Kind::Keyword(
                     "fix" | "var" | "return" | "if" | "while" | "loop" | "for" | "rev" | "break"

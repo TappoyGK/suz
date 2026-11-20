@@ -148,7 +148,7 @@ pub(crate) struct EnumDeclaration {
 }
 
 /// 汎用数値型を具体化した一つの整数型または浮動小数点型。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum ScalarType {
     Integer(IntegerType),
     Float(FloatType),
@@ -160,7 +160,7 @@ pub(crate) const NUMERIC_COMBINATIONS: usize = 18;
 /// ASTと意味検査で共有する型表現。
 /// 具体的な型に加え、汎用のint・float、型の組み合わせごとの結果、内部の正確な整数を表す。
 /// Structの番号は構造体宣言、Functionの番号は共通化した関数値の型を参照する。汎用の型はC生成までに具体化する。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Type {
     Pointer {
         leaf: PointerLeaf,
@@ -188,7 +188,7 @@ pub(crate) enum Type {
 }
 
 /// ポインタの末端の値型。各段のnull許容性はPointerShapeで別に持つ。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum PointerLeaf {
     CPointer,
     CInteger(CIntegerType),
@@ -986,7 +986,7 @@ pub(crate) struct Ignore {
 }
 
 /// C環境で幅や符号が決まる整数型。Suzの演算型と分けて保持する。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum CIntegerType {
     Int,
     Uint,

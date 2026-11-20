@@ -67,10 +67,7 @@ pub(super) fn call(
             .map(|t| scope.resolve_type_at(*t, expr.location))
             .collect::<Result<_, _>>()?
     };
-    requirements::validate_substitution(&signature.needs, &types, scope, expr.location)?;
-    for need in &signature.needs {
-        requirements::satisfy(need, &types, scope, expr.location)?;
-    }
+    check_requirements(signature, &types, scope, expr.location)?;
     let result = scope.substitute(signature.result, &types, expr.location)?;
     if matches!(result, Type::Function(_)) {
         return Err(expr.location.error(
@@ -124,6 +121,32 @@ pub(super) fn call(
     )
 }
 
+// 具体型の要求は呼び出し元に依存しないので、成功を宣言と型引数ごとに再利用する。
+// 型引数が残る転送は、呼び出し元の有効な要求が異なるため毎回検査する。
+fn check_requirements(
+    signature: &Signature,
+    arguments: &[Type],
+    scope: &Scope,
+    location: Location,
+) -> Result<(), Diagnostic> {
+    if signature.needs.is_empty() {
+        return Ok(());
+    }
+    let concrete = !arguments.iter().any(|t| scope.structs.symbolic(*t));
+    let key = (signature.id, arguments.to_vec());
+    if concrete && scope.instances.borrow().named_requirements.contains(&key) {
+        return Ok(());
+    }
+    requirements::validate_substitution(&signature.needs, arguments, scope, location)?;
+    for need in &signature.needs {
+        requirements::satisfy(need, arguments, scope, location)?;
+    }
+    if concrete {
+        scope.instances.borrow_mut().named_requirements.insert(key);
+    }
+    Ok(())
+}
+
 fn request(
     function: usize,
     arguments: Vec<Type>,
@@ -132,7 +155,7 @@ fn request(
 ) -> Result<usize, Diagnostic> {
     // 同じ具体化への再帰は再利用する。異なる具体化への再帰は、全型引数が同じか縮み、
     // 少なくとも一つが厳密に縮む場合だけ有限として扱う。
-    for (previous_function, previous) in scope.instantiation_path.iter().rev() {
+    for (previous_function, previous) in scope.named.instantiation_path.iter().rev() {
         if *previous_function != function || *previous == arguments {
             continue;
         }
@@ -153,16 +176,14 @@ fn request(
         }
     }
     let mut instances = scope.instances.borrow_mut();
-    if let Some(instance) = instances
-        .named
-        .iter()
-        .find(|i| i.function == function && i.arguments == arguments)
-    {
-        return Ok(instance.id);
+    let key = (function, arguments.clone());
+    if let Some(&id) = instances.named_ids.get(&key) {
+        return Ok(id);
     }
     let id = instances.next_id;
     instances.next_id += 1;
-    let mut path = scope.instantiation_path.as_ref().clone();
+    instances.named_ids.insert(key, id);
+    let mut path = scope.named.instantiation_path.as_ref().clone();
     path.push((function, arguments.clone()));
     instances.named.push(Instance {
         function,
@@ -197,8 +218,11 @@ pub(super) fn check_instances(
             .map(|t| scope.type_name(*t))
             .collect::<Vec<_>>()
             .join(", ");
-        scope.type_arguments = Some(Rc::new(instance.arguments));
-        scope.instantiation_path = instance.path;
+        scope.named = Rc::new(super::scope::NamedTypes {
+            type_arguments: Some(Rc::new(instance.arguments)),
+            instantiation_path: instance.path,
+            ..Default::default()
+        });
         let (checked, found) =
             functions::check_function(function, scope, instance.id).map_err(|error| {
                 let mut diagnostic = instance.location.error(
@@ -231,10 +255,7 @@ pub(super) fn method_signature(
     if signature.type_parameters == 0 {
         return Ok(resolved);
     }
-    requirements::validate_substitution(&signature.needs, &arguments, scope, location)?;
-    for need in &signature.needs {
-        requirements::satisfy(need, &arguments, scope, location)?;
-    }
+    check_requirements(signature, &arguments, scope, location)?;
     resolved.parameters = signature
         .parameters
         .iter()

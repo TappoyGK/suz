@@ -90,7 +90,7 @@ impl<'a, 's> Parser<'a, 's> {
     }
 
     fn newlines(&mut self) {
-        while self.token().kind == Kind::Newline {
+        while self.token().kind.is_newline() {
             self.cursor += 1;
         }
     }
@@ -270,7 +270,7 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
                 ));
             }
         }
-        if !matches!(p.token().kind, Kind::Newline | Kind::End) {
+        if !matches!(p.token().kind, Kind::Newline | Kind::BlankLine | Kind::End) {
             return Err(p.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(

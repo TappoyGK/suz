@@ -6,7 +6,7 @@ use std::sync::{OnceLock, RwLock};
 
 /// 下位ビットが末端側のnull許容性、その上の1が段数の目印。
 /// 最上位ビットが1なら深い形状の表番号。浅い型は表もロックも使わない。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct PointerShape(u64);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]

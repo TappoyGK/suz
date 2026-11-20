@@ -47,13 +47,19 @@ pub(super) enum Mode {
     Instance(super::generic::GenericTypes),
 }
 
-#[derive(Clone)]
-pub(super) struct Scope {
+/// 名前付き型引数の検査状態。通常のスコープ複製では一つの参照だけを引き継ぐ。
+#[derive(Clone, Default)]
+pub(super) struct NamedTypes {
     /// 名前付き型引数の具体化。汎用定義の検査ではNoneとし、type_parametersとneedsを使う。
     pub type_arguments: Option<Rc<Vec<Type>>>,
     pub type_parameters: Rc<Vec<crate::ast::generics::TypeParameter>>,
     pub needs: Rc<Vec<crate::ast::generics::Need>>,
     pub instantiation_path: Rc<Vec<(usize, Vec<Type>)>>,
+}
+
+#[derive(Clone)]
+pub(super) struct Scope {
+    pub named: Rc<NamedTypes>,
 
     // 定義のないプログラムでは、演算子用の型ヒント取得を省く。
     pub has_operator_methods: bool,
@@ -143,14 +149,27 @@ impl Scope {
         }
         self.type_name(ty.pointee().unwrap_or(ty))
     }
+    #[inline]
     pub fn resolve_type_at(
         &self,
         ty: Type,
         location: crate::ast::Location,
     ) -> Result<Type, crate::Diagnostic> {
+        if !matches!(
+            ty,
+            Type::Parameter(_) | Type::Application(_) | Type::Struct(_) | Type::Pointer { .. }
+        ) {
+            return Ok(match self.mode {
+                Mode::Instance(types) => types.resolve(ty),
+                Mode::Ordinary | Mode::GenericCheck => ty,
+            });
+        }
         let ty = self.substitute(
             ty,
-            self.type_arguments.as_deref().map_or(&[], Vec::as_slice),
+            self.named
+                .type_arguments
+                .as_deref()
+                .map_or(&[], Vec::as_slice),
             location,
         )?;
         let ty = match self.mode {
@@ -170,6 +189,7 @@ impl Scope {
     pub fn type_name(&self, ty: Type) -> String {
         match ty {
             Type::Parameter(id) => self
+                .named
                 .type_parameters
                 .get(id)
                 .map_or_else(|| "type parameter".into(), |p| p.name.clone()),
@@ -215,10 +235,7 @@ impl Scope {
 impl Default for Scope {
     fn default() -> Self {
         Self {
-            type_arguments: None,
-            type_parameters: Rc::default(),
-            needs: Rc::default(),
-            instantiation_path: Rc::default(),
+            named: Rc::default(),
             has_operator_methods: false,
             constant_initializer: false,
             arena_depth: 0,

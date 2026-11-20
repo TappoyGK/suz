@@ -150,8 +150,11 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
         .filter(|(_, d)| !d.type_parameters.is_empty())
     {
         let mut context = globals.clone();
-        context.type_parameters = Rc::new(declaration.type_parameters.clone());
-        context.needs = Rc::new(declaration.needs.clone());
+        context.named = Rc::new(super::scope::NamedTypes {
+            type_parameters: Rc::new(declaration.type_parameters.clone()),
+            needs: Rc::new(declaration.needs.clone()),
+            ..Default::default()
+        });
         let ty = context.structs.apply(
             id,
             (0..declaration.type_parameters.len())
@@ -166,8 +169,11 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     for (id, function) in program.functions.iter().enumerate() {
         if !function.type_parameters.is_empty() {
             let mut context = globals.clone();
-            context.type_parameters = Rc::new(function.type_parameters.clone());
-            context.needs = Rc::new(function.needs.clone());
+            context.named = Rc::new(super::scope::NamedTypes {
+                type_parameters: Rc::new(function.type_parameters.clone()),
+                needs: Rc::new(function.needs.clone()),
+                ..Default::default()
+            });
             let (_, found) = check_function(function, context, id)?;
             warnings.extend(found);
             continue;

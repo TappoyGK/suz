@@ -35,8 +35,8 @@ pub(super) fn operand_type(expr: &Expression, bindings: &Scope) -> Option<Type> 
 }
 
 fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
-    if !bindings.needs.is_empty()
-        && bindings.type_arguments.is_none()
+    if !bindings.named.needs.is_empty()
+        && bindings.named.type_arguments.is_none()
         && let Some(ty) = super::type_parameters::hint(expr, bindings)
     {
         return Some(ty);
@@ -469,8 +469,8 @@ fn expression_inner(
     } else {
         required
     };
-    let checked = if bindings.type_arguments.is_none()
-        && !bindings.type_parameters.is_empty()
+    let checked = if bindings.named.type_arguments.is_none()
+        && !bindings.named.type_parameters.is_empty()
         && let Some(checked) = super::type_parameters::operation(expr, bindings)?
     {
         checked

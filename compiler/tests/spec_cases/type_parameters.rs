@@ -223,3 +223,73 @@ fn main() -> u8 {
     );
     assert!(output.status.success(), "{output:?}");
 }
+
+#[test]
+fn requirement_diagnostics_identify_error_sets_and_invalid_targets() {
+    for (target, declaration, message) in [
+        (
+            "T",
+            "fn main() -> u8 { return 0 }",
+            "this declaration has no type parameters",
+        ),
+        (
+            "T",
+            "fn plain(a: i32) -> i32 { return a }\nfn main() -> u8 { return 0 }",
+            "this declaration has no type parameters",
+        ),
+        (
+            "U",
+            "fn plain[T](a: T) -> T { return a }\nfn main() -> u8 { return 0 }",
+            "'U' is not a type parameter of this declaration",
+        ),
+    ] {
+        let source = format!("@needs {target}: +({target}) -> {target}\n{declaration}");
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(error.rule(), "generic.needs");
+        assert!(error.message().contains(message), "{error:?}");
+    }
+    for errors in ["Failed", "Failed.Bad", "Failed.Bad, Other"] {
+        let source = format!(
+            r#"
+error Failed {{ Bad, Worse }}
+error Other {{ Missing }}
+@needs T: .get() -> i32 or {errors}
+fn get[T](value: T) -> i32 {{ return value.get() or 0 }}
+@needs U: .get() -> i32
+fn forward[U](value: U) -> i32 {{ return get[U](value) }}
+fn main() -> u8 {{ return 0 }}
+"#
+        );
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(error.rule(), "generic.needs-check");
+        assert!(
+            error
+                .message()
+                .contains(&format!(".get() -> i32 or {errors}")),
+            "{error:?}"
+        );
+    }
+}
+
+#[test]
+fn requirement_reuse_keeps_symbolic_callers_and_concrete_types_distinct() {
+    let source = r#"
+@needs T: +(T) -> T
+fn add[T](a: T, b: T) -> T { return a + b }
+@needs U: +(U) -> U
+fn allowed[U](a: U) -> U { return add[U](a, a) }
+fn missing[U](a: U) -> U { return add[U](a, a) }
+fn main() -> u8 { add[i32](1, 2)
+return 0 }
+"#;
+    let error = suz::compile(source.as_bytes()).unwrap_err();
+    assert_eq!(error.rule(), "generic.needs-check");
+    let source = source
+        .replace("fn missing[U](a: U) -> U { return add[U](a, a) }", "")
+        .replace(
+            "add[i32](1, 2)",
+            "add[i32](1, 2)\nadd[i32](3, 4)\nadd[bool](true, false)",
+        );
+    let error = suz::compile(source.as_bytes()).unwrap_err();
+    assert_eq!(error.rule(), "generic.needs-check");
+}
