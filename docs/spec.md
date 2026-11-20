@@ -71,9 +71,9 @@ Suzは次のものを含む。
 **[src.keywords]** 次の語はキーワードである。
 
 ```text
-fix var fn fnshape self static struct enum error extern trusted arena new ptr null let objection
+fix var fn fnshape needs self static struct enum error extern trusted arena new ptr null let objection
 if ifexpr elif else while loop for rev in break continue return match matchexpr
-as or not len c_bytes c_byte_len log panic fail ignore recover allow expr with needs
+as or not len c_bytes c_byte_len log panic fail ignore recover allow expr with
 true false nan inf
 ```
 
@@ -216,9 +216,9 @@ fn main() -> u8 {
 
 ### 4.1 宣言とスコープ
 
-**[decl.top-level]** トップレベルには、`fix`・関数・構造体・列挙型・エラー型・`fnshape` の宣言、およびexternブロックだけを書ける。これらの名前は、ファイル内の宣言順序によらず参照できる。
+**[decl.top-level]** トップレベルには、`fix`・関数・構造体・列挙型・エラー型・`fnshape`・名前付きの要求一覧の宣言、およびexternブロックだけを書ける。これらの名前は、ファイル内の宣言順序によらず参照できる。
 
-**[decl.location]** `fix` はトップレベルとブロック内で宣言できる。`var` はブロック内でのみ宣言でき、トップレベルに書くとコンパイルエラーである。関数、構造体、列挙型、エラー型、`fnshape`、externブロックはトップレベルで宣言する。それぞれの宣言をこれらの場所以外に書くとコンパイルエラーである。
+**[decl.location]** `fix` はトップレベルとブロック内で宣言できる。`var` はブロック内でのみ宣言でき、トップレベルに書くとコンパイルエラーである。関数、構造体、列挙型、エラー型、`fnshape`、名前付きの要求一覧、externブロックはトップレベルで宣言する。それぞれの宣言をこれらの場所以外に書くとコンパイルエラーである。
 
 **[decl.duplicate]** 同じスコープで同じ名前を宣言するとコンパイルエラーである。定数、変数、仮引数、関数、型など、宣言の種類が違っても同じである。
 
@@ -2079,16 +2079,27 @@ fn main() -> u8 {
 
 #### 名前付きの要求一覧
 
-**[generic.needs-group]** `needs Ordered[T] { ... }`は要求一覧のトップレベル宣言である。名前には型名の規則を適用し、ほかの型名との重複を認めない。一覧には1行以上の直接要求または別の一覧の使用を書き、各行に@needsは付けない。一覧の使用は `@needs Ordered[T]` と書く。
+**[generic.needs-group]** `needs Ordered[T] { ... }`は要求一覧のトップレベル宣言である。名前には型名の規則を適用し、ほかの型名との重複を認めない。一覧には1行以上の直接要求または別の一覧の使用を書き、各行に@needsは付けない。一覧の使用は `@needs Ordered[T]` と書く。型引数は複数宣言でき、使用時にはすべて明示する。コメント行と空行は一覧の中に置ける。
 
 ```suz
 needs Ordered[T] {
     T: <(T) -> bool
     T: <=(T) -> bool
 }
+
+@needs Ordered[T]
+fn in_range[T](value: T, low: T, high: T) -> bool {
+    if value < low { return false }
+    return value <= high
+}
+
+needs Comparable[T] {
+    Ordered[T]
+    T: ==(T) -> bool
+}
 ```
 
-**[generic.needs-expand]** 一覧は型引数を置き換えてその場所に要求を列挙した場合と同じ意味を持つ。直接要求との混在、別の一覧の使用、構造体からメソッドへの継承を認める。直接・間接の循環を宣言時に拒否する。展開順序には意味がなく、同じ要求の重複は1つとする。同じ操作へ矛盾する形を要求する場合はエラーとし、型の置換後に判明する矛盾はその使用時に示す。
+**[generic.needs-expand]** 一覧は型引数を置き換えてその場所に要求を列挙した場合と同じ意味を持つ。直接要求との混在、別の一覧の使用、構造体からメソッドへの継承を認める。直接・間接の循環を宣言時に拒否する。展開順序には意味がなく、同じ要求の重複は1つとする。同じ操作へ矛盾する形を要求する場合はエラーとし、型の置換後に判明する矛盾はその使用時に示す。未使用の一覧も検査する。展開後の直接要求の対象にも [generic.needs] を適用し、その宣言で有効な型引数でなければならない。
 
 **[generic.needs-structural]** 要求の充足に、型側の実装宣言や登録は必要ない。通常の規則で使える操作の形を検査する。比較の推移性など、振る舞いの数学的な性質は要求一覧の名前から保証しない。
 

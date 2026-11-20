@@ -21,6 +21,7 @@ pub(in crate::check) struct Structs {
     instances: RefCell<BTreeMap<Application, usize>>,
     aliases: RefCell<BTreeMap<usize, usize>>,
     names: BTreeSet<String>,
+    need_names: BTreeSet<String>,
     original_count: usize,
     enums: Vec<crate::ast::EnumDeclaration>,
 }
@@ -37,6 +38,7 @@ impl From<Vec<StructDeclaration>> for Structs {
 impl Structs {
     pub fn new(program: &Program) -> Self {
         Self {
+            need_names: program.need_groups.iter().map(|g| g.name.clone()).collect(),
             applications: program.applications.clone(),
             shapes: super::shapes::Shapes::new(program),
             enums: program.enums.clone(),
@@ -101,7 +103,7 @@ impl Structs {
         }
     }
     pub fn contains_name(&self, name: &str) -> bool {
-        self.names.contains(name)
+        self.names.contains(name) || self.need_names.contains(name)
     }
     pub fn snapshot(&self) -> Vec<StructDeclaration> {
         self.declarations

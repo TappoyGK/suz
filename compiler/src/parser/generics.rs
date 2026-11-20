@@ -38,6 +38,7 @@ impl Parser<'_, '_> {
         if self.structs.iter().any(|d| d.name == name)
             || self.enums.iter().any(|d| d.name == name)
             || self.fnshape_names.contains_key(name)
+            || self.need_groups.names.contains_key(name)
         {
             return Err(location.error(
                 ErrorKind::InvalidSource,
@@ -123,161 +124,177 @@ impl Parser<'_, '_> {
         &mut self,
     ) -> Result<Vec<crate::ast::generics::Need>, Diagnostic> {
         use super::FixedToken;
-        use crate::ast::{
-            IntegerType, Type,
-            generics::{Need, RequiredOperation},
-        };
+        use crate::ast::generics::Need;
         let saved = self.cursor;
         let mut needs: Vec<Need> = Vec::new();
         for (start, end) in std::mem::take(&mut self.pending_needs) {
             self.cursor = start + 1;
-            let location = self.location();
-            if self.token().kind != Kind::Ident("needs") {
-                return Err(self.error(
-                    ErrorKind::InvalidSource,
-                    crate::diagnostic!("generic.needs", "expected @needs"),
-                ));
-            }
-            self.cursor += 1;
+            self.expect(FixedToken::Keyword("needs"))?;
             if self.type_parameters.is_empty() {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
                     crate::diagnostic!("generic.needs", "this declaration has no type parameters"),
                 ));
             }
-            let Kind::Ident(target) = self.token().kind else {
-                return Err(self.error(
-                    ErrorKind::InvalidSource,
-                    crate::diagnostic!("generic.needs", "a requirement targets a type parameter"),
-                ));
-            };
-            let parameter = self
-                .type_parameters
-                .iter()
-                .position(|p| p.name == target)
-                .ok_or_else(|| {
-                    self.error(
-                        ErrorKind::InvalidSource,
-                        crate::diagnostic!(
-                            "generic.needs",
-                            "'{target}' is not a type parameter of this declaration"
-                        ),
-                    )
-                })?;
-            self.cursor += 1;
-            self.expect(FixedToken::Symbol(":"))?;
-            let arena = self.token().kind == Kind::Keyword("arena");
-            if arena {
-                self.cursor += 1;
-            }
-            let operation = match self.token().kind {
-                Kind::Symbol("." | "#") => {
-                    let mutable = self.token().kind == Kind::Symbol("#");
-                    self.cursor += 1;
-                    let Kind::Ident(name) = self.token().kind else {
-                        return Err(self.error(
-                            ErrorKind::InvalidSource,
-                            crate::diagnostic!("generic.needs", "expected a method name"),
-                        ));
-                    };
-                    names::check(names::Shape::Value, name, self.location())?;
-                    self.cursor += 1;
-                    RequiredOperation::Method {
-                        name: name.into(),
-                        mutable,
-                        arena,
-                    }
-                }
-                Kind::Symbol(
-                    op @ ("+" | "-" | "*" | "/" | "%" | "~" | "&" | "|" | "^" | "<<" | ">>" | "=="
-                    | "!=" | "<" | "<=" | ">" | ">="),
-                )
-                | Kind::Keyword(op @ ("len" | "not"))
-                    if !arena =>
-                {
-                    self.cursor += 1;
-                    RequiredOperation::Operator(match op {
-                        "len" => "len",
-                        "not" => "not",
-                        "~" => "~",
-                        _ => crate::ast::ComparisonOperator::from_symbol(op)
-                            .map(|o| o.symbol())
-                            .unwrap_or_else(|| {
-                                crate::ast::BinaryOperator::from_symbol(op)
-                                    .unwrap()
-                                    .c_symbol()
-                            }),
-                    })
-                }
-                _ => {
-                    return Err(self.error(
-                        ErrorKind::InvalidSource,
-                        crate::diagnostic!(
-                            "generic.needs",
-                            "expected a supported operator or method"
-                        ),
-                    ));
-                }
-            };
-            let parameters = self.list(Self::type_atom)?;
-            if parameters.contains(&Type::Void) {
-                return Err(location.error(
-                    ErrorKind::InvalidSource,
-                    crate::diagnostic!("type.void", "parameters cannot have type void"),
-                ));
-            }
-            self.expect(FixedToken::Symbol("->"))?;
-            let result = self.parse_type()?;
-            let errors = self.error_spec()?;
-            if self.cursor != end {
-                return Err(self.error(
-                    ErrorKind::InvalidSource,
-                    crate::diagnostic!("generic.needs", "unexpected tokens in requirement"),
-                ));
-            }
-            if let RequiredOperation::Operator(op) = operation {
-                let valid_arity = if matches!(op, "len" | "not" | "~") {
-                    parameters.is_empty()
-                } else if op == "-" {
-                    parameters.len() <= 1
-                } else {
-                    parameters.len() == 1
-                };
-                let valid_result = if matches!(op, "==" | "!=" | "<" | "<=" | ">" | ">=" | "not") {
-                    result == Type::Bool
-                } else if op == "len" {
-                    result == Type::Integer(IntegerType::Len)
-                } else {
-                    result != Type::Void
-                };
-                if !valid_arity || !valid_result || !errors.is_empty() {
-                    return Err(location.error(
-                        ErrorKind::InvalidSource,
-                        crate::diagnostic!(
-                            "generic.needs",
-                            "invalid operator requirement signature"
-                        ),
-                    ));
-                }
-            }
-            let need = Need {
-                parameter,
-                operation,
-                parameters,
-                result,
-                errors,
-                location,
-            };
-            // 別名のfnshapeも同じ署名になりうるため、矛盾は型解決後に判定する。
-            if !needs
-                .iter()
-                .any(|n| n.same_operation(&need) && n.same_signature(&need))
-            {
-                needs.push(need);
+            for need in self.need_item(end)? {
+                Self::insert_need(&mut needs, need);
             }
         }
         self.cursor = saved;
         Ok(needs)
+    }
+    pub(super) fn insert_need(
+        needs: &mut Vec<crate::ast::generics::Need>,
+        need: crate::ast::generics::Need,
+    ) {
+        // 別名のfnshapeの矛盾は型解決後に判定する。
+        if !needs
+            .iter()
+            .any(|n| n.same_operation(&need) && n.same_signature(&need))
+        {
+            needs.push(need);
+        }
+    }
+
+    pub(super) fn need_item(
+        &mut self,
+        end: usize,
+    ) -> Result<Vec<crate::ast::generics::Need>, Diagnostic> {
+        if self
+            .tokens
+            .get(self.cursor + 1)
+            .is_none_or(|t| t.kind != Kind::Symbol(":"))
+        {
+            return self.named_need(end);
+        }
+        self.direct_need(end).map(|need| vec![need])
+    }
+
+    fn direct_need(&mut self, end: usize) -> Result<crate::ast::generics::Need, Diagnostic> {
+        use super::FixedToken;
+        use crate::ast::{
+            IntegerType, Type,
+            generics::{Need, RequiredOperation},
+        };
+        let location = self.location();
+        let Kind::Ident(target) = self.token().kind else {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("generic.needs", "a requirement targets a type parameter"),
+            ));
+        };
+        let parameter = self
+            .type_parameters
+            .iter()
+            .position(|p| p.name == target)
+            .ok_or_else(|| {
+                self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "generic.needs",
+                        "'{target}' is not a type parameter of this declaration"
+                    ),
+                )
+            })?;
+        self.cursor += 1;
+        self.expect(FixedToken::Symbol(":"))?;
+        let arena = self.token().kind == Kind::Keyword("arena");
+        if arena {
+            self.cursor += 1;
+        }
+        let operation = match self.token().kind {
+            Kind::Symbol("." | "#") => {
+                let mutable = self.token().kind == Kind::Symbol("#");
+                self.cursor += 1;
+                let Kind::Ident(name) = self.token().kind else {
+                    return Err(self.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!("generic.needs", "expected a method name"),
+                    ));
+                };
+                names::check(names::Shape::Value, name, self.location())?;
+                self.cursor += 1;
+                RequiredOperation::Method {
+                    name: name.into(),
+                    mutable,
+                    arena,
+                }
+            }
+            Kind::Symbol(
+                op @ ("+" | "-" | "*" | "/" | "%" | "~" | "&" | "|" | "^" | "<<" | ">>" | "=="
+                | "!=" | "<" | "<=" | ">" | ">="),
+            )
+            | Kind::Keyword(op @ ("len" | "not"))
+                if !arena =>
+            {
+                self.cursor += 1;
+                RequiredOperation::Operator(match op {
+                    "len" => "len",
+                    "not" => "not",
+                    "~" => "~",
+                    _ => crate::ast::ComparisonOperator::from_symbol(op)
+                        .map(|o| o.symbol())
+                        .unwrap_or_else(|| {
+                            crate::ast::BinaryOperator::from_symbol(op)
+                                .unwrap()
+                                .c_symbol()
+                        }),
+                })
+            }
+            _ => {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("generic.needs", "expected a supported operator or method"),
+                ));
+            }
+        };
+        let parameters = self.list(Self::type_atom)?;
+        if parameters.contains(&Type::Void) {
+            return Err(location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("type.void", "parameters cannot have type void"),
+            ));
+        }
+        self.expect(FixedToken::Symbol("->"))?;
+        let result = self.parse_type()?;
+        let errors = self.error_spec()?;
+        if self.cursor != end {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("generic.needs", "unexpected tokens in requirement"),
+            ));
+        }
+        if let RequiredOperation::Operator(op) = operation {
+            let valid_arity = if matches!(op, "len" | "not" | "~") {
+                parameters.is_empty()
+            } else if op == "-" {
+                parameters.len() <= 1
+            } else {
+                parameters.len() == 1
+            };
+            let valid_result = if matches!(op, "==" | "!=" | "<" | "<=" | ">" | ">=" | "not") {
+                result == Type::Bool
+            } else if op == "len" {
+                result == Type::Integer(IntegerType::Len)
+            } else {
+                result != Type::Void
+            };
+            if !valid_arity || !valid_result || !errors.is_empty() {
+                return Err(location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("generic.needs", "invalid operator requirement signature"),
+                ));
+            }
+        }
+        let need = Need {
+            parameter,
+            operation,
+            parameters,
+            result,
+            errors,
+            location,
+        };
+        Ok(need)
     }
 }
 

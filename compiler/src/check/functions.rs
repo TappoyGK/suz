@@ -131,8 +131,15 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
         ))),
         ..Scope::default()
     };
-    let (globals, mut warnings) =
-        declarations::resolve(&program.bindings, &program.enums, &program.structs, scope)?;
+    let (globals, mut warnings) = declarations::resolve(&program.bindings, &program.enums, scope)?;
+    for group in &program.need_groups {
+        definition_scope(
+            &globals,
+            &group.type_parameters,
+            &group.needs,
+            group.location,
+        )?;
+    }
     for declaration in &program.fnshapes {
         // 型引数のない宣言には、空の型引数スコープを作らない。
         let context;

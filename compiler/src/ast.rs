@@ -535,6 +535,7 @@ pub(crate) struct FnShapeDeclaration {
 /// 構文解析の結果全体。型宣言・トップレベル束縛・関数とallowの範囲を保持する。
 /// [`crate::check`] が検査して [`crate::check::ir::CheckedProgram`] へ変換する。
 pub(crate) struct Program {
+    pub need_groups: Vec<generics::NeedGroup>,
     pub applications: Vec<generics::Application>,
     pub externs: Vec<ExternFunction>,
     pub fnshapes: Vec<FnShapeDeclaration>,

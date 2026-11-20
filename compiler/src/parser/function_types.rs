@@ -25,8 +25,10 @@ fn parser<'a, 's>(
     structs: &'a [StructDeclaration],
     declarations: &'a [FnShapeDeclaration],
     applications: crate::ast::generics::Applications,
+    need_groups: std::rc::Rc<super::need_groups::Groups>,
 ) -> Parser<'a, 's> {
     Parser {
+        need_groups,
         applications,
         type_parameters: Vec::new(),
         pending_needs: Vec::new(),
@@ -48,7 +50,14 @@ fn parser<'a, 's>(
 
 pub(super) fn headers(tokens: &[Token<'_>]) -> Result<Vec<FnShapeDeclaration>, Diagnostic> {
     let mut result = Vec::new();
-    let mut p = parser(tokens, &[], &[], &[], Default::default());
+    let mut p = parser(
+        tokens,
+        &[],
+        &[],
+        &[],
+        Default::default(),
+        Default::default(),
+    );
     let mut depth = 0usize;
     while p.token().kind != Kind::End {
         if depth == 0 && p.token().kind == Kind::Keyword("fnshape") {
@@ -96,6 +105,7 @@ pub(super) fn resolve(
     structs: &mut [StructDeclaration],
     declarations: &mut [FnShapeDeclaration],
     applications: crate::ast::generics::Applications,
+    need_groups: std::rc::Rc<super::need_groups::Groups>,
 ) -> Result<Vec<FunctionType>, Diagnostic> {
     if declarations.is_empty() {
         return Ok(Vec::new());
@@ -112,7 +122,14 @@ pub(super) fn resolve(
             ));
         }
     }
-    let mut p = parser(tokens, enums, structs, declarations, applications.clone());
+    let mut p = parser(
+        tokens,
+        enums,
+        structs,
+        declarations,
+        applications.clone(),
+        need_groups,
+    );
     let mut ranges = std::collections::BTreeMap::new();
     // @needsを持たないソースでは、要求の位置を探す二度目の構文走査を行わない。
     if tokens.iter().any(|token| token.kind == Kind::Symbol("@")) {

@@ -16,6 +16,7 @@ mod functions;
 mod generics;
 mod logs;
 mod names;
+mod need_groups;
 pub(crate) mod nesting;
 mod statements;
 pub(crate) mod structs;
@@ -35,6 +36,7 @@ struct Parser<'a, 's> {
     applications: crate::ast::generics::Applications,
     type_parameters: Vec<crate::ast::generics::TypeParameter>,
     pending_needs: Vec<(usize, usize)>,
+    need_groups: std::rc::Rc<need_groups::Groups>,
     generic_functions: std::rc::Rc<std::collections::BTreeSet<String>>,
     allows: Vec<crate::warnings::AllowScope>,
     tokens: &'a [Token<'s>],
@@ -148,6 +150,7 @@ impl<'a, 's> Parser<'a, 's> {
 }
 
 pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
+    let need_groups = need_groups::collect(tokens)?;
     let enums = enums::collect(tokens)?;
     let mut fnshapes = function_types::headers(tokens)?;
     let applications = crate::ast::generics::Applications::default();
@@ -161,15 +164,23 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
             ));
         }
     }
-    let mut structs = structs::collect(tokens, &enums, &fnshapes, applications.clone())?;
+    let mut structs = structs::collect(
+        tokens,
+        &enums,
+        &fnshapes,
+        applications.clone(),
+        need_groups.clone(),
+    )?;
     let function_types = function_types::resolve(
         tokens,
         &enums,
         &mut structs,
         &mut fnshapes,
         applications.clone(),
+        need_groups.clone(),
     )?;
     let mut p = Parser {
+        need_groups: need_groups.clone(),
         applications: applications.clone(),
         type_parameters: Vec::new(),
         pending_needs: Vec::new(),
@@ -187,6 +198,7 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
         depth: 0,
         limit_location: None,
     };
+    let groups = p.validate_need_groups()?;
     let mut externs = Vec::new();
     let mut bindings = Vec::new();
     let mut functions = Vec::new();
@@ -211,6 +223,10 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
             Kind::Symbol("@") => {
                 p.collect_need()?;
                 continue;
+            }
+            Kind::Keyword("needs") => {
+                let id = p.need_groups.starts[&p.cursor];
+                p.cursor = p.need_groups.declarations[id].end;
             }
             Kind::Keyword("extern") => externs.extend(p.extern_block()?),
             Kind::Keyword("fix") => bindings.push(p.top_level_binding()?),
@@ -278,7 +294,7 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
                     ErrorKind::InvalidSource,
                     crate::diagnostic!(
                         "decl.top-level",
-                        "expected a fix, fn, fnshape, struct, enum, error or extern declaration"
+                        "expected a fix, fn, fnshape, needs, struct, enum, error or extern declaration"
                     ),
                 ));
             }
@@ -301,6 +317,7 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
         ));
     }
     Ok(Program {
+        need_groups: groups,
         applications: applications.borrow().entries.clone(),
         externs,
         allows: p.allows,

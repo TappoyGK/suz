@@ -25,6 +25,7 @@ const KEYWORDS: &[&str] = &[
     "fn",
     "self",
     "fnshape",
+    "needs",
     "static",
     "struct",
     "enum",

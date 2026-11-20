@@ -148,8 +148,10 @@ pub(super) fn collect(
     enums: &[EnumDeclaration],
     fnshapes: &[crate::ast::FnShapeDeclaration],
     applications: crate::ast::generics::Applications,
+    need_groups: std::rc::Rc<super::need_groups::Groups>,
 ) -> Result<Vec<StructDeclaration>, Diagnostic> {
     let mut p = Parser {
+        need_groups,
         applications,
         type_parameters: Vec::new(),
         pending_needs: Vec::new(),
@@ -180,7 +182,9 @@ pub(super) fn collect(
         if depth == 0
             && matches!(
                 p.token().kind,
-                Kind::Keyword("fn" | "arena" | "fnshape" | "fix" | "extern" | "enum" | "error")
+                Kind::Keyword(
+                    "fn" | "arena" | "fnshape" | "needs" | "fix" | "extern" | "enum" | "error"
+                )
             )
         {
             p.pending_needs.clear();
@@ -317,6 +321,7 @@ pub(super) fn collect(
         p.cursor += 1;
     }
     p.structs = &headers;
+    p.prepare_need_groups()?;
     let mut declarations = headers.clone();
     for (decl, ranges) in declarations.iter_mut().zip(requirement_ranges) {
         p.cursor = decl.start + 2;

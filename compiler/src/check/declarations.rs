@@ -250,7 +250,6 @@ impl Resolver<'_> {
 pub(super) fn resolve(
     declarations: &[TopLevelBinding],
     enums: &[crate::ast::EnumDeclaration],
-    structs: &[crate::ast::StructDeclaration],
     scope: Scope,
 ) -> Result<(Scope, Vec<Location>), Diagnostic> {
     let mut resolver = Resolver {
@@ -268,7 +267,7 @@ pub(super) fn resolve(
             .structs
             .shapes
             .contains_name(&declaration.name)
-            || structs.iter().any(|s| s.name == declaration.name)
+            || resolver.bindings.structs.contains_name(&declaration.name)
             || enums.iter().any(|e| e.name == declaration.name)
             || declaration.name == "main"
             || resolver

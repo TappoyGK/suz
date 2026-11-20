@@ -307,3 +307,5 @@ mod generic_structs;
 
 #[path = "spec_cases/generic_function_values.rs"]
 mod generic_function_values;
+#[path = "spec_cases/need_groups.rs"]
+mod need_groups;
