@@ -161,20 +161,33 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
 // 浮動小数点リテラルと汎用floatの結果は、浮動小数点演算を選択する。
 // 結果を作るオペランドだけを調べ、条件や型変換前の値は含めない。
 pub(super) fn has_float_source(expr: &Expression, bindings: &Scope) -> bool {
+    // 算術式の型ヒントから繰り返し呼ばれる探索。再帰中の判定と呼び出し枠を
+    // 既存の整数式へ持ち込まないよう、定義の有無は入口で一度だけ選ぶ。
+    if bindings.has_operator_methods {
+        float_source::<true>(expr, bindings)
+    } else {
+        float_source::<false>(expr, bindings)
+    }
+}
+
+fn float_source<const OPERATOR_METHODS: bool>(expr: &Expression, bindings: &Scope) -> bool {
     let key = std::ptr::from_ref(expr) as usize;
     if bindings.hint_depth.get() > 0
         && let Some(found) = bindings.float_hints.borrow().get(&key)
     {
         return *found;
     }
-    let found = has_float_source_inner(expr, bindings);
+    let found = has_float_source_inner::<OPERATOR_METHODS>(expr, bindings);
     if bindings.hint_depth.get() > 0 {
         bindings.float_hints.borrow_mut().insert(key, found);
     }
     found
 }
 
-fn has_float_source_inner(expr: &Expression, bindings: &Scope) -> bool {
+fn has_float_source_inner<const OPERATOR_METHODS: bool>(
+    expr: &Expression,
+    bindings: &Scope,
+) -> bool {
     match &expr.kind {
         ExpressionKind::MethodCall { .. }
         | ExpressionKind::Receiver { .. }
@@ -192,9 +205,9 @@ fn has_float_source_inner(expr: &Expression, bindings: &Scope) -> bool {
                     .is_some_and(|f| f.result.is_float())
             }
         }
-        ExpressionKind::Match { arms, .. } => {
-            arms.iter().any(|arm| has_float_source(&arm.body, bindings))
-        }
+        ExpressionKind::Match { arms, .. } => arms
+            .iter()
+            .any(|arm| float_source::<OPERATOR_METHODS>(&arm.body, bindings)),
         ExpressionKind::Block { statements, value } => {
             blocks::has_float_source(statements, value, bindings)
         }
@@ -202,20 +215,21 @@ fn has_float_source_inner(expr: &Expression, bindings: &Scope) -> bool {
         ExpressionKind::ArithmeticHandler { operand: inner, .. }
         | ExpressionKind::Group(inner)
         | ExpressionKind::BitNot(inner)
-        | ExpressionKind::Negate(inner) => has_float_source(inner, bindings),
+        | ExpressionKind::Negate(inner) => float_source::<OPERATOR_METHODS>(inner, bindings),
         ExpressionKind::Binary {
             operator,
             left,
             right,
         } => {
-            if super::operator_methods::supported(*operator)
+            if OPERATOR_METHODS
+                && super::operator_methods::supported(*operator)
                 && super::operator_methods::owner(left, bindings).is_some()
             {
                 return super::operator_methods::hint(operator.c_symbol(), left, right, bindings)
                     .is_some_and(Type::is_float);
             }
-            has_float_source(left, bindings)
-                || (!operator.is_shift() && has_float_source(right, bindings))
+            float_source::<OPERATOR_METHODS>(left, bindings)
+                || (!operator.is_shift() && float_source::<OPERATOR_METHODS>(right, bindings))
         }
         ExpressionKind::If {
             branches,
@@ -223,8 +237,8 @@ fn has_float_source_inner(expr: &Expression, bindings: &Scope) -> bool {
         } => {
             branches
                 .iter()
-                .any(|(_, value)| has_float_source(value, bindings))
-                || has_float_source(otherwise, bindings)
+                .any(|(_, value)| float_source::<OPERATOR_METHODS>(value, bindings))
+                || float_source::<OPERATOR_METHODS>(otherwise, bindings)
         }
         _ => false,
     }
@@ -387,11 +401,12 @@ fn expression_inner(
     } else {
         required
     };
-    let checked = if let ExpressionKind::Binary {
-        operator,
-        left,
-        right,
-    } = &expr.kind
+    let checked = if bindings.has_operator_methods
+        && let ExpressionKind::Binary {
+            operator,
+            left,
+            right,
+        } = &expr.kind
         && super::operator_methods::owner(left, bindings).is_some()
         && super::operator_methods::supported(*operator)
     {

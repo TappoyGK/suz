@@ -80,7 +80,8 @@ pub(super) fn supported(op: crate::ast::BinaryOperator) -> bool {
 }
 
 pub(super) fn binary(expr: &Expression, scope: &Scope) -> bool {
-    matches!(&expr.kind, ExpressionKind::Binary { operator, left, .. } if supported(*operator) && owner(left, scope).is_some())
+    scope.has_operator_methods
+        && matches!(&expr.kind, ExpressionKind::Binary { operator, left, .. } if supported(*operator) && owner(left, scope).is_some())
 }
 
 pub(super) fn hint(op: &str, left: &Expression, right: &Expression, scope: &Scope) -> Option<Type> {

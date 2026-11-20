@@ -97,16 +97,21 @@ fn error(location: Location) -> Diagnostic {
         ),
     )
 }
-fn build(expr: &Expression, bindings: &Scope) -> Result<Exact, Diagnostic> {
+// 演算子定義の有無は式全体で一定。入口で経路を選び、定義のないプログラムでは
+// 長い整数式の各節に演算子メソッドの判定を追加しない。
+fn build<const OPERATOR_METHODS: bool>(
+    expr: &Expression,
+    bindings: &Scope,
+) -> Result<Exact, Diagnostic> {
     let location = expr.location;
     let (kind, range) = match &expr.kind {
-        ExpressionKind::Group(e) => return build(e, bindings),
+        ExpressionKind::Group(e) => return build::<OPERATOR_METHODS>(e, bindings),
         ExpressionKind::Integer { digits, negative } => {
             let value = Int::new(*negative, digits.parse().map_err(|_| error(location))?);
             (ExactKind::Literal(value), Some(Range::point(value)))
         }
         ExpressionKind::Negate(e) => {
-            let e = build(e, bindings)?;
+            let e = build::<OPERATOR_METHODS>(e, bindings)?;
             let range = e.range.map(|r| Range {
                 min: r.max.neg(),
                 max: r.min.neg(),
@@ -117,9 +122,11 @@ fn build(expr: &Expression, bindings: &Scope) -> Result<Exact, Diagnostic> {
             operator,
             left,
             right,
-        } if is_operator(expr) && !super::operator_methods::binary(expr, bindings) => {
-            let left = build(left, bindings)?;
-            let right = build(right, bindings)?;
+        } if is_operator(expr)
+            && (!OPERATOR_METHODS || !super::operator_methods::binary(expr, bindings)) =>
+        {
+            let left = build::<OPERATOR_METHODS>(left, bindings)?;
+            let right = build::<OPERATOR_METHODS>(right, bindings)?;
             let range = if left.domains.is_some() || right.domains.is_some() {
                 None
             } else {
@@ -224,7 +231,11 @@ pub(super) fn check(
     bindings: &Scope,
     handled: bool,
 ) -> Result<CheckedExpression, Diagnostic> {
-    let exact = build(expr, bindings)?;
+    let exact = if bindings.has_operator_methods {
+        build::<true>(expr, bindings)?
+    } else {
+        build::<false>(expr, bindings)?
+    };
     if exact.range.is_none() && !handled {
         return Err(exact.location.error(
             ErrorKind::InvalidSource,

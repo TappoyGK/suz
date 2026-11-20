@@ -148,6 +148,14 @@ pub(super) fn check(
                     ..
                 }
             );
+            let operator_symbol = match &expr.kind {
+                ExpressionKind::Binary { operator, .. }
+                    if super::super::operator_methods::supported(*operator) =>
+                {
+                    Some(operator.c_symbol())
+                }
+                _ => None,
+            };
             let type_error = |ty: Type| {
                 if ty == Type::Integer(IntegerType::Len)
                     && (!arithmetic
@@ -186,9 +194,13 @@ pub(super) fn check(
                                 "symbol.operations",
                                 "symbol does not support arithmetic or bitwise operations"
                             ),
-                            Type::Struct(_) | Type::Enum(_) if matches!(&expr.kind,
-                                ExpressionKind::Binary { operator, .. } if super::super::operator_methods::supported(*operator)) => crate::diagnostic!(
-                                    "operator.overload", "no matching operator; accepted right-hand types: none"),
+                            Type::Struct(_) | Type::Enum(_) if operator_symbol.is_some() => {
+                                crate::diagnostic!(
+                                    "operator.overload",
+                                    "no matching operator {}; accepted right-hand types: none",
+                                    operator_symbol.unwrap()
+                                )
+                            }
                             _ => crate::diagnostic!(
                                 "expr.operator-types",
                                 "invalid operand type for this operator"
@@ -411,7 +423,12 @@ pub(super) fn check(
                     if matches!(ty, Type::Struct(_) | Type::Enum(_)) {
                         crate::diagnostic!(
                             "operator.overload",
-                            "no matching operator; accepted right-hand types: none"
+                            "no matching operator {}; accepted right-hand types: none",
+                            operators
+                                .iter()
+                                .find(|op| !op.is_equality())
+                                .unwrap()
+                                .symbol()
                         )
                     } else {
                         crate::diagnostic!(

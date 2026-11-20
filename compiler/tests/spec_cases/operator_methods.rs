@@ -280,3 +280,26 @@ fn operator_methods_comparison_chains_do_not_generate_block_helpers() {
     let compiled = suz::compile(source).unwrap();
     assert!(!compiled.contains("suz_block_"));
 }
+
+#[test]
+fn missing_operator_diagnostics_include_the_symbol_without_any_definitions() {
+    for (declaration, value) in [
+        ("struct Num { v: i32 }", "Num { v: 1 }"),
+        ("enum Num: u8 { A, B }", "Num.A"),
+    ] {
+        for operator in ["+", "-", "*", "/", "<", "<=", ">", ">="] {
+            let source = format!(
+                "{declaration}\nfn main() -> u8 {{ fix a = {value}\nfix b = a {operator} a\nreturn 0 }}"
+            );
+            let error = suz::compile(source.as_bytes()).unwrap_err();
+            assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
+            assert_eq!(error.rule(), "operator.overload");
+            assert!(
+                error.to_string().contains(&format!(
+                    "no matching operator {operator}; accepted right-hand types: none"
+                )),
+                "{source}\n{error}"
+            );
+        }
+    }
+}
