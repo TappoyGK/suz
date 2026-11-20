@@ -27,6 +27,15 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
                 Type::Enum(ty) => program.enums[ty.id].variants.iter().any(|v| v == member),
                 _ => unreachable!(),
             };
+            if method.operator.is_some() && signatures.contains_key(&function.name) {
+                return Err(function.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "operator.overload",
+                        "duplicate operator definition for this right-hand type or numeric family"
+                    ),
+                ));
+            }
             if collision || signatures.contains_key(&function.name) {
                 return Err(function.location.error(
                     ErrorKind::InvalidSource,

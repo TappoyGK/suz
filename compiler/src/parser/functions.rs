@@ -302,7 +302,7 @@ impl Parser<'_, '_> {
         let owner_name = name;
         let ordinary_name = matches!(self.token().kind, Kind::Ident(_));
         self.cursor += 1;
-        let (name, method) = if matches!(self.token().kind, Kind::Symbol("." | "#")) {
+        let (mut name, method) = if matches!(self.token().kind, Kind::Symbol("." | "#")) {
             let mutable = self.token().kind == Kind::Symbol("#");
             let owner = self
                 .structs
@@ -327,21 +327,59 @@ impl Parser<'_, '_> {
             let owner_token = &self.tokens[self.cursor - 1];
             let separator = self.token();
             self.cursor += 1;
-            let Kind::Ident(method_name) = self.token().kind else {
-                return Err(self.error(
-                    ErrorKind::InvalidSource,
-                    crate::diagnostic!("method.name", "expected a method name"),
-                ));
+            let (method_name, operator) = match self.token().kind {
+                Kind::Ident(name) => (name, None),
+                Kind::Symbol(op @ ("+" | "-" | "*" | "/" | "<" | "<=" | ">" | ">=")) => {
+                    let symbol = match op {
+                        "+" => "+",
+                        "-" => "-",
+                        "*" => "*",
+                        "/" => "/",
+                        "<" => "<",
+                        "<=" => "<=",
+                        ">" => ">",
+                        ">=" => ">=",
+                        _ => unreachable!(),
+                    };
+                    (op, Some(symbol))
+                }
+                Kind::Symbol("==" | "!=") => {
+                    return Err(self.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "operator.no-equality",
+                            "equality operators cannot be defined"
+                        ),
+                    ));
+                }
+                _ => {
+                    return Err(self.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "operator.method",
+                            "expected a method name or a supported operator"
+                        ),
+                    ));
+                }
             };
             if owner_token.span.end != separator.span.start
                 || separator.span.end != self.token().span.start
             {
                 return Err(self.error(ErrorKind::InvalidSource, crate::diagnostic!("method.decl", "method declarations cannot separate the type, receiver symbol and method name")));
             }
-            super::names::check(super::names::Shape::Value, method_name, self.location())?;
+            if operator.is_none() {
+                super::names::check(super::names::Shape::Value, method_name, self.location())?;
+            }
             let name = format!("{owner_name}.{method_name}");
             self.cursor += 1;
-            (name, Some(Method { owner, mutable }))
+            (
+                name,
+                Some(Method {
+                    owner,
+                    mutable,
+                    operator,
+                }),
+            )
         } else {
             if !ordinary_name {
                 return Err(location.error(
@@ -389,6 +427,26 @@ impl Parser<'_, '_> {
             (parameters, self.parse_type()?)
         };
         if let Some(method) = method {
+            if let Some(operator) = method.operator {
+                if method.mutable
+                    || parameters.len() != 1
+                    || result == Type::Void
+                    || (matches!(operator, "<" | "<=" | ">" | ">=") && result != Type::Bool)
+                {
+                    return Err(location.error(ErrorKind::InvalidSource, crate::diagnostic!(
+                        "operator.method", "binary operator methods require a read receiver, one parameter and a value result; comparisons must return bool")));
+                }
+                // 数値は種類ごとに1定義。その他は型ごとの一意な内部名にする。
+                let rhs = parameters[0].ty;
+                let key = if rhs.is_integer() {
+                    "integer".into()
+                } else if rhs.is_float() {
+                    "float".into()
+                } else {
+                    format!("{rhs:?}")
+                };
+                name.push_str(&format!("@{key}"));
+            }
             parameters.insert(
                 0,
                 Parameter {
@@ -399,6 +457,12 @@ impl Parser<'_, '_> {
             );
         }
         let errors = self.error_spec()?;
+        if method.is_some_and(|m| m.operator.is_some()) && !errors.is_empty() {
+            return Err(location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("operator.method", "operator methods cannot return errors"),
+            ));
+        }
         if name == "main" && !errors.is_empty() {
             return Err(location.error(
                 ErrorKind::InvalidSource,

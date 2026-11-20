@@ -56,6 +56,15 @@ pub(super) fn check(
                 }
                 _ => {}
             }
+            if super::super::operator_methods::binary(call, bindings) {
+                return Err(expr.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "operator.arith-boundary",
+                        "operator method calls cannot have an or handler"
+                    ),
+                ));
+            }
             let mut checked = if super::super::exact::is_operator(operand)
                 && super::super::exact::integer(operand, bindings)
             {
@@ -311,6 +320,9 @@ pub(super) fn check(
             operators,
             operands,
         } => {
+            if let Some(value) = super::super::operator_methods::comparison(expr, bindings)? {
+                return Ok(value);
+            }
             let ty = super::joined_type(
                 operands
                     .iter()

@@ -117,7 +117,7 @@ fn build(expr: &Expression, bindings: &Scope) -> Result<Exact, Diagnostic> {
             operator,
             left,
             right,
-        } if is_operator(expr) => {
+        } if is_operator(expr) && !super::operator_methods::binary(expr, bindings) => {
             let left = build(left, bindings)?;
             let right = build(right, bindings)?;
             let range = if left.domains.is_some() || right.domains.is_some() {

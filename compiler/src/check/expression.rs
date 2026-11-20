@@ -125,6 +125,11 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
             left,
             right,
         } => {
+            if super::operator_methods::supported(*operator)
+                && super::operator_methods::owner(left, bindings).is_some()
+            {
+                return super::operator_methods::hint(operator.c_symbol(), left, right, bindings);
+            }
             let a = operand_type(left, bindings);
             let b = operand_type(right, bindings);
             if operator.is_shift() {
@@ -202,6 +207,12 @@ fn has_float_source_inner(expr: &Expression, bindings: &Scope) -> bool {
             left,
             right,
         } => {
+            if super::operator_methods::supported(*operator)
+                && super::operator_methods::owner(left, bindings).is_some()
+            {
+                return super::operator_methods::hint(operator.c_symbol(), left, right, bindings)
+                    .is_some_and(Type::is_float);
+            }
             has_float_source(left, bindings)
                 || (!operator.is_shift() && has_float_source(right, bindings))
         }
@@ -375,7 +386,23 @@ fn expression_inner(
     } else {
         required
     };
-    let checked = if super::exact::is_operator(expr) && super::exact::integer(expr, bindings) {
+    let checked = if let ExpressionKind::Binary {
+        operator,
+        left,
+        right,
+    } = &expr.kind
+        && super::operator_methods::owner(left, bindings).is_some()
+        && super::operator_methods::supported(*operator)
+    {
+        super::operator_methods::call(
+            expr,
+            operator.c_symbol(),
+            left,
+            right,
+            inference_hint,
+            bindings,
+        )?
+    } else if super::exact::is_operator(expr) && super::exact::integer(expr, bindings) {
         super::exact::check(expr, inference_hint, bindings, false)?
     } else {
         match &expr.kind {

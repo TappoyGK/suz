@@ -324,12 +324,12 @@ fn struct_fields_reject_invalid_declarations_access_and_overlapping_writes() {
         (
             "struct Item { x: u8 }",
             "fix p = Item { x: 1 }\np < p",
-            "expr.operator-types",
+            "operator.overload",
         ),
         (
             "struct Item { x: u8 }",
             "fix p = Item { x: 1 }\np + p",
-            "expr.operator-types",
+            "operator.overload",
         ),
         (
             "struct Item { x: u8 }",
