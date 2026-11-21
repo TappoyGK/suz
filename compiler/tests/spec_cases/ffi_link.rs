@@ -20,8 +20,8 @@ fn cc() -> Command {
     Command::new(std::env::var_os("CC").unwrap_or_else(|| "clang".into()))
 }
 
-#[test]
-fn ffi_external_objects_libraries_and_exported_paths() {
+// 同じ外部ライブラリを使う各経路を別テストにする。CLIとリンクの検査はBatchへ置き換えない。
+fn ffi_external_route(route: &str) {
     let root = TemporaryDirectory::new();
     // シェルとして解釈したり、入力ソースの場所を相対パスの基準にすると失敗する配置。
     let vendor_name = "vendor '$(touch injected) space";
@@ -77,92 +77,131 @@ return 0 }
         "--link-library",
         "dep",
     ];
-    success(
-        suz(&root.0)
-            .args(["build", "src/main.suz", "-o", "app"])
-            .args(flags)
-            .output()
-            .unwrap(),
-    );
-    success(Command::new(root.0.join("app")).output().unwrap());
-    success(
-        suz(&root.0)
-            .args(["run", "src/main.suz"])
-            .args(flags)
-            .output()
-            .unwrap(),
-    );
-    success(
-        suz(&root.0)
-            .args(["emit-c", "src/main.suz", "-o", "emitted"])
-            .args(flags)
-            .output()
-            .unwrap(),
-    );
-    let elsewhere = TemporaryDirectory::new();
-    fs::rename(root.0.join("emitted"), elsewhere.0.join("moved")).unwrap();
-    let moved = elsewhere.0.join("moved");
-    let mut build = Command::new(moved.join("scripts/build-c.sh"));
-    build
-        .current_dir(&elsewhere.0)
-        .arg(moved.join("program.c"))
-        .args(["-o", "app"]);
-    for name in ["CFLAGS", "CPPFLAGS", "LDFLAGS", "SUZ_CFLAGS"] {
-        build.env_remove(name);
+    match route {
+        "build" => {
+            success(
+                suz(&root.0)
+                    .args(["build", "src/main.suz", "-o", "app"])
+                    .args(flags)
+                    .output()
+                    .unwrap(),
+            );
+            success(Command::new(root.0.join("app")).output().unwrap());
+        }
+        "run" => {
+            success(
+                suz(&root.0)
+                    .args(["run", "src/main.suz"])
+                    .args(flags)
+                    .output()
+                    .unwrap(),
+            );
+        }
+        "exported" => {
+            success(
+                suz(&root.0)
+                    .args(["emit-c", "src/main.suz", "-o", "emitted"])
+                    .args(flags)
+                    .output()
+                    .unwrap(),
+            );
+            let elsewhere = TemporaryDirectory::new();
+            fs::rename(root.0.join("emitted"), elsewhere.0.join("moved")).unwrap();
+            let moved = elsewhere.0.join("moved");
+            let mut build = Command::new(moved.join("scripts/build-c.sh"));
+            build
+                .current_dir(&elsewhere.0)
+                .arg(moved.join("program.c"))
+                .args(["-o", "app"]);
+            for name in ["CFLAGS", "CPPFLAGS", "LDFLAGS", "SUZ_CFLAGS"] {
+                build.env_remove(name);
+            }
+            success(build.output().unwrap());
+            success(Command::new(elsewhere.0.join("app")).output().unwrap());
+            assert!(!elsewhere.0.join("injected").exists());
+            assert!(!moved.join(vendor_name).exists());
+        }
+        "direct" => {
+            // 保存せずに、ビルドスクリプトへ直接渡す場合も実行時の作業ディレクトリを基準にする。
+            success(
+                suz(&root.0)
+                    .args(["emit-c", "src/main.suz", "-o", "plain"])
+                    .output()
+                    .unwrap(),
+            );
+            let mut direct = Command::new(root.0.join("plain/scripts/build-c.sh"));
+            direct
+                .current_dir(&root.0)
+                .args(["plain/program.c", "-o", "direct"])
+                .args(flags);
+            for name in ["CFLAGS", "CPPFLAGS", "LDFLAGS", "SUZ_CFLAGS"] {
+                direct.env_remove(name);
+            }
+            success(direct.output().unwrap());
+            success(Command::new(root.0.join("direct")).output().unwrap());
+        }
+        "missing" | "duplicate" => {
+            let result = suz(&root.0)
+                .args([
+                    "build",
+                    "src/main.suz",
+                    "-o",
+                    "failed",
+                    "--include-dir",
+                    vendor_name,
+                    "--library-dir",
+                    vendor_name,
+                ])
+                .args(if route == "missing" {
+                    vec![]
+                } else {
+                    vec![
+                        "--link-object",
+                        &object,
+                        "--link-library",
+                        "dep",
+                        "--link-object",
+                        &object,
+                    ]
+                })
+                .output()
+                .unwrap();
+            assert_eq!(result.status.code(), Some(4), "{result:?}");
+            assert!(!root.0.join("failed").exists());
+        }
+        _ => unreachable!(),
     }
-    success(build.output().unwrap());
-    success(Command::new(elsewhere.0.join("app")).output().unwrap());
-    assert!(!elsewhere.0.join("injected").exists());
-    assert!(!root.0.join("injected").exists());
-    assert!(!moved.join(vendor_name).exists());
+    assert!(!root.0.join("injected").exists(), "{route}");
+}
 
-    // 保存せずに、ビルドスクリプトへ直接渡す場合も実行時の作業ディレクトリを基準にする。
-    success(
-        suz(&root.0)
-            .args(["emit-c", "src/main.suz", "-o", "plain"])
-            .output()
-            .unwrap(),
-    );
-    let mut direct = Command::new(root.0.join("plain/scripts/build-c.sh"));
-    direct
-        .current_dir(&root.0)
-        .args(["plain/program.c", "-o", "direct"])
-        .args(flags);
-    for name in ["CFLAGS", "CPPFLAGS", "LDFLAGS", "SUZ_CFLAGS"] {
-        direct.env_remove(name);
-    }
-    success(direct.output().unwrap());
-    success(Command::new(root.0.join("direct")).output().unwrap());
+#[test]
+fn ffi_external_build() {
+    ffi_external_route("build");
+}
 
-    // 未解決シンボルと競合定義は、Suz型検査の成功とは別にリンクで失敗する。
-    for extra in [
-        vec![],
-        vec![
-            "--link-object",
-            &object,
-            "--link-library",
-            "dep",
-            "--link-object",
-            &object,
-        ],
-    ] {
-        let result = suz(&root.0)
-            .args([
-                "build",
-                "src/main.suz",
-                "-o",
-                "failed",
-                "--include-dir",
-                vendor_name,
-                "--library-dir",
-                vendor_name,
-            ])
-            .args(extra)
-            .output()
-            .unwrap();
-        assert_eq!(result.status.code(), Some(4), "{result:?}");
-        assert!(!root.0.join("failed").exists());
-    }
+#[test]
+fn ffi_external_run() {
+    ffi_external_route("run");
+}
+
+#[test]
+fn ffi_external_exported() {
+    ffi_external_route("exported");
+}
+
+#[test]
+fn ffi_external_direct() {
+    ffi_external_route("direct");
+}
+
+#[test]
+fn ffi_external_missing() {
+    ffi_external_route("missing");
+}
+
+#[test]
+fn ffi_external_duplicate() {
+    ffi_external_route("duplicate");
 }
 
 #[test]

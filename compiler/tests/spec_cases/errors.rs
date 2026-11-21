@@ -93,7 +93,7 @@ fn fallible_signatures_reject_unhandled_or_undeclared_errors() {
 
 #[test]
 fn panic_handlers_work_for_existing_operations_and_calls() {
-    for operation in [
+    let cases = [
         "risky()",
         "`bad` as i32",
         "`bad` as% i32",
@@ -101,15 +101,22 @@ fn panic_handlers_work_for_existing_operations_and_calls() {
         "`a`[2]",
         "`a`[0:2]",
         "300 as u8",
-    ] {
-        let source = format!(
+    ];
+    let sources = cases.iter().map(|operation| {
+        format!(
             "error Err {{ Bad }}\nfn risky() -> i32 or Err {{ fail Err.Bad }}\nfn main() -> u8 {{ fix reason = 7\nfix n = {operation} or panic `bad ${{reason}}`\nreturn 0 }}"
-        );
-        let output = compile_and_run_c23(&source, "panic-errors.suz");
+        )
+    }).collect::<Vec<_>>();
+    let inputs = sources
+        .iter()
+        .map(|source| (source.as_str(), "panic-errors.suz"))
+        .collect::<Vec<_>>();
+    let outputs = crate::test_util::compile_and_run_c23_batch(&inputs);
+    for (operation, output) in cases.iter().zip(outputs) {
         assert_eq!(output.status.code(), Some(101), "{operation}: {output:?}");
         assert!(
             String::from_utf8_lossy(&output.stderr).ends_with(": bad 7\n"),
-            "{output:?}"
+            "{operation}: {output:?}"
         );
     }
 }

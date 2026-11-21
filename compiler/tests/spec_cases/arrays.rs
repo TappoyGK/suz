@@ -165,7 +165,7 @@ fn array_types_initializers_and_recursive_dependencies_are_checked() {
 
 #[test]
 fn array_failures_precede_later_indices_and_assignment_values() {
-    for (body, reason) in [
+    let cases = [
         ("a[-1:1][rhs()]#[rhs()] = rhs()", "start=-1 end=1 length=2"),
         ("a[2:1][rhs()]#[rhs()] = rhs()", "start=2 end=1 length=2"),
         ("a[-1][:]#[rhs()] = rhs()", "dimension=1 index=-1 length=2"),
@@ -176,15 +176,22 @@ fn array_failures_precede_later_indices_and_assignment_values() {
 a[0]#[huge] = rhs()",
             "dimension=2 index=18446744073709551615 length=3",
         ),
-    ] {
-        let source = format!(
+    ];
+    let sources = cases.iter().map(|(body, _)| {
+        format!(
             "fn rhs() -> i64 {{ panic `RHS evaluated` }}\nfn main() -> u8 {{ fix ptr a = new [0; 2, 3]\n{body}\nreturn 0 }}"
-        );
-        let output = compile_and_run_c23(&source, "array-bounds.suz");
-        assert!(!output.status.success());
+        )
+    }).collect::<Vec<_>>();
+    let inputs = sources
+        .iter()
+        .map(|source| (source.as_str(), "array-bounds.suz"))
+        .collect::<Vec<_>>();
+    let outputs = crate::test_util::compile_and_run_c23_batch(&inputs);
+    for ((body, reason), output) in cases.iter().zip(outputs) {
+        assert!(!output.status.success(), "case {body}: {output:?}");
         let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(stderr.contains(reason), "{stderr}");
-        assert!(!stderr.contains("RHS evaluated"), "{stderr}");
+        assert!(stderr.contains(reason), "{body}: {stderr}");
+        assert!(!stderr.contains("RHS evaluated"), "{body}: {stderr}");
     }
 }
 
@@ -213,21 +220,31 @@ fn main() -> u8 {
 
 #[test]
 fn runtime_dimensions_and_sizes_fail_before_allocating() {
-    for (dimensions, arguments, reason) in [
+    let cases = [
         ("a", "-1, 0", "dimension 1"),
         ("a", "2147483648, 0", "dimension 1"),
         ("a, b", "2147483647, 2147483647", "size_t"),
         ("0, a, b, a", "2147483647, 2147483647", "size_t"),
-    ] {
-        let source = format!(
+    ];
+    let sources = cases.iter().map(|(dimensions, arguments, _)| {
+        format!(
             "fn allocate(a: i64, b: i64) -> void {{ fix ptr p = new [0; {dimensions}] }}\nfn main() -> u8 {{ allocate({arguments})\nreturn 0 }}"
+        )
+    }).collect::<Vec<_>>();
+    let inputs = sources
+        .iter()
+        .map(|source| (source.as_str(), "array-size.suz"))
+        .collect::<Vec<_>>();
+    let outputs = crate::test_util::compile_and_run_c23_batch(&inputs);
+    for ((dimensions, arguments, reason), output) in cases.iter().zip(outputs) {
+        assert!(
+            !output.status.success(),
+            "case {dimensions} ({arguments}): {output:?}"
         );
-        let output = compile_and_run_c23(&source, "array-size.suz");
-        assert!(!output.status.success());
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
             stderr.contains("rt.array-size") && stderr.contains(reason),
-            "{stderr}"
+            "{dimensions} ({arguments}): {stderr}"
         );
     }
 }
