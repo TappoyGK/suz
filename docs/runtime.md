@@ -163,6 +163,7 @@ _Noreturn void suz_env_panic(void);
 | 成功 | 計算した値を使う |
 | 失敗し、`or 式` がある | 代替値の式を評価する |
 | 失敗し、`or return` がある | 指定した戻り値を評価して関数から戻る |
+| 失敗し、`or panic` がある | [err.or-panic] に従って理由を出力し、パニックする |
 | 整数演算に失敗し、対応する `or` がない | ソース位置と理由を使ってパニックする |
 
 算術式の格納、ゼロ除算、シフトの検査条件と数値型・列挙型の変換の成功条件は、言語仕様の [rt.int-overflow] から [rt.as-int-enum] に従う。symbolからの変換は [runtime.symbol-parse]、[runtime.symbol-wrap-parse]、[runtime.symbol-struct-parse] に従う。
