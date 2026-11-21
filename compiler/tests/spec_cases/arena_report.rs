@@ -3,7 +3,7 @@ use crate::{support::batch::Batch, test_util::TemporaryDirectory};
 use std::{fs, process::Command};
 use suz::{ArenaOptions, CompilationOptions, LogLevel};
 
-const SOURCE: &str = r#"
+pub(super) const SOURCE: &str = r#"
 error Err { Bad }
 fnshape Read() -> i64
 fn call(f: fn Read) -> i64 { return f() }
@@ -60,6 +60,10 @@ fn main() -> u8 {
 fn options(initial: u64, grow: u64) -> CompilationOptions {
     CompilationOptions {
         log_arena: true,
+        arena_report: suz::ArenaReportOptions {
+            format: suz::ArenaReportFormat::Summary,
+            ..suz::ArenaReportOptions::default()
+        },
         log_level: LogLevel::Off,
         arena: ArenaOptions {
             initial,

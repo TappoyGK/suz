@@ -36,6 +36,7 @@ struct RecoveryTarget {
 #[derive(Default)]
 struct ExpressionContext {
     uses_arena: bool,
+    report_function: String,
     arrays: crate::ast::arrays::Types,
     uses_c_byte_len: bool,
     uses_c_integer: bool,
@@ -43,7 +44,7 @@ struct ExpressionContext {
     c_literal_checks: BTreeSet<String>,
     log_level: crate::LogLevel,
     log_ignore: bool,
-    log_arena: bool,
+    arena_report: Option<crate::ArenaReportOptions>,
     function_result: Option<crate::ast::Type>,
     text_literals: std::collections::BTreeMap<String, usize>,
     uses_text: bool,
@@ -90,7 +91,7 @@ pub(crate) fn generate(
     arena: crate::ArenaOptions,
     log_level: crate::LogLevel,
     log_ignore: bool,
-    log_arena: bool,
+    arena_report: Option<crate::ArenaReportOptions>,
 ) -> String {
     let mut c = String::from(
         r#"#include <limits.h>
@@ -115,7 +116,7 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
     let mut context = ExpressionContext {
         log_level,
         log_ignore,
-        log_arena,
+        arena_report,
         arrays: program.arrays.clone(),
         source_name: source_name.into(),
         enums: program.enums.clone(),
@@ -151,8 +152,17 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
         .map(|function| functions::emit(function, &mut context))
         .collect();
     if context.uses_arena {
-        if log_arena {
+        if let Some(report) = arena_report {
             c.push_str("#define SUZ_LOG_ARENA 1\n");
+            if report.format != crate::ArenaReportFormat::Summary {
+                let format = match report.format {
+                    crate::ArenaReportFormat::Tree => "SUZ_ARENA_REPORT_TREE",
+                    crate::ArenaReportFormat::TreeBytes => "SUZ_ARENA_REPORT_TREE_BYTES",
+                    crate::ArenaReportFormat::Csv => "SUZ_ARENA_REPORT_CSV",
+                    crate::ArenaReportFormat::Summary => unreachable!(),
+                };
+                writeln!(c, "#define SUZ_ARENA_REPORT_FORMAT {format}\n#define SUZ_ARENA_REPORT_CAPACITY {}", report.capacity).unwrap();
+            }
         }
         c.push_str("#include \"suz_arena.h\"\n");
     }
@@ -200,7 +210,7 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
     for (value, id) in &context.text_literals {
         writeln!(text_init, "    suz_text_constant_{id} = suz_text_intern(suz_text_literal_{id}, UINT64_C({}), true, {});", value.len(), text::position(program.main_location, &context)).unwrap();
     }
-    let report = if log_arena {
+    let report = if arena_report.is_some() {
         "    suz_arena_report();\n"
     } else {
         ""

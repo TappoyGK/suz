@@ -82,10 +82,25 @@ void suz_arena_report_summary(size_t peak, bool initial_block);
 static inline void suz_arena_report_restore(size_t *position) {
     suz_arena_report_position = *position;
 }
+#ifdef SUZ_ARENA_REPORT_FORMAT
+#include "suz_arena_report.h"
+static suz_arena_tree suz_arena_report_tree;
+static inline void suz_arena_report_leave(suz_arena_report_frame *frame) {
+    suz_arena_tree_leave(&suz_arena_report_tree, frame);
+    suz_arena_report_position = frame->base;
+}
+#endif
 static inline void suz_arena_report(void) {
     if (suz_arena_report_allocated) {
+#ifdef SUZ_ARENA_REPORT_FORMAT
+        suz_arena_tree_output(&suz_arena_report_tree, suz_arena_report_peak, suz_arena_report_initial_block, SUZ_ARENA_REPORT_FORMAT);
+#else
         suz_arena_report_summary(suz_arena_report_peak, suz_arena_report_initial_block);
+#endif
     }
+#ifdef SUZ_ARENA_REPORT_FORMAT
+    suz_arena_tree_destroy(&suz_arena_report_tree);
+#endif
 }
 #endif
 
@@ -96,6 +111,9 @@ static inline void suz_arena_init(uint64_t initial, uint64_t grow, uint64_t limi
     suz_arena_report_peak = 0;
     suz_arena_report_allocated = false;
     suz_arena_report_initial_block = suz_arena_position.current != NULL;
+#ifdef SUZ_ARENA_REPORT_FORMAT
+    suz_arena_tree_init(&suz_arena_report_tree, SUZ_ARENA_REPORT_CAPACITY, source, line, column);
+#endif
 #endif
 }
 
@@ -117,6 +135,11 @@ static inline __attribute__((always_inline)) void *suz_arena_alloc(size_t size, 
     suz_arena_report_position = virtual_end;
     if (virtual_end > suz_arena_report_peak) suz_arena_report_peak = virtual_end;
     suz_arena_report_allocated = true;
+#ifdef SUZ_ARENA_REPORT_FORMAT
+    if (suz_arena_report_tree.active && virtual_end > suz_arena_report_tree.active->peak) {
+        suz_arena_report_tree.active->peak = virtual_end;
+    }
+#endif
 #endif
     size_t padding = (-suz_arena_position.used) & (alignment - 1);
     size_t additional, end;

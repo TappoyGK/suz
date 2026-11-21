@@ -10,6 +10,8 @@ mod arena_functions;
 mod arena_fuzz;
 #[path = "spec_cases/arena_report.rs"]
 mod arena_report;
+#[path = "spec_cases/arena_tree.rs"]
+mod arena_tree;
 #[path = "spec_cases/arithmetic.rs"]
 mod arithmetic;
 #[path = "spec_cases/arithmetic_handlers.rs"]

@@ -86,6 +86,7 @@ SUZ_TIMINGS=1 ./scripts/test-spec-cases.sh
 - `compiler/tests/spec_cases/closures.rs`：明示的な値・参照キャプチャー、環境の寿命・評価順、入れ子のスコープと深さ、保存・値の書き換え・代入先と重なる右辺の書き換えの禁止を検査する。
 - `compiler/tests/spec_cases/panic.rs`：panic文の断片出力・評価順・終了判定・構文の深さと、クロージャの終了範囲を検査する。
 - `compiler/tests/spec_cases/arena.rs`・`arena_runtime.c`：固定領域の整列・入れ子と再利用、容量と計算のあふれ、失敗前の状態保持、容量オプションと出力物への引き継ぎを検査する。`arena_asan.c`は、Suzでは拒否される回収後の読み書きを内部APIで作り、ASanの診断・生存中の実体の保護・再利用・整列の余白を検査する。生成Cの各退出経路もASanで確認する（[runtime.arena-poison](../../docs/runtime.md)）。
+- `compiler/tests/spec_cases/arena_tree.rs`：相互再帰の集約、繰り返しと別経路の区別、上限での省略、途中脱出、表示の桁揃え・CSV、計測領域の分離と確保失敗、emit-cの配布物からの実行を検査する。
 - `compiler/tests/spec_cases/arena_report.rs`：測定したpeakと同じ容量なら成功し、1バイト不足なら失敗することを、通常・ASanの両方で確認する。途中脱出・再帰・配列・クロージャ、ブロックの再利用、出力時に追加確保しないこととCLIからの引き継ぎも検査する。
 - `compiler/tests/spec_cases/arena_fuzz.rs`：**[test.arena-fuzz]** リリース検査用の `#[ignore]` テストとして、作業領域・ポインタ・構造体・制御文・クロージャ・`fn` を組み合わせたランダムなプログラム（`objection` と `trusted` を除く）を生成し、コンパイラが受理したものだけを ASan 有効でビルド・実行して回収済み実体への読み書きがないことを検証する。背景となる前提と注意は仕様書の `[arena.soundness-premise]` にある「経緯と警告」（[docs/spec.md](../../docs/spec.md)）を参照する。
 - `compiler/tests/spec_cases/ffi_bytes.rs`：UTF-8バイト列・NUL・切り出し、実体の同一性と寿命、評価回数、ポインタ操作の制限、バイト数の範囲検査を確認する。

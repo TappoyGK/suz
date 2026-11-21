@@ -933,6 +933,7 @@ pub(in crate::check) fn check_program(
     let external_start = external.start;
     for id in external.chain(std::iter::once(program.empty)) {
         checked.push(CheckedFunction {
+            name: String::new(),
             id,
             lifetime: externs
                 .get(id - external_start)
@@ -953,6 +954,7 @@ pub(in crate::check) fn check_program(
                     let mut analysis = input.base.as_deref().expect("input has its body").clone();
                     analysis.statements(&input.statements, input.region, input.arena);
                     let mut function = CheckedFunction {
+                        name: String::new(),
                         id: function.id,
                         lifetime: None,
                         mutable_receiver: false,
@@ -968,6 +970,7 @@ pub(in crate::check) fn check_program(
             }
             other => {
                 checked.push(CheckedFunction {
+                    name: String::new(),
                     id: function.id,
                     lifetime: other,
                     mutable_receiver: false,
@@ -1049,6 +1052,7 @@ pub(in crate::check) fn check_program(
             Body::Pending(Rc::new(analysis))
         };
         checked.push(CheckedFunction {
+            name: String::new(),
             id,
             lifetime: Some(body),
             mutable_receiver: false,

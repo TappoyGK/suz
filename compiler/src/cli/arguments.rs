@@ -44,6 +44,7 @@ pub struct Options {
     pub log_allow: bool,
     pub log_ignore: bool,
     pub log_arena: bool,
+    pub arena_report: suz::ArenaReportOptions,
     pub log_level: suz::LogLevel,
     pub mode: suz::ArithmeticMode,
     pub text_pool_limit: suz::TextPoolLimit,
@@ -92,6 +93,7 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
     let mut log_ignore = false;
     let mut log_arena = false;
     let mut arena_format = None;
+    let mut arena_report_capacity = None;
     let mut log_level = None;
     let mut help = false;
     let mut paths_only = false;
@@ -143,14 +145,49 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
                             "expected FORMAT after --log-arena-format",
                         )
                     })?;
-                    if value != "summary" {
+                    arena_format = Some(match value.to_str() {
+                        Some("summary") => suz::ArenaReportFormat::Summary,
+                        Some("tree") => suz::ArenaReportFormat::Tree,
+                        Some("tree-bytes") => suz::ArenaReportFormat::TreeBytes,
+                        Some("csv") => suz::ArenaReportFormat::Csv,
+                        _ => {
+                            return Err(Failure::tool(
+                                2,
+                                "tool.log-arena",
+                                "expected summary, tree, tree-bytes, or csv",
+                            ));
+                        }
+                    });
+                    continue;
+                }
+                Some("--log-arena-limit") if command != Command::Check => {
+                    if arena_report_capacity.is_some() {
                         return Err(Failure::tool(
                             2,
                             "tool.log-arena",
-                            "unsupported arena report format",
+                            "duplicate --log-arena-limit option",
                         ));
                     }
-                    arena_format = Some(value);
+                    let value = args.next().ok_or_else(|| {
+                        Failure::tool(
+                            2,
+                            "tool.log-arena",
+                            "expected COUNT after --log-arena-limit",
+                        )
+                    })?;
+                    arena_report_capacity = Some(
+                        value
+                            .to_str()
+                            .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+                            .and_then(|s| s.parse::<std::num::NonZeroU16>().ok())
+                            .ok_or_else(|| {
+                                Failure::tool(
+                                    2,
+                                    "tool.log-arena",
+                                    "expected 1..65535 after --log-arena-limit",
+                                )
+                            })?,
+                    );
                     continue;
                 }
                 Some("--log-ignore") => {
@@ -281,11 +318,11 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
     if help {
         return Ok(Action::Help(Some(command)));
     }
-    if arena_format.is_some() && !log_arena {
+    if (arena_format.is_some() || arena_report_capacity.is_some()) && !log_arena {
         return Err(Failure::tool(
             2,
             "tool.log-arena",
-            "--log-arena-format requires --log-arena",
+            "--log-arena-format and --log-arena-limit require --log-arena",
         ));
     }
     let input = input.ok_or_else(|| invalid("missing input file"))?;
@@ -304,6 +341,10 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
         log_allow,
         log_ignore,
         log_arena,
+        arena_report: suz::ArenaReportOptions {
+            format: arena_format.unwrap_or_default(),
+            capacity: arena_report_capacity.unwrap_or(suz::ArenaReportOptions::default().capacity),
+        },
         log_level: log_level.unwrap_or_default(),
         mode: mode.unwrap_or_default(),
         text_pool_limit: text_pool_limit.unwrap_or_default(),

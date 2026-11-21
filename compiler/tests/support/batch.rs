@@ -132,6 +132,7 @@ impl Batch {
             command
                 .arg(runtime.join("suz_runtime.c"))
                 .arg(runtime.join("suz_arena.c"))
+                .arg(runtime.join("suz_arena_report.c"))
                 .arg(runtime.join("suz_text.c"))
                 .arg(runtime.join("suz_parse.c"))
                 .arg("-lm")

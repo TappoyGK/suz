@@ -177,6 +177,31 @@ impl LogLevel {
     }
 }
 
+/// 作業領域の計測結果の表示形式。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ArenaReportFormat {
+    Summary,
+    #[default]
+    Tree,
+    TreeBytes,
+    Csv,
+}
+
+/// 計測用ツリーの行数には根も含む。計測対象の容量とは別に確保する。
+#[derive(Clone, Copy, Debug)]
+pub struct ArenaReportOptions {
+    pub format: ArenaReportFormat,
+    pub capacity: std::num::NonZeroU16,
+}
+impl Default for ArenaReportOptions {
+    fn default() -> Self {
+        Self {
+            format: ArenaReportFormat::Tree,
+            capacity: std::num::NonZeroU16::new(256).unwrap(),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CompilationOptions {
     pub log_level: LogLevel,
@@ -184,6 +209,7 @@ pub struct CompilationOptions {
     pub log_ignore: bool,
     /// 作業領域の使用量を計測し、正常終了時に出力する。
     pub log_arena: bool,
+    pub arena_report: ArenaReportOptions,
     pub log_allow: bool,
     pub arithmetic_mode: ArithmeticMode,
     pub text_pool_limit: TextPoolLimit,
@@ -246,7 +272,7 @@ pub fn compile_with_options(
             options.arena,
             options.log_level,
             options.log_ignore,
-            options.log_arena,
+            options.log_arena.then_some(options.arena_report),
         ),
         warnings,
     })

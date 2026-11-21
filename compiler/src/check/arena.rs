@@ -160,12 +160,17 @@ pub(super) fn statement(
     context: &mut StatementContext<'_>,
 ) -> Result<(), Diagnostic> {
     match statement {
-        Statement::Arena { body, end, .. } => {
+        Statement::Arena {
+            location,
+            body,
+            end,
+        } => {
             context.bindings.arena_depth += 1;
             let result =
                 statements::block(body, context.bindings, context.next_id, context.loop_depth);
             context.bindings.arena_depth -= 1;
             context.output.push(CheckedStatement::Arena {
+                location: *location,
                 body: result?,
                 end: *end,
             });
