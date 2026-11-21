@@ -3,7 +3,7 @@
 use super::{Analysis, Constraint, Node, Place, Reference};
 use std::collections::{BTreeSet, VecDeque};
 mod components;
-pub(super) use components::representatives;
+pub(super) use components::{partition, representatives};
 
 #[derive(Default)]
 struct Worklist {

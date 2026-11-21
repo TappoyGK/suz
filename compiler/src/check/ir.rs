@@ -14,7 +14,7 @@ pub(crate) struct CheckedProgram {
     /// 整数除算を含む浮動小数点演算の警告候補。
     pub division_warnings: Vec<Location>,
     /// 反復の外へ残らず、外側のArenaへ蓄積する確保。
-    pub arena_warnings: Vec<(Location, String)>,
+    pub arena_warnings: Vec<(Location, String, Vec<crate::Diagnostic>)>,
     /// 定数として決まる比較の位置と結果。
     pub comparison_warnings: Vec<(Location, bool)>,
     /// 実行開始時に登録する文字列定数。

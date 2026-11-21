@@ -41,9 +41,13 @@ pub(in crate::check::arena::lifetimes) fn representatives(
             // 逆辺を追加しながら入力数を判定すると順序依存になるので、ここではoutgoingだけを変える。
         }
     }
-    for edges in &mut incoming {
-        edges.clear();
-    }
+    partition(&outgoing)
+}
+
+/// 有向グラフの強連結成分。同じ成分には同じ代表ノードを返す。
+pub(in crate::check::arena::lifetimes) fn partition(outgoing: &[Vec<Node>]) -> Vec<Node> {
+    let count = outgoing.len();
+    let mut incoming = vec![Vec::new(); count];
     for (src, edges) in outgoing.iter().enumerate() {
         for &dst in edges {
             incoming[dst].push(src);

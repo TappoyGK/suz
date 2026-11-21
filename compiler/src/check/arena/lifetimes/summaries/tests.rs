@@ -33,7 +33,7 @@ fn call(id: usize, arguments: Vec<(Type, Node)>, result: Node, region: usize) ->
         location: HERE,
         notes: BTreeSet::new(),
         indirect: false,
-        loops: BTreeSet::new(),
+        loop_region: None,
     }
 }
 fn identity() -> (BTreeMap<usize, Rc<Analysis>>, BTreeMap<usize, Rc<Summary>>) {
@@ -632,5 +632,55 @@ fn alternative_targets_share_allocations_but_not_call_sites_or_regions() {
         assert!(first.is_disjoint(&checked.targets[other_region]));
         // 呼び出し候補が増えても実体候補は増えない。式の位置・Arenaの違いは保持する。
         assert_eq!(checked.cells.len(), 3);
+    }
+}
+
+#[test]
+fn repeated_allocating_calls_share_effects_but_keep_each_warning_site() {
+    for count in [16, 64, 256] {
+        for retained in [false, true] {
+            let mut target = body(1);
+            let (value, object) = pointer(&mut target, 0, Type::Bool);
+            target.objects.insert(object, Object::Allocation(1, object));
+            target.allocations.insert(
+                object,
+                vec![accumulation::Allocation {
+                    site: HERE,
+                    trace: accumulation::Trace::allocation(HERE),
+                    loop_region: None,
+                }],
+            );
+            target.returned.insert(vec![], value);
+            let summaries = BTreeMap::from([(1, Rc::new(target.summary()))]);
+            let mut caller = body(0);
+            let iteration = caller.region(0, HERE);
+            let storage = caller.cell(
+                if retained { 0 } else { iteration },
+                HERE,
+                Type::Bool.pointer(),
+            );
+            for index in 0..count {
+                let result = caller.node();
+                let mut invocation = call(1, vec![], result, 0);
+                invocation.location.line = index + 2;
+                invocation.loop_region = Some(if retained {
+                    caller.region(0, HERE)
+                } else {
+                    iteration
+                });
+                caller.direct_calls.push(invocation);
+                caller
+                    .constraints
+                    .push(Constraint::Store(Place::Direct(storage), result, HERE));
+            }
+            let checked = caller.with_summaries(&summaries).unwrap();
+            // 呼び出し数が増えても、保存先と確保の実体候補は一つずつ。
+            assert_eq!(checked.cells.len(), 2);
+            assert_eq!(checked.targets[storage].len(), 1);
+            assert_eq!(
+                checked.loop_warnings().len(),
+                if retained { 0 } else { count }
+            );
+        }
     }
 }

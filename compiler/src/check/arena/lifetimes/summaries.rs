@@ -33,14 +33,14 @@ pub(super) struct Call {
     pub location: Location,
     pub notes: BTreeSet<CallNote>,
     pub indirect: bool,
-    pub loops: BTreeSet<usize>,
+    pub loop_region: Option<usize>,
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 struct CallKey<'a> {
     id: usize,
     indirect_site: Option<Location>,
-    loops: &'a BTreeSet<usize>,
+    result_places: Vec<Node>,
     region: usize,
     arguments: Vec<(usize, Type, &'a [usize], Node)>,
     receiver: Option<Place>,
@@ -57,7 +57,7 @@ impl Call {
         CallKey {
             id: self.id,
             indirect_site: self.indirect.then_some(self.location),
-            loops: &self.loops,
+            result_places: Vec::new(),
             region: self.region,
             arguments: self
                 .arguments
@@ -107,9 +107,9 @@ pub(crate) struct Summary {
     returned: BTreeMap<Vec<usize>, BTreeSet<Endpoint>>,
     stores: BTreeMap<StoreInfo, StoreEffect>,
     notes: BTreeMap<StoreInfo, BTreeSet<CallNote>>,
-    allocations: BTreeMap<Object, Location>,
+    allocations: BTreeMap<Object, accumulation::Trace>,
     // 呼び出し元へ参照を返さない一時確保。診断用の代表位置だけを伝播する。
-    discarded: Option<Location>,
+    discarded: Option<accumulation::Trace>,
     kept: BTreeSet<Endpoint>,
 }
 
@@ -202,7 +202,11 @@ impl Summary {
         for (object, location) in std::mem::take(&mut self.allocations) {
             allocations
                 .entry(remap[&object])
-                .and_modify(|previous: &mut Location| *previous = (*previous).min(location))
+                .and_modify(|previous: &mut accumulation::Trace| {
+                    if location.origin() < previous.origin() {
+                        *previous = location.clone();
+                    }
+                })
                 .or_insert(location);
         }
         self.allocations = allocations;
@@ -402,8 +406,10 @@ impl Analysis {
                 continue;
             }
             result.objects.insert(object, ObjectInfo { ty: cell.ty });
-            if let Some(allocation) = self.allocations.get(&node) {
-                result.allocations.insert(object, allocation.origin);
+            if let Some(allocations) = self.allocations.get(&node)
+                && let Some(allocation) = allocations.iter().min_by_key(|a| a.trace.origin())
+            {
+                result.allocations.insert(object, allocation.trace.clone());
             }
         }
         for (path, &node) in &self.returned {
@@ -502,17 +508,6 @@ impl Analysis {
                         cell
                     };
                     self.targets[node].insert(Reference::object(cell));
-                    if let Some(&origin) = summary.allocations.get(&object) {
-                        let allocation =
-                            self.allocations
-                                .entry(cell)
-                                .or_insert(accumulation::Allocation {
-                                    site: call.location,
-                                    origin,
-                                    loops: BTreeSet::new(),
-                                });
-                        allocation.loops.extend(&call.loops);
-                    }
                 }
             }
         }
@@ -569,16 +564,22 @@ impl Analysis {
         }
     }
 
-    fn apply_summary(&mut self, call: &Call, summary: &Summary) {
+    fn apply_summary(
+        &mut self,
+        call: &Call,
+        summary: &Summary,
+    ) -> Vec<(Node, accumulation::Trace)> {
         let objects = self.call_objects(call, summary);
-        if let Some(origin) = summary.discarded {
-            self.discarded_calls.push(accumulation::Discarded {
-                site: call.location,
-                origin,
-                region: call.region,
-                loops: call.loops.clone(),
-            });
-        }
+        let allocations: Vec<_> = summary
+            .allocations
+            .iter()
+            .flat_map(|(object, trace)| {
+                self.targets[objects[object]]
+                    .iter()
+                    .map(|r| (self.cells[&r.target].root, trace.clone()))
+            })
+            .collect();
+        self.record_allocations(call, &allocations, summary.discarded.as_ref());
         for value in &summary.kept {
             let value = self.call_value(value, &objects, call.region);
             self.kept.push(value);
@@ -621,6 +622,33 @@ impl Analysis {
                     .push(Constraint::Limit(destination, source, call.region));
             }
         }
+        allocations
+    }
+
+    fn record_allocations(
+        &mut self,
+        call: &Call,
+        allocations: &[(Node, accumulation::Trace)],
+        discarded: Option<&accumulation::Trace>,
+    ) {
+        for (node, trace) in allocations {
+            self.allocations
+                .entry(*node)
+                .or_default()
+                .push(accumulation::Allocation {
+                    site: call.location,
+                    trace: trace.through(call),
+                    loop_region: call.loop_region,
+                });
+        }
+        if let Some(trace) = discarded {
+            self.discarded_calls.push(accumulation::Discarded {
+                site: call.location,
+                trace: trace.through(call),
+                region: call.region,
+                loop_region: call.loop_region,
+            });
+        }
     }
 
     fn with_summaries(&self, summaries: &BTreeMap<usize, Rc<Summary>>) -> Result<Self, Diagnostic> {
@@ -635,8 +663,24 @@ impl Analysis {
             return Ok(self);
         }
         let representative = solver::representatives(&self, &self.constraints);
+        // 同じ保存場所へ結果を渡す確保は、警告に必要な区別を失わずに共有できる。
+        // 戻り値と一時変数は別の保存場所なので、片方だけ残す場合は合流しない。
+        let mut destinations: BTreeMap<Node, Option<Node>> = BTreeMap::new();
+        for constraint in &self.constraints {
+            if let Constraint::Store(Place::Direct(destination), source, _) = constraint {
+                destinations
+                    .entry(*source)
+                    .and_modify(|known| {
+                        if *known != Some(*destination) {
+                            *known = None;
+                        }
+                    })
+                    .or_insert(Some(*destination));
+            }
+        }
         let calls = std::mem::take(&mut self.direct_calls);
         let mut analysis = self;
+        let mut allocations_by_call: Vec<Vec<(Node, accumulation::Trace)>> = Vec::new();
         let mut applied: BTreeMap<CallKey<'_>, usize> = BTreeMap::new();
         for (index, call) in calls.iter().enumerate() {
             let Some(summary) = summaries.get(&call.id) else {
@@ -653,13 +697,25 @@ impl Analysis {
             // 読み出し用の一時ノード番号ではなく、無条件コピーの代表で入力を比べる。
             // 同じ変数を何度も渡すコードで、密な到達グラフを呼び出し回数分作らない。
             let mut key = call.key(&representative);
-            // 確保する呼び出しは、片方の結果だけを残す場合があるため合流しない。
-            if !summary.allocations.is_empty() || summary.discarded.is_some() {
-                key.indirect_site = Some(call.location);
+            if !summary.allocations.is_empty() {
+                let places: Option<Vec<_>> = call
+                    .result
+                    .iter()
+                    .map(|(_, node)| destinations.get(node).copied().flatten())
+                    .collect();
+                if let Some(places) = places.filter(|places| !places.is_empty()) {
+                    key.result_places = places;
+                } else {
+                    key.indirect_site = Some(call.location);
+                }
             }
             // 同じ要約は推論時に共有済み。関数名が違っても同じ効果なら再展開しない。
             key.id = Rc::as_ptr(summary) as usize;
             if let Some(&previous) = applied.get(&key) {
+                let allocations: Vec<(Node, accumulation::Trace)> =
+                    allocations_by_call[previous].clone();
+                analysis.record_allocations(call, &allocations, summary.discarded.as_ref());
+                allocations_by_call.push(allocations);
                 for (path, destination) in &call.result {
                     if let Some(source) = calls[previous].result_node(path) {
                         analysis
@@ -669,7 +725,7 @@ impl Analysis {
                 }
                 continue;
             }
-            analysis.apply_summary(call, summary);
+            allocations_by_call.push(analysis.apply_summary(call, summary));
             applied.insert(key, index);
         }
         let constraints = std::mem::take(&mut analysis.constraints);
@@ -854,7 +910,7 @@ fn infer(
 /// 全具体化の要約を収束させて呼び出しを検査し、C生成には不要な解析本体を取り除く。
 pub(in crate::check) fn check_program(
     functions: &mut [CheckedFunction],
-) -> Result<Vec<(Location, String)>, Diagnostic> {
+) -> Result<Vec<(Location, String, Vec<Diagnostic>)>, Diagnostic> {
     let mut bodies = BTreeMap::new();
     let mut ready = BTreeMap::new();
     for function in functions {
@@ -881,7 +937,7 @@ pub(in crate::check) fn check_program(
         let constraints = std::mem::take(&mut analysis.constraints);
         analysis.validate(&constraints)?;
     }
-    warnings.sort();
+    warnings.sort_by_key(|warning| warning.0);
     warnings.dedup_by_key(|warning| warning.0);
     Ok(warnings)
 }

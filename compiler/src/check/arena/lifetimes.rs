@@ -89,9 +89,8 @@ pub(crate) struct Analysis {
     resolved: bool,
     objects: BTreeMap<Node, summaries::Object>,
     candidate_allocations: BTreeMap<(Location, usize, Type), Node>,
-    allocations: BTreeMap<Node, accumulation::Allocation>,
-    loops: Vec<usize>,
-    active_loops: BTreeSet<usize>,
+    allocations: BTreeMap<Node, Vec<accumulation::Allocation>>,
+    active_loop: Option<usize>,
     discarded_calls: Vec<accumulation::Discarded>,
     kept: Vec<Node>,
     returned: Shape,
@@ -129,8 +128,7 @@ impl Analysis {
             objects: BTreeMap::new(),
             candidate_allocations: BTreeMap::new(),
             allocations: BTreeMap::new(),
-            loops: Vec::new(),
-            active_loops: BTreeSet::new(),
+            active_loop: None,
             discarded_calls: Vec::new(),
             kept: Vec::new(),
             returned: Shape::new(),
@@ -307,11 +305,11 @@ impl Analysis {
                     .insert(cell, summaries::Object::Allocation(self.function_id, cell));
                 self.allocations.insert(
                     cell,
-                    accumulation::Allocation {
+                    vec![accumulation::Allocation {
                         site: *location,
-                        origin: *location,
-                        loops: self.active_loops.clone(),
-                    },
+                        trace: accumulation::Trace::allocation(*location),
+                        loop_region: self.active_loop,
+                    }],
                 );
                 self.write(Place::Direct(cell), initial, *location);
                 let n = self.node();
@@ -444,7 +442,7 @@ impl Analysis {
                     captures,
                     region: arena.expect("checked arena call"),
                     location: *location,
-                    loops: self.active_loops.clone(),
+                    loop_region: self.active_loop,
                     indirect: self.candidate_notes.contains_key(&(*id, *location)),
                     notes: self
                         .candidate_notes
@@ -550,7 +548,7 @@ impl Analysis {
                             location: locations[index],
                             notes: BTreeSet::new(),
                             indirect: false,
-                            loops: self.active_loops.clone(),
+                            loop_region: self.active_loop,
                         });
                     }
                 }
@@ -668,7 +666,9 @@ impl Analysis {
                 CheckedStatement::Arena { body, end, .. } => {
                     let locals = self.locals.clone();
                     let inner = self.region(region, *end);
+                    let active_loop = self.active_loop.take();
                     self.statements(body, inner, Some(inner));
+                    self.active_loop = active_loop;
                     self.locals = locals;
                 }
                 CheckedStatement::Binding {

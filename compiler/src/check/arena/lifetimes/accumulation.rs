@@ -1,45 +1,208 @@
-//! 解決済みの参照グラフから、反復の外へ残らない確保だけを警告する。
-//! 警告のために寿命制約や実行時の回収時点を変更しない。
+//! 実体へ到達する保存場所の字句領域を、一つのグラフで伝播する。
+//! ループごとの全探索や、呼び出し経路の配列の複製を行わない。
 use super::*;
+use std::{cmp::Ordering, collections::VecDeque};
+
+/// 呼び出し先の経路を共有する、診断用の連結リスト。寿命効果には含めない。
+#[derive(Clone, Debug)]
+pub(super) struct Trace(Rc<TraceStep>);
+#[derive(Debug)]
+struct TraceStep {
+    origin: Location,
+    site: Location,
+    notes: Vec<summaries::CallNote>,
+    next: Option<Trace>,
+}
+impl PartialEq for Trace {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+impl Eq for Trace {}
+impl PartialOrd for Trace {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for Trace {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // 要約の共有用。経路の深さに比例する比較を避け、異なる経路は混同しない。
+        (self.0.origin, Rc::as_ptr(&self.0)).cmp(&(other.0.origin, Rc::as_ptr(&other.0)))
+    }
+}
+impl Trace {
+    pub fn allocation(site: Location) -> Self {
+        Self(Rc::new(TraceStep {
+            origin: site,
+            site,
+            notes: vec![],
+            next: None,
+        }))
+    }
+    pub fn through(&self, call: &summaries::Call) -> Self {
+        Self(Rc::new(TraceStep {
+            origin: self.0.origin,
+            site: call.location,
+            notes: call.notes.iter().cloned().collect(),
+            next: Some(self.clone()),
+        }))
+    }
+    pub fn origin(&self) -> Location {
+        self.0.origin
+    }
+    fn notes(&self) -> Vec<Diagnostic> {
+        let mut notes = Vec::new();
+        let mut seen = BTreeSet::new();
+        let mut current = Some(self);
+        while let Some(trace) = current {
+            let step = &trace.0;
+            if !seen.insert(step.site) {
+                break;
+            }
+            notes.push(
+                step.site.error(
+                    ErrorKind::InvalidSource,
+                    crate::DiagnosticMessage {
+                        rule: "arena.call-diagnostic",
+                        text: if step.next.is_some() {
+                            "this call leads to the allocation"
+                        } else {
+                            "the object is allocated here"
+                        }
+                        .into(),
+                    },
+                ),
+            );
+            for note in &step.notes {
+                notes.push(note.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::DiagnosticMessage {
+                        rule: "arena.call-diagnostic",
+                        text: note.message.clone(),
+                    },
+                ));
+            }
+            current = step.next.as_ref();
+        }
+        notes
+    }
+}
 
 #[derive(Clone)]
 pub(super) struct Allocation {
     pub site: Location,
-    pub origin: Location,
-    pub loops: BTreeSet<usize>,
+    pub trace: Trace,
+    // 確保先Arenaの内側にある最外の反復。この反復の外へ残れば警告しない。
+    pub loop_region: Option<usize>,
 }
 #[derive(Clone)]
 pub(super) struct Discarded {
     pub site: Location,
-    pub origin: Location,
+    pub trace: Trace,
     pub region: usize,
-    pub loops: BTreeSet<usize>,
+    pub loop_region: Option<usize>,
 }
 
-pub(super) struct Reachability(BTreeMap<Node, BTreeSet<Node>>);
-impl Reachability {
-    pub fn from(analysis: &Analysis) -> Self {
-        let mut edges: BTreeMap<Node, BTreeSet<Node>> = BTreeMap::new();
-        for (&node, cell) in &analysis.cells {
-            edges.entry(cell.root).or_default().extend(
-                analysis.targets[node]
-                    .iter()
-                    .map(|reference| analysis.cells[&reference.target].root),
-            );
-        }
-        Self(edges)
-    }
-    pub fn reachable(&self, seeds: impl IntoIterator<Item = Node>) -> BTreeSet<Node> {
-        let mut seen = BTreeSet::new();
-        let mut pending: Vec<_> = seeds.into_iter().collect();
-        while let Some(node) = pending.pop() {
-            if seen.insert(node)
-                && let Some(next) = self.0.get(&node)
-            {
-                pending.extend(next);
+struct Escapes {
+    // 領域木の前順番号。部分木の範囲内なら、その反復の中だけに保存される。
+    starts: Vec<usize>,
+    ends: Vec<usize>,
+    // この実体へ到達する保存場所の前順番号の最小・最大。未到達の最小値はMAX。
+    ranges: Vec<(usize, usize)>,
+}
+impl Escapes {
+    fn from(analysis: &Analysis) -> Self {
+        let mut children = vec![Vec::new(); analysis.regions.len()];
+        for (id, region) in analysis.regions.iter().enumerate() {
+            if let Some(parent) = region.parent {
+                children[parent].push(id);
             }
         }
-        seen
+        let mut starts = vec![0; children.len()];
+        let mut ends = starts.clone();
+        let mut stack = vec![(0, false)];
+        let mut clock = 0;
+        while let Some((id, visited)) = stack.pop() {
+            if visited {
+                ends[id] = clock;
+                continue;
+            }
+            starts[id] = clock;
+            clock += 1;
+            stack.push((id, true));
+            stack.extend(children[id].iter().rev().map(|&child| (child, false)));
+        }
+        let mut graph = vec![Vec::new(); analysis.targets.len()];
+        let mut ranges = vec![(usize::MAX, 0); graph.len()];
+        // 確保先Arenaの寿命は保持元に数えない。局所の実体へ保存しただけで
+        // 反復外へ残ると誤認しないよう、変数・仮引数などからの到達を伝える。
+        for (&node, cell) in &analysis.cells {
+            graph[cell.root].extend(
+                analysis.targets[node]
+                    .iter()
+                    .map(|r| analysis.cells[&r.target].root),
+            );
+            if node == cell.root
+                && !matches!(
+                    analysis.objects.get(&node),
+                    Some(
+                        summaries::Object::Allocation(..)
+                            | summaries::Object::RecursiveAllocation(..)
+                    )
+                )
+            {
+                ranges[node] = (starts[cell.region], starts[cell.region]);
+            }
+        }
+        for node in analysis
+            .kept
+            .iter()
+            .chain(analysis.returned.values())
+            .flat_map(|&node| &analysis.targets[node])
+        {
+            ranges[analysis.cells[&node.target].root] = (0, 0);
+        }
+        // 閉路は一つにまとめ、その後はDAGの各辺を一度だけ通す。
+        let representatives = solver::partition(&graph);
+        let mut edges = vec![Vec::new(); graph.len()];
+        let mut indegrees = vec![0usize; graph.len()];
+        for (node, outgoing) in graph.iter().enumerate() {
+            let from = representatives[node];
+            ranges[from].0 = ranges[from].0.min(ranges[node].0);
+            ranges[from].1 = ranges[from].1.max(ranges[node].1);
+            for &target in outgoing {
+                let to = representatives[target];
+                if from != to {
+                    edges[from].push(to);
+                    indegrees[to] += 1;
+                }
+            }
+        }
+        let mut queue: VecDeque<_> = (0..graph.len())
+            .filter(|&n| representatives[n] == n && indegrees[n] == 0)
+            .collect();
+        while let Some(node) = queue.pop_front() {
+            for &target in &edges[node] {
+                ranges[target].0 = ranges[target].0.min(ranges[node].0);
+                ranges[target].1 = ranges[target].1.max(ranges[node].1);
+                indegrees[target] -= 1;
+                if indegrees[target] == 0 {
+                    queue.push_back(target);
+                }
+            }
+        }
+        for node in 0..graph.len() {
+            ranges[node] = ranges[representatives[node]];
+        }
+        Self {
+            starts,
+            ends,
+            ranges,
+        }
+    }
+    fn stays_in(&self, node: Node, region: usize) -> bool {
+        let (first, last) = self.ranges[node];
+        first == usize::MAX || (first >= self.starts[region] && last < self.ends[region])
     }
 }
 
@@ -53,100 +216,64 @@ impl Analysis {
     ) {
         let locals = self.locals.clone();
         let iteration = self.region(region, self.regions[region].end);
-        let id = self.loops.len();
-        self.loops.push(iteration);
-        self.active_loops.insert(id);
+        let previous = self.active_loop;
+        self.active_loop = previous.or(Some(iteration));
         if let Some(condition) = condition {
             self.expr(condition, iteration, arena);
         }
         self.statements(body, iteration, arena);
-        self.active_loops.remove(&id);
+        self.active_loop = previous;
         self.locals = locals;
     }
 
-    fn kept_roots(&self) -> impl Iterator<Item = Node> + '_ {
-        self.kept
-            .iter()
-            .flat_map(|&node| &self.targets[node])
-            .map(|reference| self.cells[&reference.target].root)
-    }
-
-    // 関数から返すか、引数・捕捉・Cへ残す確保と、内部だけで使い終わる確保を分ける。
-    // 内部の一時確保は呼び出し側の戻り値が残っても警告対象から消さない。
-    pub(super) fn discarded_allocation(&self) -> Option<Location> {
+    pub(super) fn discarded_allocation(&self) -> Option<Trace> {
         let inherited = self
             .discarded_calls
             .iter()
             .filter(|call| call.region == 0)
-            .map(|call| call.origin)
-            .min();
+            .map(|call| call.trace.clone());
         if self.allocations.is_empty() {
-            return inherited;
+            return inherited.min_by_key(Trace::origin);
         }
-        let seeds = self
-            .objects
-            .iter()
-            .filter_map(|(&node, object)| {
-                matches!(
-                    object,
-                    summaries::Object::Parameter(..)
-                        | summaries::Object::ReachableParameter(..)
-                        | summaries::Object::Slot(..)
-                )
-                .then_some(node)
-            })
-            .chain(self.returned.values().copied())
-            .chain(self.kept_roots());
-        let escaped = Reachability::from(self).reachable(seeds);
+        let escapes = Escapes::from(self);
         self.allocations
             .iter()
-            .filter(|(node, _)| self.cells[node].region == 0 && !escaped.contains(node))
-            .map(|(_, allocation)| allocation.origin)
+            .filter(|(node, _)| self.cells[node].region == 0 && escapes.ranges[**node].0 != 0)
+            .flat_map(|(_, allocations)| allocations.iter().map(|a| a.trace.clone()))
             .chain(inherited)
-            .min()
+            .min_by_key(Trace::origin)
     }
 
-    pub(super) fn loop_warnings(&self) -> Vec<(Location, String)> {
-        if self.loops.is_empty() {
-            return Vec::new();
-        }
-        let graph = Reachability::from(self);
+    pub(super) fn loop_warnings(&self) -> Vec<(Location, String, Vec<Diagnostic>)> {
+        let has_allocations = self
+            .allocations
+            .values()
+            .flatten()
+            .any(|a| a.loop_region.is_some());
+        let escapes = has_allocations.then(|| Escapes::from(self));
         let mut sites = BTreeMap::new();
-        for (id, &iteration) in self.loops.iter().enumerate() {
-            let seeds = self
-                .cells
-                .iter()
-                .filter_map(|(&node, cell)| {
-                    (node == cell.root
-                        && !self.outlives(iteration, cell.region)
-                        && !self
-                            .allocations
-                            .get(&node)
-                            .is_some_and(|a| a.loops.contains(&id)))
-                    .then_some(node)
-                })
-                .chain(self.kept_roots());
-            let escaped = graph.reachable(seeds);
-            for (&node, allocation) in &self.allocations {
-                let region = self.cells[&node].region;
-                if allocation.loops.contains(&id)
-                    && self.outlives(region, iteration)
-                    && !escaped.contains(&node)
-                {
-                    sites
-                        .entry(allocation.site)
-                        .or_insert((allocation.origin, region));
-                }
-            }
-            for call in &self.discarded_calls {
-                if call.loops.contains(&id) && self.outlives(call.region, iteration) {
-                    sites.entry(call.site).or_insert((call.origin, call.region));
+        if let Some(escapes) = escapes {
+            for (&node, allocations) in &self.allocations {
+                for allocation in allocations {
+                    if let Some(region) = allocation.loop_region
+                        && escapes.stays_in(node, region)
+                    {
+                        sites
+                            .entry(allocation.site)
+                            .or_insert((&allocation.trace, self.cells[&node].region));
+                    }
                 }
             }
         }
-        sites.into_iter().map(|(site, (origin, region))| {
+        for call in &self.discarded_calls {
+            if call.loop_region.is_some() {
+                sites.entry(call.site).or_insert((&call.trace, call.region));
+            }
+        }
+        sites.into_iter().map(|(site, (trace, region))| {
             let end = self.regions[region].end;
-            (site, format!("allocation does not escape this iteration and accumulates in the current arena (allocation at {}:{}, arena ends at {}:{})", origin.line, origin.column, end.line, end.column))
+            let origin = trace.origin();
+            (site, format!("allocation does not escape this iteration and accumulates in the current arena (allocation at {}:{}, arena ends at {}:{})", origin.line, origin.column, end.line, end.column), trace.notes())
         }).collect()
     }
 }

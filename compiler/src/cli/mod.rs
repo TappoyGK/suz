@@ -112,6 +112,10 @@ pub fn run() -> Result<Outcome> {
                     warning.allowed_reason.as_ref().map(|reason| format!(" {reason}")).unwrap_or_default()
                 )
                 .map_err(|e| Failure::tool(2, "tool.messages", e))?;
+                for note in &warning.related {
+                    writeln!(stderr, "  note: {}:{}:{}: {}", options.input.display(), note.line, note.column, note.message())
+                        .map_err(|e| Failure::tool(2, "tool.messages", e))?;
+                }
             }
             drop(stderr);
             if let Some(c) = c {

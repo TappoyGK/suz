@@ -67,10 +67,9 @@ pub(crate) fn collect(
         )
     }));
     candidates.extend(
-        checked
-            .arena_warnings
-            .iter()
-            .map(|(location, message)| (*location, "arena.loop-allocation", message.clone(), true)),
+        checked.arena_warnings.iter().map(|(location, message, _)| {
+            (*location, "arena.loop-allocation", message.clone(), true)
+        }),
     );
     candidates.sort_by_key(|(location, ..)| position(*location));
     for scope in scopes {
@@ -126,6 +125,15 @@ pub(crate) fn collect(
                 return None;
             }
             Some(Warning {
+                related: if rule == "arena.loop-allocation" {
+                    checked
+                        .arena_warnings
+                        .binary_search_by_key(&location, |warning| warning.0)
+                        .map(|index| checked.arena_warnings[index].2.clone())
+                        .unwrap_or_default()
+                } else {
+                    Vec::new()
+                },
                 rule_id: rule.to_owned(),
                 line: location.line,
                 column: location.column,

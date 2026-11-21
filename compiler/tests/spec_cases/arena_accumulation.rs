@@ -200,3 +200,57 @@ fn allocating_comparison_methods_report_each_operator() {
     );
     assert_ne!(warnings[0].column, warnings[1].column);
 }
+
+#[test]
+fn allocation_routes_preserve_forwarding_and_callable_candidates() {
+    let extra = "fn work() -> void { fix ptr p = make() }\nfn wrap() -> void { work() }\nfnshape Act() -> void\nfn run(f: fn Act) -> void { f() }\nstruct Handler { f: static fn Act }";
+    for body in [
+        "loop { wrap()\nbreak }",
+        "loop { run(fn wrap)\nbreak }",
+        "fix h = Handler { f: fn wrap }\nloop { h.f()\nbreak }",
+    ] {
+        let found = warnings(extra, body);
+        assert_eq!(found.len(), 1);
+        let notes = &found[0].related;
+        for line in [2, 3, 4] {
+            assert!(
+                notes.iter().any(|note| note.line == line),
+                "{body}: {notes:?}"
+            );
+        }
+        if body.contains("fn wrap") {
+            assert!(
+                notes
+                    .iter()
+                    .any(|note| note.message().contains("possible call target")),
+                "{notes:?}"
+            );
+            assert!(
+                notes
+                    .iter()
+                    .any(|note| note.message().contains("supplies the call target")),
+                "{notes:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn cli_prints_allocation_route_notes() {
+    let directory = crate::test_util::TemporaryDirectory::new();
+    let path = directory.0.join("route.suz");
+    std::fs::write(&path, "fn make() -> void { fix ptr p = new (1 as i32) }\nfn wrap() -> void { make() }\nfn main() -> u8 { loop { wrap()\nbreak }\nreturn 0 }").unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_suz"))
+        .arg("check")
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("note:")
+            && stderr.contains("route.suz:2:")
+            && stderr.contains("route.suz:1:"),
+        "{stderr}"
+    );
+}

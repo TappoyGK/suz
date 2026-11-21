@@ -848,7 +848,7 @@ pub(in crate::check) fn check_program(
     functions: &mut [CheckedFunction],
     external: std::ops::Range<usize>,
     externs: &[crate::ast::ExternFunction],
-) -> Result<Vec<(Location, String)>, Diagnostic> {
+) -> Result<Vec<(Location, String, Vec<Diagnostic>)>, Diagnostic> {
     if functions.iter().all(|function| function.lifetime.is_none()) {
         return Ok(Vec::new());
     }
@@ -990,7 +990,7 @@ pub(in crate::check) fn check_program(
         });
     }
     warnings.extend(summaries::check_program(&mut checked)?);
-    warnings.sort();
+    warnings.sort_by_key(|warning| warning.0);
     warnings.dedup_by_key(|warning| warning.0);
     Ok(warnings)
 }
