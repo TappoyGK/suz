@@ -32,6 +32,7 @@ fn call(id: usize, arguments: Vec<(Type, Node)>, result: Node, region: usize) ->
         region,
         location: HERE,
         notes: BTreeSet::new(),
+        indirect: false,
     }
 }
 fn identity() -> (BTreeMap<usize, Rc<Analysis>>, BTreeMap<usize, Rc<Summary>>) {
@@ -588,4 +589,47 @@ fn direct_parameter_returns_need_no_call_graph_expansion() {
     f.constraints
         .push(Constraint::Address(value, Place::Direct(local)));
     assert!(f.forwarded_summary(&summaries).is_none());
+}
+
+#[test]
+fn alternative_targets_share_allocations_but_not_call_sites_or_regions() {
+    for count in [16, 64, 256] {
+        let mut caller = body(0);
+        let mut summaries = BTreeMap::new();
+        let mut results = Vec::new();
+        for id in 1..=count {
+            let mut target = body(id);
+            let (value, object) = pointer(&mut target, 0, Type::Bool);
+            target
+                .objects
+                .insert(object, Object::Allocation(id, object));
+            target.returned.insert(vec![], value);
+            summaries.insert(id, Rc::new(target.summary()));
+            let result = caller.node();
+            results.push(result);
+            let mut invocation = call(id, vec![], result, 0);
+            invocation.indirect = true;
+            caller.direct_calls.push(invocation);
+        }
+        let other_site = caller.node();
+        let mut invocation = call(1, vec![], other_site, 0);
+        invocation.indirect = true;
+        invocation.location.line = 2;
+        caller.direct_calls.push(invocation);
+        let inner = caller.region(0, HERE);
+        let other_region = caller.node();
+        let mut invocation = call(1, vec![], other_region, inner);
+        invocation.indirect = true;
+        caller.direct_calls.push(invocation);
+        let checked = caller.with_summaries(&summaries).unwrap();
+        let first = &checked.targets[results[0]];
+        assert_eq!(first.len(), 1);
+        for result in results {
+            assert_eq!(&checked.targets[result], first);
+        }
+        assert!(first.is_disjoint(&checked.targets[other_site]));
+        assert!(first.is_disjoint(&checked.targets[other_region]));
+        // 呼び出し候補が増えても実体候補は増えない。式の位置・Arenaの違いは保持する。
+        assert_eq!(checked.cells.len(), 3);
+    }
 }

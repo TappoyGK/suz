@@ -5,8 +5,12 @@ use crate::check::ir::{CallHandler, CheckedFunction};
 
 #[derive(Clone)]
 pub(crate) struct Input {
-    pub base: Analysis,
+    pub base: Option<Rc<Analysis>>,
+    pub(super) structs: Rc<crate::check::type_parameters::structs::Structs>,
+    pub function_id: usize,
     pub callables: bool,
+    pub parameter_metadata: Vec<(Type, Location, bool)>,
+    pub end: Location,
     pub region: usize,
     pub arena: Option<usize>,
     pub parameters: Vec<Type>,
@@ -16,6 +20,19 @@ pub(crate) struct Input {
     pub errors: Vec<crate::ast::ErrorVariant>,
     pub function_types: Rc<std::cell::RefCell<Vec<crate::ast::FunctionType>>>,
     pub statements: Vec<CheckedStatement>,
+}
+
+impl Input {
+    // 全本体の型検査が終わってポインタの使用が分かるまで、制約やIRの複製を作らない。
+    fn with_body(&self, statements: &[CheckedStatement]) -> Rc<Self> {
+        let mut input = self.clone();
+        let mut analysis = Analysis::with_structs(input.structs.clone());
+        analysis.function_id = input.function_id;
+        (input.region, input.arena) = analysis.parameters(&input.parameter_metadata, input.end);
+        input.base = Some(Rc::new(analysis));
+        input.statements = statements.to_vec();
+        Rc::new(input)
+    }
 }
 
 // 関数値の由来と、クロージャが保持する値・保存場所を別々に持つ。
@@ -201,7 +218,7 @@ impl Program {
         self.enqueue(id);
         id
     }
-    fn closure(&mut self, input: Rc<Input>) -> usize {
+    fn closure(&mut self, input: Rc<Input>, statements: &[CheckedStatement]) -> usize {
         let key = Rc::as_ptr(&input) as usize;
         if let Some(&id) = self.closures.get(&key) {
             return id;
@@ -209,7 +226,7 @@ impl Program {
         let id = self.next;
         self.next += 1;
         self.closures.insert(key, id);
-        self.templates.insert(id, input);
+        self.templates.insert(id, input.with_body(statements));
         id
     }
 }
@@ -359,7 +376,9 @@ impl Walk<'_> {
                 let Some(Body::Input(input)) = &closure.function.lifetime else {
                     unreachable!("closure input retained until lifetime checking")
                 };
-                let function = self.program.closure(input.clone());
+                let function = self
+                    .program
+                    .closure(input.clone(), &closure.function.statements);
                 let captures = closure
                     .captures
                     .iter_mut()
@@ -854,8 +873,9 @@ pub(in crate::check) fn check_program(
     for function in functions.iter_mut() {
         match function.lifetime.take() {
             Some(Body::Input(input)) => {
+                let input = input.with_body(&function.statements);
                 if !input.callables {
-                    let mut analysis = input.base.clone();
+                    let mut analysis = input.base.as_deref().expect("input has its body").clone();
                     analysis.statements(&input.statements, input.region, input.arena);
                     let mut function = CheckedFunction {
                         id: function.id,
@@ -894,7 +914,7 @@ pub(in crate::check) fn check_program(
         program.current = id;
         let context = program.contexts[&id].clone();
         let input = program.templates[&context.function].clone();
-        let mut analysis = input.base.clone();
+        let mut analysis = input.base.as_deref().expect("input has its body").clone();
         analysis.function_id = id;
         let mut walk = Walk {
             program: &mut program,

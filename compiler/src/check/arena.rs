@@ -52,6 +52,9 @@ pub(super) fn observe_type(ty: Type, scope: &Scope) {
     ) {
         return;
     }
+    if !scope.program_pointers_used.get() && contains(ty, scope) {
+        scope.program_pointers_used.set(true);
+    }
     if !scope.callables_used.get() && callable_type(ty, &scope.structs) {
         scope.callables_used.set(true);
         scope.lifetime_used.set(true);
@@ -366,7 +369,6 @@ fn store(
 }
 
 pub(super) fn check_lifetimes(
-    statements: &[CheckedStatement],
     scope: &Scope,
     function: &crate::ast::Function,
     references: &std::collections::BTreeMap<String, Binding>,
@@ -381,5 +383,5 @@ pub(super) fn check_lifetimes(
     if !scope.lifetime_used.get() && !function.name.is_empty() {
         return Ok(None);
     }
-    lifetimes::check(statements, scope, function, references, id).map(Some)
+    lifetimes::check(scope, function, references, id).map(Some)
 }

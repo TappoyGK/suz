@@ -725,6 +725,15 @@ fn grow(f: fn Act, count: i32) -> void {
 fn main() -> u8 { grow(fn plain, 2)
     return 0 }
 "#;
+    // ポインタのないプログラムには寿命解析の資源上限を課さない。
+    suz::compile(source.as_bytes()).unwrap();
+    let source = format!(
+        "struct Node {{ v: i32 }}\n{}",
+        source.replace(
+            "grow(fn plain, 2)",
+            "fix ptr node = new Node { v: 1 }\ngrow(fn [node]() -> void { node#v = 2 }, 2)",
+        )
+    );
     assert_eq!(
         suz::compile(source.as_bytes()).unwrap_err().rule(),
         "arena.analysis-limit"

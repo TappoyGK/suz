@@ -32,11 +32,13 @@ pub(super) struct Call {
     pub region: usize,
     pub location: Location,
     pub notes: BTreeSet<CallNote>,
+    pub indirect: bool,
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 struct CallKey<'a> {
     id: usize,
+    indirect_site: Option<Location>,
     region: usize,
     arguments: Vec<(usize, Type, &'a [usize], Node)>,
     receiver: Option<Place>,
@@ -52,6 +54,7 @@ impl Call {
     fn key(&self, representative: &[Node]) -> CallKey<'_> {
         CallKey {
             id: self.id,
+            indirect_site: self.indirect.then_some(self.location),
             region: self.region,
             arguments: self
                 .arguments
@@ -419,9 +422,27 @@ impl Analysis {
                     }
                 }
                 Object::Allocation(..) | Object::RecursiveAllocation(..) => {
-                    let cell = self.cell(call.region, call.location, info.ty);
-                    self.cells.get_mut(&cell).unwrap().origin = Origin::Call;
-                    self.objects.insert(cell, object);
+                    // 一つの間接呼び出しで選ばれる関数の確保先は、同じArenaに属する。
+                    // 型ごとに合流し、候補N個が返すN個の同寿命の実体を、次の反復で
+                    // N個の候補すべてへ渡す完全グラフを作らない。異なる呼び出し位置は分ける。
+                    let key = (call.location, call.region, info.ty);
+                    let cell = if call.indirect {
+                        if let Some(&cell) = self.candidate_allocations.get(&key) {
+                            cell
+                        } else {
+                            let cell = self.cell(call.region, call.location, info.ty);
+                            self.cells.get_mut(&cell).unwrap().origin = Origin::Call;
+                            self.objects
+                                .insert(cell, Object::Allocation(self.function_id, cell));
+                            self.candidate_allocations.insert(key, cell);
+                            cell
+                        }
+                    } else {
+                        let cell = self.cell(call.region, call.location, info.ty);
+                        self.cells.get_mut(&cell).unwrap().origin = Origin::Call;
+                        self.objects.insert(cell, object);
+                        cell
+                    };
                     self.targets[node].insert(Reference::object(cell));
                 }
             }

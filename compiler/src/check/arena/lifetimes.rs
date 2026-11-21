@@ -87,6 +87,7 @@ pub(crate) struct Analysis {
     function_id: usize,
     resolved: bool,
     objects: BTreeMap<Node, summaries::Object>,
+    candidate_allocations: BTreeMap<(Location, usize, Type), Node>,
     returned: Shape,
     direct_calls: Vec<summaries::Call>,
     effect_calls: BTreeMap<usize, Location>,
@@ -110,12 +111,17 @@ pub(crate) struct Analysis {
 }
 
 impl Analysis {
+    #[cfg(test)]
     fn new(scope: &Scope) -> Self {
+        Self::with_structs(scope.structs.clone())
+    }
+    fn with_structs(structs: Rc<crate::check::type_parameters::structs::Structs>) -> Self {
         Self {
-            structs: scope.structs.clone(),
+            structs,
             function_id: 0,
             resolved: false,
             objects: BTreeMap::new(),
+            candidate_allocations: BTreeMap::new(),
             returned: Shape::new(),
             direct_calls: Vec::new(),
             effect_calls: BTreeMap::new(),
@@ -419,6 +425,7 @@ impl Analysis {
                     captures,
                     region: arena.expect("checked arena call"),
                     location: *location,
+                    indirect: self.candidate_notes.contains_key(&(*id, *location)),
                     notes: self
                         .candidate_notes
                         .get(&(*id, *location))
@@ -519,6 +526,7 @@ impl Analysis {
                             region: arena.expect("functions have a current arena"),
                             location: self.regions[region].end,
                             notes: BTreeSet::new(),
+                            indirect: false,
                         });
                     }
                 }
@@ -1003,20 +1011,33 @@ impl Analysis {
 }
 
 pub(super) fn check(
-    statements: &[CheckedStatement],
     scope: &Scope,
     function: &crate::ast::Function,
     references: &BTreeMap<String, super::Binding>,
     id: usize,
 ) -> Result<Body, Diagnostic> {
-    let mut analysis = Analysis::new(scope);
-    analysis.function_id = id;
-    let (region, arena) = analysis.parameters(function, references, scope);
+    let parameter_metadata = function
+        .parameters
+        .iter()
+        .enumerate()
+        .map(|(index, p)| {
+            (
+                scope.resolve_type_at(p.ty, p.location).unwrap(),
+                p.location,
+                references.contains_key(&p.name)
+                    || (index == 0 && function.method.is_some_and(|m| m.mutable)),
+            )
+        })
+        .collect();
     Ok(Body::Input(Rc::new(callables::Input {
-        base: analysis,
+        base: None,
+        structs: scope.structs.clone(),
+        function_id: id,
         callables: scope.callables_used.get() || function.name.is_empty(),
-        region,
-        arena,
+        parameter_metadata,
+        end: function.end,
+        region: 0,
+        arena: None,
         parameters: function
             .parameters
             .iter()
@@ -1027,7 +1048,7 @@ pub(super) fn check(
         result: scope.result,
         errors: function.errors.clone(),
         function_types: scope.function_types.clone(),
-        statements: statements.to_vec(),
+        statements: Vec::new(),
     })))
 }
 

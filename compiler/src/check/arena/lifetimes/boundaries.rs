@@ -79,47 +79,31 @@ impl Analysis {
 
     pub(super) fn parameters(
         &mut self,
-        function: &crate::ast::Function,
-        references: &BTreeMap<String, super::super::Binding>,
-        scope: &Scope,
+        parameters: &[(Type, Location, bool)],
+        end: Location,
     ) -> (usize, Option<usize>) {
-        self.regions[0].end = function.end;
+        self.regions[0].end = end;
         // 0が呼び出し時の現在のArena。引数の実体は要約を適用するときに
         // 実引数の由来へ置き換える。ローカル変数の保存場所は関数の終了まで。
-        let body = self.region(0, function.end);
+        let body = self.region(0, end);
         self.return_region = Some(0);
-        for (id, parameter) in function.parameters.iter().enumerate() {
-            let ty = scope
-                .resolve_type_at(parameter.ty, parameter.location)
-                .expect("parameter type was checked before lifetime analysis");
+        for (id, &(ty, location, reference)) in parameters.iter().enumerate() {
             let region = 0;
             let mut private = Vec::new();
             let objects = &mut private;
             let mut roots = BTreeMap::new();
             // 参照捕捉の保存場所は呼び出し元にある。値捕捉・通常の仮引数はローカルなコピー。
-            let storage = if references.contains_key(&parameter.name) {
-                region
-            } else {
-                body
-            };
-            let local = self.cell(storage, parameter.location, ty);
+            let storage = if reference { region } else { body };
+            let local = self.cell(storage, location, ty);
             self.cells.get_mut(&local).unwrap().origin = Origin::Parameter;
             self.locals.insert(id, local);
-            if references.contains_key(&parameter.name)
-                || (id == 0 && function.method.is_some_and(|method| method.mutable))
-            {
+            if reference {
                 self.objects.insert(local, summaries::Object::Slot(id));
             }
             for path in self.paths(ty) {
                 let pointee = self.field_type(ty, &path).pointee().unwrap();
-                let object = self.parameter_root(
-                    id,
-                    pointee,
-                    region,
-                    parameter.location,
-                    &mut roots,
-                    objects,
-                );
+                let object =
+                    self.parameter_root(id, pointee, region, location, &mut roots, objects);
                 let field = self.project(local, &path);
                 self.targets[field].insert(Reference::object(object));
             }
