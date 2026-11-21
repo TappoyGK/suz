@@ -13,6 +13,7 @@ def requires_checks(paths):
         if (
             not path.endswith('.md')
             or path in {
+                'README.md',
                 'docs/spec.md',
                 'docs/spec-cases.md',
                 'runtime/third_party/ryu/README.md',

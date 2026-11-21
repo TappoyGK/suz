@@ -28,12 +28,13 @@ class ChangeTests(unittest.TestCase):
         # 文書は、拡張子が.mdでも検査が必要。コードとの混在時も省略しない。
         self.assertFalse(ci.requires_checks(['HUMANS.md', 'docs/releasing.md', 'compiler/README.md']))
         self.assertFalse(ci.requires_checks([]))
-        for path in ['docs/spec.md', 'docs/spec-cases.md', 'docs/spec-cases/flow.md',
+        for path in ['README.md', 'docs/spec.md', 'docs/spec-cases.md', 'docs/spec-cases/flow.md',
                      'docs/spec-cases/new.md', 'runtime/third_party/ryu/README.md',
                      '.github/workflows/ci.yml', 'compiler/src/main.rs', 'Cargo.lock',
                      'scripts/ci-changes.py', 'LICENSE-MIT']:
             with self.subTest(path=path):
-                self.assertTrue(ci.requires_checks(['README.md', path]))
+                self.assertTrue(ci.requires_checks([path]))
+                self.assertTrue(ci.requires_checks(['compiler/README.md', path]))
 
     def test_manual_and_new_branch_runs(self):
         # 手動実行と新規ブランチには比較元がないので、必ず検査する。

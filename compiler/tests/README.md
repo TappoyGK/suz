@@ -69,6 +69,7 @@ SUZ_TIMINGS=1 ./scripts/test-spec-cases.sh
 - `compiler/tests/spec_cases/batch.rs`：実行状態の分離とCコンパイル失敗の検証。
 - `compiler/tests/support/runner.rs`：並列数の設定、ジョブの実行、コンパイル・実行結果の照合。
 - `compiler/tests/spec_cases.rs`：テストの入口、実際の例集の整合検査と実行。
+- `compiler/tests/spec_cases/readme.rs`：トップのREADMEからSuzコードを直接取り出し、ビルド・実行と期待するログを検査する。例を追加・削除した場合は期待値も更新する。
 - `compiler/tests/spec_cases/format.rs`：Markdownの書式・抽出のテスト。
 - `compiler/tests/spec_cases/diagnostics.rs`：診断・警告の期待値と照合のテスト。
 - `compiler/tests/spec_cases/names.rs`：宣言ごとの命名規則、アンダースコアの位置、診断位置、大文字・小文字を区別した参照を検査する。
