@@ -56,74 +56,95 @@ SUZ_TIMINGS=1 ./scripts/test-spec-cases.sh
 
 ## 管理するデータ
 
-- `docs/spec-cases.md`：例集の書式、目次、全体の件数。
-- `docs/spec-cases/*.md`：分野別のID、ソースまたは入力バイト列、説明、期待結果の表、期待する出力。
-- `compiler/tests/support/catalog.rs`：分野別ファイルの読み込み、ファイル間のID重複、分野別・結果別・全体の件数の検査。
-- `compiler/tests/support/mod.rs`：共有するデータ型とソースファイルの保存。
-- `compiler/tests/support/cases.rs`：各例の入力・説明・期待値の抽出。
-- `compiler/tests/support/expectations.rs`：期待結果・診断の表の読み取り、設定の検査、診断出力の照合。
-- `compiler/tests/support/markdown.rs`：見出し、表、コードブロックの解析。
-- `compiler/tests/support/batch.rs`：生成Cの一括リンクとプロセスごとの実行。
-- `compiler/tests/support/runtime_link.rs`：生成Cを直接検証するテストで使う、標準ランタイムとのリンク設定。
-- `compiler/tests/support/timing.rs`：各段階の呼び出し回数と累積時間の計測。
-- `compiler/tests/spec_cases/batch.rs`：実行状態の分離とCコンパイル失敗の検証。
-- `compiler/tests/support/runner.rs`：並列数の設定、ジョブの実行、コンパイル・実行結果の照合。
-- `compiler/tests/spec_cases.rs`：テストの入口、実際の例集の整合検査と実行。
-- `compiler/tests/spec_cases/readme.rs`：トップのREADMEからSuzコードを直接取り出し、ビルド・実行と期待するログを検査する。例を追加・削除した場合は期待値も更新する。
-- `compiler/tests/spec_cases/format.rs`：Markdownの書式・抽出のテスト。
-- `compiler/tests/spec_cases/diagnostics.rs`：診断・警告の期待値と照合のテスト。
-- `compiler/tests/spec_cases/names.rs`：宣言ごとの命名規則、アンダースコアの位置、診断位置、大文字・小文字を区別した参照を検査する。
-- `compiler/tests/spec_cases/syntax_diagnostics.rs`：構文エラーの診断、終了コード、出力ファイルを生成しないこと、途中で切れた入力のテスト。
-- `compiler/tests/spec_cases/invalid_inputs.rs`：既存例の各バイトの削除と、区切り記号の置換・重複による入力の検査。コンパイラがパニックせず、エラー診断のタグが仕様に存在することを確認する。
-- `compiler/tests/spec_cases/panics.rs`：パニック診断の書式・出力照合と実行検証のテスト。
-- `compiler/tests/spec_cases/c_build.rs`：不適切なC設定の拒否と、ビルドコマンドによる生成プログラムの検証。
-- `compiler/tests/spec_cases/execution.rs`：CLI、変数、スコープ、制御文の実行テスト。
-- `compiler/tests/spec_cases/expressions.rs`：演算子の型検査と実行結果のテスト。
-- `compiler/tests/spec_cases/enums.rs`：列挙型の同一性、採番の上限、整数との変換、定数・関数・match・ログとの組み合わせのテスト。
-- `compiler/tests/spec_cases/generic_numeric.rs`：汎用数値関数の型推論、具体型ごとの関数生成、未使用関数、キャストと警告、診断の関連位置のテスト。
-- `compiler/tests/spec_cases/generic_properties.rs`：汎用関数と具体型で書いた関数の一致、値ブロックの型推論、入れ子の定数変換、本体の誤りより前にある保留判定の診断順序のテスト。
-- `compiler/tests/spec_cases/function_values.rs`：関数値の型・受け渡し・評価順序、汎用関数の具体化と診断の検査。
-- `compiler/tests/spec_cases/closures.rs`：明示的な値・参照キャプチャー、環境の寿命・評価順、入れ子のスコープと深さ、保存・値の書き換え・代入先と重なる右辺の書き換えの禁止を検査する。
-- `compiler/tests/spec_cases/panic.rs`：panic文の断片出力・評価順・終了判定・構文の深さと、クロージャの終了範囲を検査する。
-- `compiler/tests/spec_cases/arena.rs`・`arena_runtime.c`：固定領域の整列・入れ子と再利用、容量と計算のあふれ、失敗前の状態保持、容量オプションと出力物への引き継ぎを検査する。`arena_asan.c`は、Suzでは拒否される回収後の読み書きを内部APIで作り、ASanの診断・生存中の実体の保護・再利用・整列の余白を検査する。生成Cの各退出経路もASanで確認する（[runtime.arena-poison](../../docs/runtime.md)）。
-- `compiler/tests/spec_cases/arena_tree.rs`：相互再帰の集約、繰り返しと別経路の区別、上限での省略、途中脱出、表示の桁揃え・CSV、計測領域の分離と確保失敗、emit-cの配布物からの実行を検査する。
-- `compiler/tests/spec_cases/arena_report.rs`：測定したpeakと同じ容量なら成功し、1バイト不足なら失敗することを、通常・ASanの両方で確認する。途中脱出・再帰・配列・クロージャ、ブロックの再利用、出力時に追加確保しないこととCLIからの引き継ぎも検査する。
-- `compiler/tests/spec_cases/arena_fuzz.rs`：**[test.arena-fuzz]** リリース検査用の `#[ignore]` テストとして、作業領域・ポインタ・構造体・制御文・クロージャ・`fn` を組み合わせたランダムなプログラム（`objection` と `trusted` を除く）を生成し、コンパイラが受理したものだけを ASan 有効でビルド・実行して回収済み実体への読み書きがないことを検証する。寿命検査の前提は[言語仕様](../../docs/spec.md#93-寿命検査の前提)、その経緯は[設計記録](../../docs/design.md)を参照すること。
-
-  寿命検査の前提を変更する場合は、検査モデルを検証し直し、追加・変更する機能を生成テストの要素に加える。回収後・再利用前のアクセスをASanで検査する。境界検査を意図的に欠落させたコンパイラでは、配列実体の外へ出る生成例がASanで失敗することを確認する。
-
-  生成テストでは配列要素・部分配列・切り出しを経由する保存・返却、引数とキャプチャー経由の保存・返却、内側のarenaからのコールバック、戻り値経由の書き込み、static fnの候補混在を組み合わせる。保存効果・由来候補・関数候補を意図的に欠落させた検査では、受理された不正な持ち出しを回収後・再利用前のASan実行で検出できることを確認する。
-
-- `compiler/tests/spec_cases/ffi_bytes.rs`：UTF-8バイト列・NUL・切り出し、実体の同一性と寿命、評価回数、ポインタ操作の制限、バイト数の範囲検査を確認する。
-- `compiler/tests/spec_cases/ffi_link.rs`：外部ヘッダー・オブジェクト・ライブラリ、リンクの順序と失敗、emit-cのパス引き継ぎを実際のCLIで検査する。
-- `compiler/tests/spec_cases/ffi_pointers.rs`：Arenaの実体をCへ渡す借用、型・constのヘッダー照合、評価順序と更新の反映、非nullと対応型の制約、keepによる登録後の利用とArena退出前の登録解除を検査する。
-- `compiler/tests/spec_cases/ffi_structs.rs`：C構造体の宣言、ヘッダーとの配置・型・修飾の照合、実際のCメンバーを使った値操作を検査する。
-- `compiler/tests/spec_cases/ffi.rs`：Cヘッダーとの関数型照合、全スカラー型のABI、引数の評価順、C固有型の変換、trustedの境界を検査する。
-- `compiler/tests/spec_cases/functions.rs`：関数の引数・戻り値、評価順序、再帰、仮引数の制約、voidのテスト。
-- `compiler/tests/spec_cases/value_blocks.rs`：値ブロックのスコープ、外側の変数の更新、評価順序、制御移動と代入先の制約のテスト。
-- `compiler/tests/spec_cases/arithmetic.rs`：整数の算術、境界値、パニック、定数評価のテスト。
-- `compiler/tests/spec_cases/logs.rs`：テンプレート、整数・boolの表示、評価中のパニック、ログ出力のアトミック性のテスト。
-- `compiler/tests/spec_cases/symbol_float_casts.rs`：浮動小数点への変換、定数と実行時の丸め、失敗処理を検査する。解析処理の境界値とRustの数値解析との比較は `compiler/src/check/text_parse_tests.rs` に置く。
-- `compiler/tests/spec_cases/symbol_struct_casts.rs`：構造体変換の入れ子、フィールド型、エスケープ、改行、定数評価と失敗処理を検査する。
-- `compiler/tests/spec_cases/symbol_struct_runtime.rs`：失敗した構造体変換がプールを増やさないこと、一時領域の解放、確保失敗の位置、定数結果の静的配置を検査する。
-- `compiler/tests/spec_cases/symbol_casts.rs`：整数・真偽値への変換、整数のラップ変換、定数評価、失敗処理の型と制御移動を検査する。
-- `compiler/tests/spec_cases/text_views.rs`：型変換と失敗処理の制約、Unicodeの全境界での切り出し・添字、範囲の保持、確保なしの読み取りと明示的なインターン化を検査する。
-- `compiler/tests/spec_cases/symbol.rs`：テンプレートの定数依存、入れ子のスコープ、診断、定数と実行時の浮動小数点表示の一致を検査する。
-- `compiler/tests/spec_cases/symbol_startup.rs`：未使用の定数を含む起動時の一括登録、初期化失敗の位置、定数参照とログ出力の追加確保の有無を検査する。
-- `compiler/tests/spec_cases/symbol_runtime.rs`・`symbol_runtime.c`：環境層の確保・解放の記録によるテキストプールの共有実体、容量計測、上限、確保失敗、一時バッファの検査。プール単体のCプログラムはテスト起動ごとに最適化設定別で1回ビルドし、Cargoの出力ディレクトリに置いた同じ実行ファイルを各検査から別プロセスで起動する。検査結果は再利用しない。`text_environment.c` は生成プログラムの確保要求を記録し、ログの確保要求がないこと、確保失敗時のソース位置、NULを含む出力を検査する。textのC実行テストは、通常の開発プロファイルでは動作を検査し、リリースプロファイルではサニタイザーも有効にする。最適化ありのプール検査は、プロファイルによらずサニタイザーを有効にする。
-- `compiler/tests/spec_cases/matches.rs`：整数・boolのmatchとmatchexpr、定数パターン、制御移動、式の結果を捨てる場合のテスト。
-- `compiler/tests/spec_cases/ranges.rs`：forの整数境界、入れ子の制御、範囲の参照・スコープ・診断のテスト。
-- `compiler/tests/spec_cases/shifts.rs`：シフトの型・境界値・定数評価のテスト。
-- `compiler/tests/spec_cases/arithmetic_handlers.rs`：整数演算の失敗処理、制御移動の位置、診断対象のテスト。
-- `compiler/tests/spec_cases/casts.rs`：型だけで成功を保証できる変換の検査と実行結果のテスト。
-- `compiler/tests/spec_cases/floats.rs`：浮動小数点のリテラル・型・比較・算術のテスト。
-- `compiler/tests/spec_cases/workers.rs`：並列数とジョブ実行のテスト。
-- `compiler/tests/support/test_util.rs`：一時ディレクトリと生成Cの実行に使う共通処理。
-- `compiler/tests/support/integer_bounds.rs`：型検査・演算テストで共有する整数型の境界値。
-
 分割したファイルは、同じ `spec_cases` テストターゲットのモジュールとして読み込む。`execute_spec_cases` の実行コマンドは前述のとおりである。個々のテストは関数名で絞り込める。完全名には `expressions::` などのモジュール名が付く。
 
 ソースと期待結果は例集だけで管理する。別の期待結果ファイルはない。通常のソースは末尾にLFを付け、生バイト指定は16進数をそのまま復元する。テスト中は一時ディレクトリにID名の `.suz` ファイルを作成し、読み戻してバイト単位で比較する。終了後は削除する。
+
+### docs/
+
+| ファイル | 内容 |
+|---|---|
+| `spec-cases.md` | 例集の書式、目次、全体の件数。 |
+| `spec-cases/*.md` | 分野別のID、ソースまたは入力バイト列、説明、期待結果の表、期待する出力。 |
+
+### compiler/tests/
+
+| ファイル | 内容 |
+|---|---|
+| `spec_cases.rs` | テストの入口、実際の例集の整合検査と実行。 |
+
+### compiler/tests/support/
+
+| ファイル | 内容 |
+|---|---|
+| `catalog.rs` | 分野別ファイルの読み込み、ファイル間のID重複、分野別・結果別・全体の件数の検査。 |
+| `mod.rs` | 共有するデータ型とソースファイルの保存。 |
+| `cases.rs` | 各例の入力・説明・期待値の抽出。 |
+| `expectations.rs` | 期待結果・診断の表の読み取り、設定の検査、診断出力の照合。 |
+| `markdown.rs` | 見出し、表、コードブロックの解析。 |
+| `batch.rs` | 生成Cの一括リンクとプロセスごとの実行。 |
+| `runtime_link.rs` | 生成Cを直接検証するテストで使う、標準ランタイムとのリンク設定。 |
+| `timing.rs` | 各段階の呼び出し回数と累積時間の計測。 |
+| `runner.rs` | 並列数の設定、ジョブの実行、コンパイル・実行結果の照合。 |
+| `test_util.rs` | 一時ディレクトリと生成Cの実行に使う共通処理。 |
+| `integer_bounds.rs` | 型検査・演算テストで共有する整数型の境界値。 |
+
+### compiler/tests/spec_cases/
+
+| ファイル | 内容 |
+|---|---|
+| `batch.rs` | 実行状態の分離とCコンパイル失敗の検証。 |
+| `readme.rs` | トップのREADMEからSuzコードを直接取り出し、ビルド・実行と期待するログを検査する。例を追加・削除した場合は期待値も更新する。 |
+| `format.rs` | Markdownの書式・抽出のテスト。 |
+| `diagnostics.rs` | 診断・警告の期待値と照合のテスト。 |
+| `names.rs` | 宣言ごとの命名規則、アンダースコアの位置、診断位置、大文字・小文字を区別した参照を検査する。 |
+| `syntax_diagnostics.rs` | 構文エラーの診断、終了コード、出力ファイルを生成しないこと、途中で切れた入力のテスト。 |
+| `invalid_inputs.rs` | 既存例の各バイトの削除と、区切り記号の置換・重複による入力の検査。コンパイラがパニックせず、エラー診断のタグが仕様に存在することを確認する。 |
+| `panics.rs` | パニック診断の書式・出力照合と実行検証のテスト。 |
+| `c_build.rs` | 不適切なC設定の拒否と、ビルドコマンドによる生成プログラムの検証。 |
+| `execution.rs` | CLI、変数、スコープ、制御文の実行テスト。 |
+| `expressions.rs` | 演算子の型検査と実行結果のテスト。 |
+| `enums.rs` | 列挙型の同一性、採番の上限、整数との変換、定数・関数・match・ログとの組み合わせのテスト。 |
+| `generic_numeric.rs` | 汎用数値関数の型推論、具体型ごとの関数生成、未使用関数、キャストと警告、診断の関連位置のテスト。 |
+| `generic_properties.rs` | 汎用関数と具体型で書いた関数の一致、値ブロックの型推論、入れ子の定数変換、本体の誤りより前にある保留判定の診断順序のテスト。 |
+| `function_values.rs` | 関数値の型・受け渡し・評価順序、汎用関数の具体化と診断の検査。 |
+| `closures.rs` | 明示的な値・参照キャプチャー、環境の寿命・評価順、入れ子のスコープと深さ、保存・値の書き換え・代入先と重なる右辺の書き換えの禁止を検査する。 |
+| `panic.rs` | panic文の断片出力・評価順・終了判定・構文の深さと、クロージャの終了範囲を検査する。 |
+| `arena.rs`・`arena_runtime.c` | 固定領域の整列・入れ子と再利用、容量と計算のあふれ、失敗前の状態保持、容量オプションと出力物への引き継ぎを検査する。`arena_asan.c`は、Suzでは拒否される回収後の読み書きを内部APIで作り、ASanの診断・生存中の実体の保護・再利用・整列の余白を検査する。生成Cの各退出経路もASanで確認する（[runtime.arena-poison](../../docs/runtime.md)）。 |
+| `arena_tree.rs` | 相互再帰の集約、繰り返しと別経路の区別、上限での省略、途中脱出、表示の桁揃え・CSV、計測領域の分離と確保失敗、emit-cの配布物からの実行を検査する。 |
+| `arena_report.rs` | 測定したpeakと同じ容量なら成功し、1バイト不足なら失敗することを、通常・ASanの両方で確認する。途中脱出・再帰・配列・クロージャ、ブロックの再利用、出力時に追加確保しないこととCLIからの引き継ぎも検査する。 |
+| `arena_fuzz.rs` | **[test.arena-fuzz]** リリース検査用の `#[ignore]` テストとして、作業領域・ポインタ・構造体・制御文・クロージャ・`fn` を組み合わせたランダムなプログラム（`objection` と `trusted` を除く）を生成し、コンパイラが受理したものだけを ASan 有効でビルド・実行して回収済み実体への読み書きがないことを検証する。寿命検査の前提は[言語仕様](../../docs/spec.md#93-寿命検査の前提)、その経緯は[設計記録](../../docs/design.md)を参照すること。 |
+| `ffi_bytes.rs` | UTF-8バイト列・NUL・切り出し、実体の同一性と寿命、評価回数、ポインタ操作の制限、バイト数の範囲検査を確認する。 |
+| `ffi_link.rs` | 外部ヘッダー・オブジェクト・ライブラリ、リンクの順序と失敗、emit-cのパス引き継ぎを実際のCLIで検査する。 |
+| `ffi_pointers.rs` | Arenaの実体をCへ渡す借用、型・constのヘッダー照合、評価順序と更新の反映、非nullと対応型の制約、keepによる登録後の利用とArena退出前の登録解除を検査する。 |
+| `ffi_structs.rs` | C構造体の宣言、ヘッダーとの配置・型・修飾の照合、実際のCメンバーを使った値操作を検査する。 |
+| `ffi.rs` | Cヘッダーとの関数型照合、全スカラー型のABI、引数の評価順、C固有型の変換、trustedの境界を検査する。 |
+| `functions.rs` | 関数の引数・戻り値、評価順序、再帰、仮引数の制約、voidのテスト。 |
+| `value_blocks.rs` | 値ブロックのスコープ、外側の変数の更新、評価順序、制御移動と代入先の制約のテスト。 |
+| `arithmetic.rs` | 整数の算術、境界値、パニック、定数評価のテスト。 |
+| `logs.rs` | テンプレート、整数・boolの表示、評価中のパニック、ログ出力のアトミック性のテスト。 |
+| `symbol_float_casts.rs` | 浮動小数点への変換、定数と実行時の丸め、失敗処理を検査する。解析処理の境界値とRustの数値解析との比較は `compiler/src/check/text_parse_tests.rs` に置く。 |
+| `symbol_struct_casts.rs` | 構造体変換の入れ子、フィールド型、エスケープ、改行、定数評価と失敗処理を検査する。 |
+| `symbol_struct_runtime.rs` | 失敗した構造体変換がプールを増やさないこと、一時領域の解放、確保失敗の位置、定数結果の静的配置を検査する。 |
+| `symbol_casts.rs` | 整数・真偽値への変換、整数のラップ変換、定数評価、失敗処理の型と制御移動を検査する。 |
+| `text_views.rs` | 型変換と失敗処理の制約、Unicodeの全境界での切り出し・添字、範囲の保持、確保なしの読み取りと明示的なインターン化を検査する。 |
+| `symbol.rs` | テンプレートの定数依存、入れ子のスコープ、診断、定数と実行時の浮動小数点表示の一致を検査する。 |
+| `symbol_startup.rs` | 未使用の定数を含む起動時の一括登録、初期化失敗の位置、定数参照とログ出力の追加確保の有無を検査する。 |
+| `symbol_runtime.rs`・`symbol_runtime.c` | 環境層の確保・解放の記録によるテキストプールの共有実体、容量計測、上限、確保失敗、一時バッファの検査。プール単体のCプログラムはテスト起動ごとに最適化設定別で1回ビルドし、Cargoの出力ディレクトリに置いた同じ実行ファイルを各検査から別プロセスで起動する。検査結果は再利用しない。`text_environment.c` は生成プログラムの確保要求を記録し、ログの確保要求がないこと、確保失敗時のソース位置、NULを含む出力を検査する。textのC実行テストは、通常の開発プロファイルでは動作を検査し、リリースプロファイルではサニタイザーも有効にする。最適化ありのプール検査は、プロファイルによらずサニタイザーを有効にする。 |
+| `matches.rs` | 整数・boolのmatchとmatchexpr、定数パターン、制御移動、式の結果を捨てる場合のテスト。 |
+| `ranges.rs` | forの整数境界、入れ子の制御、範囲の参照・スコープ・診断のテスト。 |
+| `shifts.rs` | シフトの型・境界値・定数評価のテスト。 |
+| `arithmetic_handlers.rs` | 整数演算の失敗処理、制御移動の位置、診断対象のテスト。 |
+| `casts.rs` | 型だけで成功を保証できる変換の検査と実行結果のテスト。 |
+| `floats.rs` | 浮動小数点のリテラル・型・比較・算術のテスト。 |
+| `workers.rs` | 並列数とジョブ実行のテスト。 |
+| `operator_methods.rs` | 演算子の対象基準、剰余・ビット演算・シフト・not・lenの呼び出し、単項の結果型制約、演算子の定義選択、単項と二項のマイナスの区別、数値の種類と具体型の決定、整数算術の境界、評価順序と比較連鎖の短絡、複合代入の代入先保持と戻り値型を検査する。 |
+
+#### arena_fuzz.rs
+
+寿命検査の前提を変更する場合は、検査モデルを検証し直し、追加・変更する機能を生成テストの要素に加える。回収後・再利用前のアクセスをASanで検査する。境界検査を意図的に欠落させたコンパイラでは、配列実体の外へ出る生成例がASanで失敗することを確認する。
+
+生成テストでは配列要素・部分配列・切り出しを経由する保存・返却、引数とキャプチャー経由の保存・返却、内側のarenaからのコールバック、戻り値経由の書き込み、static fnの候補混在を組み合わせる。保存効果・由来候補・関数候補を意図的に欠落させた検査では、受理された不正な持ち出しを回収後・再利用前のASan実行で検出できることを確認する。
 
 ## Markdownの読み取り
 
@@ -174,5 +195,3 @@ CIは、ビルドや検証の入力にならないMarkdown文書だけの変更�
 2. 例集のソース・説明・期待結果の表・出力ブロックを更新する。結果を誤って計算した場合や、制御を取り違えた場合に、終了コードや出力が変わることを確認する。
 3. 例を追加・削除した場合は、例集の件数表を更新する。既存の書式に沿った追加ではRust側の変更は不要である。
 4. `cargo test` を実行する。
-
-- `compiler/tests/spec_cases/operator_methods.rs`：演算子の対象基準、剰余・ビット演算・シフト・not・lenの呼び出し、単項の結果型制約、演算子の定義選択、単項と二項のマイナスの区別、数値の種類と具体型の決定、整数算術の境界、評価順序と比較連鎖の短絡、複合代入の代入先保持と戻り値型を検査する。
