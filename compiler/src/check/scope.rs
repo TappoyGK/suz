@@ -123,6 +123,7 @@ pub(super) struct NamedTypes {
 
 #[derive(Clone)]
 pub(super) struct Scope {
+    pub array_bounds: super::arrays::bounds::State,
     pub named: Rc<NamedTypes>,
 
     // 定義のないプログラムでは、演算子用の型ヒント取得を省く。
@@ -264,6 +265,15 @@ impl Scope {
 
     pub fn type_name(&self, ty: Type) -> String {
         match ty {
+            Type::Array(id) => {
+                let array = self.structs.arrays.borrow().get(id);
+                let element = self.type_name(array.element);
+                if array.rank == 1 {
+                    format!("[{element}]")
+                } else {
+                    format!("[{element}; {}]", vec!["_"; array.rank].join(", "))
+                }
+            }
             Type::Parameter(id) => self
                 .named
                 .type_parameters
@@ -350,6 +360,7 @@ impl Default for Scope {
             deferred: None,
             generic_calls: None,
             instances: Rc::default(),
+            array_bounds: Default::default(),
             type_hints: Rc::default(),
             hint_depth: Rc::default(),
             float_hints: Rc::default(),

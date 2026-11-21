@@ -16,6 +16,7 @@ use std::{
 #[derive(Default)]
 pub(in crate::check) struct Structs {
     pub shapes: super::shapes::Shapes,
+    pub arrays: RefCell<crate::ast::arrays::Types>,
     declarations: RefCell<Vec<Rc<StructDeclaration>>>,
     applications: Vec<Application>,
     instances: RefCell<BTreeMap<Application, usize>>,
@@ -39,6 +40,7 @@ impl Structs {
     pub fn new(program: &Program) -> Self {
         Self {
             need_names: program.need_groups.iter().map(|g| g.name.clone()).collect(),
+            arrays: RefCell::new(program.arrays.clone()),
             applications: program.applications.clone(),
             shapes: super::shapes::Shapes::new(program),
             enums: program.enums.clone(),
@@ -62,6 +64,11 @@ impl Structs {
                 .with_nullable(ty.is_nullable());
         }
         match ty {
+            Type::Array(id) => {
+                let array = self.arrays.borrow().get(id);
+                let element = self.normalize(array.element);
+                self.arrays.borrow_mut().intern(element, array.rank)
+            }
             Type::Struct(id) => Type::Struct(self.canonical_id(id)),
             _ => self.shapes.normalize(ty),
         }
@@ -114,9 +121,12 @@ impl Structs {
     }
     fn validate_layout(&self, start: usize) -> Result<(), Diagnostic> {
         let declarations = self.declarations.borrow();
-        crate::parser::structs::validate_layout_range(start, declarations.len(), |id| {
-            declarations[id].as_ref()
-        })
+        crate::parser::structs::validate_layout_range(
+            start,
+            declarations.len(),
+            |id| declarations[id].as_ref(),
+            &self.arrays.borrow(),
+        )
     }
     pub fn prepare(&self) -> Result<(), Diagnostic> {
         self.shapes.prepare_plain();
@@ -185,6 +195,7 @@ impl Structs {
     #[inline]
     pub fn symbolic(&self, ty: Type) -> bool {
         match ty.leaf() {
+            Type::Array(id) => self.symbolic(self.arrays.borrow().get(id).element),
             Type::Parameter(_) => true,
             Type::Struct(id) => self.get(id).symbolic,
             Type::Application(id) | Type::StaticShape(id) | Type::Shape(id) => self.applications
@@ -200,6 +211,7 @@ impl Structs {
     }
     fn symbolic_inner(&self, ty: Type, seen: &mut BTreeSet<usize>) -> bool {
         match ty.leaf() {
+            Type::Array(id) => self.symbolic_inner(self.arrays.borrow().get(id).element, seen),
             Type::Parameter(_) => true,
             Type::Struct(id) => self.get(id).symbolic,
             Type::StaticFunction(id) | Type::Function(id) => {
@@ -223,6 +235,9 @@ impl Structs {
     }
     /// コード生成前に解決する型。名前付き型引数と、既存のint・floatの両方を含む。
     pub fn unresolved(&self, ty: Type) -> bool {
+        if let Type::Array(id) = ty.leaf() {
+            return self.unresolved(self.arrays.borrow().get(id).element);
+        }
         ty.leaf().symbolic() || self.symbolic(ty)
     }
     pub fn name(&self, ty: Type) -> String {
@@ -298,6 +313,7 @@ impl Structs {
                 continue;
             }
             match ty {
+                Type::Array(id) => pending.push(self.arrays.borrow().get(id).element),
                 Type::Struct(id) => {
                     if let Some(app) = &self.get(id).application {
                         pending.extend(&app.arguments);
@@ -354,7 +370,7 @@ impl Structs {
             return Ok(ty);
         }
         match ty.leaf() {
-            Type::Application(_) | Type::StaticShape(_) | Type::Shape(_) => {}
+            Type::Array(_) | Type::Application(_) | Type::StaticShape(_) | Type::Shape(_) => {}
             Type::Parameter(_) | Type::Struct(_) | Type::StaticFunction(_) | Type::Function(_) => {
                 // 既に解決した型へ置き換える型引数がなければ、展開表に触れない。
                 if arguments.is_empty() {
@@ -374,6 +390,7 @@ impl Structs {
         resolve: impl FnOnce() -> Result<Type, Diagnostic>,
     ) -> Result<Type, Diagnostic> {
         let start = self.declarations.borrow().len();
+        let array_start = self.arrays.borrow().entries.len();
         // 関数型のないプログラムでは、関数型表の巻き戻しや予約番号の更新は不要。
         let shape_state = (!self.shapes.declarations.is_empty()
             || !self.shapes.types.borrow().is_empty())
@@ -405,6 +422,7 @@ impl Structs {
             }
         });
         if result.is_err() {
+            self.arrays.borrow_mut().truncate(array_start);
             if let Some((shape_start, _)) = shape_state {
                 self.shapes.rollback(shape_start);
             }
@@ -445,6 +463,18 @@ impl Structs {
             Type::StaticShape(_) | Type::Shape(_) | Type::StaticFunction(_) | Type::Function(_)
         ) {
             return self.resolve_shape(ty, arguments, location, path, parameters);
+        }
+        if let Type::Array(id) = ty {
+            let array = self.arrays.borrow().get(id);
+            let element =
+                self.resolve_inner(array.element, arguments, location, path, parameters)?;
+            if element == Type::Void || matches!(element, Type::Function(_)) {
+                return Err(location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("array.type", "array elements require stored value types"),
+                ));
+            }
+            return Ok(self.arrays.borrow_mut().intern(element, array.rank));
         }
         let application = match ty {
             Type::Parameter(id) => return Ok(arguments.get(id).copied().unwrap_or(ty)),

@@ -42,6 +42,13 @@ pub(super) fn declaration(function: &CheckedFunction) -> String {
 }
 
 pub(super) fn emit(function: &CheckedFunction, context: &mut ExpressionContext) -> String {
+    context.immutable_locals = function
+        .parameters
+        .iter()
+        .enumerate()
+        .filter(|(id, _)| !(*id == 0 && function.mutable_receiver))
+        .map(|(id, _)| id)
+        .collect();
     context.references.clear();
     if function.mutable_receiver {
         context.references.insert(0);
@@ -64,9 +71,12 @@ pub(super) fn emit(function: &CheckedFunction, context: &mut ExpressionContext) 
     };
     statements::emit_block(&mut body, &function.statements, 1, &mut 0, context);
     let mut c = format!("{} {{\n", declaration(function));
-    for id in 0..function.parameters.len() {
+    for (id, &ty) in function.parameters.iter().enumerate() {
         // Suzでは未使用の引数を認めるため、Cコンパイラの警告を抑える。
         writeln!(c, "    (void){};", context.local(id)).unwrap();
+        if ty.array_id().is_some() && context.immutable_locals.contains(&id) {
+            super::arrays::cache(&mut c, id, ty, "    ", context);
+        }
     }
     for (index, ty) in context.temporaries.iter().enumerate() {
         writeln!(c, "    {} suz_cmp_{index};", ty.c_name()).unwrap();

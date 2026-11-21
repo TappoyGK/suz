@@ -370,6 +370,63 @@ impl Walk<'_> {
                 site: *location,
                 captures: Vec::new(),
             }),
+            Value::Array {
+                values, lengths, ..
+            } => {
+                let mut result = Values::new();
+                for v in values.iter_mut().chain(lengths) {
+                    merge(&mut result, self.expr(v));
+                }
+                result
+            }
+            Value::ArrayElement { target, indices } => {
+                let result = self.expr(target);
+                for (index, _, _) in indices {
+                    self.expr(index);
+                }
+                result
+            }
+            Value::ArrayView {
+                target,
+                start,
+                end,
+                handler,
+                ..
+            } => {
+                let mut result = self.expr(target);
+                for v in [start, end].into_iter().flatten() {
+                    self.expr(v);
+                }
+                if let Some(handler) = handler {
+                    match handler {
+                        CheckedHandler::Value(v) => {
+                            merge(&mut result, self.expr(v));
+                        }
+                        CheckedHandler::Return { value, .. } => {
+                            self.expr(value);
+                        }
+                    }
+                }
+                result
+            }
+            Value::ArrayRead { address, handler } => {
+                let pointers = self.expr(address);
+                let mut result = Values::new();
+                for pointer in pointers.values().flat_map(|s| s.values()) {
+                    merge(&mut result, self.program.read(Flow::Heap(pointer.function)));
+                }
+                if let Some(handler) = handler {
+                    match handler {
+                        CheckedHandler::Value(v) => {
+                            merge(&mut result, self.expr(v));
+                        }
+                        CheckedHandler::Return { value, .. } => {
+                            self.expr(value);
+                        }
+                    }
+                }
+                result
+            }
             Value::Local(id) => self.locals.get(id).cloned().unwrap_or_default(),
             Value::FunctionBorrow(value)
             | Value::Cast(value)
@@ -777,11 +834,25 @@ impl Walk<'_> {
                     self.statements(body);
                 }
                 CheckedStatement::For {
-                    start, end, body, ..
+                    id,
+                    start,
+                    end,
+                    body,
+                    ..
                 } => {
-                    self.expr(start);
+                    let mut values = self.expr(start);
                     if let Some(e) = end {
                         self.expr(e);
+                    }
+                    if let Some(array) = start.ty.array_id() {
+                        if self.analysis.structs.arrays.borrow().get(array).rank == 1 {
+                            let pointers = values;
+                            values = Values::new();
+                            for pointer in pointers.values().flat_map(|s| s.values()) {
+                                merge(&mut values, self.program.read(Flow::Heap(pointer.function)));
+                            }
+                        }
+                        merge(self.locals.entry(*id).or_default(), values);
                     }
                     self.statements(body);
                 }
@@ -800,16 +871,19 @@ impl Walk<'_> {
                     merge(self.locals.entry(*id).or_default(), values);
                 }
                 CheckedStatement::SliceReturn {
+                    id,
                     operation,
                     return_value,
                     ..
                 }
                 | CheckedStatement::ArithmeticReturn {
+                    id,
                     operation,
                     return_value,
                     ..
                 } => {
-                    self.expr(operation);
+                    let values = self.expr(operation);
+                    merge(self.locals.entry(*id).or_default(), values);
                     let values = self.expr(return_value);
                     merge(&mut self.returned, values);
                 }

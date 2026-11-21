@@ -5,6 +5,80 @@ use crate::ast::Type;
 use crate::check::{CheckedExpression, CheckedProgram, CheckedStatement, Value};
 use std::{fs, process::Command};
 
+#[test]
+fn emitted_float_constants_preserve_ieee_bits() {
+    use crate::ast::FloatType;
+    use std::fmt::Write;
+    // Cコンパイラによる再丸めや符号・非正規数の欠落を、元のビット列と比較する。
+    let directory = std::env::temp_dir().join(format!("suz-float-bits-{}", std::process::id()));
+    fs::create_dir(&directory).unwrap();
+    struct Cleanup(std::path::PathBuf);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    let _cleanup = Cleanup(directory.clone());
+    let mut context = ExpressionContext::default();
+    let mut body = String::from("int main(void) {\n");
+    let mut seed = 0x51a7_u64;
+    for (ty, width, fraction, exponent) in
+        [(FloatType::F32, 32, 23, 8), (FloatType::F64, 64, 52, 11)]
+    {
+        let mut values = vec![
+            0,
+            1,
+            (1_u64 << fraction) - 1,
+            1 << fraction,
+            (((1_u64 << exponent) - 1) << fraction) - 1,
+            ((1_u64 << exponent) - 1) << fraction,
+            (((1_u64 << exponent) - 1) << fraction) | 0x1234,
+        ];
+        for _ in 0..128 {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            values.push(if width == 32 {
+                seed & 0xffff_ffff
+            } else {
+                seed
+            });
+        }
+        for bits in values {
+            for bits in [bits, bits | (1 << (width - 1))] {
+                let value = expression(
+                    &CheckedExpression {
+                        ty: Type::Float(ty),
+                        value: Value::Float(bits),
+                    },
+                    &mut context,
+                );
+                writeln!(body, "{{ {} value = {value}; uint{width}_t bits; memcpy(&bits, &value, sizeof(bits)); if (bits != UINT64_C({bits})) return 1; }}", ty.c_name()).unwrap();
+            }
+        }
+    }
+    body.push_str("return 0; }\n");
+    let mut c = String::from("#include <stdint.h>\n#include <string.h>\n");
+    super::helpers::emit(&mut c, &context);
+    c.push_str(&body);
+    let source = directory.join("bits.c");
+    fs::write(&source, c).unwrap();
+    for optimization in ["-O0", "-O2"] {
+        let executable = directory.join("bits");
+        let built = runtime_link::compiler()
+            .args(["-std=c23", optimization, "-Wall", "-Wextra", "-Werror"])
+            .arg(&source)
+            .arg("-o")
+            .arg(&executable)
+            .output()
+            .unwrap();
+        assert!(
+            built.status.success(),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
+        assert!(Command::new(&executable).status().unwrap().success());
+    }
+}
+
 fn boolean(value: Value) -> CheckedExpression {
     CheckedExpression {
         ty: Type::Bool,
@@ -43,6 +117,7 @@ fn generated_bool_values_preserve_negation_and_copies() {
     .enumerate()
     {
         let program = CheckedProgram {
+            arrays: Default::default(),
             arena_warnings: Vec::new(),
             externs: Vec::new(),
             external_base: 0,
@@ -238,6 +313,7 @@ fn comparison_codegen_sequences_and_reuses_operands() {
             });
         }
         let program = CheckedProgram {
+            arrays: Default::default(),
             arena_warnings: Vec::new(),
             externs: Vec::new(),
             external_base: 0,
@@ -310,3 +386,6 @@ return result != {expected} || trace != {trace};
         assert!(result.stdout.is_empty() && result.stderr.is_empty());
     }
 }
+
+#[path = "tests/array_bounds.rs"]
+mod array_bounds;

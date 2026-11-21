@@ -1,8 +1,60 @@
+#include <string.h>
 #include "suz_arena.h"
 #include "suz_runtime.h"
 #include <assert.h>
 
 suz_arena_state suz_arena;
+
+/* 添字の符号を別に渡し、u64の最大値と負のi64の双方を切り詰めず診断する。 */
+_Noreturn void suz_array_bounds(const char *source, size_t line, size_t column, size_t dimension, uint64_t index, bool negative, int32_t length) {
+    suz_panic_begin(source, line, column);
+    suz_log_text("array index out of bounds: dimension=", sizeof("array index out of bounds: dimension=") - 1);
+    suz_log_u64(dimension);
+    suz_log_text(" index=", sizeof(" index=") - 1);
+    if (negative) {
+        suz_log_text("-", 1);
+        index = UINT64_C(0) - index;
+    }
+    suz_log_u64(index);
+    suz_log_text(" length=", sizeof(" length=") - 1);
+    suz_log_u64((uint64_t)length);
+    suz_log_text(" [rt.array-bounds]", sizeof(" [rt.array-bounds]") - 1);
+    suz_panic_end();
+}
+
+/* 切り出しを含む書き込み経路では、失敗した範囲の両端を元の符号で報告する。 */
+_Noreturn void suz_array_slice_bounds(const char *source, size_t line, size_t column, uint64_t start, bool start_negative, uint64_t end, bool end_negative, int32_t length) {
+    suz_panic_begin(source, line, column);
+    suz_log_text("array slice out of bounds: start=", sizeof("array slice out of bounds: start=") - 1);
+    if (start_negative) {
+        suz_log_text("-", 1);
+        start = UINT64_C(0) - start;
+    }
+    suz_log_u64(start);
+    suz_log_text(" end=", sizeof(" end=") - 1);
+    if (end_negative) {
+        suz_log_text("-", 1);
+        end = UINT64_C(0) - end;
+    }
+    suz_log_u64(end);
+    suz_log_text(" length=", sizeof(" length=") - 1);
+    suz_log_u64((uint64_t)length);
+    suz_log_text(" [rt.array-bounds]", sizeof(" [rt.array-bounds]") - 1);
+    suz_panic_end();
+}
+
+/* 実引数をすべて評価した後、本体の入口で同じ寸法名の一致を検査する。 */
+_Noreturn void suz_array_dimensions(const char *source, size_t line, size_t column, const char *name, int32_t expected, int32_t actual) {
+    suz_panic_begin(source, line, column);
+    suz_log_text("array dimensions differ: ", sizeof("array dimensions differ: ") - 1);
+    suz_log_text(name, strlen(name));
+    suz_log_text(" expected=", sizeof(" expected=") - 1);
+    suz_log_u64((uint64_t)expected);
+    suz_log_text(" actual=", sizeof(" actual=") - 1);
+    suz_log_u64((uint64_t)actual);
+    suz_log_text(" [rt.array-dimensions]", sizeof(" [rt.array-dimensions]") - 1);
+    suz_panic_end();
+}
 
 /* mainが返ってから全ブロックを解放する。明示的なarenaの巻き戻しは再利用のため
    記憶領域を保持するが、プログラムの終了境界では保持する必要がない。 */

@@ -199,6 +199,7 @@ impl Analysis {
     }
     fn paths(&self, ty: Type) -> Vec<Vec<usize>> {
         match ty {
+            Type::Array(id) => self.paths(self.structs.arrays.borrow().get(id).element),
             Type::Pointer { .. } => vec![vec![]],
             Type::Struct(id) => self
                 .structs
@@ -293,6 +294,62 @@ impl Analysis {
     }
     fn expr(&mut self, value: &CheckedExpression, region: usize, arena: Option<usize>) -> Shape {
         match &value.value {
+            Value::Array {
+                values, lengths, ..
+            } => {
+                for length in lengths {
+                    self.expr(length, region, arena);
+                }
+                let result = self.shape(value.ty);
+                for initial in values {
+                    let shape = self.expr(initial, region, arena);
+                    self.join(&result, shape);
+                }
+                result
+            }
+            Value::ArrayElement { target, indices } => {
+                let result = self.expr(target, region, arena);
+                for (index, _, _) in indices {
+                    self.expr(index, region, arena);
+                }
+                result
+            }
+            Value::ArrayView {
+                target,
+                start,
+                end,
+                handler,
+                ..
+            } => {
+                let result = self.expr(target, region, arena);
+                for v in [start, end].into_iter().flatten() {
+                    self.expr(v, region, arena);
+                }
+                let mut alternatives = vec![result];
+                if let Some(handler) = handler {
+                    match handler {
+                        CheckedHandler::Value(v) => alternatives.push(self.expr(v, region, arena)),
+                        CheckedHandler::Return { value, .. } => {
+                            self.expr(value, region, arena);
+                        }
+                    }
+                }
+                self.alternatives(value.ty, alternatives)
+            }
+            Value::ArrayRead { address, handler } => {
+                let p = self.expr(address, region, arena);
+                let read = self.read(value.ty, Place::Indirect(p[&vec![]], vec![]));
+                let mut alternatives = vec![read];
+                if let Some(handler) = handler {
+                    match handler {
+                        CheckedHandler::Value(v) => alternatives.push(self.expr(v, region, arena)),
+                        CheckedHandler::Return { value, .. } => {
+                            self.expr(value, region, arena);
+                        }
+                    }
+                }
+                self.alternatives(value.ty, alternatives)
+            }
             Value::Null => self.shape(value.ty),
             // 最外側の暗黙変換は実体と、保存直前の非nullの証明を変えない。
             Value::Cast(inner) if value.ty.pointee().is_some() => self.expr(inner, region, arena),
@@ -503,6 +560,7 @@ impl Analysis {
             | Value::CBytes(v)
             | Value::CByteLen { operand: v, .. }
             | Value::FunctionBorrow(v)
+            | Value::ArrayLength { target: v, .. }
             | Value::Len(v)
             | Value::Negate(v)
             | Value::Truncate(v)
@@ -520,7 +578,9 @@ impl Analysis {
                 self.expr(fallback, region, arena);
                 Shape::new()
             }
-            Value::Binary { left, right, .. } | Value::Logical { left, right, .. } => {
+            Value::ArrayDimensionGuard { left, right, .. }
+            | Value::Binary { left, right, .. }
+            | Value::Logical { left, right, .. } => {
                 self.expr(left, region, arena);
                 self.expr(right, region, arena);
                 Shape::new()
@@ -747,18 +807,29 @@ impl Analysis {
                 }
                 CheckedStatement::For {
                     id,
+                    variable_type,
                     start,
                     end,
                     body,
                     ..
                 } => {
-                    self.expr(start, region, arena);
+                    let source = self.expr(start, region, arena);
                     if let Some(end) = end {
                         self.expr(end, region, arena);
                     }
                     let locals = self.locals.clone();
-                    let cell = self.cell(region, self.regions[region].end, Type::Void);
+                    let location = self.regions[region].end;
+                    let cell = self.cell(region, location, *variable_type);
                     self.locals.insert(*id, cell);
+                    if let Some(array) = start.ty.array_id() {
+                        let rank = self.structs.arrays.borrow().get(array).rank;
+                        let value = if rank == 1 {
+                            self.read(*variable_type, Place::Indirect(source[&vec![]], vec![]))
+                        } else {
+                            source
+                        };
+                        self.write(Place::Direct(cell), value, location);
+                    }
                     self.loop_body(body, None, region, arena);
                     self.locals = locals;
                 }
@@ -814,11 +885,12 @@ impl Analysis {
                     operation,
                     return_value,
                 } => {
-                    self.expr(operation, region, arena);
+                    let value = self.expr(operation, region, arena);
                     let returned = self.expr(return_value, region, arena);
                     self.return_value(return_value.ty, returned, *location);
-                    let cell = self.cell(region, self.regions[region].end, Type::Void);
+                    let cell = self.cell(region, self.regions[region].end, operation.ty);
                     self.locals.insert(*id, cell);
+                    self.write(Place::Direct(cell), value, *location);
                 }
                 CheckedStatement::CastReturn {
                     return_location: location,
@@ -867,6 +939,9 @@ impl Analysis {
     fn member_path(&self, cell: Node) -> String {
         let cell = &self.cells[&cell];
         let mut ty = cell.ty;
+        if let Type::Array(id) = ty {
+            ty = self.structs.arrays.borrow().get(id).element;
+        }
         let mut names = Vec::new();
         for &index in &cell.path {
             let Type::Struct(id) = ty else {

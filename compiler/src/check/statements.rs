@@ -341,13 +341,31 @@ fn check_for(statement: &Statement, context: &mut StatementContext<'_>) -> Resul
     } else {
         super::ranges::check_references(start, context.bindings)?;
         let value = expression(start, None, context.bindings)?;
-        if !value.ty.is_text() {
+        let ty = if let Some(id) = value.ty.array_id().filter(|_| value.ty.is_nonnull()) {
+            let array = context.bindings.structs.arrays.borrow().get(id);
+            if array.rank == 1 {
+                array.element
+            } else {
+                context
+                    .bindings
+                    .structs
+                    .arrays
+                    .borrow_mut()
+                    .intern(array.element, array.rank - 1)
+                    .pointer()
+            }
+        } else if value.ty.is_text() {
+            Type::Char
+        } else {
             return Err(start.location.error(
                 ErrorKind::InvalidSource,
-                crate::diagnostic!("char.for-type", "iteration without a range requires text"),
+                crate::diagnostic!(
+                    "char.for-type",
+                    "iteration without a range requires text or a nonnull array"
+                ),
             ));
-        }
-        (value, None, Type::Char)
+        };
+        (value, None, ty)
     };
     if context.bindings.functions.contains_key(name)
         || context.bindings.is_type_name(name)
@@ -364,6 +382,20 @@ fn check_for(statement: &Statement, context: &mut StatementContext<'_>) -> Resul
         name.clone(),
         Binding::local(id, variable_type, false, true, *location),
     );
+    if let Some(end) = &end {
+        super::arrays::bounds::loop_bound(id, &start, end, *inclusive, context.bindings);
+    } else if let Some(array) = start.ty.array_id() {
+        let rank = context.bindings.structs.arrays.borrow().get(array).rank;
+        if rank > 1 {
+            let dimensions = super::arrays::bounds::shape(&start, context.bindings)
+                .into_iter()
+                .skip(1)
+                .collect();
+            super::arrays::bounds::register(id, variable_type, false, dimensions, context.bindings);
+        } else {
+            super::arrays::bounds::register(id, variable_type, false, Vec::new(), context.bindings);
+        }
+    }
     let body = block_with_bindings(
         body,
         context.bindings,
@@ -373,7 +405,8 @@ fn check_for(statement: &Statement, context: &mut StatementContext<'_>) -> Resul
     )?;
     context.output.push(CheckedStatement::For {
         id,
-        start,
+        variable_type,
+        start: Box::new(start),
         end: end.map(Box::new),
         inclusive: *inclusive,
         reverse: *reverse,
@@ -393,6 +426,7 @@ fn check_binding(
         name,
         location,
         annotation,
+        dimensions,
         initializer,
     } = statement
     else {
@@ -455,6 +489,7 @@ fn check_binding(
             crate::diagnostic!("type.void", "bindings cannot have type void"),
         ));
     }
+    let dimensions_known = super::arrays::bounds::shape(&initializer, context.bindings);
     lower_return_handler(
         &mut initializer,
         &mut context.output,
@@ -469,6 +504,7 @@ fn check_binding(
         name.clone(),
         Binding::local(id, ty, *mutable, false, *location),
     );
+    super::arrays::bounds::register(id, ty, *mutable, dimensions_known, context.bindings);
     context.output.push(CheckedStatement::Binding {
         location: *location,
         mutable: *mutable,
@@ -476,6 +512,16 @@ fn check_binding(
         ty,
         initializer: Box::new(initializer),
     });
+    super::arrays::dimensions::bind(
+        dimensions,
+        id,
+        ty,
+        context.bindings,
+        context.next_id,
+        context.declared,
+        &mut context.output,
+        None,
+    )?;
 
     Ok(())
 }
@@ -573,6 +619,9 @@ fn condition_value(
 pub(super) fn finish_scope(bindings: &mut Scope, declared: Vec<String>) -> Result<(), Diagnostic> {
     for name in declared {
         let binding = bindings.locals.remove(&name).unwrap();
+        bindings.array_bounds.arrays.remove(&binding.id);
+        bindings.array_bounds.names.remove(&binding.id);
+        bindings.array_bounds.loops.remove(&binding.id);
         if binding.mutable && !binding.assigned.get() {
             let error = binding.location.error(
                 ErrorKind::InvalidSource,

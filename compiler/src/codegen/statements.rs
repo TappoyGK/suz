@@ -132,6 +132,7 @@ pub(super) fn emit_block(
             }
             CheckedStatement::For {
                 id,
+                variable_type,
                 start,
                 end,
                 inclusive,
@@ -139,6 +140,20 @@ pub(super) fn emit_block(
                 body,
             } => {
                 let Some(end) = end else {
+                    if start.ty.array_id().is_some() {
+                        super::arrays::emit_loop(
+                            c,
+                            *id,
+                            *variable_type,
+                            start,
+                            *reverse,
+                            body,
+                            depth,
+                            next_assignment,
+                            context,
+                        );
+                        continue;
+                    }
                     super::characters::emit_text_loop(
                         c,
                         *id,
@@ -196,6 +211,7 @@ pub(super) fn emit_block(
                 )
                 .unwrap();
                 writeln!(c, "{indent}        (void)suz_local_{id};").unwrap();
+                context.immutable_locals.insert(*id);
                 emit_block(c, body, depth + 2, next_assignment, context);
                 writeln!(c, "{indent}    }}\n{indent}}}").unwrap();
             }
@@ -295,6 +311,12 @@ pub(super) fn emit_block(
                     expression(initializer, context)
                 )
                 .unwrap();
+                if !mutable {
+                    context.immutable_locals.insert(*id);
+                    if ty.array_id().is_some() {
+                        super::arrays::cache(c, *id, *ty, &indent, context);
+                    }
+                }
                 // Suzは全束縛の読み取りを要求しないため、Cの未使用警告を抑える。
                 writeln!(c, "{indent}(void)suz_local_{id};").unwrap();
             }

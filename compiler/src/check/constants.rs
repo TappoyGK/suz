@@ -340,7 +340,8 @@ fn constant_bool_raw(expr: &CheckedExpression) -> Option<bool> {
                 } else {
                     match left.ty {
                         Type::StaticFunction(_) | Type::Function(_) => return None,
-                        Type::Pointer { .. }
+                        Type::Array(_)
+                        | Type::Pointer { .. }
                         | Type::CPointer
                         | Type::CInteger(_)
                         | Type::Application(_)
@@ -465,7 +466,8 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
             Value::Function { .. } => expr.value.clone(),
             _ => return None,
         },
-        Type::Pointer { .. }
+        Type::Array(_)
+        | Type::Pointer { .. }
         | Type::CPointer
         | Type::CInteger(_)
         | Type::Application(_)

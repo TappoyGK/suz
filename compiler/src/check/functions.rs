@@ -244,6 +244,7 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     // 比較・除算の候補は汎用検査からだけ集まる。
     warnings.dedup_by_key(|l| (l.line, l.column));
     Ok(CheckedProgram {
+        arrays: globals.structs.arrays.borrow().clone(),
         arena_warnings,
         externs: program.externs.clone(),
         external_base: program.functions.len(),
@@ -449,9 +450,10 @@ fn instance_error(
 
 pub(super) fn check_function(
     function: &crate::ast::Function,
-    scope: Scope,
+    mut scope: Scope,
     id: usize,
 ) -> Result<(CheckedFunction, Vec<crate::ast::Location>), Diagnostic> {
+    scope.array_bounds = Default::default();
     let mut references = BTreeMap::new();
     if let Some(method) = function.method.filter(|m| m.mutable) {
         references.insert(
@@ -529,14 +531,43 @@ pub(super) fn check_with_captures(
             },
         );
     }
+    for binding in scope.locals.values().cloned().collect::<Vec<_>>() {
+        super::arrays::bounds::register(
+            binding.id,
+            binding.ty,
+            binding.mutable,
+            scope
+                .array_bounds
+                .arrays
+                .get(&binding.id)
+                .cloned()
+                .unwrap_or_default(),
+            &mut scope,
+        );
+    }
     let mut next_id = function.parameters.len();
-    let statements = statements::block_with_bindings(
+    let mut statements = Vec::new();
+    let mut dimension_names = BTreeMap::new();
+    for (parameter_id, parameter) in function.parameters.iter().enumerate() {
+        let ty = scope.locals[&parameter.name].ty;
+        super::arrays::dimensions::bind(
+            &parameter.dimensions,
+            parameter_id,
+            ty,
+            &mut scope,
+            &mut next_id,
+            &mut declared,
+            &mut statements,
+            Some(&mut dimension_names),
+        )?;
+    }
+    statements.extend(statements::block_with_bindings(
         &function.statements,
         &mut scope,
         &mut next_id,
         0,
         declared,
-    )?;
+    )?);
     for (name, binding) in references {
         if scope.locals[name].assigned.get() {
             binding.assigned.set(true);

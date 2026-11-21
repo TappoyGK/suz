@@ -14,6 +14,9 @@ pub(super) fn allocate(
     location: Location,
     context: &mut ExpressionContext,
 ) -> String {
+    if matches!(value.value, crate::check::Value::Array { .. }) {
+        return super::arrays::allocate(value, ty, location, context);
+    }
     context.uses_arena = true;
     let initial = context.temporaries.len();
     context.temporaries.push(value.ty);
