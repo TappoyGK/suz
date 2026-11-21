@@ -3,6 +3,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* -O0では位置の数だけ本体を複製せず、通常の関数呼出しにする。
+   最適化するビルドでは、反復の通常経路に関数呼出しを残さない。 */
+#if defined(__OPTIMIZE__)
+#define SUZ_ARENA_REPORT_INLINE static inline __attribute__((always_inline))
+#else
+#define SUZ_ARENA_REPORT_INLINE static inline
+#endif
+
 typedef enum {
     SUZ_ARENA_REPORT_TREE = 1,
     SUZ_ARENA_REPORT_TREE_BYTES = 2,
@@ -49,7 +57,7 @@ size_t suz_arena_tree_find(suz_arena_tree *tree, const suz_arena_report_site *si
 
 /* 反復・再帰の通常経路では外部関数や文字列比較を使わない。
    異なる親へ切り替わったときだけ、固定サイズの索引を検索する。 */
-static inline __attribute__((always_inline)) void suz_arena_tree_enter(
+SUZ_ARENA_REPORT_INLINE void suz_arena_tree_enter(
     suz_arena_tree *tree, suz_arena_report_frame *frame, size_t position, suz_arena_report_site *site) {
     *frame = (suz_arena_report_frame){ .previous = tree->active, .node = SIZE_MAX, .base = position, .peak = position, .site = site };
     tree->active = frame;
@@ -71,7 +79,7 @@ static inline __attribute__((always_inline)) void suz_arena_tree_enter(
     }
 }
 
-static inline __attribute__((always_inline)) void suz_arena_tree_leave(suz_arena_tree *tree, suz_arena_report_frame *frame) {
+SUZ_ARENA_REPORT_INLINE void suz_arena_tree_leave(suz_arena_tree *tree, suz_arena_report_frame *frame) {
     /* 再帰した内側の退出では、外側の基準位置とアクティブ状態を解除しない。 */
     if (frame->outermost) {
         size_t peak = frame->peak - frame->base;

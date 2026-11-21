@@ -547,3 +547,50 @@ fn disabled_arena_reporting_does_not_link_reporting_functions() {
         assert!(Command::new(executable).status().unwrap().success());
     }
 }
+
+#[test]
+fn arena_tree_shares_debug_helpers_and_inlines_optimized_helpers() {
+    let directory = TemporaryDirectory::new();
+    let source = directory.0.join("main.suz");
+    fs::write(&source, "fn main() -> u8 {\narena { fix ptr p = new (1 as u8) }\narena { fix ptr p = new (2 as i64) }\nreturn 0 }").unwrap();
+    let mut reports = Vec::new();
+    for optimization in ["-O0", "-O2"] {
+        let executable = directory.0.join(format!("app{optimization}"));
+        let output = Command::new(env!("CARGO_BIN_EXE_suz"))
+            .arg("build")
+            .arg(&source)
+            .arg("-o")
+            .arg(&executable)
+            .args([optimization, "--log-arena", "--log-arena-format", "csv"])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let output = Command::new("nm").arg(&executable).output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let symbols = String::from_utf8_lossy(&output.stdout);
+        // 大量の位置を通常テストでビルドせず、共有する本体の有無を直接検査する。
+        for name in [
+            "suz_arena_tree_enter",
+            "suz_arena_tree_leave",
+            "suz_arena_report_leave",
+        ] {
+            let count = symbols
+                .lines()
+                .filter(|line| {
+                    line.split_whitespace()
+                        .last()
+                        .is_some_and(|symbol| symbol.trim_start_matches('_') == name)
+                })
+                .count();
+            assert_eq!(
+                count,
+                usize::from(optimization == "-O0"),
+                "{optimization}: {symbols}"
+            );
+        }
+        let output = Command::new(executable).output().unwrap();
+        assert_eq!(output.status.code(), Some(0), "{output:?}");
+        reports.push(output.stderr);
+    }
+    assert_eq!(reports[0], reports[1]);
+}
