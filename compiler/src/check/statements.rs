@@ -341,13 +341,31 @@ fn check_for(statement: &Statement, context: &mut StatementContext<'_>) -> Resul
     } else {
         super::ranges::check_references(start, context.bindings)?;
         let value = expression(start, None, context.bindings)?;
-        if !value.ty.is_text() {
+        let ty = if let Some(id) = value.ty.array_id().filter(|_| value.ty.is_nonnull()) {
+            let array = context.bindings.structs.arrays.borrow().get(id);
+            if array.rank == 1 {
+                array.element
+            } else {
+                context
+                    .bindings
+                    .structs
+                    .arrays
+                    .borrow_mut()
+                    .intern(array.element, array.rank - 1)
+                    .pointer()
+            }
+        } else if value.ty.is_text() {
+            Type::Char
+        } else {
             return Err(start.location.error(
                 ErrorKind::InvalidSource,
-                crate::diagnostic!("char.for-type", "iteration without a range requires text"),
+                crate::diagnostic!(
+                    "char.for-type",
+                    "iteration without a range requires text or a nonnull array"
+                ),
             ));
-        }
-        (value, None, Type::Char)
+        };
+        (value, None, ty)
     };
     if context.bindings.functions.contains_key(name)
         || context.bindings.is_type_name(name)
@@ -373,7 +391,8 @@ fn check_for(statement: &Statement, context: &mut StatementContext<'_>) -> Resul
     )?;
     context.output.push(CheckedStatement::For {
         id,
-        start,
+        variable_type,
+        start: Box::new(start),
         end: end.map(Box::new),
         inclusive: *inclusive,
         reverse: *reverse,

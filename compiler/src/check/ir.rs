@@ -90,7 +90,8 @@ pub(crate) enum CheckedStatement {
     },
     For {
         id: usize,
-        start: CheckedExpression,
+        variable_type: Type,
+        start: Box<CheckedExpression>,
         end: Option<Box<CheckedExpression>>,
         inclusive: bool,
         reverse: bool,
@@ -245,6 +246,15 @@ pub(crate) enum Value {
     ArrayElement {
         target: Box<CheckedExpression>,
         indices: Vec<(CheckedExpression, Location)>,
+    },
+    /// 実体を複製しない部分配列・切り出し。途中の失敗は末尾のハンドラーへ渡す。
+    ArrayView {
+        target: Box<CheckedExpression>,
+        start: Option<Box<CheckedExpression>>,
+        end: Option<Box<CheckedExpression>>,
+        index: bool,
+        location: Location,
+        handler: Option<CheckedHandler>,
     },
     ArrayRead {
         address: Box<CheckedExpression>,
@@ -479,7 +489,7 @@ macro_rules! constant_children_visitor {
                     visit(address);
                     return handler(h, visit);
                 }
-                Self::Slice { target, start, end, handler: h, .. } => {
+                Self::ArrayView { target, start, end, handler: h, .. } | Self::Slice { target, start, end, handler: h, .. } => {
                     visit(target);
                     for value in [start, end].into_iter().flatten() {
                         visit(value);

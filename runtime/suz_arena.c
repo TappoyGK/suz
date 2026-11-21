@@ -21,6 +21,27 @@ _Noreturn void suz_array_bounds(const char *source, size_t line, size_t column, 
     suz_panic_end();
 }
 
+/* 切り出しを含む書き込み経路では、失敗した範囲の両端を元の符号で報告する。 */
+_Noreturn void suz_array_slice_bounds(const char *source, size_t line, size_t column, uint64_t start, bool start_negative, uint64_t end, bool end_negative, int32_t length) {
+    suz_panic_begin(source, line, column);
+    suz_log_text("array slice out of bounds: start=", sizeof("array slice out of bounds: start=") - 1);
+    if (start_negative) {
+        suz_log_text("-", 1);
+        start = UINT64_C(0) - start;
+    }
+    suz_log_u64(start);
+    suz_log_text(" end=", sizeof(" end=") - 1);
+    if (end_negative) {
+        suz_log_text("-", 1);
+        end = UINT64_C(0) - end;
+    }
+    suz_log_u64(end);
+    suz_log_text(" length=", sizeof(" length=") - 1);
+    suz_log_u64((uint64_t)length);
+    suz_log_text(" [rt.array-bounds]", sizeof(" [rt.array-bounds]") - 1);
+    suz_panic_end();
+}
+
 /* mainが返ってから全ブロックを解放する。明示的なarenaの巻き戻しは再利用のため
    記憶領域を保持するが、プログラムの終了境界では保持する必要がない。 */
 void suz_arena_destroy(void) {

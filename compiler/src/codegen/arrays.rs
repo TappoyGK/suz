@@ -167,13 +167,13 @@ fn parts(
     let mut tests = Vec::new();
     let setup = if immutable {
         "(void)0".into()
-    } else if let Value::ArrayRead {
-        address,
-        handler: None,
-    } = &target.value
-    {
-        let (setup, valid, pointer) = parts(address, write, context);
-        tests.push(format!("({valid} && ({source} = *{pointer}, true))"));
+    } else if unhandled(target) {
+        let (setup, valid, value) = access_parts(target, write, context);
+        tests.push(sequence(
+            &valid,
+            &format!("({source} = {value}, true)"),
+            write,
+        ));
         setup
     } else {
         format!("{source} = {}", expression(target, context))
@@ -223,7 +223,22 @@ fn parts(
         |id| format!("suz_array_data_{id}"),
     );
     let pointer = format!("({data} + {offset})");
-    (setup, tests.join(" && "), pointer)
+    (
+        setup,
+        if write {
+            format!(
+                "({}, true)",
+                tests
+                    .iter()
+                    .map(|t| format!("(void)({t})"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        } else {
+            tests.join(" && ")
+        },
+        pointer,
+    )
 }
 
 pub(super) fn address(expr: &CheckedExpression, context: &mut ExpressionContext) -> String {
@@ -235,11 +250,121 @@ pub(super) fn read_parts(
     expr: &CheckedExpression,
     context: &mut ExpressionContext,
 ) -> (String, String, String) {
-    let Value::ArrayRead { address, .. } = &expr.value else {
+    access_parts(expr, false, context)
+}
+
+/// 書き込みは失敗時に脱出するため、後続の検査へ常に進むことをCにも明示する。
+fn sequence(first: &str, next: &str, write: bool) -> String {
+    if write {
+        format!("((void)({first}), {next})")
+    } else {
+        format!("({first} && {next})")
+    }
+}
+
+fn unhandled(expr: &CheckedExpression) -> bool {
+    matches!(
+        expr.value,
+        Value::ArrayRead { handler: None, .. } | Value::ArrayView { handler: None, .. }
+    )
+}
+
+fn access_parts(
+    expr: &CheckedExpression,
+    write: bool,
+    context: &mut ExpressionContext,
+) -> (String, String, String) {
+    if let Value::ArrayRead { address, .. } = &expr.value {
+        let (setup, condition, pointer) = parts(address, write, context);
+        return (setup, condition, format!("(*{pointer})"));
+    }
+    let Value::ArrayView {
+        target,
+        start,
+        end,
+        index,
+        location,
+        ..
+    } = &expr.value
+    else {
         unreachable!()
     };
-    let (setup, condition, pointer) = parts(address, false, context);
-    (setup, condition, format!("(*{pointer})"))
+    let array = context.arrays.get(target.ty.array_id().unwrap());
+    let source = temporary(target.ty, context);
+    let (setup, previous) = if unhandled(target) {
+        let (setup, valid, value) = access_parts(target, write, context);
+        (
+            setup,
+            sequence(&valid, &format!("({source} = {value}, true)"), write),
+        )
+    } else {
+        (
+            format!("{source} = {}", expression(target, context)),
+            "true".into(),
+        )
+    };
+    let mut evaluations = Vec::new();
+    let mut bound = |value: &Option<Box<CheckedExpression>>, default: String| {
+        value.as_ref().map_or(default, |value| {
+            let local = temporary(value.ty, context);
+            evaluations.push(format!("{local} = {}", expression(value, context)));
+            local
+        })
+    };
+    let first = bound(start, "0".into());
+    let last = bound(end, format!("{source}.lengths[0]"));
+    let test = if *index {
+        format!("(uint64_t){first} < (uint64_t){source}.lengths[0]")
+    } else {
+        format!(
+            "((uint64_t){first} <= (uint64_t){last} && (uint64_t){last} <= (uint64_t){source}.lengths[0])"
+        )
+    };
+    // 同じ角括弧の境界は両方評価してから検査する。前の角括弧が失敗したら評価しない。
+    evaluations.push(if write {
+        context.uses_arena = true;
+        let negative = |v: &Option<Box<CheckedExpression>>, name: &str| {
+            if v.as_ref().is_some_and(|v| v.ty.integer_bounds().unwrap().0 < 0) {
+                format!("{name} < 0")
+            } else { "false".into() }
+        };
+        let fail = if *index {
+            format!("suz_array_bounds({}, {}, {}, 1, (uint64_t){first}, {}, {source}.lengths[0])",
+                c_string(&context.source_name), location.line, location.column, negative(start, &first))
+        } else {
+            format!("suz_array_slice_bounds({}, {}, {}, (uint64_t){first}, {}, (uint64_t){last}, {}, {source}.lengths[0])",
+                c_string(&context.source_name), location.line, location.column, negative(start, &first), negative(end, &last))
+        };
+        format!("({test} || ({fail}, false))")
+    } else {
+        test
+    });
+    let condition = sequence(&previous, &format!("({})", evaluations.join(", ")), write);
+    let stride = (1..array.rank)
+        .map(|i| format!("(size_t){source}.lengths[{i}]"))
+        .collect::<Vec<_>>();
+    let stride = if stride.is_empty() {
+        "1".into()
+    } else {
+        stride.join(" * ")
+    };
+    let lengths = if *index {
+        (1..array.rank)
+            .map(|i| format!("{source}.lengths[{i}]"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    } else {
+        std::iter::once(format!("(int32_t)((uint64_t){last} - (uint64_t){first})"))
+            .chain((1..array.rank).map(|i| format!("{source}.lengths[{i}]")))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let value = format!(
+        "({}){{ .data = ({} *){source}.data + (size_t){first} * ({stride}), .lengths = {{ {lengths} }} }}",
+        expr.ty.c_name(),
+        array.element.c_name()
+    );
+    (setup, condition, value)
 }
 
 /// 表現が全ビット0と分かるスカラーだけを一括初期化する。
@@ -250,4 +375,75 @@ fn zero_bits(value: &CheckedExpression) -> bool {
         Value::Cast(inner) if value.ty.is_integer() || value.ty.is_float() => zero_bits(inner),
         _ => false,
     }
+}
+
+/// 入口で参照を保存する。各要素は反復の直前に読み、前の反復による書き込みを反映する。
+#[allow(clippy::too_many_arguments)]
+pub(super) fn emit_loop(
+    c: &mut String,
+    id: usize,
+    item: Type,
+    source: &CheckedExpression,
+    reverse: bool,
+    body: &[crate::check::CheckedStatement],
+    depth: usize,
+    next_assignment: &mut usize,
+    context: &mut ExpressionContext,
+) {
+    let indent = "    ".repeat(depth);
+    let array = context.arrays.get(source.ty.array_id().unwrap());
+    let ty = source.ty.c_name();
+    let source = expression(source, context);
+    writeln!(
+        c,
+        "{indent}{{\n{indent}    const {ty} suz_iter_{id} = {source};"
+    )
+    .unwrap();
+    let (initial, condition, position) = if reverse {
+        (
+            format!("suz_iter_{id}.lengths[0]"),
+            format!("suz_cursor_{id} > 0"),
+            format!("--suz_cursor_{id}"),
+        )
+    } else {
+        (
+            "0".into(),
+            format!("suz_cursor_{id} < suz_iter_{id}.lengths[0]"),
+            format!("suz_cursor_{id}++"),
+        )
+    };
+    writeln!(c, "{indent}    int32_t suz_cursor_{id} = {initial};\n{indent}    while ({condition}) {{\n{indent}        const size_t suz_pos_{id} = {position};").unwrap();
+    let value = if array.rank == 1 {
+        format!(
+            "(({} *)suz_iter_{id}.data)[suz_pos_{id}]",
+            array.element.c_name()
+        )
+    } else {
+        let lengths = (1..array.rank)
+            .map(|i| format!("suz_iter_{id}.lengths[{i}]"))
+            .collect::<Vec<_>>();
+        let stride = lengths
+            .iter()
+            .map(|s| format!("(size_t){s}"))
+            .collect::<Vec<_>>()
+            .join(" * ");
+        format!(
+            "({}){{ .data = ({} *)suz_iter_{id}.data + suz_pos_{id} * ({stride}), .lengths = {{ {} }} }}",
+            item.c_name(),
+            array.element.c_name(),
+            lengths.join(", ")
+        )
+    };
+    writeln!(
+        c,
+        "{indent}        typeof({}) const suz_local_{id} = {value};\n{indent}        (void)suz_local_{id};",
+        item.c_name()
+    )
+    .unwrap();
+    context.immutable_locals.insert(id);
+    if item.array_id().is_some() {
+        cache(c, id, item, &format!("{indent}        "), context);
+    }
+    super::statements::emit_block(c, body, depth + 2, next_assignment, context);
+    writeln!(c, "{indent}    }}\n{indent}}}").unwrap();
 }

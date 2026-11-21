@@ -305,6 +305,10 @@ fn has_return_handler(expr: &CheckedExpression) -> bool {
                 | super::ir::CallHandler::Branches(_)
         ),
         Value::CastReturn { .. }
+        | Value::ArrayView {
+            handler: Some(CheckedHandler::Return { .. }),
+            ..
+        }
         | Value::ArrayRead {
             handler: Some(CheckedHandler::Return { .. }),
             ..
@@ -349,7 +353,10 @@ pub(super) fn lower_return_handler(
     }
     if matches!(
         &expr.value,
-        Value::ArrayRead {
+        Value::ArrayView {
+            handler: Some(CheckedHandler::Return { .. }),
+            ..
+        } | Value::ArrayRead {
             handler: Some(CheckedHandler::Return { .. }),
             ..
         } | Value::Slice {
@@ -365,7 +372,9 @@ pub(super) fn lower_return_handler(
         let value = std::mem::replace(&mut expr.value, Value::Local(id));
         let mut operation = CheckedExpression { ty: expr.ty, value };
         let (handler, slice) = match &mut operation.value {
-            Value::Slice { handler, .. } | Value::ArrayRead { handler, .. } => (handler, true),
+            Value::ArrayView { handler, .. }
+            | Value::Slice { handler, .. }
+            | Value::ArrayRead { handler, .. } => (handler, true),
             Value::IntegerArithmetic { handler, .. } => (handler, false),
             _ => unreachable!(),
         };

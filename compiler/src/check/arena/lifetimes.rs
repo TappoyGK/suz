@@ -314,6 +314,28 @@ impl Analysis {
                 }
                 result
             }
+            Value::ArrayView {
+                target,
+                start,
+                end,
+                handler,
+                ..
+            } => {
+                let result = self.expr(target, region, arena);
+                for v in [start, end].into_iter().flatten() {
+                    self.expr(v, region, arena);
+                }
+                let mut alternatives = vec![result];
+                if let Some(handler) = handler {
+                    match handler {
+                        CheckedHandler::Value(v) => alternatives.push(self.expr(v, region, arena)),
+                        CheckedHandler::Return { value, .. } => {
+                            self.expr(value, region, arena);
+                        }
+                    }
+                }
+                self.alternatives(value.ty, alternatives)
+            }
             Value::ArrayRead { address, handler } => {
                 let p = self.expr(address, region, arena);
                 let read = self.read(value.ty, Place::Indirect(p[&vec![]], vec![]));
@@ -782,18 +804,29 @@ impl Analysis {
                 }
                 CheckedStatement::For {
                     id,
+                    variable_type,
                     start,
                     end,
                     body,
                     ..
                 } => {
-                    self.expr(start, region, arena);
+                    let source = self.expr(start, region, arena);
                     if let Some(end) = end {
                         self.expr(end, region, arena);
                     }
                     let locals = self.locals.clone();
-                    let cell = self.cell(region, self.regions[region].end, Type::Void);
+                    let location = self.regions[region].end;
+                    let cell = self.cell(region, location, *variable_type);
                     self.locals.insert(*id, cell);
+                    if let Some(array) = start.ty.array_id() {
+                        let rank = self.structs.arrays.borrow().get(array).rank;
+                        let value = if rank == 1 {
+                            self.read(*variable_type, Place::Indirect(source[&vec![]], vec![]))
+                        } else {
+                            source
+                        };
+                        self.write(Place::Direct(cell), value, location);
+                    }
                     self.loop_body(body, None, region, arena);
                     self.locals = locals;
                 }

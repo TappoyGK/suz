@@ -103,3 +103,66 @@ fn main() -> u8 {
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
 | 通常 | `[rt.array-bounds]` | 4 | 7 |
+
+
+### array-005 部分配列と切り出しは元の実体を更新する
+
+主根拠：`[array.slice]`。
+
+補助根拠：`[array.index]`。
+
+**ソース：**
+
+```suz
+fn update(a: ptr [i64; _, _], y: i64, begin: i64, end: i64) -> void {
+    fix ptr row = a[y] or return
+    fix ptr view = row[begin:end] or return
+    view#[0] = 9
+}
+fn read(a: ptr [i64; _, _], y: i64, x: i64) -> i64 {
+    return a[y][x] or -1
+}
+fn main() -> u8 {
+    fix ptr a = new [[1, 2], [3, 4]]
+    update(a, 1, 0, 1)
+    if read(a, 1, 0) != 9 { return 1 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### array-006 反復の途中の更新を後続の反復が読む
+
+主根拠：`[array.iteration]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix ptr a = new [1, 2, 3]
+    var sum: i64 = 0
+    for value in a {
+        sum += value
+        a#[2] = 9
+    }
+    if sum != 12 { return 1 }
+    var order: i64 = 0
+    rev value in a { order = order * 10 + value }
+    if order != 921 { return 2 }
+    fix ptr empty: ptr [i64] = new []
+    for value in empty { return 3 }
+    rev value in empty { return 4 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |

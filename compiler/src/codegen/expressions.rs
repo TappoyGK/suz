@@ -35,8 +35,11 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
     match expr.value {
         Value::Array { .. } => unreachable!("array initializer is emitted by new"),
         Value::ArrayElement { .. } => super::arrays::address(expr, context),
-        Value::ArrayRead { ref handler, .. } => {
+        Value::ArrayView { ref handler, .. } | Value::ArrayRead { ref handler, .. } => {
             let (setup, condition, value) = super::arrays::read_parts(expr, context);
+            if handler.is_none() {
+                return format!("({setup}, (void)({condition}), {value})");
+            }
             let Some(CheckedHandler::Value(fallback)) = handler else {
                 unreachable!("array return handlers are lowered")
             };

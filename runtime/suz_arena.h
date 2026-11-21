@@ -59,6 +59,7 @@ typedef struct {
    grow=0は追加確保禁止。初期容量は有限のlimitを超えないように抑える。 */
 void suz_arena_destroy(void);
 _Noreturn __attribute__((cold)) void suz_array_bounds(const char *source, size_t line, size_t column, size_t dimension, uint64_t index, bool negative, int32_t length);
+_Noreturn __attribute__((cold)) void suz_array_slice_bounds(const char *source, size_t line, size_t column, uint64_t start, bool start_negative, uint64_t end, bool end_negative, int32_t length);
 suz_arena_cursor suz_arena_storage_init(uint64_t initial, uint64_t grow, uint64_t limit, const char *source, size_t line, size_t column);
 _Noreturn __attribute__((cold)) void suz_arena_overflow(const char *source, size_t line, size_t column);
 _Noreturn __attribute__((cold)) void suz_arena_capacity_exceeded(size_t size, const char *source, size_t line, size_t column);

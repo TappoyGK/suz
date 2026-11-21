@@ -166,6 +166,9 @@ fn array_types_initializers_and_recursive_dependencies_are_checked() {
 #[test]
 fn array_failures_precede_later_indices_and_assignment_values() {
     for (body, reason) in [
+        ("a[-1:1][rhs()]#[rhs()] = rhs()", "start=-1 end=1 length=2"),
+        ("a[2:1][rhs()]#[rhs()] = rhs()", "start=2 end=1 length=2"),
+        ("a[-1][:]#[rhs()] = rhs()", "dimension=1 index=-1 length=2"),
         ("a[0]#[3] = rhs()", "dimension=2 index=3 length=3"),
         ("a[-1]#[rhs()] = rhs()", "dimension=1 index=-1 length=2"),
         (
@@ -335,14 +338,6 @@ fn array_source_diagnostics_are_not_internal_errors() {
             "array.dimension-bind",
         ),
         (
-            "fn main() -> u8 { fix ptr a = new [0; 2, 3]\nfix ptr row = a[0] or panic `missing`\nreturn 0 }",
-            "array.index",
-        ),
-        (
-            "fn main() -> u8 { fix ptr a = new [0; 3]\nfix ptr view = a[0:2] or panic `missing`\nreturn 0 }",
-            "array.slice",
-        ),
-        (
             "fn main() -> u8 { fix ptr a = new [0; 3]\na[0] = 1\nreturn 0 }",
             "array.write",
         ),
@@ -421,4 +416,221 @@ fn main() -> u8 {
         "array-reference-snapshots.suz",
     );
     assert_eq!(output.status.code(), Some(0), "{output:?}");
+}
+
+#[test]
+fn array_views_share_storage_and_compose_with_reads_and_writes() {
+    let output = compile_and_run_c23(
+        r#"
+fn read(a: ptr [i64; _, _], y: i64, x: i64) -> i64 { return a[y][x] or -1 }
+fn row(a: ptr [i64; _, _], y: i64) -> ptr [i64] {
+    fix ptr r = a[y] or return new []
+    return r
+}
+fn main() -> u8 {
+    fix ptr grid = new [[1, 2, 3], [4, 5, 6]]
+    fix ptr r = row(grid, 1)
+    r#[1] = 9
+    if read(grid, 1, 1) != 9 { return 1 }
+    fix ptr view = grid[1:2] or panic `slice`
+    view[0]#[2] = 8
+    if read(grid, 1, 2) != 8 { return 2 }
+    fix ptr full = grid[:][:]
+    full[0]#[0] = 7
+    grid[0:1][0]#[1] = 10
+    if read(grid, 0, 0) != 7 || read(grid, 0, 1) != 10 { return 3 }
+    fix ptr empty = grid[2:2] or panic `empty`
+    if len empty != 0 { return 4 }
+    fix ptr missing = row(grid, 9)
+    if len missing != 0 { return 5 }
+    fix v = (grid[0:1])[0][2] or -1
+    if v != 3 { return 6 }
+    return 0
+}
+"#,
+        "array-views.suz",
+    );
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+}
+
+#[test]
+fn array_view_failure_skips_later_brackets_but_evaluates_both_slice_bounds() {
+    let output = compile_and_run_c23(
+        r#"
+struct Counter { n: i64 }
+fn tick(c: ptr Counter, v: i64) -> i64 { c#n += 1
+return v }
+fn main() -> u8 {
+    fix ptr a = new [7; 2, 3]
+    fix ptr c = new Counter { n: 0 }
+    fix v = a[tick(c, -1):tick(c, 2)][tick(c, 0)][tick(c, 0)] or tick(c, 99)
+    if v != 99 || c.n != 3 { return 1 }
+    c#n = 0
+    fix w = a[tick(c, 8)][tick(c, 0):tick(c, 1)][tick(c, 0)] or tick(c, 88)
+    if w != 88 || c.n != 2 { return 2 }
+    fix ptr r = (a[9] or new [4; 3])[1:2] or panic `slice`
+    fix x = r[0] or -1
+    if x != 4 { return 3 }
+    return 0
+}
+"#,
+        "array-view-order.suz",
+    );
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+}
+
+#[test]
+fn array_iteration_reads_current_elements_and_handles_empty_rows() {
+    let output = compile_and_run_c23(
+        r#"
+struct Node { n: i64 }
+struct Holder { a: ptr [i64], calls: i64 }
+fn source(h: ptr Holder) -> ptr [i64] { h#calls += 1
+return h.a }
+fn main() -> u8 {
+    fix ptr original = new [1, 2, 3]
+    fix ptr h = new Holder { a: original, calls: 0 }
+    var sum: i64 = 0
+    for value in source(h) {
+        sum += value
+        original#[2] = 9
+        h#a = new [99]
+    }
+    if sum != 12 || h.calls != 1 { return 1 }
+    var order: i64 = 0
+    rev value in original {
+        if value == 2 { continue }
+        order = order * 10 + value
+    }
+    if order != 91 { return 2 }
+    fix ptr grid = new [[1, 2], [3, 4]]
+    for row in grid { row#[0] += 10 }
+    var rows: i64 = 0
+    rev row in grid {
+        fix v = row[0] or -1
+        rows = rows * 100 + v
+    }
+    if rows != 1311 { return 3 }
+    fix ptr empty: ptr [i64] = new []
+    for value in empty { return 4 }
+    rev value in empty { return 5 }
+    fix ptr narrow = new [0; 2, 0]
+    var count: i64 = 0
+    for row in narrow { if len row != 0 { return 6 }
+        count += 1 }
+    if count != 2 { return 7 }
+    fix ptr node = new Node { n: 5 }
+    fix ptr pointers = new [node]
+    for p in pointers { p#n += 1 }
+    if node.n != 6 { return 8 }
+    return 0
+}
+"#,
+        "array-iteration.suz",
+    );
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+}
+
+#[test]
+fn array_views_and_iteration_keep_the_original_storage_lifetime() {
+    for update in [
+        "fix ptr row = a[0] or panic `row`\nrow#[0] = new Node { n: 1, next: null }",
+        "fix ptr view = a[0:1] or panic `slice`\nview[0]#[0] = new Node { n: 1, next: null }",
+        "for row in a { row#[0] = new Node { n: 1, next: null } }",
+        "fix ptr row = a[0] or panic `row`\nfor p in row { let found = p { found#next = new Node { n: 1, next: null } } }",
+    ] {
+        let source = format!(
+            "struct Node {{ n: i64, next: ptr? Node }}\nfn main() -> u8 {{ fix ptr node = new Node {{ n: 0, next: null }}\nfix ptr a: ptr [ptr? Node; _, _] = new [node; 1, 2]\narena {{ {update} }}\nreturn 0 }}"
+        );
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(error.rule(), "arena.store", "{update}: {error}");
+    }
+    for body in [
+        "fix ptr a = new [1; 2, 3]\nresult = a[0] or panic `row`",
+        "fix ptr a = new [1; 3]\nresult = a[:]",
+    ] {
+        let source = format!(
+            "fn main() -> u8 {{ var ptr result: ptr? [i64] = null\narena {{ {body} }}\nreturn 0 }}"
+        );
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(error.rule(), "arena.store", "{body}: {error}");
+    }
+}
+
+#[test]
+fn array_views_reject_missing_or_redundant_handlers_and_whole_view_writes() {
+    for (body, rule) in [
+        ("fix ptr row = a[0]", "array.access-handler"),
+        ("fix ptr slice = a[0:1]", "array.access-handler"),
+        ("fix ptr full = a[:] or a", "array.access-handler"),
+        ("fix ptr full = a[:][:] or a", "array.access-handler"),
+        ("a#[0] = a[0] or panic `row`", "array.write"),
+        ("a#[0:1] = a", "syntax.grammar"),
+        ("fix ptr row = a[true] or panic `row`", "array.index"),
+        ("fix ptr slice = a[0:false] or panic `slice`", "array.index"),
+        ("var ptr b = a\nfor row in b {}", "for.bound-reference"),
+    ] {
+        let source = format!("fn main() -> u8 {{ fix ptr a = new [0; 2, 3]\n{body}\nreturn 0 }}");
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(error.rule(), rule, "{body}: {error}");
+    }
+}
+
+#[test]
+fn array_slices_validate_wide_bounds_and_allow_empty_ends() {
+    let output = compile_and_run_c23(
+        r#"
+fn length(a: ptr [i64], start: i64, end: u64) -> i64 {
+    fix ptr view = a[start:end] or return -1
+    return len view as i64
+}
+fn main() -> u8 {
+    fix ptr a = new [1, 2, 3]
+    if length(a, -1, 2) != -1 { return 1 }
+    if length(a, 0, 18446744073709551615) != -1 { return 2 }
+    if length(a, 2, 1) != -1 { return 3 }
+    if length(a, 3, 3) != 0 { return 4 }
+    fix ptr left = a[:2] or panic `left`
+    fix ptr right = a[2:] or panic `right`
+    if len left != 2 || len right != 1 { return 5 }
+    fix ptr empty: ptr [i64] = new []
+    fix ptr full = empty[:]
+    if len full != 0 { return 6 }
+    return 0
+}
+"#,
+        "array-slice-bounds.suz",
+    );
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+}
+
+#[test]
+fn array_views_and_iteration_preserve_callable_origins() {
+    for binding in [
+        "fix ptr row = fs[0] or panic `row`\nfor f in row[:] { h#p = f(a) }",
+        "for row in fs { for f in row { h#p = f(a) } }",
+    ] {
+        let source = format!(
+            r#"
+struct Node {{ n: i64 }}
+struct Holder {{ p: ptr? Node }}
+fnshape Read(ptr [ptr? Node]) -> ptr? Node
+fn get(a: ptr [ptr? Node]) -> ptr? Node {{
+    fix ptr p = a[0] or return null
+    return p
+}}
+fn main() -> u8 {{
+    fix ptr h = new Holder {{ p: null }}
+    arena {{
+        fix ptr a: ptr [ptr? Node] = new [new Node {{ n: 1 }}]
+        fix ptr fs: ptr [static fn Read; _, _] = new [fn get; 1, 1]
+        {binding}
+    }}
+    return 0
+}}
+"#
+        );
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(error.rule(), "arena.store", "{binding}: {error}");
+    }
 }

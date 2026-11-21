@@ -6,7 +6,7 @@ use super::{
 };
 use crate::{
     Diagnostic, ErrorKind,
-    ast::{Expression, ExpressionKind, FailureHandler, Location, Type},
+    ast::{Expression, ExpressionKind, FailureHandler, Type},
 };
 
 pub(super) fn initializer(
@@ -122,32 +122,41 @@ pub(super) fn initializer(
     })
 }
 
-fn chain<'a>(
-    expr: &'a Expression,
-    indices: &mut Vec<(&'a Expression, Location)>,
-) -> Result<&'a Expression, Diagnostic> {
+/// 明示的なorで区切られるまで、括弧をまたぐアクセスを一つの失敗単位にする。
+fn chain<'a>(expr: &'a Expression, steps: &mut Vec<&'a Expression>) -> &'a Expression {
     match &expr.kind {
-        ExpressionKind::Group(v) => chain(v, indices),
+        ExpressionKind::Group(v) => chain(v, steps),
         ExpressionKind::Slice {
             target,
-            start: Some(index),
-            end: None,
-            index: true,
             fallback: None,
+            ..
         } => {
-            let root = chain(target, indices)?;
-            indices.push((index, expr.location));
-            Ok(root)
+            let root = chain(target, steps);
+            steps.push(expr);
+            root
         }
-        _ => Ok(expr),
+        _ => expr,
     }
 }
-fn address(expr: &Expression, scope: &Scope) -> Result<CheckedExpression, Diagnostic> {
-    let mut indices = Vec::new();
-    let root = chain(expr, &mut indices)?;
+
+fn bound(expr: &Expression, scope: &Scope) -> Result<CheckedExpression, Diagnostic> {
+    let value = expression::expression(expr, None, scope)?;
+    if !value.ty.is_integer() {
+        return Err(expr.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!("array.index", "array bounds require integers"),
+        ));
+    }
+    Ok(value)
+}
+
+fn access(expr: &Expression, scope: &Scope) -> Result<(CheckedExpression, bool), Diagnostic> {
+    let mut steps = Vec::new();
+    let root = chain(expr, &mut steps);
     let mut target = expression::expression(root, None, scope)?;
     let mut position = 0;
-    loop {
+    let mut fallible = false;
+    while position < steps.len() {
         let id = target.ty.array_id().ok_or_else(|| {
             expr.location.error(
                 ErrorKind::InvalidSource,
@@ -161,49 +170,92 @@ fn address(expr: &Expression, scope: &Scope) -> Result<CheckedExpression, Diagno
             ));
         }
         let array = scope.structs.arrays.borrow().get(id);
-        if indices.len() - position < array.rank {
-            return Err(expr.location.error(
-                ErrorKind::InvalidSource,
-                crate::diagnostic!(
-                    "array.index",
-                    "partial array indexing is not implemented yet"
-                ),
-            ));
-        }
-        let end = position + array.rank;
-        let checked = indices[position..end]
+        let indices = steps[position..]
             .iter()
-            .map(|(i, location)| {
-                let value = expression::expression(i, None, scope)?;
-                if !value.ty.is_integer() {
-                    return Err(location.error(
-                        ErrorKind::InvalidSource,
-                        crate::diagnostic!("array.index", "array index requires an integer"),
-                    ));
-                }
-                Ok((value, *location))
-            })
-            .collect::<Result<_, Diagnostic>>()?;
-        let address = CheckedExpression {
-            ty: array.element.pointer(),
-            value: Value::ArrayElement {
-                target: Box::new(target),
-                indices: checked,
-            },
-        };
-        if end == indices.len() {
-            return Ok(address);
+            .take_while(|s| matches!(s.kind, ExpressionKind::Slice { index: true, .. }))
+            .count();
+        if indices >= array.rank {
+            let mut checked = Vec::new();
+            for step in &steps[position..position + array.rank] {
+                let ExpressionKind::Slice { start: Some(i), .. } = &step.kind else {
+                    unreachable!()
+                };
+                checked.push((bound(i, scope)?, step.location));
+            }
+            let address = CheckedExpression {
+                ty: array.element.pointer(),
+                value: Value::ArrayElement {
+                    target: Box::new(target),
+                    indices: checked,
+                },
+            };
+            target = CheckedExpression {
+                ty: array.element,
+                value: Value::ArrayRead {
+                    address: Box::new(address),
+                    handler: None,
+                },
+            };
+            position += array.rank;
+            fallible = true;
+        } else {
+            let step = steps[position];
+            let ExpressionKind::Slice {
+                start, end, index, ..
+            } = &step.kind
+            else {
+                unreachable!()
+            };
+            let ty = if *index {
+                scope
+                    .structs
+                    .arrays
+                    .borrow_mut()
+                    .intern(array.element, array.rank - 1)
+                    .pointer()
+            } else {
+                target.ty
+            };
+            fallible |= *index || start.is_some() || end.is_some();
+            target = CheckedExpression {
+                ty,
+                value: Value::ArrayView {
+                    target: Box::new(target),
+                    start: start
+                        .as_ref()
+                        .map(|v| bound(v, scope).map(Box::new))
+                        .transpose()?,
+                    end: end
+                        .as_ref()
+                        .map(|v| bound(v, scope).map(Box::new))
+                        .transpose()?,
+                    index: *index,
+                    location: step.location,
+                    handler: None,
+                },
+            };
+            position += 1;
         }
-        // 配列参照を要素に持つ場合は、一つの実体の検査を終えてから次の参照を読む。
-        // 途中の読み取りにハンドラーを付けず、末尾のorへ全体の失敗を伝える。
-        target = CheckedExpression {
-            ty: array.element,
-            value: Value::ArrayRead {
-                address: Box::new(address),
-                handler: None,
-            },
-        };
-        position = end;
+    }
+    Ok((target, fallible))
+}
+
+fn address(expr: &Expression, scope: &Scope) -> Result<CheckedExpression, Diagnostic> {
+    let (value, _) = access(expr, scope)?;
+    if let Value::ArrayRead {
+        address,
+        handler: None,
+    } = value.value
+    {
+        Ok(*address)
+    } else {
+        Err(expr.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "array.write",
+                "assign to an element, not a partial array or slice"
+            ),
+        ))
     }
 }
 
@@ -212,10 +264,7 @@ pub(super) fn read_or_text(
     scope: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
     let ExpressionKind::Slice {
-        target,
-        index,
-        fallback,
-        ..
+        target, fallback, ..
     } = &expr.kind
     else {
         unreachable!()
@@ -225,26 +274,28 @@ pub(super) fn read_or_text(
         unreachable!()
     };
     *h = None;
-    let mut indices = Vec::new();
-    let root = chain(&stripped, &mut indices)?;
-    let root_ty = expression::operand_type(root, scope);
-    if !root_ty.is_some_and(|t| t.array_id().is_some()) {
-        // 単独の切り出しでも対象の配列型を調べる。
-        if !expression::operand_type(target, scope).is_some_and(|t| t.array_id().is_some()) {
-            return expression::slices::check(expr, scope);
+    let root = chain(&stripped, &mut Vec::new());
+    if !expression::operand_type(root, scope).is_some_and(|t| t.array_id().is_some())
+        && !expression::operand_type(target, scope).is_some_and(|t| t.array_id().is_some())
+    {
+        return expression::slices::check(expr, scope);
+    }
+    let (mut result, fallible) = access(&stripped, scope)?;
+    if !fallible {
+        if fallback.is_some() {
+            return Err(expr.location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "array.access-handler",
+                    "full slices cannot fail and do not accept or"
+                ),
+            ));
         }
+        return Ok(result);
     }
-    if !index {
-        return Err(expr.location.error(
-            ErrorKind::InvalidSource,
-            crate::diagnostic!("array.slice", "array slicing is not implemented yet"),
-        ));
-    }
-    let address = address(&stripped, scope)?;
-    let ty = address.ty.pointee().unwrap();
     let handler = match fallback {
         Some(FailureHandler::Value(v)) => {
-            CheckedHandler::Value(Box::new(expression::coerced(v, Some(ty), scope)?))
+            CheckedHandler::Value(Box::new(expression::coerced(v, Some(result.ty), scope)?))
         }
         Some(FailureHandler::Return { value, location }) => CheckedHandler::Return {
             value: Box::new(super::functions::return_value(value, scope)?),
@@ -263,13 +314,13 @@ pub(super) fn read_or_text(
             ));
         }
     };
-    Ok(CheckedExpression {
-        ty,
-        value: Value::ArrayRead {
-            address: Box::new(address),
-            handler: Some(handler),
-        },
-    })
+    match &mut result.value {
+        Value::ArrayRead { handler: h, .. } | Value::ArrayView { handler: h, .. } => {
+            *h = Some(handler)
+        }
+        _ => unreachable!(),
+    }
+    Ok(result)
 }
 
 pub(super) fn write_target(

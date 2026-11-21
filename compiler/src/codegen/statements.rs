@@ -132,6 +132,7 @@ pub(super) fn emit_block(
             }
             CheckedStatement::For {
                 id,
+                variable_type,
                 start,
                 end,
                 inclusive,
@@ -139,6 +140,20 @@ pub(super) fn emit_block(
                 body,
             } => {
                 let Some(end) = end else {
+                    if start.ty.array_id().is_some() {
+                        super::arrays::emit_loop(
+                            c,
+                            *id,
+                            *variable_type,
+                            start,
+                            *reverse,
+                            body,
+                            depth,
+                            next_assignment,
+                            context,
+                        );
+                        continue;
+                    }
                     super::characters::emit_text_loop(
                         c,
                         *id,

@@ -386,6 +386,29 @@ impl Walk<'_> {
                 }
                 result
             }
+            Value::ArrayView {
+                target,
+                start,
+                end,
+                handler,
+                ..
+            } => {
+                let mut result = self.expr(target);
+                for v in [start, end].into_iter().flatten() {
+                    self.expr(v);
+                }
+                if let Some(handler) = handler {
+                    match handler {
+                        CheckedHandler::Value(v) => {
+                            merge(&mut result, self.expr(v));
+                        }
+                        CheckedHandler::Return { value, .. } => {
+                            self.expr(value);
+                        }
+                    }
+                }
+                result
+            }
             Value::ArrayRead { address, handler } => {
                 let pointers = self.expr(address);
                 let mut result = Values::new();
@@ -811,11 +834,25 @@ impl Walk<'_> {
                     self.statements(body);
                 }
                 CheckedStatement::For {
-                    start, end, body, ..
+                    id,
+                    start,
+                    end,
+                    body,
+                    ..
                 } => {
-                    self.expr(start);
+                    let mut values = self.expr(start);
                     if let Some(e) = end {
                         self.expr(e);
+                    }
+                    if let Some(array) = start.ty.array_id() {
+                        if self.analysis.structs.arrays.borrow().get(array).rank == 1 {
+                            let pointers = values;
+                            values = Values::new();
+                            for pointer in pointers.values().flat_map(|s| s.values()) {
+                                merge(&mut values, self.program.read(Flow::Heap(pointer.function)));
+                            }
+                        }
+                        merge(self.locals.entry(*id).or_default(), values);
                     }
                     self.statements(body);
                 }
