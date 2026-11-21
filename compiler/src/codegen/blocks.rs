@@ -29,6 +29,12 @@ pub(super) fn emit(
         &mut context.references,
         captures.iter().map(|(id, _, _)| *id).collect(),
     );
+    let saved_immutable_locals = std::mem::take(&mut context.immutable_locals);
+    context.immutable_locals = captures
+        .iter()
+        .filter(|(id, _, _)| saved_immutable_locals.contains(id))
+        .map(|(id, _, _)| *id)
+        .collect();
     let saved_recovery = context.recovery.take();
     let saved_temporaries = std::mem::take(&mut context.temporaries);
     let saved_environments = std::mem::take(&mut context.closure_environments);
@@ -55,6 +61,11 @@ pub(super) fn emit(
             &parameters
         }
     );
+    for (id, ty, _) in captures {
+        if ty.array_id().is_some() && context.immutable_locals.contains(id) {
+            super::arrays::cache(&mut function, *id, *ty, "    ", context);
+        }
+    }
     for (index, ty) in context.temporaries.iter().enumerate() {
         writeln!(function, "    {} suz_cmp_{index};", ty.c_name()).unwrap();
     }
@@ -69,5 +80,6 @@ pub(super) fn emit(
     context.temporaries = saved_temporaries;
     context.closure_environments = saved_environments;
     context.references = saved_references;
+    context.immutable_locals = saved_immutable_locals;
     format!("suz_block_{id}({arguments})")
 }

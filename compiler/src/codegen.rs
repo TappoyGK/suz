@@ -61,6 +61,7 @@ struct ExpressionContext {
     next_closure: usize,
     closure_environments: Vec<String>,
     references: BTreeSet<usize>,
+    immutable_locals: BTreeSet<usize>,
     helpers: BTreeSet<bool>,
     source_name: String,
     narrow_float: bool,

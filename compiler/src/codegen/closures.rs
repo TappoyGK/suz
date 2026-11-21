@@ -30,6 +30,16 @@ pub(super) fn emit(closure: &CheckedClosure, ty: Type, context: &mut ExpressionC
             }
         ));
     }
+    let saved_immutable_locals = std::mem::take(&mut context.immutable_locals);
+    context.immutable_locals = function
+        .parameters
+        .iter()
+        .enumerate()
+        .filter(|(id, _)| {
+            *id < parameter_count || !closure.captures[*id - parameter_count].by_reference
+        })
+        .map(|(id, _)| id)
+        .collect();
     let saved_recovery = context.recovery.take();
     let saved_temporaries = std::mem::take(&mut context.temporaries);
     let saved_environments = std::mem::take(&mut context.closure_environments);
@@ -89,8 +99,11 @@ pub(super) fn emit(closure: &CheckedClosure, ty: Type, context: &mut ExpressionC
             writeln!(definition, "    const {} suz_local_{local} = ((const suz_closure_env_{id} *)environment)->capture_{index};", capture.value.ty.c_name()).unwrap();
         }
     }
-    for index in 0..function.parameters.len() {
+    for (index, &ty) in function.parameters.iter().enumerate() {
         writeln!(definition, "    (void){};", context.local(index)).unwrap();
+        if ty.array_id().is_some() && context.immutable_locals.contains(&index) {
+            super::arrays::cache(&mut definition, index, ty, "    ", context);
+        }
     }
     for (index, ty) in context.temporaries.iter().enumerate() {
         writeln!(definition, "    {} suz_cmp_{index};", ty.c_name()).unwrap();
@@ -107,6 +120,7 @@ pub(super) fn emit(closure: &CheckedClosure, ty: Type, context: &mut ExpressionC
     context.temporaries = saved_temporaries;
     context.closure_environments = saved_environments;
     context.references = saved_references;
+    context.immutable_locals = saved_immutable_locals;
     let environment = if closure.captures.is_empty() {
         "NULL".to_owned()
     } else {

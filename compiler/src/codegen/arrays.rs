@@ -23,6 +23,27 @@ pub(super) fn declarations(c: &mut String, context: &ExpressionContext) {
     }
 }
 
+/// 不変の配列参照のデータと長さは束縛時に取り出し、アクセスごとの構造体の読み取りを省く。
+pub(super) fn cache(
+    c: &mut String,
+    id: usize,
+    ty: Type,
+    indent: &str,
+    context: &ExpressionContext,
+) {
+    let array = context.arrays.get(ty.array_id().unwrap());
+    let source = context.local(id);
+    writeln!(
+        c,
+        "{indent}{} *const suz_array_data_{id} = ({source}).data;\n{indent}(void)suz_array_data_{id};",
+        array.element.c_name()
+    )
+    .unwrap();
+    for dimension in 0..array.rank {
+        writeln!(c, "{indent}const int32_t suz_array_length_{id}_{dimension} = ({source}).lengths[{dimension}];\n{indent}(void)suz_array_length_{id}_{dimension};").unwrap();
+    }
+}
+
 fn temporary(ty: Type, context: &mut ExpressionContext) -> String {
     let id = context.temporaries.len();
     context.temporaries.push(ty);
@@ -131,9 +152,22 @@ fn parts(
     let Value::ArrayElement { target, indices } = &expr.value else {
         unreachable!()
     };
-    let source = temporary(target.ty, context);
+    // 不変の参照は添字評価で変わらないので直接読む。可変の参照・関数呼び出し・
+    // 要素から取り出す参照は、添字を評価する前の値を保存する。
+    let cached = match target.value {
+        Value::Local(id) if context.immutable_locals.contains(&id) => Some(id),
+        _ => None,
+    };
+    let immutable = cached.is_some();
+    let source = if immutable {
+        format!("({})", expression(target, context))
+    } else {
+        temporary(target.ty, context)
+    };
     let mut tests = Vec::new();
-    let setup = if let Value::ArrayRead {
+    let setup = if immutable {
+        "(void)0".into()
+    } else if let Value::ArrayRead {
         address,
         handler: None,
     } = &target.value
@@ -146,27 +180,49 @@ fn parts(
     };
     let mut offset = String::new();
     for (dimension, (index, location)) in indices.iter().enumerate() {
-        let local = temporary(index.ty, context);
-        let check = format!(
-            "({local} = {}, (uint64_t){local} < (uint64_t){source}.lengths[{dimension}])",
-            expression(index, context)
+        // 不変の添字もそのまま読む。可変の添字は後続の添字で変わり得るため保存する。
+        let (local, evaluate) = if matches!(index.value, Value::Local(id) if context.immutable_locals.contains(&id))
+        {
+            (expression(index, context), String::new())
+        } else {
+            let local = temporary(index.ty, context);
+            let evaluate = format!("{local} = {}, ", expression(index, context));
+            (local, evaluate)
+        };
+        let length = cached.map_or_else(
+            || format!("{source}.lengths[{dimension}]"),
+            |id| format!("suz_array_length_{id}_{dimension}"),
         );
+        let check = format!("({evaluate}(uint64_t){local} < (uint64_t){length})");
         tests.push(if write {
             context.uses_arena = true;
-            let negative = if index.ty.integer_bounds().unwrap().0 < 0 { format!("{local} < 0") } else { "false".into() };
-            let fail = format!("suz_array_bounds({}, {}, {}, {}, (uint64_t){local}, {negative}, {source}.lengths[{dimension}])", c_string(&context.source_name), location.line, location.column, dimension + 1);
+            let negative = if index.ty.integer_bounds().unwrap().0 < 0 {
+                format!("{local} < 0")
+            } else {
+                "false".into()
+            };
+            let fail = format!(
+                "suz_array_bounds({}, {}, {}, {}, (uint64_t){local}, {negative}, {length})",
+                c_string(&context.source_name),
+                location.line,
+                location.column,
+                dimension + 1
+            );
             format!("({check} || ({fail}, false))")
-        } else { check });
+        } else {
+            check
+        });
         offset = if dimension == 0 {
             format!("(size_t){local}")
         } else {
-            format!("({offset} * (size_t){source}.lengths[{dimension}] + (size_t){local})")
+            format!("({offset} * (size_t){length} + (size_t){local})")
         };
     }
-    let pointer = format!(
-        "(({} *){source}.data + {offset})",
-        expr.ty.pointee().unwrap().c_name()
+    let data = cached.map_or_else(
+        || format!("({} *){source}.data", expr.ty.pointee().unwrap().c_name()),
+        |id| format!("suz_array_data_{id}"),
     );
+    let pointer = format!("({data} + {offset})");
     (setup, tests.join(" && "), pointer)
 }
 

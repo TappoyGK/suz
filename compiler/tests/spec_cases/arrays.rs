@@ -385,3 +385,40 @@ fn main() -> u8 {
     );
     assert_eq!(output.status.code(), Some(0), "{output:?}");
 }
+
+#[test]
+fn array_access_snapshots_mutable_references_across_index_calls_and_blocks() {
+    let output = compile_and_run_c23(
+        r#"
+fnshape Index() -> i64
+fn invoke(f: fn Index) -> i64 { return f() }
+fn read(a: ptr [i64], i: i64) -> i64 { return a[i] or -1 }
+fn main() -> u8 {
+    fix ptr first = new [10]
+    fix ptr second = new [20]
+    var ptr current = first
+    fix old = current[invoke(fn [var current, second]() -> i64 {
+        current = second
+        return 0
+    })] or -1
+    if old != 10 || read(current, 0) != 20 { return 1 }
+    current = first
+    fix again = current[expr { current = second
+        0 }] or -1
+    if again != 10 { return 2 }
+    fix captured = invoke(fn [first]() -> i64 { return first[0] or -1 })
+    fix blocked = expr { fix n = read(second, 0)
+        (first[0] or -1) + n }
+    if captured != 10 || blocked != 30 { return 3 }
+    fix ptr grid = new [[10], [20]]
+    var row: i64 = 0
+    fix original = grid[row][expr { row = 1
+        0 }] or -1
+    if original != 10 { return 4 }
+    return 0
+}
+"#,
+        "array-reference-snapshots.suz",
+    );
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+}
