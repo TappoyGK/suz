@@ -67,6 +67,7 @@ fn omitted_array_bounds_are_detected_by_asan() {
                     crate::ArenaOptions::default(),
                     crate::LogLevel::default(),
                     false,
+                    None,
                 ),
             )
             .unwrap();

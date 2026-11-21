@@ -75,6 +75,7 @@ pub fn build_and_run_c(c_file: &Path, executable: &Path) -> Result<Output> {
             .arg(&runtime)
             .arg(runtime.join("suz_runtime.c"))
             .arg(runtime.join("suz_arena.c"))
+            .arg(runtime.join("suz_arena_report.c"))
             .arg(runtime.join("suz_text.c"))
             .arg(runtime.join("suz_parse.c"))
             .args(

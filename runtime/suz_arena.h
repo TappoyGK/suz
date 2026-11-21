@@ -71,8 +71,50 @@ suz_arena_cursor suz_arena_expand(suz_arena_chunk *current, size_t size, const c
 void suz_arena_poison_reclaimed(suz_arena_chunk *saved, size_t used, suz_arena_cursor current);
 #endif
 
+#ifdef SUZ_LOG_ARENA
+/* ブロック境界の余りを除いて、単一ブロックに置く場合の必要容量を測る。
+   生成Cだけに置くため、無効時の確保経路には計測用の呼出しも状態も残らない。 */
+static size_t suz_arena_report_position;
+static size_t suz_arena_report_peak;
+static bool suz_arena_report_allocated;
+static bool suz_arena_report_initial_block;
+void suz_arena_report_summary(size_t peak, bool initial_block);
+static inline void suz_arena_report_restore(size_t *position) {
+    suz_arena_report_position = *position;
+}
+#ifdef SUZ_ARENA_REPORT_FORMAT
+#include "suz_arena_report.h"
+static suz_arena_tree suz_arena_report_tree;
+static inline void suz_arena_report_leave(suz_arena_report_frame *frame) {
+    suz_arena_tree_leave(&suz_arena_report_tree, frame);
+    suz_arena_report_position = frame->base;
+}
+#endif
+static inline void suz_arena_report(void) {
+    if (suz_arena_report_allocated) {
+#ifdef SUZ_ARENA_REPORT_FORMAT
+        suz_arena_tree_output(&suz_arena_report_tree, suz_arena_report_peak, suz_arena_report_initial_block, SUZ_ARENA_REPORT_FORMAT);
+#else
+        suz_arena_report_summary(suz_arena_report_peak, suz_arena_report_initial_block);
+#endif
+    }
+#ifdef SUZ_ARENA_REPORT_FORMAT
+    suz_arena_tree_destroy(&suz_arena_report_tree);
+#endif
+}
+#endif
+
 static inline void suz_arena_init(uint64_t initial, uint64_t grow, uint64_t limit, const char *source, size_t line, size_t column) {
     suz_arena_position = suz_arena_storage_init(initial, grow, limit, source, line, column);
+#ifdef SUZ_LOG_ARENA
+    suz_arena_report_position = 0;
+    suz_arena_report_peak = 0;
+    suz_arena_report_allocated = false;
+    suz_arena_report_initial_block = suz_arena_position.current != NULL;
+#ifdef SUZ_ARENA_REPORT_FORMAT
+    suz_arena_tree_init(&suz_arena_report_tree, SUZ_ARENA_REPORT_CAPACITY, source, line, column);
+#endif
+#endif
 }
 
 /* 初期値は呼出し前に評価済み。size>0、alignmentは2のべき乗でmax_align_t以下。 */
@@ -82,6 +124,22 @@ static inline __attribute__((always_inline)) void *suz_arena_alloc(size_t size, 
     if (ckd_add(&size, size, SUZ_ARENA_ASAN_UNIT - 1)) suz_arena_overflow(source, line, column);
     size &= ~(size_t)(SUZ_ARENA_ASAN_UNIT - 1);
     if (alignment < SUZ_ARENA_ASAN_UNIT) alignment = SUZ_ARENA_ASAN_UNIT;
+#endif
+#ifdef SUZ_LOG_ARENA
+    size_t virtual_padding = (-suz_arena_report_position) & (alignment - 1);
+    size_t virtual_end;
+    if (ckd_add(&virtual_end, suz_arena_report_position, virtual_padding) ||
+        ckd_add(&virtual_end, virtual_end, size)) {
+        suz_arena_overflow(source, line, column);
+    }
+    suz_arena_report_position = virtual_end;
+    if (virtual_end > suz_arena_report_peak) suz_arena_report_peak = virtual_end;
+    suz_arena_report_allocated = true;
+#ifdef SUZ_ARENA_REPORT_FORMAT
+    if (suz_arena_report_tree.active && virtual_end > suz_arena_report_tree.active->peak) {
+        suz_arena_report_tree.active->peak = virtual_end;
+    }
+#endif
 #endif
     size_t padding = (-suz_arena_position.used) & (alignment - 1);
     size_t additional, end;

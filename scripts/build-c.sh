@@ -94,6 +94,6 @@ exec "${CC:-clang}" "${extra_flags[@]+"${extra_flags[@]}"}" -std=c23 -Wall -Wext
     -fhonor-nans -fhonor-infinities -ffp-contract=off \
     -fdenormal-fp-math=ieee \
     -iquote "$runtime" -iquote "$runtime/third_party/ryu" \
-    "$source_file" "$runtime/suz_runtime.c" "$runtime/suz_arena.c" "$runtime/suz_text.c" "$runtime/suz_parse.c" "$runtime/suz_parse_float.c" "$runtime/suz_parse_struct.c" "$environment_file" "$runtime/suz_float.c" "$runtime/suz_format_float.c" \
+    "$source_file" "$runtime/suz_runtime.c" "$runtime/suz_arena.c" "$runtime/suz_arena_report.c" "$runtime/suz_text.c" "$runtime/suz_parse.c" "$runtime/suz_parse_float.c" "$runtime/suz_parse_struct.c" "$environment_file" "$runtime/suz_float.c" "$runtime/suz_format_float.c" \
     "$runtime/third_party/ryu/ryu/f2s.c" "$runtime/third_party/ryu/ryu/d2s.c" \
     "${ffi_args[@]+"${ffi_args[@]}"}" -lm -o "$output_file"

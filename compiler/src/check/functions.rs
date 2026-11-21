@@ -578,6 +578,7 @@ pub(super) fn check_with_captures(
     warnings.extend(diagnostics::unhandled_arithmetic(&statements));
     Ok((
         CheckedFunction {
+            name: function.name.clone(),
             lifetime,
             mutable_receiver: function.method.is_some_and(|m| m.mutable),
             id,

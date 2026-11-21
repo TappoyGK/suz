@@ -99,6 +99,9 @@ cd generated
 | `--library-dir DIR` | 可 | 可 | 可 | 可 | ライブラリの探索先を追加。複数指定可 |
 | `--link-library NAME` | 可 | 可 | 可 | 可 | Cライブラリ名を指定。複数指定可 |
 | `--link-object FILE` | 可 | 可 | 可 | 可 | オブジェクトまたはアーカイブを指定。複数指定可 |
+| `--log-arena` | 可 | 可 | | 可 | 作業領域の使用量を計測。既定は無効 |
+| `--log-arena-format FORMAT` | 可 | 可 | | 可 | summary/tree/tree-bytes/csv。既定はtree |
+| `--log-arena-limit COUNT` | 可 | 可 | | 可 | 計測ツリーの最大行数。根を含め既定256 |
 | `--arena-initial SIZE` | 可 | 可 | | 可 | 作業領域の初期容量。既定は `64M` |
 | `--arena-grow SIZE` | 可 | 可 | | 可 | 作業領域の追加容量の基準。既定は `64M`、`0` は拡張禁止 |
 | `--arena-limit SIZE` | 可 | 可 | | 可 | 確保した作業領域の総容量上限。既定は `unlimited` |
@@ -165,6 +168,37 @@ suz emit-c program.suz -o generated --text-pool-limit unlimited
 上限は整列の余白と回収後に保持する容量も含む、各ブロックのデータ容量の合計に適用する。ブロックの管理情報と環境層の確保管理費用は含めない。無制限でもOSの確保失敗やサイズ計算のあふれはパニックする。
 
 設定は生成Cに埋め込み、入れ子を含む全作業領域で使用する。`emit-c`後も同じ設定を使う。arena未使用なら、この設定によるメモリ確保は行わない。`check`は3つのオプションを受け付けない。失敗時の診断は [rt.arena-storage]・[rt.arena-allocation] に従う。
+
+### 3.3 作業領域の使用量の計測
+
+**[tool.log-arena]** `--log-arena`は値を取らないフラグで、`build`・`run`・`emit-c`で受け付ける。省略時は計測しない。`check`では受け付けない。重複指定は終了コード2のツールエラーとする。`emit-c`には計測を有効にしたCを出力する。最低ログレベルとは独立しており、`--log-level off`でも計測結果を出力する。
+
+**[tool.arena-report-format]** `--log-arena-format FORMAT`で表示形式を選ぶ。`--log-arena`との併用を必須とし、順序は問わない。オプション直後の値の欠落・不正な値・重複指定と、`check`での指定は終了コード2のツールエラーとする。形式は`summary`・`tree`・`tree-bytes`・`csv`から選び、省略時は`tree`とする。`summary`は [rt.arena-report-output] の全体集計をバイト単位の整数で表示する。他の形式は [rt.arena-tree-output] に従う。
+
+**[tool.arena-report-limit]** `--log-arena-limit COUNT`は、計測用ツリーの最大行数を指定する。根の行を含み、既定は256とする。値はASCIIの10進整数で1〜65535とし、符号や単位は付けない。`--log-arena`との併用を必須とする。値の欠落・不正な値・重複指定と、`check`での指定は終了コード2のツールエラーとする。`summary`ではツリーを記録しないため、この上限は使用しない。計測対象の作業領域の容量を制限するオプションではない。
+
+```sh
+suz build game.suz -o game -O2 --log-arena --log-arena-format summary
+./game
+# arena peak=3145776 reserved=67108864 blocks=1 expansions=0
+suz build game.suz -o game -O2 --arena-initial 3145776 --arena-grow 0 --force
+```
+
+ツリーは、どの作業領域でメモリを使っているかを調べるために使う。
+
+```text
+arena                 function  peak
+main                  main        56
+├── tree.suz:2:5      a           56 [recursive]
+│   └── tree.suz:8:5  b           48 [recursive]
+└── tree.suz:16:9     main        16
+    └── tree.suz:2:5  a            8
+reserved=128 blocks=1 expansions=0
+```
+
+これは`tree-bytes`の表示例である。`recursive`は再帰を折り畳んだ行、`omitted`は記録上限のため子の枝を省略した行を示す。省略しても、その親と根のpeakには省略した枝の使用量を含む。子のpeakは同時に発生するとは限らず、合計しても親のpeakにはならない。容量設定には根のpeakを使う。
+
+測定した実行と同じ確保・回収の経路では、`peak`を初期容量に指定して追加確保なしで実行できる。入力によって経路や配列の大きさが変わる場合は、その分の余裕を持たせること。ASanの有無を含め、実際に使うビルドと同じ設定で測ること。
 
 ## 4. 出力と一時ファイル
 

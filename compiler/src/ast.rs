@@ -630,6 +630,7 @@ pub(crate) enum LogLevel {
 #[derive(Clone)]
 pub(crate) enum Statement {
     Arena {
+        location: Location,
         body: Vec<Statement>,
         end: Location,
     },

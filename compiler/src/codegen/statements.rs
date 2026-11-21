@@ -18,11 +18,21 @@ pub(super) fn emit_block(
     let indent = "    ".repeat(depth);
     for statement in statements {
         match statement {
-            CheckedStatement::Arena { body, .. } => {
+            CheckedStatement::Arena { body, location, .. } => {
                 context.uses_arena = true;
                 let id = *next_assignment;
                 *next_assignment += 1;
                 writeln!(c, "{indent}{{\n{indent}    suz_arena_mark suz_arena_mark_{id} __attribute__((cleanup(suz_arena_restore))) = suz_arena_save();").unwrap();
+                if let Some(report) = context.arena_report {
+                    if report.format == crate::ArenaReportFormat::Summary {
+                        writeln!(c, "{indent}    size_t suz_arena_report_mark_{id} __attribute__((cleanup(suz_arena_report_restore))) = suz_arena_report_position;").unwrap();
+                    } else {
+                        writeln!(c, "{indent}    suz_arena_report_frame suz_arena_report_mark_{id} __attribute__((cleanup(suz_arena_report_leave)));").unwrap();
+                        writeln!(c, "{indent}    suz_arena_tree_enter(&suz_arena_report_tree, &suz_arena_report_mark_{id}, suz_arena_report_position, {}, {}, {}, {});",
+                            super::expressions::c_string(&context.source_name), location.line, location.column,
+                            super::expressions::c_string(&context.report_function)).unwrap();
+                    }
+                }
                 emit_block(c, body, depth + 1, next_assignment, context);
                 writeln!(c, "{indent}}}").unwrap();
             }
