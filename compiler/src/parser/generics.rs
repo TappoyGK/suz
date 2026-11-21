@@ -189,10 +189,6 @@ impl Parser<'_, '_> {
             })?;
         self.cursor += 1;
         self.expect(FixedToken::Symbol(":"))?;
-        let arena = self.token().kind == Kind::Keyword("arena");
-        if arena {
-            self.cursor += 1;
-        }
         let operation = match self.token().kind {
             Kind::Symbol("." | "#") => {
                 let mutable = self.token().kind == Kind::Symbol("#");
@@ -208,16 +204,13 @@ impl Parser<'_, '_> {
                 RequiredOperation::Method {
                     name: name.into(),
                     mutable,
-                    arena,
                 }
             }
             Kind::Symbol(
                 op @ ("+" | "-" | "*" | "/" | "%" | "~" | "&" | "|" | "^" | "<<" | ">>" | "=="
                 | "!=" | "<" | "<=" | ">" | ">="),
             )
-            | Kind::Keyword(op @ ("len" | "not"))
-                if !arena =>
-            {
+            | Kind::Keyword(op @ ("len" | "not")) => {
                 self.cursor += 1;
                 RequiredOperation::Operator(match op {
                     "len" => "len",

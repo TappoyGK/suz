@@ -70,9 +70,9 @@ impl Parser<'_, '_> {
                 ),
             ));
         }
-        // keepはCが保持できる期間の契約だけを宣言する。型・ABI・寿命検査は
-        // 通常のポインタ引数と同じなので、後段へ実行用の情報を追加しない。
+        // keepはABIを変えず、蓄積警告でCへの保持を判定するために残す。
         Ok(ExternParameter {
+            keep,
             name,
             ty,
             location,

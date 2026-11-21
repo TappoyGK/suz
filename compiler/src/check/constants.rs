@@ -313,6 +313,7 @@ fn constant_bool_raw(expr: &CheckedExpression) -> Option<bool> {
             operators,
             operands,
             methods,
+            ..
         } => {
             if methods.iter().any(Option::is_some) {
                 return None;
@@ -422,6 +423,7 @@ fn equal_structs(left: &CheckedExpression, right: &CheckedExpression) -> Option<
         let equal = constant_bool_raw(&CheckedExpression {
             ty: Type::Bool,
             value: Value::Comparison {
+                locations: Vec::new(),
                 methods: Vec::new(),
                 operators: vec![crate::ast::ComparisonOperator::Equal],
                 operands: vec![left.clone(), right.clone()],
@@ -460,7 +462,7 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
     }
     let value = match expr.ty {
         Type::StaticFunction(_) | Type::Function(_) => match expr.value {
-            Value::Function(_) => expr.value.clone(),
+            Value::Function { .. } => expr.value.clone(),
             _ => return None,
         },
         Type::Pointer { .. }
@@ -778,6 +780,7 @@ fn validate_evaluation(expr: &CheckedExpression) -> Result<(), Diagnostic> {
                 let pair = CheckedExpression {
                     ty: Type::Bool,
                     value: Value::Comparison {
+                        locations: Vec::new(),
                         methods: Vec::new(),
                         operators: vec![*operator],
                         operands: pair.to_vec(),

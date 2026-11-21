@@ -2219,11 +2219,11 @@ fn main() -> u8 {
 ```suz
 struct Point { x: i32 }
 struct Holder { value: ptr i32 }
-arena fn select(holder: ptr Holder, calls: ptr i32) -> ptr i32 {
+fn select(holder: ptr Holder, calls: ptr i32) -> ptr i32 {
     #calls += 1
     return holder.value
 }
-arena fn select_point(point: ptr Point, calls: ptr i32) -> ptr Point {
+fn select_point(point: ptr Point, calls: ptr i32) -> ptr Point {
     #calls += 1
     return point
 }

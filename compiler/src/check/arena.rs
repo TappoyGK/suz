@@ -10,17 +10,57 @@ use crate::{
     Diagnostic, ErrorKind,
     ast::{Expression, ExpressionKind, Location, Statement, Type},
 };
+pub(crate) use lifetimes::Body as LifetimeBody;
+pub(super) use lifetimes::check_program;
 
 pub(super) fn contains(ty: Type, scope: &Scope) -> bool {
+    contains_in(ty, &scope.structs)
+}
+
+fn contains_in(ty: Type, structs: &super::type_parameters::structs::Structs) -> bool {
     match ty {
         Type::Pointer { .. } => true,
-        Type::Struct(id) => scope
-            .structs
+        Type::Struct(id) => structs
             .get(id)
             .fields
             .iter()
-            .any(|f| contains(f.ty, scope)),
+            .any(|f| contains_in(f.ty, structs)),
         _ => false,
+    }
+}
+
+// ポインタの寿命と、関数候補の流れに必要な解析を別々に記録する。
+pub(super) fn callable_type(ty: Type, structs: &super::type_parameters::structs::Structs) -> bool {
+    let mut pending = vec![ty];
+    let mut seen = std::collections::BTreeSet::new();
+    while let Some(ty) = pending.pop() {
+        match ty {
+            Type::Function(_) | Type::StaticFunction(_) => return true,
+            Type::Pointer { .. } => pending.push(ty.pointee().unwrap()),
+            Type::Struct(id) if seen.insert(id) => {
+                pending.extend(structs.get(id).fields.iter().map(|f| f.ty))
+            }
+            _ => {}
+        }
+    }
+    false
+}
+pub(super) fn observe_type(ty: Type, scope: &Scope) {
+    if !matches!(
+        ty,
+        Type::Pointer { .. } | Type::Struct(_) | Type::Function(_) | Type::StaticFunction(_)
+    ) {
+        return;
+    }
+    if !scope.program_pointers_used.get() && contains(ty, scope) {
+        scope.program_pointers_used.set(true);
+    }
+    if !scope.callables_used.get() && callable_type(ty, &scope.structs) {
+        scope.callables_used.set(true);
+        scope.lifetime_used.set(true);
+    }
+    if !scope.lifetime_used.get() && contains(ty, scope) {
+        scope.lifetime_used.set(true);
     }
 }
 
@@ -111,7 +151,6 @@ pub(super) fn statement(
 ) -> Result<(), Diagnostic> {
     match statement {
         Statement::Arena { body, end, .. } => {
-            context.bindings.arena_used.set(true);
             context.bindings.arena_depth += 1;
             let result =
                 statements::block(body, context.bindings, context.next_id, context.loop_depth);
@@ -330,23 +369,19 @@ fn store(
 }
 
 pub(super) fn check_lifetimes(
-    statements: &[CheckedStatement],
     scope: &Scope,
     function: &crate::ast::Function,
     references: &std::collections::BTreeMap<String, Binding>,
-) -> Result<(), Diagnostic> {
-    if !scope.arena_used.get()
-        && !function.arena
-        && !function.parameters.iter().any(|p| {
-            contains(
-                scope
-                    .resolve_type_at(p.ty, p.location)
-                    .expect("parameter type was checked before lifetime analysis"),
-                scope,
-            )
-        })
+    id: usize,
+) -> Result<Option<LifetimeBody>, Diagnostic> {
+    // 記号的な型の本体は型検査を行い、寿命効果は具体化した本体から求める。
+    if scope.generic_check()
+        || (!function.type_parameters.is_empty() && scope.named.type_arguments.is_none())
     {
-        return Ok(());
+        return Ok(None);
     }
-    lifetimes::check(statements, scope, function, references)
+    if !scope.lifetime_used.get() && !scope.calls_used.get() && !function.name.is_empty() {
+        return Ok(None);
+    }
+    lifetimes::check(scope, function, references, id).map(Some)
 }

@@ -17,6 +17,7 @@ pub(super) fn check(
     shape: usize,
     outer: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
+    super::arena::observe_type(Type::Function(shape), outer);
     let signature = outer.function_types.borrow()[shape].clone();
     if closure
         .function

@@ -2,6 +2,8 @@
 mod allows;
 #[path = "spec_cases/arena.rs"]
 mod arena;
+#[path = "spec_cases/arena_accumulation.rs"]
+mod arena_accumulation;
 #[path = "spec_cases/arena_functions.rs"]
 mod arena_functions;
 #[path = "spec_cases/arena_fuzz.rs"]

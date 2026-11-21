@@ -13,7 +13,6 @@ pub(super) struct Signature {
     pub type_parameter_names: Option<Rc<Vec<String>>>,
     pub needs: Vec<crate::ast::generics::Need>,
     pub method: Option<crate::ast::Method>,
-    pub arena: bool,
     pub external: bool,
     pub id: usize,
     pub parameters: Vec<Type>,
@@ -131,7 +130,13 @@ pub(super) struct Scope {
     // 定数初期値では、演算子構文による関数呼び出しも拒否する。
     pub constant_initializer: bool,
     pub arena_depth: usize,
-    pub arena_used: Rc<std::cell::Cell<bool>>,
+    pub lifetime_used: Rc<std::cell::Cell<bool>>,
+    // 本体にポインタがなくても、呼び出し先の一時確保を蓄積警告へ伝える。
+    pub calls_used: Rc<std::cell::Cell<bool>>,
+    // ループがないプログラムでは、寿命検査だけを行い蓄積警告の情報を作らない。
+    pub program_loops_used: Rc<std::cell::Cell<bool>>,
+    pub program_pointers_used: Rc<std::cell::Cell<bool>>,
+    pub callables_used: Rc<std::cell::Cell<bool>>,
     pub trusted_block: bool,
     // 最も内側のerror腕の成功型。関数の戻り値型とは独立し、クロージャ境界で解除する。
     pub recovery: Option<Type>,
@@ -332,7 +337,11 @@ impl Default for Scope {
             has_operator_methods: false,
             constant_initializer: false,
             arena_depth: 0,
-            arena_used: Default::default(),
+            lifetime_used: Default::default(),
+            calls_used: Default::default(),
+            program_loops_used: Default::default(),
+            program_pointers_used: Default::default(),
+            callables_used: Default::default(),
             trusted_block: false,
             recovery: None,
             loop_depth: 0,

@@ -189,10 +189,17 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
     for (value, id) in &context.text_literals {
         writeln!(text_init, "    suz_text_constant_{id} = suz_text_intern(suz_text_literal_{id}, UINT64_C({}), true, {});", value.len(), text::position(program.main_location, &context)).unwrap();
     }
+    let exit = if context.uses_arena {
+        format!(
+            "    int result = (int)suz_fn_{}();\n    suz_arena_destroy();\n    return result;",
+            program.main_id
+        )
+    } else {
+        format!("    return (int)suz_fn_{}();", program.main_id)
+    };
     writeln!(
         c,
-        "int main(void) {{\n    suz_runtime_init();\n{references}{text_init}    return (int)suz_fn_{}();\n}}",
-        program.main_id
+        "int main(void) {{\n    suz_runtime_init();\n{references}{text_init}{exit}\n}}"
     )
     .unwrap();
     c

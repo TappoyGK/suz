@@ -478,6 +478,7 @@ pub(super) fn check(
             CheckedExpression {
                 ty: Type::Bool,
                 value: Value::Comparison {
+                    locations: locations.clone(),
                     methods: Vec::new(),
                     operators: operators.clone(),
                     operands,

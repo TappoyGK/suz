@@ -78,7 +78,7 @@ error Failed { Bad }
 struct Number { n: i32 }
 fn Number.read() -> i32 or Failed { return self.n }
 fn Number#increment() -> void { self#n = self.n + 1 }
-arena fn Number.copy() -> ptr Number { return new self }
+fn Number.copy() -> ptr Number { return new self }
 @needs T: .read() -> i32 or Failed
 @needs T: #increment() -> void
 fn use_value[T](value: T) -> i32 {
@@ -86,8 +86,8 @@ fn use_value[T](value: T) -> i32 {
     copy#increment()
     return copy.read() or 99
 }
-@needs T: arena .copy() -> ptr T
-arena fn duplicate[T](value: T) -> ptr T { return value.copy() }
+@needs T: .copy() -> ptr T
+fn duplicate[T](value: T) -> ptr T { return value.copy() }
 fn main() -> u8 {
     arena {
         fix ptr p = duplicate[Number](Number { n: 4 })
@@ -145,7 +145,7 @@ fn generic_requirement_lines_and_type_parameter_names_are_checked() {
 #[test]
 fn named_generics_preserve_lifetimes_and_bound_recursive_instantiation() {
     let source = r#"
-arena fn identity[T](value: T) -> T { return value }
+fn identity[T](value: T) -> T { return value }
 fn main() -> u8 {
     arena {
         var ptr escaped: ptr? i32 = null
@@ -160,11 +160,7 @@ fn main() -> u8 {
     let error = suz::compile(source.as_bytes()).unwrap_err();
     assert!(error.message().contains("arena.store"), "{error:?}");
     let ordinary = b"fn identity[T](value: T) -> T { return value }\nfn main() -> u8 { arena { fix ptr p = new (1 as i32)\nidentity[ptr i32](p) }\nreturn 0 }";
-    let error = suz::compile(ordinary).unwrap_err();
-    assert!(
-        format!("{error:?}").contains("arena.parameter"),
-        "{error:?}"
-    );
+    suz::compile(ordinary).unwrap();
     let recursive = r#"
 fn grow[T]() -> void { grow[ptr T]() }
 fn main() -> u8 { grow[i32]()
@@ -190,7 +186,6 @@ fn main() -> u8 { return countdown[u8](0, 3) }
 fn substituted_requirements_and_call_only_types_cannot_hide_invalid_signatures() {
     for source in [
         "@needs T: +(T) -> i8\n@needs U: +(U) -> i64\nfn keep[T, U](a: T, b: U) -> U { return b }\nfn main() -> u8 { keep[i8, i8](1, 2)\nreturn 0 }",
-        "@needs T: .read() -> i32\n@needs T: arena .read() -> i32\nfn keep[T](v: T) -> T { return v }\nfn main() -> u8 { return 0 }",
         "fnshape Action() -> void\nfn local[T]() -> void { fix ptr p: ptr T = panic `stop` }\nfn main() -> u8 { local[fn Action]()\nreturn 0 }",
         "fnshape Action() -> void\nfn local[T]() -> void { fix p: T = panic `stop` }\nfn main() -> u8 { local[fn Action]()\nreturn 0 }",
         "fnshape Action() -> void\nfn exit_now[T]() -> T { return panic `stop` }\nfn main() -> u8 { exit_now[fn Action]()\nreturn 0 }",
@@ -418,8 +413,7 @@ fn inference_requires_evidence_and_preserves_explicit_arguments() {
 #[test]
 fn inferred_calls_preserve_lifetimes_and_function_value_restrictions() {
     for source in [
-        "arena fn identity[T](value: T) -> T { return value }\nfn main() -> u8 { arena { var ptr saved: ptr? i32 = null\narena { fix ptr p = new (1 as i32)\nsaved = identity(p) } }\nreturn 0 }",
-        "fn identity[T](value: T) -> T { return value }\nfn main() -> u8 { arena { fix ptr p = new (1 as i32)\nidentity(p) }\nreturn 0 }",
+        "fn identity[T](value: T) -> T { return value }\nfn main() -> u8 { arena { var ptr saved: ptr? i32 = null\narena { fix ptr p = new (1 as i32)\nsaved = identity(p) } }\nreturn 0 }",
         "fn identity[T](value: T) -> T { return value }\nfn main() -> u8 { identity(fn [](n: i32) -> i32 { return n })\nreturn 0 }",
         "fn nothing() -> void {}\nfn consume[T](v: T) -> void {}\nfn main() -> u8 { consume(nothing())\nreturn 0 }",
     ] {
@@ -499,7 +493,7 @@ fn main() -> u8 {
     assert!(output.status.success(), "{output:?}");
     for source in [
         "struct Box[T] { value: T }\nfn take[T](b: Box[ptr? T]) -> void {}\nfn main() -> u8 { arena { fix ptr p = new (1 as i32)\ntake(Box[ptr i32] { value: p }) }\nreturn 0 }",
-        "arena fn same[T](a: T, b: T) -> void {}\nfn main() -> u8 { arena { fix ptr p = new (1 as i32)\nfix ptr q: ptr? i32 = p\nsame(p, q) }\nreturn 0 }",
+        "fn same[T](a: T, b: T) -> void {}\nfn main() -> u8 { arena { fix ptr p = new (1 as i32)\nfix ptr q: ptr? i32 = p\nsame(p, q) }\nreturn 0 }",
     ] {
         assert!(suz::compile(source.as_bytes()).is_err(), "{source}");
     }

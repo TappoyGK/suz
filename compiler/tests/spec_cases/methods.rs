@@ -78,22 +78,18 @@ fn methods_reject_invalid_receivers_names_and_writes() {
 }
 
 #[test]
-fn method_receivers_keep_borrowing_capture_and_range_restrictions() {
+fn method_receivers_keep_lifetimes_capture_and_range_restrictions() {
     for (declarations, body, rule) in [
-        (
-            "fn Node#clear() -> void { self#next = null }",
-            "",
-            "arena.parameter",
-        ),
+        ("fn Node#clear() -> void { self#next = null }", "", "accept"),
         (
             "fn Node#clear() -> void { self = Node { value: 0, next: null } }",
             "",
-            "arena.parameter",
+            "accept",
         ),
         (
             "fn Node.bad() -> ptr? Node { return self.next }",
             "",
-            "arena.parameter",
+            "accept",
         ),
         (
             "fn Node.read() -> i32 { return invoke(fn []() -> i32 { return self.value }) }",
@@ -131,22 +127,16 @@ fn method_receivers_keep_borrowing_capture_and_range_restrictions() {
             "arena { fix ptr outer = new Node { value: 1, next: null }\narena { outer#append() } }",
             "arena.store",
         ),
-        (
-            "",
-            "arena { fix ptr outer = new Node { value: 1, next: null }\narena { fix ptr inner = new Node { value: 2, next: outer }\ninner#append() } }",
-            "arena.fn-call",
-        ),
-        (
-            "",
-            "var n = Node { value: 0, next: null }\nn#append()",
-            "arena.fn-call",
-        ),
         ("fn Node .bad() -> void {}", "", "method.decl"),
     ] {
         let source = format!(
-            "struct Node {{ value: i32, next: ptr? Node }}\nfnshape Read() -> i32\nfn invoke(f: fn Read) -> i32 {{ return f() }}\nfn Node.count() -> i32 {{ return self.value }}\nfn Node#bump() -> i32 {{ self#value += 1\nreturn self.value }}\narena fn Node#append() -> void {{ self#next = new Node {{ value: 2, next: null }} }}\n{declarations}\nfn main() -> u8 {{ {body}\nreturn 0 }}"
+            "struct Node {{ value: i32, next: ptr? Node }}\nfnshape Read() -> i32\nfn invoke(f: fn Read) -> i32 {{ return f() }}\nfn Node.count() -> i32 {{ return self.value }}\nfn Node#bump() -> i32 {{ self#value += 1\nreturn self.value }}\nfn Node#append() -> void {{ self#next = new Node {{ value: 2, next: null }} }}\n{declarations}\nfn main() -> u8 {{ {body}\nreturn 0 }}"
         );
-        let error = suz::compile(source.as_bytes()).unwrap_err();
-        assert_eq!(error.rule(), rule, "{declarations}\n{body}: {error}");
+        if rule == "accept" {
+            suz::compile(source.as_bytes()).unwrap();
+        } else {
+            let error = suz::compile(source.as_bytes()).unwrap_err();
+            assert_eq!(error.rule(), rule, "{declarations}\n{body}: {error}");
+        }
     }
 }

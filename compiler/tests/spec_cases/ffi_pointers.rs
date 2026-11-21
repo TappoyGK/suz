@@ -34,7 +34,7 @@ extern "fixture.h" {
 }
 struct Holder { p: ptr Sample }
 fn forward(p: ptr Sample) -> void { trusted { set_sample(p, 11) } }
-arena fn make() -> ptr Sample { return new Sample { value: 0 } }
+fn make() -> ptr Sample { return new Sample { value: 0 } }
 fn main() -> u8 {
     arena {
         fix ptr first = make()
@@ -227,7 +227,7 @@ extern "fixture.h" {
 fn register(p: ptr State, q: ptr f64) -> void { trusted { attach(p, q) } }
 fnshape Action() -> void
 fn invoke(f: fn Action) -> void { f() }
-arena fn make() -> ptr State { return new State { value: 0 } }
+fn make() -> ptr State { return new State { value: 0 } }
 fn main() -> u8 {
     for i in 0..<2 {
         arena {
@@ -282,7 +282,7 @@ fn keep_is_a_typed_pointer_modifier_not_a_reserved_name() {
 fn keep_on_suz_parameters_explains_the_extern_only_modifier() {
     for declaration in [
         "fn wrapper(keep p: ptr i32) -> void {}",
-        "arena fn wrapper(keep p: ptr i32) -> void {}",
+        "fn wrapper(keep p: ptr i32) -> void {}",
         "fn wrapper() -> void { fix f = fn [](keep p: ptr i32) -> void {} }",
     ] {
         let source = format!("{declaration}\nfn main() -> u8 {{ return 0 }}");

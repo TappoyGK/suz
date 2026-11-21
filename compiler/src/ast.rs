@@ -10,7 +10,7 @@ use pointer_shape::PointerShape;
 use crate::{Diagnostic, ErrorKind};
 
 /// ソース内の1始まりの行・列。構文解析後も診断の位置として保持する。
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct Location {
     pub line: usize,
     pub column: usize,
@@ -561,7 +561,6 @@ pub(crate) struct Function {
     pub type_parameters: Vec<generics::TypeParameter>,
     pub needs: Vec<generics::Need>,
     pub method: Option<Method>,
-    pub arena: bool,
     pub keyword_location: Location,
     pub name: String,
     pub location: Location,
@@ -1073,6 +1072,8 @@ pub(crate) struct ExternFunction {
 /// 外部関数の仮引数。型付きCポインタはSuz側では非nullのptr Tとして検査する。
 #[derive(Clone)]
 pub(crate) struct ExternParameter {
+    /// Cが呼び出し後も参照を保持する。蓄積警告の逃避先として使う。
+    pub keep: bool,
     pub name: String,
     pub ty: Type,
     pub location: Location,

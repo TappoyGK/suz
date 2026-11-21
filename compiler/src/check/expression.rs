@@ -450,7 +450,27 @@ pub(super) fn floating_operand(
     Ok(checked)
 }
 
+// 型検査と同時に必要な解析を記録し、無関係な本体をもう一度走査しない。
 fn expression_inner(
+    expr: &Expression,
+    required: Option<Type>,
+    bindings: &Scope,
+    widen: Widening,
+    argument: Option<super::generic::Family>,
+) -> Result<CheckedExpression, Diagnostic> {
+    let checked = expression_checked(expr, required, bindings, widen, argument)?;
+    super::arena::observe_type(checked.ty, bindings);
+    if matches!(
+        &checked.value,
+        Value::Call { .. } | Value::Invoke { .. } | Value::HandledCall { .. }
+    ) || matches!(&checked.value, Value::Comparison { methods, .. } if methods.iter().any(Option::is_some))
+    {
+        bindings.calls_used.set(true);
+    }
+    Ok(checked)
+}
+
+fn expression_checked(
     expr: &Expression,
     required: Option<Type>,
     bindings: &Scope,

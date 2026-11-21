@@ -190,6 +190,8 @@ pub struct CompilationOptions {
 
 #[derive(Debug)]
 pub struct Warning {
+    /// 呼び出し経路などの注記。allowでは警告本体と一緒に抑制する。
+    pub related: Vec<Diagnostic>,
     rule_id: String,
     pub allowed_reason: Option<String>,
     pub line: usize,
