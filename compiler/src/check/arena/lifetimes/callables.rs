@@ -847,9 +847,10 @@ impl Walk<'_> {
 pub(in crate::check) fn check_program(
     functions: &mut [CheckedFunction],
     external: std::ops::Range<usize>,
-) -> Result<(), Diagnostic> {
+    externs: &[crate::ast::ExternFunction],
+) -> Result<Vec<(Location, String)>, Diagnostic> {
     if functions.iter().all(|function| function.lifetime.is_none()) {
-        return Ok(());
+        return Ok(Vec::new());
     }
     let mut program = Program {
         next: functions.iter().map(|f| f.id).max().unwrap_or(0) + 1,
@@ -859,10 +860,14 @@ pub(in crate::check) fn check_program(
     program.empty = program.next;
     program.next += 1;
     let mut checked = Vec::new();
+    let mut warnings = Vec::new();
+    let external_start = external.start;
     for id in external.chain(std::iter::once(program.empty)) {
         checked.push(CheckedFunction {
             id,
-            lifetime: None,
+            lifetime: externs
+                .get(id - external_start)
+                .map(|function| Body::Resolved(Rc::new(summaries::Summary::external(function)))),
             mutable_receiver: false,
             parameters: vec![],
             result: Type::Void,
@@ -969,6 +974,7 @@ pub(in crate::check) fn check_program(
                 analysis.solve()?;
                 analysis.summary()
             };
+            warnings.extend(analysis.loop_warnings());
             Body::Resolved(Rc::new(summary))
         } else {
             Body::Pending(Rc::new(analysis))
@@ -983,5 +989,8 @@ pub(in crate::check) fn check_program(
             statements: vec![],
         });
     }
-    summaries::check_program(&mut checked)
+    warnings.extend(summaries::check_program(&mut checked)?);
+    warnings.sort();
+    warnings.dedup_by_key(|warning| warning.0);
+    Ok(warnings)
 }

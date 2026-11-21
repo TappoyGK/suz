@@ -33,6 +33,7 @@ fn call(id: usize, arguments: Vec<(Type, Node)>, result: Node, region: usize) ->
         location: HERE,
         notes: BTreeSet::new(),
         indirect: false,
+        loops: BTreeSet::new(),
     }
 }
 fn identity() -> (BTreeMap<usize, Rc<Analysis>>, BTreeMap<usize, Rc<Summary>>) {

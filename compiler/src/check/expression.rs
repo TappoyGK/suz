@@ -460,6 +460,13 @@ fn expression_inner(
 ) -> Result<CheckedExpression, Diagnostic> {
     let checked = expression_checked(expr, required, bindings, widen, argument)?;
     super::arena::observe_type(checked.ty, bindings);
+    if matches!(
+        &checked.value,
+        Value::Call { .. } | Value::Invoke { .. } | Value::HandledCall { .. }
+    ) || matches!(&checked.value, Value::Comparison { methods, .. } if methods.iter().any(Option::is_some))
+    {
+        bindings.calls_used.set(true);
+    }
     Ok(checked)
 }
 

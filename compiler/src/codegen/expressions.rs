@@ -404,6 +404,7 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             ref methods,
             ref operators,
             ref operands,
+            ..
         } => {
             use crate::ast::{IntegerType, Type};
             let operands: Vec<_> = operands

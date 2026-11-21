@@ -277,6 +277,7 @@ pub(in crate::check) fn operation(
             Ok(Some(CheckedExpression {
                 ty: Type::Bool,
                 value: Value::Comparison {
+                    locations: locations.clone(),
                     operands: values,
                     operators: operators.clone(),
                     methods: Vec::new(),

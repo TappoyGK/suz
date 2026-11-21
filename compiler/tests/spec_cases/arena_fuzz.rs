@@ -479,6 +479,41 @@ fn save_failure(seed: u64, index: usize, source: &str, details: &str) -> (PathBu
     (source_path, report_path)
 }
 
+// 呼び出しの解析を壊す変異でも、誤受理したプログラムが回収後に実際に読む。
+// 安全側は同じ操作を外側の実体に行うので、常に拒否する実装も見逃さない。
+fn callable_program(kind: usize, escaping: bool) -> String {
+    let value = if escaping { "inner" } else { "outer" };
+    let operation = match kind {
+        0 => format!("invoke(fn write, holder, {value})"),
+        1 => format!(
+            "invoke(fn [holder](a: ptr Node, b: ptr Node) -> void {{ holder#next = b }}, holder, {value})"
+        ),
+        2 => format!(
+            "var action: static fn Link = fn read\naction(holder, {value})\naction = fn write\naction(holder, {value})"
+        ),
+        3 => format!("fix ptr alias = identity(holder)\nalias#next = {value}"),
+        _ => unreachable!(),
+    };
+    format!(
+        r#"struct Node {{ value: i32, next: ptr? Node }}
+fnshape Link(ptr Node, ptr Node) -> void
+fn read(a: ptr Node, b: ptr Node) -> void {{ fix x = a.value + b.value }}
+fn write(a: ptr Node, b: ptr Node) -> void {{ a#next = b }}
+fn invoke(f: fn Link, a: ptr Node, b: ptr Node) -> void {{ f(a, b) }}
+fn identity(p: ptr Node) -> ptr Node {{ return p }}
+fn main() -> u8 {{
+    fix ptr holder = new Node {{ value: 1, next: null }}
+    fix ptr outer = new Node {{ value: 2, next: null }}
+    arena {{
+        fix ptr inner = new Node {{ value: 3, next: null }}
+        {operation}
+    }}
+    let saved = holder.next {{ if saved.value == 0 {{ return 1 }} }}
+    return 0
+}}"#
+    )
+}
+
 fn env_u64(name: &str, default: u64) -> u64 {
     match std::env::var(name) {
         Ok(value) => value
@@ -546,6 +581,24 @@ fn arena_fuzz_accepted_programs_never_trigger_asan() {
             accepted_by_kind[kind],
             rejected_by_kind[kind]
         );
+    }
+
+    for kind in 0..4 {
+        for escaping in [false, true] {
+            let index = count + kind * 2 + usize::from(escaping);
+            let source = callable_program(kind, escaping);
+            match suz::compile(source.as_bytes()) {
+                Ok(compiled) => {
+                    let path = directory.0.join(format!("case-{index}.c"));
+                    fs::write(&path, compiled).unwrap();
+                    accepted.push((index, source, path));
+                }
+                Err(error) => assert!(
+                    escaping && error.rule() == "arena.store",
+                    "case={index}: {error}\n{source}"
+                ),
+            }
+        }
     }
 
     let batch_inputs: Vec<(usize, PathBuf)> = accepted

@@ -13,6 +13,8 @@ pub(crate) struct CheckedProgram {
     pub function_types: Vec<crate::ast::FunctionType>,
     /// 整数除算を含む浮動小数点演算の警告候補。
     pub division_warnings: Vec<Location>,
+    /// 反復の外へ残らず、外側のArenaへ蓄積する確保。
+    pub arena_warnings: Vec<(Location, String)>,
     /// 定数として決まる比較の位置と結果。
     pub comparison_warnings: Vec<(Location, bool)>,
     /// 実行開始時に登録する文字列定数。
@@ -367,6 +369,8 @@ pub(crate) enum Value {
         right: Box<CheckedExpression>,
     },
     Comparison {
+        // 比較メソッドの呼び出しによる診断を、各演算子の位置へ対応させる。
+        locations: Vec<Location>,
         // 空なら全て組み込み比較。Some(id)は比較メソッドの具体化済み関数ID。
         methods: Vec<Option<usize>>,
         operators: Vec<ComparisonOperator>,

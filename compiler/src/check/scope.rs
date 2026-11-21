@@ -131,6 +131,8 @@ pub(super) struct Scope {
     pub constant_initializer: bool,
     pub arena_depth: usize,
     pub lifetime_used: Rc<std::cell::Cell<bool>>,
+    // 本体にポインタがなくても、呼び出し先の一時確保を蓄積警告へ伝える。
+    pub calls_used: Rc<std::cell::Cell<bool>>,
     pub program_pointers_used: Rc<std::cell::Cell<bool>>,
     pub callables_used: Rc<std::cell::Cell<bool>>,
     pub trusted_block: bool,
@@ -334,6 +336,7 @@ impl Default for Scope {
             constant_initializer: false,
             arena_depth: 0,
             lifetime_used: Default::default(),
+            calls_used: Default::default(),
             program_pointers_used: Default::default(),
             callables_used: Default::default(),
             trusted_block: false,

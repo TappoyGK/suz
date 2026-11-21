@@ -66,6 +66,12 @@ pub(crate) fn collect(
             true,
         )
     }));
+    candidates.extend(
+        checked
+            .arena_warnings
+            .iter()
+            .map(|(location, message)| (*location, "arena.loop-allocation", message.clone(), true)),
+    );
     candidates.sort_by_key(|(location, ..)| position(*location));
     for scope in scopes {
         for item in &scope.items {

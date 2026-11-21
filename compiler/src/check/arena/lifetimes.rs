@@ -4,6 +4,7 @@
 //! **[impl.lifetime-flow]** ポインタを含みうる値の流れは、すべて制約（Copy・Limit・Load・Store・Address）へ
 //! 変換してから検査し、構文ごとに個別の寿命検査を書かない。式・文・失敗処理で分岐する
 //! match には `_` を使わず全種類を列挙する。
+mod accumulation;
 mod boundaries;
 mod callables;
 mod solver;
@@ -88,6 +89,11 @@ pub(crate) struct Analysis {
     resolved: bool,
     objects: BTreeMap<Node, summaries::Object>,
     candidate_allocations: BTreeMap<(Location, usize, Type), Node>,
+    allocations: BTreeMap<Node, accumulation::Allocation>,
+    loops: Vec<usize>,
+    active_loops: BTreeSet<usize>,
+    discarded_calls: Vec<accumulation::Discarded>,
+    kept: Vec<Node>,
     returned: Shape,
     direct_calls: Vec<summaries::Call>,
     effect_calls: BTreeMap<usize, Location>,
@@ -122,6 +128,11 @@ impl Analysis {
             resolved: false,
             objects: BTreeMap::new(),
             candidate_allocations: BTreeMap::new(),
+            allocations: BTreeMap::new(),
+            loops: Vec::new(),
+            active_loops: BTreeSet::new(),
+            discarded_calls: Vec::new(),
+            kept: Vec::new(),
             returned: Shape::new(),
             direct_calls: Vec::new(),
             effect_calls: BTreeMap::new(),
@@ -294,6 +305,14 @@ impl Analysis {
                 let cell = self.cell(arena.expect("new has a lexical arena"), *location, ty);
                 self.objects
                     .insert(cell, summaries::Object::Allocation(self.function_id, cell));
+                self.allocations.insert(
+                    cell,
+                    accumulation::Allocation {
+                        site: *location,
+                        origin: *location,
+                        loops: self.active_loops.clone(),
+                    },
+                );
                 self.write(Place::Direct(cell), initial, *location);
                 let n = self.node();
                 self.targets[n].insert(Reference::object(cell));
@@ -425,6 +444,7 @@ impl Analysis {
                     captures,
                     region: arena.expect("checked arena call"),
                     location: *location,
+                    loops: self.active_loops.clone(),
                     indirect: self.candidate_notes.contains_key(&(*id, *location)),
                     notes: self
                         .candidate_notes
@@ -504,7 +524,10 @@ impl Analysis {
                 Shape::new()
             }
             Value::Comparison {
-                operands, methods, ..
+                operands,
+                methods,
+                locations,
+                ..
             } => {
                 let values: Vec<_> = operands
                     .iter()
@@ -524,9 +547,10 @@ impl Analysis {
                             receiver: None,
                             captures: BTreeMap::new(),
                             region: arena.expect("functions have a current arena"),
-                            location: self.regions[region].end,
+                            location: locations[index],
                             notes: BTreeSet::new(),
                             indirect: false,
+                            loops: self.active_loops.clone(),
                         });
                     }
                 }
@@ -715,10 +739,7 @@ impl Analysis {
                     }
                 }
                 CheckedStatement::Loop { condition, body } => {
-                    if let Some(c) = condition {
-                        self.expr(c, region, arena);
-                    }
-                    self.block(body, region, arena);
+                    self.loop_body(body, condition.as_ref(), region, arena);
                 }
                 CheckedStatement::For {
                     id,
@@ -734,7 +755,7 @@ impl Analysis {
                     let locals = self.locals.clone();
                     let cell = self.cell(region, self.regions[region].end, Type::Void);
                     self.locals.insert(*id, cell);
-                    self.block(body, region, arena);
+                    self.loop_body(body, None, region, arena);
                     self.locals = locals;
                 }
                 CheckedStatement::Match {

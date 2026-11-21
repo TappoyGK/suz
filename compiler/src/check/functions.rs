@@ -226,21 +226,24 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     }
     // 関数型がスカラーだけでも、クロージャはポインタを捕捉できる。
     // 型検査済みの全本体・捕捉・具体化でポインタがなければ、寿命解析自体が不要。
-    if globals.program_pointers_used.get() {
+    let arena_warnings = if globals.program_pointers_used.get() {
         super::arena::check_program(
             &mut functions,
             program.functions.len()..program.functions.len() + program.externs.len(),
-        )?;
+            &program.externs,
+        )?
     } else {
         for function in &mut functions {
             function.lifetime = None;
         }
-    }
+        Vec::new()
+    };
     warnings.sort_by_key(|l| (l.line, l.column));
     // 整数演算の箇所は汎用検査と具体化の両方で集まるため、ソースの演算ごとに一度だけ報告する。
     // 比較・除算の候補は汎用検査からだけ集まる。
     warnings.dedup_by_key(|l| (l.line, l.column));
     Ok(CheckedProgram {
+        arena_warnings,
         externs: program.externs.clone(),
         external_base: program.functions.len(),
         function_types: globals.function_types.borrow().clone(),
@@ -470,6 +473,7 @@ pub(super) fn check_with_captures(
     scope.trusted_block = false;
     scope.arena_depth = 1;
     scope.lifetime_used = Default::default();
+    scope.calls_used = Default::default();
     scope.callables_used = Default::default();
     scope.recovery = None;
     scope.loop_depth = 0;

@@ -1072,6 +1072,8 @@ pub(crate) struct ExternFunction {
 /// 外部関数の仮引数。型付きCポインタはSuz側では非nullのptr Tとして検査する。
 #[derive(Clone)]
 pub(crate) struct ExternParameter {
+    /// Cが呼び出し後も参照を保持する。蓄積警告の逃避先として使う。
+    pub keep: bool,
     pub name: String,
     pub ty: Type,
     pub location: Location,

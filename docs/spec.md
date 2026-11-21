@@ -2332,6 +2332,7 @@ count = (count + 1) or return 1
 | [diagnostic.arithmetic] | `or` による失敗処理がない整数演算 | `--warn-unhandled-arithmetic` を指定した場合 |
 | [diagnostic.constant-comparison] | 範囲だけで結果が決まる比較 | 常に |
 | [diagnostic.integer-division-to-float] | 浮動小数点演算へ渡る整数除算 | 常に |
+| [arena.loop-allocation] | 反復の外へ残らない実体のArenaへの蓄積 | 常に |
 
 **[warn.output]** 警告は [tool.messages] の形式で標準エラーへ書く。メッセージの前には `warn:` を付ける。メッセージの末尾の規則名が、`allow` に指定する規則名である。
 

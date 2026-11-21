@@ -43,6 +43,7 @@ fn generated_bool_values_preserve_negation_and_copies() {
     .enumerate()
     {
         let program = CheckedProgram {
+            arena_warnings: Vec::new(),
             externs: Vec::new(),
             external_base: 0,
             function_types: Vec::new(),
@@ -224,6 +225,7 @@ fn comparison_codegen_sequences_and_reuses_operands() {
             })
             .collect();
         let mut expr = boolean(Value::Comparison {
+            locations: Vec::new(),
             methods: Vec::new(),
             operators,
             operands,
@@ -236,6 +238,7 @@ fn comparison_codegen_sequences_and_reuses_operands() {
             });
         }
         let program = CheckedProgram {
+            arena_warnings: Vec::new(),
             externs: Vec::new(),
             external_base: 0,
             function_types: Vec::new(),

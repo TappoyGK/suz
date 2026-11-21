@@ -380,7 +380,7 @@ pub(super) fn check_lifetimes(
     {
         return Ok(None);
     }
-    if !scope.lifetime_used.get() && !function.name.is_empty() {
+    if !scope.lifetime_used.get() && !scope.calls_used.get() && !function.name.is_empty() {
         return Ok(None);
     }
     lifetimes::check(scope, function, references, id).map(Some)

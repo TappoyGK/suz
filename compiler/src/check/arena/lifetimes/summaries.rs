@@ -33,12 +33,14 @@ pub(super) struct Call {
     pub location: Location,
     pub notes: BTreeSet<CallNote>,
     pub indirect: bool,
+    pub loops: BTreeSet<usize>,
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 struct CallKey<'a> {
     id: usize,
     indirect_site: Option<Location>,
+    loops: &'a BTreeSet<usize>,
     region: usize,
     arguments: Vec<(usize, Type, &'a [usize], Node)>,
     receiver: Option<Place>,
@@ -55,6 +57,7 @@ impl Call {
         CallKey {
             id: self.id,
             indirect_site: self.indirect.then_some(self.location),
+            loops: &self.loops,
             region: self.region,
             arguments: self
                 .arguments
@@ -104,9 +107,30 @@ pub(crate) struct Summary {
     returned: BTreeMap<Vec<usize>, BTreeSet<Endpoint>>,
     stores: BTreeMap<StoreInfo, StoreEffect>,
     notes: BTreeMap<StoreInfo, BTreeSet<CallNote>>,
+    allocations: BTreeMap<Object, Location>,
+    // 呼び出し元へ参照を返さない一時確保。診断用の代表位置だけを伝播する。
+    discarded: Option<Location>,
+    kept: BTreeSet<Endpoint>,
 }
 
 impl Summary {
+    pub(super) fn external(function: &crate::ast::ExternFunction) -> Self {
+        let mut summary = Self::default();
+        for (index, parameter) in function.parameters.iter().enumerate() {
+            if parameter.keep
+                && let Some(ty) = parameter.ty.pointee()
+            {
+                let object = Object::Parameter(index, ty);
+                summary.objects.insert(object, ObjectInfo { ty });
+                summary.kept.insert(Endpoint {
+                    object,
+                    path: vec![],
+                    limited: false,
+                });
+            }
+        }
+        summary
+    }
     // 使われない仮引数の到達先を呼び出しごとに読み直さない。
     // 到達先を要約が実際に使う仮引数だけは、そこまでの経路も保持する。
     fn retain_used_objects(&mut self) {
@@ -119,6 +143,7 @@ impl Summary {
                     .values()
                     .flat_map(|effect| effect.destinations.iter().chain(&effect.values)),
             )
+            .chain(&self.kept)
             .map(|endpoint| endpoint.object)
             .collect();
         let traversed: BTreeSet<_> = used
@@ -137,6 +162,8 @@ impl Summary {
                     _ => false,
                 }
         });
+        self.allocations
+            .retain(|object, _| self.objects.contains_key(object));
     }
     // 再帰を一周するたびに、同じArena・型の確保箇所を全呼び出し元へ展開しない。
     // 参照先の領域は共通なので、寿命検査では一つの候補にまとめられる。
@@ -170,6 +197,15 @@ impl Summary {
                 })
                 .collect();
         };
+        endpoints(&mut self.kept);
+        let mut allocations = BTreeMap::new();
+        for (object, location) in std::mem::take(&mut self.allocations) {
+            allocations
+                .entry(remap[&object])
+                .and_modify(|previous: &mut Location| *previous = (*previous).min(location))
+                .or_insert(location);
+        }
+        self.allocations = allocations;
         for values in self.returned.values_mut() {
             endpoints(values);
         }
@@ -194,7 +230,12 @@ impl Summary {
     }
 
     fn same_effects(&self, other: &Self) -> bool {
-        if self.objects != other.objects || self.returned != other.returned {
+        if self.objects != other.objects
+            || self.returned != other.returned
+            || self.kept != other.kept
+            || self.discarded.is_some() != other.discarded.is_some()
+            || !self.allocations.keys().eq(other.allocations.keys())
+        {
             return false;
         }
         // 同じ効果の診断位置の選び方だけでは、呼び出し元を再計算しない。
@@ -248,7 +289,11 @@ impl Analysis {
         }
         if let Some(call) = self.direct_calls.first() {
             let callee = summaries.get(&call.id)?;
-            if !callee.stores.is_empty() {
+            if !callee.stores.is_empty()
+                || !callee.kept.is_empty()
+                || callee.discarded.is_some()
+                || !callee.allocations.is_empty()
+            {
                 return None;
             }
             let mut inputs = BTreeMap::new();
@@ -336,7 +381,17 @@ impl Analysis {
     }
 
     pub(super) fn summary(&mut self) -> Summary {
-        let mut result = Summary::default();
+        let mut result = Summary {
+            discarded: self.discarded_allocation(),
+            ..Summary::default()
+        };
+        for &node in &self.kept {
+            result.kept.extend(
+                self.targets[node]
+                    .iter()
+                    .filter_map(|&value| self.endpoint(value)),
+            );
+        }
         for (&node, &object) in &self.objects {
             let cell = &self.cells[&node];
             if matches!(
@@ -347,6 +402,9 @@ impl Analysis {
                 continue;
             }
             result.objects.insert(object, ObjectInfo { ty: cell.ty });
+            if let Some(allocation) = self.allocations.get(&node) {
+                result.allocations.insert(object, allocation.origin);
+            }
         }
         for (path, &node) in &self.returned {
             result.returned.insert(
@@ -444,6 +502,17 @@ impl Analysis {
                         cell
                     };
                     self.targets[node].insert(Reference::object(cell));
+                    if let Some(&origin) = summary.allocations.get(&object) {
+                        let allocation =
+                            self.allocations
+                                .entry(cell)
+                                .or_insert(accumulation::Allocation {
+                                    site: call.location,
+                                    origin,
+                                    loops: BTreeSet::new(),
+                                });
+                        allocation.loops.extend(&call.loops);
+                    }
                 }
             }
         }
@@ -502,6 +571,18 @@ impl Analysis {
 
     fn apply_summary(&mut self, call: &Call, summary: &Summary) {
         let objects = self.call_objects(call, summary);
+        if let Some(origin) = summary.discarded {
+            self.discarded_calls.push(accumulation::Discarded {
+                site: call.location,
+                origin,
+                region: call.region,
+                loops: call.loops.clone(),
+            });
+        }
+        for value in &summary.kept {
+            let value = self.call_value(value, &objects, call.region);
+            self.kept.push(value);
+        }
         for (info, effect) in &summary.stores {
             let destination = self.node();
             for value in &effect.destinations {
@@ -572,6 +653,10 @@ impl Analysis {
             // 読み出し用の一時ノード番号ではなく、無条件コピーの代表で入力を比べる。
             // 同じ変数を何度も渡すコードで、密な到達グラフを呼び出し回数分作らない。
             let mut key = call.key(&representative);
+            // 確保する呼び出しは、片方の結果だけを残す場合があるため合流しない。
+            if !summary.allocations.is_empty() || summary.discarded.is_some() {
+                key.indirect_site = Some(call.location);
+            }
             // 同じ要約は推論時に共有済み。関数名が違っても同じ効果なら再展開しない。
             key.id = Rc::as_ptr(summary) as usize;
             if let Some(&previous) = applied.get(&key) {
@@ -767,7 +852,9 @@ fn infer(
 }
 
 /// 全具体化の要約を収束させて呼び出しを検査し、C生成には不要な解析本体を取り除く。
-pub(in crate::check) fn check_program(functions: &mut [CheckedFunction]) -> Result<(), Diagnostic> {
+pub(in crate::check) fn check_program(
+    functions: &mut [CheckedFunction],
+) -> Result<Vec<(Location, String)>, Diagnostic> {
     let mut bodies = BTreeMap::new();
     let mut ready = BTreeMap::new();
     for function in functions {
@@ -785,14 +872,18 @@ pub(in crate::check) fn check_program(functions: &mut [CheckedFunction]) -> Resu
         }
     }
     let Inferred { checked, .. } = infer_checked(bodies, false, ready)?;
+    let mut warnings = Vec::new();
     for mut analysis in checked.into_values() {
+        warnings.extend(analysis.loop_warnings());
         if analysis.resolved || analysis.root_references_only() {
             continue;
         }
         let constraints = std::mem::take(&mut analysis.constraints);
         analysis.validate(&constraints)?;
     }
-    Ok(())
+    warnings.sort();
+    warnings.dedup_by_key(|warning| warning.0);
+    Ok(warnings)
 }
 
 #[cfg(test)]
