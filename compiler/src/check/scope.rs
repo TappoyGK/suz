@@ -264,6 +264,15 @@ impl Scope {
 
     pub fn type_name(&self, ty: Type) -> String {
         match ty {
+            Type::Array(id) => {
+                let array = self.structs.arrays.borrow().get(id);
+                let element = self.type_name(array.element);
+                if array.rank == 1 {
+                    format!("[{element}]")
+                } else {
+                    format!("[{element}; {}]", vec!["_"; array.rank].join(", "))
+                }
+            }
             Type::Parameter(id) => self
                 .named
                 .type_parameters

@@ -3,6 +3,9 @@ use super::*;
 
 impl Analysis {
     pub(super) fn field_type(&self, mut ty: Type, path: &[usize]) -> Type {
+        if let Type::Array(id) = ty {
+            ty = self.structs.arrays.borrow().get(id).element;
+        }
         for &index in path {
             let Type::Struct(id) = ty else {
                 unreachable!("checked field path")

@@ -36,6 +36,7 @@ pub(super) fn callable_type(ty: Type, structs: &super::type_parameters::structs:
     while let Some(ty) = pending.pop() {
         match ty {
             Type::Function(_) | Type::StaticFunction(_) => return true,
+            Type::Array(id) => pending.push(structs.arrays.borrow().get(id).element),
             Type::Pointer { .. } => pending.push(ty.pointee().unwrap()),
             Type::Struct(id) if seen.insert(id) => {
                 pending.extend(structs.get(id).fields.iter().map(|f| f.ty))
@@ -74,6 +75,15 @@ pub(super) fn deref(
             crate::diagnostic!("arena.ptr-operations", "dereference requires ptr"),
         ));
     };
+    if value.ty.array_id().is_some() {
+        return Err(location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "array.value",
+                "array storage cannot be dereferenced as a value"
+            ),
+        ));
+    }
     if !value.ty.is_nonnull() {
         return Err(location.error(
             ErrorKind::InvalidSource,
@@ -307,7 +317,7 @@ fn store(
     location: Location,
     context: &mut StatementContext<'_>,
 ) -> Result<(), Diagnostic> {
-    let target = expression::expression(target, None, context.bindings)?;
+    let target = super::arrays::write_target(target, context.bindings)?;
     fn indirect(value: &Value) -> bool {
         match value {
             Value::Deref(_) => true,

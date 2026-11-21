@@ -182,6 +182,14 @@ fn statement_height(statement: &Statement) -> usize {
 fn kind_height(kind: &ExpressionKind) -> usize {
     use ExpressionKind::*;
     1 + match kind {
+        ArrayInit {
+            values, lengths, ..
+        } => values
+            .iter()
+            .chain(lengths)
+            .map(|v| v.height)
+            .max()
+            .unwrap_or(0),
         Slice {
             target,
             start,

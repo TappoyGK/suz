@@ -184,7 +184,11 @@ impl Parser<'_, '_> {
             }
             layers.push(nullable);
         }
-        let mut ty = self.type_leaf()?;
+        let mut ty = if !layers.is_empty() && self.token().kind == Kind::Symbol("[") {
+            self.array_type()?
+        } else {
+            self.type_leaf()?
+        };
         if !self.type_parameters.is_empty() && ty.generic() {
             return Err(self.error(
                 ErrorKind::InvalidSource,

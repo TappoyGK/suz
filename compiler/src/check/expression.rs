@@ -9,7 +9,7 @@ pub(super) mod blocks;
 mod branches;
 pub(in crate::check) mod casts;
 mod operators;
-mod slices;
+pub(super) mod slices;
 pub(crate) mod structs;
 
 use super::ir::{CheckedExpression, Value};
@@ -44,6 +44,20 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
     #[cfg(test)]
     super::generic::work();
     match &expr.kind {
+        ExpressionKind::ArrayInit {
+            values, lengths, ..
+        } => {
+            let element = values
+                .first()
+                .map(|v| operand_type(v, bindings).unwrap_or_else(|| default_type(v, bindings)))?;
+            Some(
+                bindings
+                    .structs
+                    .arrays
+                    .borrow_mut()
+                    .intern(element, lengths.len()),
+            )
+        }
         ExpressionKind::MethodCall {
             target,
             name,
@@ -84,7 +98,24 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
             };
             Some(bindings.function_types.borrow()[id].result)
         }
-        ExpressionKind::Slice { index, .. } => Some(if *index { Type::Char } else { Type::Text }),
+        ExpressionKind::Slice { target, index, .. } => {
+            if let Some(id) = operand_type(target, bindings).and_then(Type::array_id) {
+                let a = bindings.structs.arrays.borrow().get(id);
+                return Some(if !index {
+                    Type::Array(id).pointer()
+                } else if a.rank == 1 {
+                    a.element
+                } else {
+                    bindings
+                        .structs
+                        .arrays
+                        .borrow_mut()
+                        .intern(a.element, a.rank - 1)
+                        .pointer()
+                });
+            }
+            Some(if *index { Type::Char } else { Type::Text })
+        }
         ExpressionKind::New(value) => operand_type(value, bindings).map(Type::pointer),
         ExpressionKind::Deref(value) => operand_type(value, bindings).and_then(Type::pointee),
         ExpressionKind::Null => None,
@@ -529,6 +560,9 @@ fn expression_checked(
         super::exact::check(expr, inference_hint, bindings, false)?
     } else {
         match &expr.kind {
+            ExpressionKind::ArrayInit { .. } => {
+                super::arrays::initializer(expr, required, bindings)?
+            }
             ExpressionKind::MethodCall { .. } => {
                 super::methods::call(expr, inference_hint, bindings, None)?
             }
@@ -557,7 +591,7 @@ fn expression_checked(
             ExpressionKind::Invoke { target, arguments } => {
                 super::function_values::invoke(expr, target, arguments, bindings, None)?
             }
-            ExpressionKind::Slice { .. } => slices::check(expr, bindings)?,
+            ExpressionKind::Slice { .. } => super::arrays::read_or_text(expr, bindings)?,
             ExpressionKind::Template(parts) => {
                 super::text::template(parts, expr.location, bindings)?
             }
@@ -611,7 +645,9 @@ fn expression_checked(
             }
             ExpressionKind::Len(inner) => {
                 let operand = expression(inner, None, bindings)?;
-                if !operand.ty.is_text() {
+                if !operand.ty.is_text()
+                    && !(operand.ty.is_nonnull() && operand.ty.array_id().is_some())
+                {
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
                         if matches!(operand.ty, Type::Struct(_) | Type::Enum(_)) {

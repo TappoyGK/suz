@@ -12,6 +12,8 @@ mod arena_fuzz;
 mod arithmetic;
 #[path = "spec_cases/arithmetic_handlers.rs"]
 mod arithmetic_handlers;
+#[path = "spec_cases/arrays.rs"]
+mod arrays;
 #[path = "spec_cases/batch.rs"]
 mod batch;
 #[path = "spec_cases/c_build.rs"]

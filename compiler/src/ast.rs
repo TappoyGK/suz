@@ -2,6 +2,7 @@
 //!
 //! 利用元: [`crate::parser`]、[`crate::check`]。
 
+pub(crate) mod arrays;
 pub(crate) mod generics;
 mod pointer_shape;
 pub(crate) mod visit;
@@ -162,6 +163,7 @@ pub(crate) const NUMERIC_COMBINATIONS: usize = 18;
 /// Structの番号は構造体宣言、Functionの番号は共通化した関数値の型を参照する。汎用の型はC生成までに具体化する。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Type {
+    Array(usize), // ポインタの参照先専用。配列値は単独では保存しない。
     Pointer {
         leaf: PointerLeaf,
         shape: PointerShape,
@@ -192,6 +194,7 @@ pub(crate) enum Type {
 /// ポインタの末端の値型。各段のnull許容性はPointerShapeで別に持つ。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum PointerLeaf {
+    Array(usize),
     CPointer,
     CInteger(CIntegerType),
     Parameter(usize),
@@ -215,6 +218,12 @@ pub(crate) enum PointerLeaf {
     Text,
 }
 impl Type {
+    pub fn array_id(self) -> Option<usize> {
+        match self.pointee() {
+            Some(Self::Array(id)) => Some(id),
+            _ => None,
+        }
+    }
     pub fn pointer(self) -> Self {
         let leaf = match self {
             Self::Pointer { leaf, shape } => {
@@ -223,6 +232,7 @@ impl Type {
                     shape: shape.push(),
                 };
             }
+            Self::Array(id) => PointerLeaf::Array(id),
             Self::CPointer => PointerLeaf::CPointer,
             Self::CInteger(v) => PointerLeaf::CInteger(v),
             Self::Parameter(id) => PointerLeaf::Parameter(id),
@@ -280,6 +290,7 @@ impl Type {
             });
         }
         Some(match leaf {
+            PointerLeaf::Array(id) => Self::Array(id),
             PointerLeaf::CPointer => Self::CPointer,
             PointerLeaf::CInteger(v) => Self::CInteger(v),
             PointerLeaf::Parameter(id) => Self::Parameter(id),
@@ -398,6 +409,7 @@ impl Type {
                     "ptr"
                 }
             }
+            Self::Array(_) => "array",
             Self::CPointer => "*const void",
             Self::CInteger(ty) => ty.name(),
             Self::Parameter(_) => "type parameter",
@@ -428,6 +440,10 @@ impl Type {
     }
     pub fn c_name(self) -> String {
         match self {
+            Self::Pointer { .. } if self.array_id().is_some() => {
+                format!("suz_array_{}", self.array_id().unwrap())
+            }
+            Self::Array(_) => unreachable!("array storage has no standalone C value type"),
             Self::Pointer { .. } => format!("typeof({} *)", self.pointee().unwrap().c_name()),
             Self::CPointer => "suz_ffi_bytes".into(),
             Self::CInteger(ty) => ty.c_name().into(),
@@ -535,6 +551,7 @@ pub(crate) struct FnShapeDeclaration {
 /// 構文解析の結果全体。型宣言・トップレベル束縛・関数とallowの範囲を保持する。
 /// [`crate::check`] が検査して [`crate::check::ir::CheckedProgram`] へ変換する。
 pub(crate) struct Program {
+    pub arrays: arrays::Types,
     pub need_groups: Vec<generics::NeedGroup>,
     pub applications: Vec<generics::Application>,
     pub externs: Vec<ExternFunction>,
@@ -899,6 +916,11 @@ pub(crate) enum ExpressionKind {
     Receiver {
         target: Box<Expression>,
         mutable: bool,
+    },
+    ArrayInit {
+        values: Vec<Expression>,
+        lengths: Vec<Expression>,
+        repeated: bool,
     },
     New(Box<Expression>),
     Deref(Box<Expression>),

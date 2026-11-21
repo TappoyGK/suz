@@ -4,6 +4,7 @@
 
 mod arena;
 mod arithmetic;
+mod arrays;
 mod blocks;
 mod casts;
 mod characters;
@@ -35,6 +36,7 @@ struct RecoveryTarget {
 #[derive(Default)]
 struct ExpressionContext {
     uses_arena: bool,
+    arrays: crate::ast::arrays::Types,
     uses_c_byte_len: bool,
     uses_c_integer: bool,
     uses_c_pointer: bool,
@@ -110,6 +112,7 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
     let mut context = ExpressionContext {
         log_level,
         log_ignore,
+        arrays: program.arrays.clone(),
         source_name: source_name.into(),
         enums: program.enums.clone(),
         structs: program.structs.clone(),
@@ -146,6 +149,7 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
     if context.uses_arena {
         c.push_str("#include \"suz_arena.h\"\n");
     }
+    arrays::declarations(&mut c, &context);
     ffi::checks(&mut c, program, &context);
     ffi::declarations(&mut c, program);
     text_structure::prepare(&mut context);

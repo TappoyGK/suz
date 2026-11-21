@@ -5,6 +5,7 @@
 
 mod allows;
 mod arena;
+mod arrays;
 mod branches;
 mod closures;
 mod enums;
@@ -299,6 +300,7 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
     }
     Ok(Program {
         need_groups: groups,
+        arrays: applications.borrow().arrays.clone(),
         applications: applications.borrow().entries.clone(),
         externs,
         allows: p.allows,

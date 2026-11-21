@@ -370,6 +370,40 @@ impl Walk<'_> {
                 site: *location,
                 captures: Vec::new(),
             }),
+            Value::Array {
+                values, lengths, ..
+            } => {
+                let mut result = Values::new();
+                for v in values.iter_mut().chain(lengths) {
+                    merge(&mut result, self.expr(v));
+                }
+                result
+            }
+            Value::ArrayElement { target, indices } => {
+                let result = self.expr(target);
+                for (index, _) in indices {
+                    self.expr(index);
+                }
+                result
+            }
+            Value::ArrayRead { address, handler } => {
+                let pointers = self.expr(address);
+                let mut result = Values::new();
+                for pointer in pointers.values().flat_map(|s| s.values()) {
+                    merge(&mut result, self.program.read(Flow::Heap(pointer.function)));
+                }
+                if let Some(handler) = handler {
+                    match handler {
+                        CheckedHandler::Value(v) => {
+                            merge(&mut result, self.expr(v));
+                        }
+                        CheckedHandler::Return { value, .. } => {
+                            self.expr(value);
+                        }
+                    }
+                }
+                result
+            }
             Value::Local(id) => self.locals.get(id).cloned().unwrap_or_default(),
             Value::FunctionBorrow(value)
             | Value::Cast(value)
@@ -800,16 +834,19 @@ impl Walk<'_> {
                     merge(self.locals.entry(*id).or_default(), values);
                 }
                 CheckedStatement::SliceReturn {
+                    id,
                     operation,
                     return_value,
                     ..
                 }
                 | CheckedStatement::ArithmeticReturn {
+                    id,
                     operation,
                     return_value,
                     ..
                 } => {
-                    self.expr(operation);
+                    let values = self.expr(operation);
+                    merge(self.locals.entry(*id).or_default(), values);
                     let values = self.expr(return_value);
                     merge(&mut self.returned, values);
                 }

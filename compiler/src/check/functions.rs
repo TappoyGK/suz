@@ -244,6 +244,7 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     // 比較・除算の候補は汎用検査からだけ集まる。
     warnings.dedup_by_key(|l| (l.line, l.column));
     Ok(CheckedProgram {
+        arrays: globals.structs.arrays.borrow().clone(),
         arena_warnings,
         externs: program.externs.clone(),
         external_base: program.functions.len(),

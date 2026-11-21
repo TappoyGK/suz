@@ -8,6 +8,7 @@ use crate::ast::{BinaryOperator, ComparisonOperator, Location, LogicalOperator, 
 /// 型・名前を解決した関数、入口の関数番号、文字列定数と診断候補を保持する。
 /// 型宣言はASTの表現を共有し、関数は必要な汎用型の具体化も含めてC生成へ渡す。
 pub(crate) struct CheckedProgram {
+    pub arrays: crate::ast::arrays::Types,
     pub external_base: usize,
     pub externs: Vec<crate::ast::ExternFunction>,
     pub function_types: Vec<crate::ast::FunctionType>,
@@ -233,6 +234,22 @@ pub(crate) enum Value {
         target: Box<CheckedExpression>,
         mutable: bool,
     },
+    Array {
+        values: Vec<CheckedExpression>,
+        lengths: Vec<CheckedExpression>,
+        repeated: bool,
+        // 定数で決まる内側からの要素数。対象C環境のsizeofでもコンパイル時に検査する。
+        constant_counts: Vec<u64>,
+    },
+    /// 要素の住所。添字は書き込み先の確定時に一度だけ評価する。
+    ArrayElement {
+        target: Box<CheckedExpression>,
+        indices: Vec<(CheckedExpression, Location)>,
+    },
+    ArrayRead {
+        address: Box<CheckedExpression>,
+        handler: Option<CheckedHandler>,
+    },
     New {
         value: Box<CheckedExpression>,
         location: Location,
@@ -447,6 +464,20 @@ macro_rules! constant_children_visitor {
                     for (_, value) in fields {
                         visit(value);
                     }
+                }
+                Self::Array { values, lengths, .. } => {
+                    for v in values { visit(v); }
+                    for v in lengths { visit(v); }
+                    return true;
+                }
+                Self::ArrayElement { target, indices } => {
+                    visit(target);
+                    for (v, _) in indices { visit(v); }
+                    return true;
+                }
+                Self::ArrayRead { address, handler: h } => {
+                    visit(address);
+                    return handler(h, visit);
                 }
                 Self::Slice { target, start, end, handler: h, .. } => {
                     visit(target);

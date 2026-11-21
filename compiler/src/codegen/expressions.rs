@@ -33,12 +33,28 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
         return super::exact::stored(expr, context);
     }
     match expr.value {
+        Value::Array { .. } => unreachable!("array initializer is emitted by new"),
+        Value::ArrayElement { .. } => super::arrays::address(expr, context),
+        Value::ArrayRead { ref handler, .. } => {
+            let (setup, condition, value) = super::arrays::read_parts(expr, context);
+            let Some(CheckedHandler::Value(fallback)) = handler else {
+                unreachable!("array return handlers are lowered")
+            };
+            format!(
+                "({setup}, {condition} ? {value} : ({}))",
+                expression(fallback, context)
+            )
+        }
         Value::Receiver { ref target, .. } => expression(target, context),
         Value::New {
             ref value,
             location,
         } => super::arena::allocate(value, expr.ty, location, context),
         Value::Deref(ref value) => format!("(*({}))", expression(value, context)),
+        Value::NonNull(ref value) if value.ty.array_id().is_some() => {
+            format!("(({}).data != NULL)", expression(value, context))
+        }
+        Value::Null if expr.ty.array_id().is_some() => format!("({}){{0}}", expr.ty.c_name()),
         Value::NonNull(ref value) => format!("({} != NULL)", expression(value, context)),
         Value::Null => "NULL".into(),
         Value::CBytes(ref operand) => super::ffi::bytes(operand, context),
@@ -250,6 +266,9 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             format!("({setup}, {condition} ? {converted} : ({fallback}))")
         }
         Value::Cast(ref inner) => {
+            if expr.ty.array_id().is_some() {
+                return expression(inner, context);
+            }
             if inner.ty == crate::ast::Type::Exact {
                 let value = expression(inner, context);
                 return super::exact::converted(expr.ty, &value, context);
@@ -272,7 +291,9 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
         Value::Len(ref inner) => {
             let value = expression(inner, context);
             // 実体またはビューが保持する個数を読む。オペランドは一度だけ評価する。
-            if inner.ty == crate::ast::Type::Symbol {
+            if inner.ty.array_id().is_some() {
+                format!("({value}).lengths[0]")
+            } else if inner.ty == crate::ast::Type::Symbol {
                 format!("suz_text_count({value})")
             } else {
                 format!("((int32_t)({value}).scalars)")

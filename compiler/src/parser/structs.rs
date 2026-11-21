@@ -361,12 +361,13 @@ pub(super) fn collect(
             }
         }
     }
-    validate_layout(&declarations)?;
+    validate_layout_range(
+        0,
+        declarations.len(),
+        |id| &declarations[id],
+        &p.applications.borrow().arrays,
+    )?;
     Ok(declarations)
-}
-
-pub(crate) fn validate_layout(declarations: &[StructDeclaration]) -> Result<(), Diagnostic> {
-    validate_layout_range(0, declarations.len(), |id| &declarations[id])
 }
 
 /// 既存の宣言を変更しない具体化では、追加した宣言だけを検査する。
@@ -375,6 +376,7 @@ pub(crate) fn validate_layout_range<'a>(
     start: usize,
     end: usize,
     declaration: impl Fn(usize) -> &'a StructDeclaration,
+    arrays: &crate::ast::arrays::Types,
 ) -> Result<(), Diagnostic> {
     if start == end {
         return Ok(());
@@ -389,11 +391,24 @@ pub(crate) fn validate_layout_range<'a>(
                     .iter()
                     .filter_map(|field| {
                         let mut ty = field.ty;
-                        while include_pointers && let Some(inner) = ty.pointee() {
-                            if ty.is_nullable() {
-                                return None;
+                        if include_pointers {
+                            loop {
+                                if let Some(inner) = ty.pointee() {
+                                    if ty.is_nullable() {
+                                        return None;
+                                    }
+                                    ty = inner;
+                                } else if let Type::Array(id) = ty {
+                                    let array = arrays.get(id);
+                                    // 一次元はnew []で初期化を打ち切れる。多次元は初期値が必要。
+                                    if array.rank == 1 {
+                                        return None;
+                                    }
+                                    ty = array.element;
+                                } else {
+                                    break;
+                                }
                             }
-                            ty = inner;
                         }
                         if let Type::Struct(child) = ty {
                             (child >= start).then_some((child, field))

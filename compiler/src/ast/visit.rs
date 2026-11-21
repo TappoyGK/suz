@@ -32,6 +32,13 @@ pub(crate) fn walk_expression<V: Visitor + ?Sized>(
     expr: &Expression,
 ) -> Result<(), Diagnostic> {
     match &expr.kind {
+        ExpressionKind::ArrayInit {
+            values, lengths, ..
+        } => {
+            for value in values.iter().chain(lengths) {
+                visitor.expression(value)?;
+            }
+        }
         ExpressionKind::Slice {
             target,
             start,

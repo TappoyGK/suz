@@ -199,6 +199,7 @@ impl Analysis {
     }
     fn paths(&self, ty: Type) -> Vec<Vec<usize>> {
         match ty {
+            Type::Array(id) => self.paths(self.structs.arrays.borrow().get(id).element),
             Type::Pointer { .. } => vec![vec![]],
             Type::Struct(id) => self
                 .structs
@@ -293,6 +294,40 @@ impl Analysis {
     }
     fn expr(&mut self, value: &CheckedExpression, region: usize, arena: Option<usize>) -> Shape {
         match &value.value {
+            Value::Array {
+                values, lengths, ..
+            } => {
+                for length in lengths {
+                    self.expr(length, region, arena);
+                }
+                let result = self.shape(value.ty);
+                for initial in values {
+                    let shape = self.expr(initial, region, arena);
+                    self.join(&result, shape);
+                }
+                result
+            }
+            Value::ArrayElement { target, indices } => {
+                let result = self.expr(target, region, arena);
+                for (index, _) in indices {
+                    self.expr(index, region, arena);
+                }
+                result
+            }
+            Value::ArrayRead { address, handler } => {
+                let p = self.expr(address, region, arena);
+                let read = self.read(value.ty, Place::Indirect(p[&vec![]], vec![]));
+                let mut alternatives = vec![read];
+                if let Some(handler) = handler {
+                    match handler {
+                        CheckedHandler::Value(v) => alternatives.push(self.expr(v, region, arena)),
+                        CheckedHandler::Return { value, .. } => {
+                            self.expr(value, region, arena);
+                        }
+                    }
+                }
+                self.alternatives(value.ty, alternatives)
+            }
             Value::Null => self.shape(value.ty),
             // 最外側の暗黙変換は実体と、保存直前の非nullの証明を変えない。
             Value::Cast(inner) if value.ty.pointee().is_some() => self.expr(inner, region, arena),
@@ -814,11 +849,12 @@ impl Analysis {
                     operation,
                     return_value,
                 } => {
-                    self.expr(operation, region, arena);
+                    let value = self.expr(operation, region, arena);
                     let returned = self.expr(return_value, region, arena);
                     self.return_value(return_value.ty, returned, *location);
-                    let cell = self.cell(region, self.regions[region].end, Type::Void);
+                    let cell = self.cell(region, self.regions[region].end, operation.ty);
                     self.locals.insert(*id, cell);
+                    self.write(Place::Direct(cell), value, *location);
                 }
                 CheckedStatement::CastReturn {
                     return_location: location,

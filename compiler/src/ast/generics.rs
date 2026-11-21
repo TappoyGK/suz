@@ -55,6 +55,7 @@ pub(crate) struct Application {
 /// 構文解析中の型適用表。fnshapeを多数使っても既存の適用を全件走査しない。
 #[derive(Default)]
 pub(crate) struct ApplicationTable {
+    pub arrays: super::arrays::Types,
     pub entries: Vec<Application>,
     ids: std::collections::BTreeMap<Application, usize>,
 }
