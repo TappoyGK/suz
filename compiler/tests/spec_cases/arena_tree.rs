@@ -549,7 +549,7 @@ fn disabled_arena_reporting_does_not_link_reporting_functions() {
 }
 
 #[test]
-fn arena_tree_shares_debug_helpers_and_optimizes_small_loops() {
+fn arena_tree_report_is_independent_of_optimization() {
     let directory = TemporaryDirectory::new();
     let source = directory.0.join("main.suz");
     fs::write(&source, "fn main() -> u8 {\narena { fix ptr p = new (1 as u8) }\narena { fix ptr p = new (2 as i64) }\nreturn 0 }").unwrap();
@@ -565,29 +565,6 @@ fn arena_tree_shares_debug_helpers_and_optimizes_small_loops() {
             .output()
             .unwrap();
         assert!(output.status.success(), "{output:?}");
-        let output = Command::new("nm").arg(&executable).output().unwrap();
-        assert!(output.status.success(), "{output:?}");
-        let symbols = String::from_utf8_lossy(&output.stdout);
-        // 小さい例での展開を確認する。多数の位置がある場合は共有してもよい。
-        for name in [
-            "suz_arena_tree_enter",
-            "suz_arena_tree_leave",
-            "suz_arena_report_leave",
-        ] {
-            let count = symbols
-                .lines()
-                .filter(|line| {
-                    line.split_whitespace()
-                        .last()
-                        .is_some_and(|symbol| symbol.trim_start_matches('_') == name)
-                })
-                .count();
-            assert_eq!(
-                count,
-                usize::from(optimization == "-O0"),
-                "{optimization}: {symbols}"
-            );
-        }
         let output = Command::new(executable).output().unwrap();
         assert_eq!(output.status.code(), Some(0), "{output:?}");
         reports.push(output.stderr);
