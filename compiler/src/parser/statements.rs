@@ -454,12 +454,12 @@ impl Parser<'_, '_> {
                         while let ExpressionKind::Group(inner) = &place.kind {
                             place = inner;
                         }
-                        if matches!(place.kind, ExpressionKind::Slice { index: true, .. }) {
+                        if matches!(place.kind, ExpressionKind::Slice { .. }) {
                             return Err(self.error(
                                 ErrorKind::InvalidSource,
                                 crate::diagnostic!(
                                     "array.write",
-                                    "use a#[i] = value to write an array element, not a[i] = value"
+                                    "use a#[i] = value to write an element; assigning to an index or slice without # is not allowed"
                                 ),
                             ));
                         }

@@ -123,15 +123,13 @@ pub(super) fn initializer(
 }
 
 /// 明示的なorで区切られるまで、括弧をまたぐアクセスを一つの失敗単位にする。
-fn chain<'a>(expr: &'a Expression, steps: &mut Vec<&'a Expression>) -> &'a Expression {
+fn chain<'a>(expr: &'a Expression, steps: &mut Vec<&'a Expression>, outer: bool) -> &'a Expression {
     match &expr.kind {
-        ExpressionKind::Group(v) => chain(v, steps),
+        ExpressionKind::Group(v) => chain(v, steps, outer),
         ExpressionKind::Slice {
-            target,
-            fallback: None,
-            ..
-        } => {
-            let root = chain(target, steps);
+            target, fallback, ..
+        } if outer || fallback.is_none() => {
+            let root = chain(target, steps, false);
             steps.push(expr);
             root
         }
@@ -152,7 +150,7 @@ fn bound(expr: &Expression, scope: &Scope) -> Result<CheckedExpression, Diagnost
 
 fn access(expr: &Expression, scope: &Scope) -> Result<(CheckedExpression, bool), Diagnostic> {
     let mut steps = Vec::new();
-    let root = chain(expr, &mut steps);
+    let root = chain(expr, &mut steps, true);
     let mut target = expression::expression(root, None, scope)?;
     let mut position = 0;
     let mut fallible = false;
@@ -269,18 +267,15 @@ pub(super) fn read_or_text(
     else {
         unreachable!()
     };
-    let mut stripped = expr.clone();
-    let ExpressionKind::Slice { fallback: h, .. } = &mut stripped.kind else {
-        unreachable!()
-    };
-    *h = None;
-    let root = chain(&stripped, &mut Vec::new());
+    // 型推論のキャッシュはASTの住所をキーにするため、一時的な複製を検査しない。
+    // 末尾のorだけを探索時に無視し、元のASTを最後まで参照する。
+    let root = chain(expr, &mut Vec::new(), true);
     if !expression::operand_type(root, scope).is_some_and(|t| t.array_id().is_some())
         && !expression::operand_type(target, scope).is_some_and(|t| t.array_id().is_some())
     {
         return expression::slices::check(expr, scope);
     }
-    let (mut result, fallible) = access(&stripped, scope)?;
+    let (mut result, fallible) = access(expr, scope)?;
     if !fallible {
         if fallback.is_some() {
             return Err(expr.location.error(

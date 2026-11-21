@@ -565,7 +565,11 @@ fn array_views_reject_missing_or_redundant_handlers_and_whole_view_writes() {
         ("fix ptr full = a[:] or a", "array.access-handler"),
         ("fix ptr full = a[:][:] or a", "array.access-handler"),
         ("a#[0] = a[0] or panic `row`", "array.write"),
-        ("a#[0:1] = a", "syntax.grammar"),
+        ("a#[0:1] = a", "array.write"),
+        ("a#[:] = a", "array.write"),
+        ("a[:] = a", "array.write"),
+        ("a[0:1] = a", "array.write"),
+        ("(a[:]) = a", "array.write"),
         ("fix ptr row = a[true] or panic `row`", "array.index"),
         ("fix ptr slice = a[0:false] or panic `slice`", "array.index"),
         ("var ptr b = a\nfor row in b {}", "for.bound-reference"),
@@ -633,4 +637,28 @@ fn main() -> u8 {{
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.rule(), "arena.store", "{binding}: {error}");
     }
+}
+
+#[test]
+fn array_indices_keep_independent_arithmetic_types_across_accesses() {
+    let output = compile_and_run_c23(
+        r#"
+fn f(g: ptr [u8; _, _], y: i32, x: i32) -> u8 {
+    fix s = (g[y - 1][x] or 0) + (g[y + 1][x] or 0)
+    fix t = (g[y][x - 1] or 0) + (g[y][x + 1] or 0)
+    return s + t
+}
+fn slices(g: ptr [u8; _, _], y: i32, x: i32) -> u8 {
+    return (g[y - 1:y][0][x] or 0) + (g[y:y + 1][0][x] or 0)
+}
+fn main() -> u8 {
+    fix ptr g = new [1 as u8; 4, 4]
+    if f(g, 1, 1) != 4 { return 1 }
+    if slices(g, 1, 1) != 2 { return 2 }
+    return 0
+}
+"#,
+        "array-index-types.suz",
+    );
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
 }

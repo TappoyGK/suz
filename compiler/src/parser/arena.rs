@@ -67,7 +67,17 @@ impl Parser<'_, '_> {
             if self.token().kind == Kind::Symbol("[") {
                 let location = self.location();
                 self.cursor += 1;
-                let index = self.expression()?;
+                let index = if self.token().kind == Kind::Symbol(":") {
+                    None
+                } else {
+                    Some(self.expression()?)
+                };
+                if index.is_none() || self.token().kind == Kind::Symbol(":") {
+                    return Err(self.error(ErrorKind::InvalidSource, crate::diagnostic!(
+                        "array.write", "use a#[i] = value to write an element; assigning to a slice is not allowed"
+                    )));
+                }
+                let index = index.unwrap();
                 self.expect(FixedToken::Symbol("]"))?;
                 target = self.node(
                     ExpressionKind::Slice {

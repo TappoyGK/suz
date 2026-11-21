@@ -399,28 +399,35 @@ pub(super) fn emit_loop(
         "{indent}{{\n{indent}    const {ty} suz_iter_{id} = {source};"
     )
     .unwrap();
+    // データと各寸法は反復中に変わらない。構造体からの読み取りを入口で済ませる。
+    writeln!(
+        c,
+        "{indent}    {} *const suz_iter_data_{id} = suz_iter_{id}.data;",
+        array.element.c_name()
+    )
+    .unwrap();
+    for dimension in 0..array.rank {
+        writeln!(c, "{indent}    const int32_t suz_iter_length_{id}_{dimension} = suz_iter_{id}.lengths[{dimension}];").unwrap();
+    }
     let (initial, condition, position) = if reverse {
         (
-            format!("suz_iter_{id}.lengths[0]"),
+            format!("suz_iter_length_{id}_0"),
             format!("suz_cursor_{id} > 0"),
             format!("--suz_cursor_{id}"),
         )
     } else {
         (
             "0".into(),
-            format!("suz_cursor_{id} < suz_iter_{id}.lengths[0]"),
+            format!("suz_cursor_{id} < suz_iter_length_{id}_0"),
             format!("suz_cursor_{id}++"),
         )
     };
     writeln!(c, "{indent}    int32_t suz_cursor_{id} = {initial};\n{indent}    while ({condition}) {{\n{indent}        const size_t suz_pos_{id} = {position};").unwrap();
     let value = if array.rank == 1 {
-        format!(
-            "(({} *)suz_iter_{id}.data)[suz_pos_{id}]",
-            array.element.c_name()
-        )
+        format!("suz_iter_data_{id}[suz_pos_{id}]")
     } else {
         let lengths = (1..array.rank)
-            .map(|i| format!("suz_iter_{id}.lengths[{i}]"))
+            .map(|i| format!("suz_iter_length_{id}_{i}"))
             .collect::<Vec<_>>();
         let stride = lengths
             .iter()
@@ -428,9 +435,8 @@ pub(super) fn emit_loop(
             .collect::<Vec<_>>()
             .join(" * ");
         format!(
-            "({}){{ .data = ({} *)suz_iter_{id}.data + suz_pos_{id} * ({stride}), .lengths = {{ {} }} }}",
+            "({}){{ .data = suz_iter_data_{id} + suz_pos_{id} * ({stride}), .lengths = {{ {} }} }}",
             item.c_name(),
-            array.element.c_name(),
             lengths.join(", ")
         )
     };
