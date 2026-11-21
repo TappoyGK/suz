@@ -22,11 +22,7 @@ cargo run -- run sample.suz
 
 `build` と `run` は外部のClang・リンカー・SDKを使う。`--cc PATH` でClangを、`--env FILE` で環境層を指定できる。最適化は `-O0`（既定）または `-O2` を選ぶ。
 
-`build`・`run`・`emit-c` は `--text-pool-limit SIZE` でテキストプールの上限を指定できる。既定値は `1G`。バイト数、`K`・`M`・`G` 付きの値、`unlimited` を受け付ける。設定は生成プログラムに組み込む。
-
-`build` の出力先は新規ファイルとする。既存の通常ファイルを置き換える場合は `--force` を指定する。入力ソースや環境層と同じファイルは置き換えられない。
-
-`run` は呼び出し元の作業ディレクトリと標準入出力を引き継ぎ、実行後に一時ファイルを削除する。生成プログラムの終了コード・終了シグナルを呼び出し元へ伝える。
+テキストプールの容量は[ツール仕様3.1節](../docs/tool.md#31-テキストプールの上限)、出力先の保護と一時ファイルは[同4節](../docs/tool.md#4-出力と一時ファイル)、`run`の実行環境と終了状態は[同2.2節](../docs/tool.md#22-run)を参照すること。
 
 ## 追加のCフラグ
 
@@ -46,7 +42,7 @@ cargo run -- run sample.suz
 | `-fsanitize=address` | 生成Cやランタイムの範囲外アクセス、解放済み領域の使用などを実行時に検出する。メモリ使用量と実行時間が増えるため、不具合の調査に使う。 |
 | `-fsanitize=undefined` | 生成Cやランタイムで、Cの未定義動作が起きていないかを実行時に検査する。`-fsanitize=address,undefined` で両方を使える。 |
 
-フラグの詳細は[Clangの引数一覧](https://clang.llvm.org/docs/ClangCommandLineReference.html)、PGOの手順は[Clangの利用手引き](https://clang.llvm.org/docs/UsersManual.html#profiling-with-instrumentation)を参照する。追加フラグで速くなるかはプログラムによって異なるため、同じ入力で比較する。
+受け付けるフラグと書式は[ツール仕様の追加フラグ](../docs/tool.md#3-オプション)を参照すること。フラグ自体の詳細は[Clangの引数一覧](https://clang.llvm.org/docs/ClangCommandLineReference.html)、PGOの手順は[Clangの利用手引き](https://clang.llvm.org/docs/UsersManual.html#profiling-with-instrumentation)を参照すること。追加フラグによる速度の変化は、同じ入力で比較する。
 
 たとえば、最適化したプログラムにデバッグ情報と呼び出し履歴を付ける場合は次のように指定する。
 
@@ -60,11 +56,11 @@ SUZ_CFLAGS="-g -fno-omit-frame-pointer" cargo run -- build sample.suz -o sample 
 SUZ_CFLAGS="-g -fsanitize=address,undefined" cargo run -- run sample.suz -O2
 ```
 
-`-O0` は最適化を抑え、`-O2` は実行速度を改善する最適化を有効にする。これらはSuzの引数として指定し、`SUZ_CFLAGS` には入れない。`SUZ_CFLAGS` は空白区切りで、引用符・変数・ワイルドカードを展開しない。空白を含むパスは渡せない。許可するフラグとエラーの扱いは[ツール仕様](../docs/tool.md#3-オプション)で定める。
+最適化レベルはSuzの引数として指定する。
 
 ### Suzが固定する浮動小数点の設定
 
-次の設定は、プログラムの計算結果を保つためにSuzが指定する。`SUZ_CFLAGS` から変更することはできない。
+浮動小数点の固定フラグは[ツール仕様](../docs/tool.md#3-オプション)、環境とpragmaの契約は[ランタイム仕様](../docs/runtime.md#2-cと実行環境の前提)で定める。各設定の目的は次のとおりである。
 
 | 設定 | 意味 |
 |---|---|
@@ -74,7 +70,7 @@ SUZ_CFLAGS="-g -fsanitize=address,undefined" cargo run -- run sample.suz -O2
 | `float_control(precise, on)` | Cのソース側で、演算順序や符号付きゼロなどを無視する最適化を抑える。 |
 | `FENV_ACCESS ON` | 丸めモードや例外フラグを読み書きすることをClangへ伝える。Suzでは環境を初期化する関数内だけに適用する。 |
 
-`-ffp-model=strict` を全体に指定すると、演算中にも浮動小数点環境が変わりうるものとして扱われる。Suzは入口で環境を整え、その後の変更を認めないため、このフラグは使わない。これにより、各要素を独立に計算するループのベクトル化を妨げずに済む。演算と環境の契約は[ランタイム仕様](../docs/runtime.md)で定める。生成CをClangで直接ビルドするときも、4つの固定フラグを他の数値関連フラグより後に指定する。共通ヘッダーのpragmaだけでは、NaN・無限大を無視する設定や積和への縮約を防げない。通常は、これらを指定する同梱の `scripts/build-c.sh` を使う。
+`-ffp-model=strict` を全体に指定すると、演算中にも浮動小数点環境が変わりうるものとして扱われる。Suzは入口で環境を整え、その後の変更を認めないため、このフラグは使わない。これにより、各要素を独立に計算するループのベクトル化を妨げずに済む。共通ヘッダーのpragmaだけでは、NaN・無限大を無視する設定や積和への縮約を防げない。通常は、これらを指定する同梱の `scripts/build-c.sh` を使う。
 
 ## ソースの検査
 

@@ -885,7 +885,7 @@ fn main() -> u8 {
 
 ### text-021 symbolをmatchとmatchexprで分岐する
 
-主根拠：`[symbol.match]`。
+主根拠：`[match.target]`。
 
 **ソース：**
 

@@ -1015,7 +1015,7 @@ fn main() -> u8 {
 | 通常 | 正常終了 | 0 | 0 |
 ### type-036 floatを関数名に使う
 
-主根拠：`[num.reserved]`。
+主根拠：`[src.type-names]`。
 
 `float` は組み込み型名のため、関数名には使えない。
 

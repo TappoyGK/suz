@@ -35,7 +35,7 @@
 
 **[runtime.c-compiler]** 生成したCとランタイムは、C23に対応したClangでビルドする。C23の言語機能、Clangが提供するヘッダー、Clangの拡張を使える。CライブラリのC23追加ヘッダーは、[tool.platform] のSDKが提供する場合に使える。Clangの最低バージョンは定めず、必要な機能を [runtime.c-check] で検査する。
 
-**[runtime.c-extensions]** 生成Cとランタイム本体が使うClang拡張は、名前と用途を本規則に記載し、使用する変更と同時に更新する。共通の設定ヘッダーで `#pragma float_control(precise, on)` を使い、浮動小数点の演算順序や符号付きゼロなどを無視する最適化を抑える（[runtime.unsafe-math]）。FFIの関数型照合には `__typeof__` と `__builtin_types_compatible_p` を使う。C固有型の範囲検査にも128ビットの `_BitInt` を使う。同梱のRyuが使う拡張はRyuのREADMEで扱う。
+**[runtime.c-extensions]** 生成Cとランタイム本体が使うClang拡張は、名前と用途を本規則に記載し、使用する変更と同時に更新する。浮動小数点の最適化を抑えるpragmaは [runtime.unsafe-math] に定める。FFIの関数型照合には `__typeof__` と `__builtin_types_compatible_p` を使う。C固有型の範囲検査にも128ビットの `_BitInt` を使う。同梱のRyuが使う拡張はRyuのREADMEで扱う。
 
 **[runtime.c-check]** `suz_config.h` は `__clang__` の定義、`__STDC_VERSION__ >= 202311L`、128ビット以上の `_BitInt`、C23の `<stdckdint.h>` を要求する。条件を満たさない場合は必要な機能を英語の診断で示し、コンパイルエラーとする。Clang拡張を使用する場合は、プリプロセッサで検査できる機能を本ヘッダーで検査する。
 
@@ -49,7 +49,7 @@
 
 生成したCのコンパイルでは、演算の再結合、積和への縮約、非正規化数のゼロへの置換などによってSuzの結果が変わる最適化を行わない。Cの式の途中だけ余分な精度が保持されることによって結果が変わる場合も、Suzの型の精度へ丸める処理を入れる。
 
-**[runtime.unsafe-math]** 共通の設定ヘッダーで `#pragma float_control(precise, on)` と `#pragma STDC FP_CONTRACT OFF` を指定する。生成Cとランタイムのコンパイルでは、[tool.build-settings](tool.md) に従い `-fhonor-nans`、`-fhonor-infinities`、`-ffp-contract=off`、`-fdenormal-fp-math=ieee` を指定する。これらの固定フラグは追加フラグより後に置く。
+**[runtime.unsafe-math]** 共通の設定ヘッダーで `#pragma float_control(precise, on)` と `#pragma STDC FP_CONTRACT OFF` を指定する。生成Cとランタイムの固定フラグは [tool.build-settings]、追加フラグとの順序は [tool.extra-flags] に従う。
 
 この設定では、`-fno-signed-zeros`、`-freciprocal-math`、`-funsafe-math-optimizations`、`-fno-honor-nans`、`-fno-honor-infinities`、`-ffp-model=fast`、`-ffast-math`、`-ffinite-math-only` が固定フラグより前に指定されても、NaN・無限大・符号付きゼロを無視した最適化、逆数乗算への置換、演算の再結合・積和への縮約でSuzの結果を変えてはならない。
 
@@ -138,9 +138,7 @@ _Noreturn void suz_env_panic(void);
 
 **[runtime.log-filter]** [log.filter] で除外したログは、生成Cには出力処理も埋め込み値の読み取りも含めず、そのログだけが使う本文や表示用の文字列も含めない。Cの最適化設定によらず適用する。独立した宣言や生成対象の式が必要とする文字列は、静的データと起動時の登録を維持する。未使用の宣言や関数を除去する規則ではない。
 
-**[runtime.log-evaluation]** [log.filter]で生成対象となった1つの `log debug`・`log info`・`log warn`・`log error` では、最初にすべての埋め込み式を左から右に1回ずつ評価し、それぞれの値を保持する。すべての評価が成功してから、そのログ文の出力を始める。
-
-埋め込みには言語仕様の [output.embed-value] を適用し、名前とそのフィールド参照から値を読む。計算が必要な場合はログ文の前で行う。
+**[runtime.log-evaluation]** ログの埋め込み値の評価・保持と出力開始の順序は [log.evaluation] に従う。生成Cでの保持方法は [runtime.log-storage] に従う。
 
 **[runtime.log-fragments]** `suz_log_begin(level, source, line)` は `suz_log_level` の `SUZ_LOG_DEBUG`・`SUZ_LOG_INFO`・`SUZ_LOG_WARN`・`SUZ_LOG_ERROR`・`SUZ_LOG_IGNORE` を受け取り、出力のロックを取得して接頭辞を書く。`suz_log_end()` は改行を出力してロックを解放する。ランタイム本体は、言語仕様の [log.output] と [log.fragments] に従って、接頭辞・本文の各断片・末尾の改行を `suz_env_log` へ順に渡す。分割位置と呼び出し回数によらず、連結した出力バイト列は同じでなければならない。
 
