@@ -40,6 +40,8 @@ pub(super) fn emit(closure: &CheckedClosure, ty: Type, context: &mut ExpressionC
         })
         .map(|(id, _)| id)
         .collect();
+    let report_function = format!("{}::<closure>", context.report_function);
+    let saved_report_function = std::mem::replace(&mut context.report_function, report_function);
     let saved_recovery = context.recovery.take();
     let saved_temporaries = std::mem::take(&mut context.temporaries);
     let saved_environments = std::mem::take(&mut context.closure_environments);
@@ -115,6 +117,7 @@ pub(super) fn emit(closure: &CheckedClosure, ty: Type, context: &mut ExpressionC
     definition.push_str("}\n\n");
     // 入れ子のクロージャと値ブロックは、外側の本体より先に出力済み。
     context.functions.push_str(&definition);
+    context.report_function = saved_report_function;
     context.function_result = saved_result;
     context.recovery = saved_recovery;
     context.temporaries = saved_temporaries;

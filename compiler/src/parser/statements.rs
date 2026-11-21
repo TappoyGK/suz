@@ -283,9 +283,14 @@ impl Parser<'_, '_> {
                 Ok(Statement::Objection(body))
             }
             Kind::Keyword("arena") => {
+                let location = self.location();
                 self.cursor += 1;
                 let (body, end) = self.block()?;
-                Ok(Statement::Arena { body, end })
+                Ok(Statement::Arena {
+                    location,
+                    body,
+                    end,
+                })
             }
             Kind::Symbol("#" | "." | "(") => self.indirect_statement(),
 

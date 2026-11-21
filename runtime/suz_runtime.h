@@ -108,6 +108,7 @@ _Noreturn void suz_panic_end(void);
 _Noreturn void suz_panic(const char *source, size_t line, size_t column, const char *reason);
 
 /* beginの前にすべての補間値を評価する。beginとendは対にし、書き込み処理には評価済みの値だけを渡す。 */
+/* sourceがNULLなら位置接頭辞を出さず、同じ出力ロックだけを取得する。 */
 void suz_log_begin(suz_log_level level, const char *source, size_t line);
 void suz_log_text(const char *text, size_t len);
 void suz_log_i64(int64_t value);

@@ -42,6 +42,7 @@ pub(super) fn declaration(function: &CheckedFunction) -> String {
 }
 
 pub(super) fn emit(function: &CheckedFunction, context: &mut ExpressionContext) -> String {
+    context.report_function.clone_from(&function.name);
     context.immutable_locals = function
         .parameters
         .iter()

@@ -147,6 +147,7 @@ static void lock_output(void) {
 void suz_log_begin(suz_log_level level, const char *source, size_t line) {
     lock_output();
     output_level = level;
+    if (source == NULL) return; /* 計測結果など、位置接頭辞を付けない出力。 */
     switch (level) {
         case SUZ_LOG_DEBUG: write_text("debug"); break;
         case SUZ_LOG_INFO: write_text("info"); break;

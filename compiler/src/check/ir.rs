@@ -34,6 +34,8 @@ pub(crate) struct CheckedProgram {
 /// 名前を関数番号へ置き換え、仮引数と戻り値の型、本体のIRを保持する。
 #[derive(Clone)]
 pub(crate) struct CheckedFunction {
+    /// 計測結果に表示するソース上の関数名。
+    pub name: String,
     /// 関数群がそろうまで保持する寿命制約。呼び出し要約の検査後に取り除く。
     pub lifetime: Option<super::arena::LifetimeBody>,
     pub mutable_receiver: bool,
@@ -51,6 +53,7 @@ pub(crate) struct CheckedFunction {
 #[derive(Clone)]
 pub(crate) enum CheckedStatement {
     Arena {
+        location: Location,
         body: Vec<CheckedStatement>,
         end: Location,
     },

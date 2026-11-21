@@ -131,6 +131,7 @@ fn generated_bool_values_preserve_negation_and_copies() {
             division_warnings: Vec::new(),
             main_id: 0,
             functions: vec![crate::check::ir::CheckedFunction {
+                name: String::new(),
                 lifetime: None,
                 mutable_receiver: false,
                 fallible: false,
@@ -178,6 +179,7 @@ fn generated_bool_values_preserve_negation_and_copies() {
                 crate::ArenaOptions::default(),
                 crate::LogLevel::default(),
                 false,
+                None,
             ),
         )
         .unwrap();
@@ -327,6 +329,7 @@ fn comparison_codegen_sequences_and_reuses_operands() {
             division_warnings: Vec::new(),
             main_id: 0,
             functions: vec![crate::check::ir::CheckedFunction {
+                name: String::new(),
                 lifetime: None,
                 mutable_receiver: false,
                 fallible: false,
@@ -363,7 +366,8 @@ return result != {expected} || trace != {trace};
                 crate::TextPoolLimit::default(),
                 crate::ArenaOptions::default(),
                 crate::LogLevel::default(),
-                false
+                false,
+                None
             )
         );
         let source = directory.join(format!("{index}.c"));
