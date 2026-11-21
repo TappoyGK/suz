@@ -148,7 +148,7 @@ _Noreturn void suz_env_panic(void);
 
 **[runtime.ignore-output]** [err.ignore-output] の記録が無効な場合、出力処理と記録だけに使う理由・位置のデータを生成しない。有効な場合、1件の接頭辞・理由・改行を [runtime.log-fragments] と同じロックで囲む。
 
-**[runtime.panic-fragments]** `suz_panic_begin(source, line, column)` は出力ロックを取得し、`SUZ_LOG_PANIC`で位置の接頭辞を出力する。続く本文は評価済みの値を`suz_log_*`の断片出力関数へ渡す。`suz_panic_end()`は改行を出力し、ロックを保持したまま`suz_env_panic()`で終了する。既存の`suz_panic`もこの開始・終了処理を使う。埋め込み式の評価はロック取得前に完了させる。本文の整形・出力は[runtime.log-storage]と同じく動的確保を行わない。
+**[runtime.panic-fragments]** `suz_panic_begin(source, line, column)` は出力ロックを取得し、`SUZ_LOG_PANIC`で位置の接頭辞を出力する。続く本文は評価済みの値を`suz_log_*`の断片出力関数へ渡す。`suz_panic_end()`は改行を出力し、ロックを保持したまま`suz_env_panic()`で終了する。`suz_panic`もこの開始・終了処理を使う。埋め込み式の評価はロック取得前に完了させる。本文の整形・出力は[runtime.log-storage]と同じく動的確保を行わない。
 
 **[runtime.value-format]** 値の表示は言語仕様の [symbol.value-format] と [symbol.float-format] に従う。整数・浮動小数点の表示は実行環境のロケールに依存させず、小数点には `.` を使う。`f32` の最短表記は `f32` として読み戻す条件で、`f64` は `f64` として読み戻す条件で決める。
 
@@ -326,7 +326,7 @@ constant symbolの本体は計測対象に含めない。dynamic symbolの本体
 
 **[runtime.ffi-struct]** externで宣言した構造体の実体には、ヘッダーのC構造体型をそのまま使う。Suz内部名はその型のtypedefとし、フィールドにはヘッダーのメンバー名でアクセスする。配置の照合用に生成する構造体は実体の保存には使わない。同じ配置を持つ別の構造体型へキャストすることによるCの型に基づく別名規則の違反を避ける。
 
-**[runtime.ffi-borrow]** Arenaの実体を渡すときは、[ffi.arena-pointer] に従い、そのアドレスをCの仮引数へ渡す。数値型は既存のC表現、C構造体はヘッダーの型を使う。呼び出しのためにArenaの寿命を変更せず、Cによる解放や参照保持を監視する処理も追加しない。保持期間は [ffi.borrow](spec.md) と [ffi.keep](spec.md) の契約に従う。keepの有無でCの型や呼び出し方法は変えない。
+**[runtime.ffi-borrow]** Arenaの実体を渡すときは、[ffi.arena-pointer] に従い、そのアドレスをCの仮引数へ渡す。数値型は [runtime.ffi-types] のC型、C構造体はヘッダーの型を使う。呼び出しのためにArenaの寿命を変更せず、Cによる解放や参照保持を監視する処理も追加しない。保持期間は [ffi.borrow](spec.md) と [ffi.keep](spec.md) の契約に従う。keepの有無でCの型や呼び出し方法は変えない。
 
 **[runtime.ffi-range]** C固有型の整数範囲には `INT_MIN`・`INT_MAX`・`UINT_MAX`・`LONG_MIN`・`LONG_MAX`・`ULONG_MAX`・`SIZE_MAX`・`CHAR_MIN`・`CHAR_MAX` を使う。C固有型またはexternを使うプログラムには整数幅64ビット以下を要求し、生成Cで検査する。これらを使わないプログラムにFFIの制約は課さない。リテラルの範囲はCコンパイル時、値の変換の範囲は評価時に検査する。`_char`の符号は対象環境に従う。変換失敗時には範囲外のCキャストを実行せず、`as%`もCの符号付き狭小化の処理系依存動作に頼らず値を作る。
 
