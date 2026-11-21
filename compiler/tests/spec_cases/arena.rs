@@ -388,8 +388,27 @@ fn arena_rejects_invalid_pointer_operations_and_function_boundaries() {
     assert!(error.to_string().contains("[arena.store]"), "{error}");
 }
 
-#[test]
-fn arena_rewinds_on_return_failure_recovery_and_loop_exits() {
+const ARENA_EXITS_LIMITED: &[&str] = &["--arena-limit", "64"];
+const ARENA_EXITS_FIXED: &[&str] = &["--arena-limit", "64", "--arena-grow", "0"];
+const ARENA_EXITS_GROWING: &[&str] = &[
+    "--arena-initial",
+    "8",
+    "--arena-grow",
+    "8",
+    "--arena-limit",
+    "64",
+];
+const ARENA_EXITS_EMPTY: &[&str] = &[
+    "--arena-initial",
+    "0",
+    "--arena-grow",
+    "8",
+    "--arena-limit",
+    "64",
+];
+
+// 各設定を独立したテストにし、内側に並列実行を重ねない。CLIとASanを通す経路は保つ。
+fn arena_rewinds_on_exits(flags: &[&str], optimization: &str, sanitizer: &str) {
     let directory = TemporaryDirectory::new();
     let source = directory.0.join("exits.suz");
     fs::write(
@@ -465,45 +484,81 @@ fn main() -> u8 {
 "#,
     )
     .unwrap();
-    for flags in [
-        vec!["--arena-limit", "64"],
-        vec!["--arena-limit", "64", "--arena-grow", "0"],
-        vec![
-            "--arena-initial",
-            "8",
-            "--arena-grow",
-            "8",
-            "--arena-limit",
-            "64",
-        ],
-        vec![
-            "--arena-initial",
-            "0",
-            "--arena-grow",
-            "8",
-            "--arena-limit",
-            "64",
-        ],
-    ] {
-        // ASanでも生成Cのcleanup経由で回収・再利用できることを確認する。
-        for (optimization, sanitizer) in [("-O0", ""), ("-O2", ""), ("-O2", "-fsanitize=address")] {
-            let result = Command::new(env!("CARGO_BIN_EXE_suz"))
-                .arg("run")
-                .arg(&source)
-                .args(&flags)
-                .arg(optimization)
-                .env("SUZ_CFLAGS", sanitizer)
-                .env("ASAN_OPTIONS", "detect_leaks=0")
-                .output()
-                .unwrap();
-            assert_eq!(
-                result.status.code(),
-                Some(0),
-                "{flags:?} {optimization}: {}",
-                String::from_utf8_lossy(&result.stderr)
-            );
-        }
-    }
+    let result = Command::new(env!("CARGO_BIN_EXE_suz"))
+        .arg("run")
+        .arg(&source)
+        .args(flags)
+        .arg(optimization)
+        .env("SUZ_CFLAGS", sanitizer)
+        .env("ASAN_OPTIONS", "detect_leaks=0")
+        .output()
+        .unwrap();
+    assert_eq!(
+        result.status.code(),
+        Some(0),
+        "{flags:?} {optimization}: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+}
+
+#[test]
+fn arena_rewinds_limited_o0() {
+    arena_rewinds_on_exits(ARENA_EXITS_LIMITED, "-O0", "");
+}
+
+#[test]
+fn arena_rewinds_limited_o2() {
+    arena_rewinds_on_exits(ARENA_EXITS_LIMITED, "-O2", "");
+}
+
+#[test]
+fn arena_rewinds_limited_asan() {
+    arena_rewinds_on_exits(ARENA_EXITS_LIMITED, "-O2", "-fsanitize=address");
+}
+
+#[test]
+fn arena_rewinds_fixed_o0() {
+    arena_rewinds_on_exits(ARENA_EXITS_FIXED, "-O0", "");
+}
+
+#[test]
+fn arena_rewinds_fixed_o2() {
+    arena_rewinds_on_exits(ARENA_EXITS_FIXED, "-O2", "");
+}
+
+#[test]
+fn arena_rewinds_fixed_asan() {
+    arena_rewinds_on_exits(ARENA_EXITS_FIXED, "-O2", "-fsanitize=address");
+}
+
+#[test]
+fn arena_rewinds_growing_o0() {
+    arena_rewinds_on_exits(ARENA_EXITS_GROWING, "-O0", "");
+}
+
+#[test]
+fn arena_rewinds_growing_o2() {
+    arena_rewinds_on_exits(ARENA_EXITS_GROWING, "-O2", "");
+}
+
+#[test]
+fn arena_rewinds_growing_asan() {
+    arena_rewinds_on_exits(ARENA_EXITS_GROWING, "-O2", "-fsanitize=address");
+}
+
+#[test]
+fn arena_rewinds_empty_o0() {
+    arena_rewinds_on_exits(ARENA_EXITS_EMPTY, "-O0", "");
+}
+
+#[test]
+fn arena_rewinds_empty_o2() {
+    arena_rewinds_on_exits(ARENA_EXITS_EMPTY, "-O2", "");
+}
+
+#[test]
+fn arena_rewinds_empty_asan() {
+    arena_rewinds_on_exits(ARENA_EXITS_EMPTY, "-O2", "-fsanitize=address");
 }
 
 #[test]

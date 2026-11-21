@@ -243,8 +243,7 @@ fn main() -> u8 {
     }
 }
 
-#[test]
-fn precise_math_preserves_results_under_unsafe_options() {
+fn precise_math_with_flag(flag: &str) {
     let directory = TemporaryDirectory::new();
     let source = directory.0.join("precise.c");
     let generated = suz::compile(b"fn main() -> u8 { return 0 }")
@@ -283,42 +282,75 @@ int main(void) {
         ),
     )
     .unwrap();
-    for flag in [
-        "-fno-signed-zeros",
-        "-freciprocal-math",
-        "-funsafe-math-optimizations",
-        "-ffp-contract=fast",
-        "-fno-honor-nans",
-        "-fno-honor-infinities",
-        "-ffp-model=fast",
-        "-ffast-math",
-        "-ffinite-math-only",
-    ] {
-        let executable = directory.0.join("precise");
-        // 意図的に競合するフラグを渡すため、上書き通知だけはエラーにしない。
-        // 実際のCLIでは危険なフラグを許可リストで拒否する。
-        let built = crate::support::runtime_link::compiler()
-            .args(["-std=c23", "-O2", "-Wall", "-Wextra", "-Werror", flag])
-            .args([
-                "-fhonor-nans",
-                "-fhonor-infinities",
-                "-ffp-contract=off",
-                "-fdenormal-fp-math=ieee",
-                "-Wno-error=overriding-option",
-            ])
-            .arg(&source)
-            .arg("-o")
-            .arg(&executable)
-            .output()
-            .unwrap();
-        assert!(
-            built.status.success(),
-            "{flag}: {}",
-            String::from_utf8_lossy(&built.stderr)
-        );
-        let result = Command::new(&executable).output().unwrap();
-        assert_eq!(result.status.code(), Some(0), "{flag}: {result:?}");
-    }
+    let executable = directory.0.join("precise");
+    // 意図的に競合するフラグを渡すため、上書き通知だけはエラーにしない。
+    // 実際のCLIでは危険なフラグを許可リストで拒否する。
+    let built = crate::support::runtime_link::compiler()
+        .args(["-std=c23", "-O2", "-Wall", "-Wextra", "-Werror", flag])
+        .args([
+            "-fhonor-nans",
+            "-fhonor-infinities",
+            "-ffp-contract=off",
+            "-fdenormal-fp-math=ieee",
+            "-Wno-error=overriding-option",
+        ])
+        .arg(&source)
+        .arg("-o")
+        .arg(&executable)
+        .output()
+        .unwrap();
+    assert!(
+        built.status.success(),
+        "{flag}: {}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let result = Command::new(&executable).output().unwrap();
+    assert_eq!(result.status.code(), Some(0), "{flag}: {result:?}");
+}
+
+#[test]
+fn precise_math_with_no_signed_zeros() {
+    precise_math_with_flag("-fno-signed-zeros");
+}
+
+#[test]
+fn precise_math_with_reciprocal_math() {
+    precise_math_with_flag("-freciprocal-math");
+}
+
+#[test]
+fn precise_math_with_unsafe_math_optimizations() {
+    precise_math_with_flag("-funsafe-math-optimizations");
+}
+
+#[test]
+fn precise_math_with_fp_contract_fast() {
+    precise_math_with_flag("-ffp-contract=fast");
+}
+
+#[test]
+fn precise_math_with_no_honor_nans() {
+    precise_math_with_flag("-fno-honor-nans");
+}
+
+#[test]
+fn precise_math_with_no_honor_infinities() {
+    precise_math_with_flag("-fno-honor-infinities");
+}
+
+#[test]
+fn precise_math_with_fp_model_fast() {
+    precise_math_with_flag("-ffp-model=fast");
+}
+
+#[test]
+fn precise_math_with_fast_math() {
+    precise_math_with_flag("-ffast-math");
+}
+
+#[test]
+fn precise_math_with_finite_math_only() {
+    precise_math_with_flag("-ffinite-math-only");
 }
 
 #[test]
