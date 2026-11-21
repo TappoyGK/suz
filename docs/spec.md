@@ -2201,7 +2201,21 @@ fn duplicate[T](value: T) -> ptr T {
 | `<`・`<=`・`>`・`>=`・`==`・`!=` | オペランドの型がその比較を使え、要求の結果型がboolである。 |
 | `&`・`\|`・`^`・`~`・`<<`・`>>` | [width.same-type] の条件を満たし、結果型が要求と一致する。 |
 | `not` | 対象型と要求の結果型がともにboolである。 |
-| `len` | 対象型がsymbolまたはtextで、要求の結果型がlen_tである。 |
+| `len` | 対象型がsymbol・textまたは非nullの配列参照で、要求の結果型がlen_tである。配列では最初の次元の長さを返す。null許容の配列参照は満たさない。 |
+
+次のcountは、1次元・多次元の非null配列参照を型引数Tにできる。`ptr? [i32]`はlenの要求を満たさないため拒否し、letで非nullを確認した参照なら受理する。
+
+```suz
+@needs T: len() -> len_t
+fn count[T](x: T) -> len_t {
+    return len x
+}
+fn main() -> u8 {
+    fix ptr grid = new [0; 2, 3]
+    fix n = count(grid)
+    return ifexpr n == 2 { 0 } else { 1 }
+}
+```
 
 整数算術の要求は、全入力で結果が格納範囲内に収まることまでは保証しない。実際の本体には [arith.width] などの静的検査と、格納時の範囲検査・ゼロ除算の検査を適用する。要求の照合自体は本体に格納を挿入せず、複合した式の格納位置は [generic.arithmetic] に従う。
 
