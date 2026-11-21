@@ -2,6 +2,33 @@
 use crate::test_util::compile_and_run_c23;
 
 #[test]
+fn proven_float_reads_preserve_order_around_writes_and_calls() {
+    // 読み取り同士は直接計算できるが、右辺が配列を書き換える場合は左辺の値を先に保存する。
+    let output = compile_and_run_c23(
+        r#"
+fn change(a: ptr [f32]) -> f32 { a#[0] = 8.0
+    return 2.0 }
+fn inspect(a: ptr [f32; n]) -> f32 {
+    var s: f32 = 0.0
+    for i in 0..<n { s = a[i] + change(a) }
+    return s
+}
+fn main() -> u8 {
+    fix ptr a = new [1.0 as f32]
+    if inspect(a) != 3.0 || a[0] != 8.0 { return 1 }
+    var x: f32 = 1.0
+    fix v = x + expr { x = 5.0
+        2.0 }
+    if v != 3.0 || x != 5.0 { return 2 }
+    return 0
+}
+"#,
+        "array-float-order.suz",
+    );
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+}
+
+#[test]
 fn dimensions_are_not_type_arguments_and_only_bind_at_allowed_declarations() {
     for source in [
         "fn f() -> ptr [i32; n] { return new [] }",

@@ -20,6 +20,53 @@ pub(super) fn c_string(text: &str) -> String {
     result
 }
 
+/// 両辺とも保存や呼び出し、失敗がなければ、Cの評価順でも読み取り結果は変わらない。
+/// それ以外は従来どおり一時変数へ左から保存する。
+fn unordered_read(expr: &CheckedExpression, context: &mut ExpressionContext) -> bool {
+    match &expr.value {
+        Value::Local(_) | Value::Float(_) | Value::Integer { .. } => true,
+        Value::Binary { left, right, .. } if expr.ty.is_float() => {
+            unordered_read(left, context) && unordered_read(right, context)
+        }
+        Value::Negate(value) => unordered_read(value, context),
+        Value::ArrayRead {
+            address,
+            handler: None,
+        } => {
+            let Value::ArrayElement { target, indices } = &address.value else {
+                return false;
+            };
+            matches!(target.value, Value::Local(id) if context.immutable_locals.contains(&id))
+                && indices.iter().all(|(index, _, proven)| {
+                    *proven && super::arrays::proven_index(index, context).is_some()
+                })
+        }
+        _ => false,
+    }
+}
+
+/// 有限のIEEE値は丸めを挟まない16進Cリテラルにする。NaNのペイロードは従来のビットコピーで保つ。
+fn float_literal(bits: u64, ty: crate::ast::FloatType) -> Option<String> {
+    use crate::ast::FloatType;
+    let (fraction_bits, exponent_bits, bias, suffix) = match ty {
+        FloatType::F32 => (23, 8, 127, "f"),
+        FloatType::F64 => (52, 11, 1023, ""),
+    };
+    let exponent = (bits >> fraction_bits) & ((1 << exponent_bits) - 1);
+    if exponent == (1 << exponent_bits) - 1 {
+        return None;
+    }
+    let sign = if bits >> (fraction_bits + exponent_bits) != 0 {
+        "-"
+    } else {
+        ""
+    };
+    let fraction = bits & ((1 << fraction_bits) - 1);
+    let significand = fraction | if exponent == 0 { 0 } else { 1 << fraction_bits };
+    let power = exponent.max(1) as i32 - bias - fraction_bits;
+    Some(format!("({sign}0x{significand:x}p{power}{suffix})"))
+}
+
 pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionContext) -> String {
     context.uses_c_pointer |= matches!(expr.ty, crate::ast::Type::CPointer);
     context.uses_c_integer |= matches!(expr.ty, crate::ast::Type::CInteger(_));
@@ -330,8 +377,11 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             let crate::ast::Type::Float(ty) = expr.ty else {
                 unreachable!()
             };
-            context.float_helpers.insert(ty);
             context.float_types.insert(ty);
+            if let Some(literal) = float_literal(bits, ty) {
+                return literal;
+            }
+            context.float_helpers.insert(ty);
             format!("suz_{}(UINT64_C({bits}))", ty.name())
         }
         Value::Match {
@@ -408,6 +458,16 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             ref left,
             ref right,
         } => {
+            if expr.ty.is_float() && unordered_read(left, context) && unordered_read(right, context)
+            {
+                return format!(
+                    "({})(({}) {} ({}))",
+                    expr.ty.c_name(),
+                    expression(left, context),
+                    operator.c_symbol(),
+                    expression(right, context)
+                );
+            }
             let index = context.temporaries.len();
             context.temporaries.extend([left.ty, right.ty]);
             let left = expression(left, context);

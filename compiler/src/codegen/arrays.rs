@@ -50,6 +50,56 @@ fn temporary(ty: Type, context: &mut ExpressionContext) -> String {
     format!("suz_cmp_{id}")
 }
 
+/// 保証済みの不変の添字は、評価順を保存する一時変数を必要としない。
+/// 加減算は非負かつlen_t内と証明された形だけをsize_tで計算する。
+pub(super) fn proven_index(
+    index: &CheckedExpression,
+    context: &mut ExpressionContext,
+) -> Option<String> {
+    use crate::ast::BinaryOperator;
+    use crate::check::{IntegerOperation, exact::ExactKind};
+    match &index.value {
+        Value::Local(id) if context.immutable_locals.contains(id) => {
+            Some(expression(index, context))
+        }
+        Value::Integer { value, .. } if *value >= 0 => Some(expression(index, context)),
+        Value::IntegerArithmetic {
+            operation: IntegerOperation::Exact(e),
+            handler: None,
+            ..
+        } => {
+            let ExactKind::Binary(op @ (BinaryOperator::Add | BinaryOperator::Subtract), a, b) =
+                &e.kind
+            else {
+                return None;
+            };
+            let ExactKind::Leaf(base) = &a.kind else {
+                return None;
+            };
+            let Value::Local(id) = base.value else {
+                return None;
+            };
+            let ExactKind::Literal(n) = b.kind else {
+                return None;
+            };
+            let n = n.to_i128()?;
+            if !context.immutable_locals.contains(&id)
+                || !(0..=i32::MAX as i128).contains(&n)
+                || !e.range?.contained(0, i32::MAX as i128)
+                || !a.range?.contained(0, i32::MAX as i128)
+            {
+                return None;
+            }
+            Some(format!(
+                "((size_t){} {} (size_t){n})",
+                context.local(id),
+                op.c_symbol()
+            ))
+        }
+        _ => None,
+    }
+}
+
 fn panic(location: Location, reason: &str, context: &ExpressionContext) -> String {
     format!(
         "suz_panic({}, {}, {}, {})",
@@ -181,7 +231,10 @@ fn parts(
     let mut offset = String::new();
     for (dimension, (index, location, proven)) in indices.iter().enumerate() {
         // 不変の添字もそのまま読む。可変の添字は後続の添字で変わり得るため保存する。
-        let (local, evaluate) = if matches!(index.value, Value::Local(id) if context.immutable_locals.contains(&id))
+        let direct = proven.then(|| proven_index(index, context)).flatten();
+        let (local, evaluate) = if let Some(direct) = direct {
+            (direct, String::new())
+        } else if matches!(index.value, Value::Local(id) if context.immutable_locals.contains(&id))
         {
             (expression(index, context), String::new())
         } else {
