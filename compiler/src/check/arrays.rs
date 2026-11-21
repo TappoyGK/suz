@@ -163,7 +163,7 @@ fn address(expr: &Expression, scope: &Scope) -> Result<CheckedExpression, Diagno
         let array = scope.structs.arrays.borrow().get(id);
         if indices.len() - position < array.rank {
             return Err(expr.location.error(
-                ErrorKind::Unsupported,
+                ErrorKind::InvalidSource,
                 crate::diagnostic!(
                     "array.index",
                     "partial array indexing is not implemented yet"
@@ -236,7 +236,7 @@ pub(super) fn read_or_text(
     }
     if !index {
         return Err(expr.location.error(
-            ErrorKind::Unsupported,
+            ErrorKind::InvalidSource,
             crate::diagnostic!("array.slice", "array slicing is not implemented yet"),
         ));
     }

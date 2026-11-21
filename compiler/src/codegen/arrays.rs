@@ -10,6 +10,9 @@ use crate::{
 use std::fmt::Write;
 
 pub(super) fn declarations(c: &mut String, context: &ExpressionContext) {
+    if !context.arrays.entries.is_empty() {
+        c.push_str("#include <string.h>\n");
+    }
     for (id, array) in context.arrays.entries.iter().enumerate() {
         writeln!(
             c,
@@ -102,7 +105,9 @@ pub(super) fn allocate(
         write!(c, "if (suz_length_{i} != 0 && suz_count > SIZE_MAX / (size_t)suz_length_{i}) {overflow}; suz_count *= (size_t)suz_length_{i}; if (suz_count > SIZE_MAX / sizeof({element})) {overflow}; ").unwrap();
     }
     write!(c, "size_t suz_bytes = suz_count * sizeof({element}); suz_array_value.data = suz_arena_alloc(suz_bytes ? suz_bytes : 1, alignof({element}), {}, {}, {}); ", c_string(&context.source_name), location.line, location.column).unwrap();
-    if *repeated {
+    if *repeated && zero_bits(&values[0]) {
+        c.push_str("(void)suz_initial_0; memset(suz_array_value.data, 0, suz_bytes); ");
+    } else if *repeated {
         write!(c, "for (size_t suz_i = 0; suz_i < suz_count; ++suz_i) (({element} *)suz_array_value.data)[suz_i] = suz_initial_0; ").unwrap();
     } else {
         for i in 0..values.len() {
@@ -139,16 +144,11 @@ fn parts(
     } else {
         format!("{source} = {}", expression(target, context))
     };
-    let mut offset = String::from("0");
+    let mut offset = String::new();
     for (dimension, (index, location)) in indices.iter().enumerate() {
         let local = temporary(index.ty, context);
-        let negative = if index.ty.integer_bounds().unwrap().0 < 0 {
-            format!("{local} >= 0 && ")
-        } else {
-            String::new()
-        };
         let check = format!(
-            "({local} = {}, {negative}(uint64_t){local} < (uint64_t){source}.lengths[{dimension}])",
+            "({local} = {}, (uint64_t){local} < (uint64_t){source}.lengths[{dimension}])",
             expression(index, context)
         );
         tests.push(if write {
@@ -157,7 +157,11 @@ fn parts(
             let fail = format!("suz_array_bounds({}, {}, {}, {}, (uint64_t){local}, {negative}, {source}.lengths[{dimension}])", c_string(&context.source_name), location.line, location.column, dimension + 1);
             format!("({check} || ({fail}, false))")
         } else { check });
-        offset = format!("({offset} * (size_t){source}.lengths[{dimension}] + (size_t){local})");
+        offset = if dimension == 0 {
+            format!("(size_t){local}")
+        } else {
+            format!("({offset} * (size_t){source}.lengths[{dimension}] + (size_t){local})")
+        };
     }
     let pointer = format!(
         "(({} *){source}.data + {offset})",
@@ -180,4 +184,14 @@ pub(super) fn read_parts(
     };
     let (setup, condition, pointer) = parts(address, false, context);
     (setup, condition, format!("(*{pointer})"))
+}
+
+/// 表現が全ビット0と分かるスカラーだけを一括初期化する。
+/// nullポインタ・構造体のパディング・負の浮動小数点ゼロには適用しない。
+fn zero_bits(value: &CheckedExpression) -> bool {
+    match &value.value {
+        Value::Integer { value: 0, .. } | Value::Bool(false) | Value::Float(0) => true,
+        Value::Cast(inner) if value.ty.is_integer() || value.ty.is_float() => zero_bits(inner),
+        _ => false,
+    }
 }

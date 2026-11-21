@@ -311,3 +311,77 @@ fn main() -> u8 {
     );
     assert_eq!(output.status.code(), Some(0), "{output:?}");
 }
+
+#[test]
+fn array_element_fields_reject_shorter_lived_references() {
+    let source = b"struct Node { v: i32 }
+struct Item { p: ptr? Node, n: i32 }
+fn main() -> u8 {
+    arena { fix ptr a = new [Item { p: null, n: 0 }; 3]
+      arena { fix ptr t = new Node { v: 2 }
+        a[0]#p = t } }
+    return 0 }";
+    let error = suz::compile(source).unwrap_err();
+    assert_eq!(error.rule(), "arena.store", "{error}");
+}
+
+#[test]
+fn array_source_diagnostics_are_not_internal_errors() {
+    use std::{fs, process::Command};
+    let directory = crate::test_util::TemporaryDirectory::new();
+    for (source, rule) in [
+        (
+            "fn f(a: ptr [i32; n]) -> void {}\nfn main() -> u8 { return 0 }",
+            "array.dimension-bind",
+        ),
+        (
+            "fn main() -> u8 { fix ptr a = new [0; 2, 3]\nfix ptr row = a[0] or panic `missing`\nreturn 0 }",
+            "array.index",
+        ),
+        (
+            "fn main() -> u8 { fix ptr a = new [0; 3]\nfix ptr view = a[0:2] or panic `missing`\nreturn 0 }",
+            "array.slice",
+        ),
+        (
+            "fn main() -> u8 { fix ptr a = new [0; 3]\na[0] = 1\nreturn 0 }",
+            "array.write",
+        ),
+    ] {
+        let path = directory.0.join("source.suz");
+        fs::write(&path, source).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_suz"))
+            .arg("check")
+            .arg(&path)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1), "{output:?}");
+        let message = String::from_utf8_lossy(&output.stderr);
+        assert!(message.contains(&format!("[{rule}]")), "{message}");
+        if rule == "array.write" {
+            assert!(message.contains("a#[i]"), "{message}");
+        } else {
+            assert!(message.contains("not implemented yet"), "{message}");
+        }
+    }
+}
+
+#[test]
+fn array_zero_initialization_preserves_negative_zero_and_nonzero_values() {
+    let output = compile_and_run_c23(
+        r#"
+fn get(a: ptr [f64], i: i64) -> f64 { return a[i] or 10.0 }
+fn main() -> u8 {
+    fix ptr positive = new [0.0; 4]
+    fix ptr negative = new [-0.0; 4]
+    fix ptr filled = new [1.5; 4]
+    if get(positive, 3) != 0.0 { return 1 }
+    if get(filled, 3) != 1.5 { return 2 }
+    fix x = 1.0 / get(negative, 3)
+    if x >= 0.0 { return 3 }
+    return 0
+}
+"#,
+        "array-zero.suz",
+    );
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+}

@@ -903,6 +903,9 @@ impl Analysis {
     fn member_path(&self, cell: Node) -> String {
         let cell = &self.cells[&cell];
         let mut ty = cell.ty;
+        if let Type::Array(id) = ty {
+            ty = self.structs.arrays.borrow().get(id).element;
+        }
         let mut names = Vec::new();
         for &index in &cell.path {
             let Type::Struct(id) = ty else {

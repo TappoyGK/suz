@@ -449,7 +449,22 @@ impl Parser<'_, '_> {
                 if self.token().kind == Kind::Symbol("#") {
                     self.finish_indirect_statement(target, false)
                 } else {
-                    self.check_value_context()?;
+                    if let Err(error) = self.check_value_context() {
+                        let mut place = &target;
+                        while let ExpressionKind::Group(inner) = &place.kind {
+                            place = inner;
+                        }
+                        if matches!(place.kind, ExpressionKind::Slice { index: true, .. }) {
+                            return Err(self.error(
+                                ErrorKind::InvalidSource,
+                                crate::diagnostic!(
+                                    "array.write",
+                                    "use a#[i] = value to write an array element, not a[i] = value"
+                                ),
+                            ));
+                        }
+                        return Err(error);
+                    }
                     Ok(Statement::Expression(target))
                 }
             }

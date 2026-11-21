@@ -28,7 +28,7 @@ impl Parser<'_, '_> {
                 loop {
                     if parser.token().kind != Kind::Wildcard {
                         return Err(parser.error(
-                            ErrorKind::Unsupported,
+                            ErrorKind::InvalidSource,
                             crate::diagnostic!(
                                 "array.dimension-bind",
                                 "named dimensions are not implemented yet"
