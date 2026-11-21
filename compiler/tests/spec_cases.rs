@@ -100,6 +100,8 @@ mod panic;
 mod panics;
 #[path = "spec_cases/ranges.rs"]
 mod ranges;
+#[path = "spec_cases/readme.rs"]
+mod readme;
 #[path = "spec_cases/runtime.rs"]
 mod runtime;
 #[path = "spec_cases/shifts.rs"]
