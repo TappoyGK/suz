@@ -594,7 +594,6 @@ impl Parser<'_, '_> {
             type_parameters: std::mem::take(&mut self.type_parameters),
             needs,
             method,
-            arena: false,
             keyword_location,
             name,
             location,

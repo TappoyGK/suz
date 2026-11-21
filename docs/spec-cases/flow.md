@@ -2785,17 +2785,17 @@ fn main() -> u8 {
 ```suz
 struct Node { next: ptr? Node, value: i32 }
 error Trouble { Empty }
-arena fn Node#append(value: i32) -> ptr Node {
+fn Node#append(value: i32) -> ptr Node {
     fix ptr child = new Node { next: null, value }
     self#next = child
     return child
 }
-arena fn Node.follow() -> ptr? Node { return self.next }
+fn Node.follow() -> ptr? Node { return self.next }
 fn Node.read() -> i32 or Trouble {
     if self.value == 0 { fail Trouble.Empty }
     return self.value
 }
-arena fn make() -> ptr Node { return new Node { next: null, value: 0 } }
+fn make() -> ptr Node { return new Node { next: null, value: 0 } }
 fn main() -> u8 {
     arena {
         fix ptr p = make()

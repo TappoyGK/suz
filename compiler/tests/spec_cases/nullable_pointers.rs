@@ -10,8 +10,8 @@ fn update(state: ptr State) -> void { state#value += 1 }
 fn read(holder: Holder) -> i32 { return holder.state.value }
 fnshape Read() -> i32
 fn invoke(f: fn Read) -> i32 { return f() }
-arena fn identity(value: ptr int) -> ptr int { return value }
-arena fn clear(slot: ptr ptr? i32) -> void { #slot = null }
+fn identity(value: ptr int) -> ptr int { return value }
+fn clear(slot: ptr ptr? i32) -> void { #slot = null }
 fn main() -> u8 {
     arena {
         var ptr state = new State { value: 1 }
@@ -77,7 +77,7 @@ fn main() -> u8 {
 
 #[test]
 fn pointer_type_errors_cannot_be_bypassed_by_aliases_or_objection() {
-    let prefix = "struct Node { value: i32 }\nfn take(p: ptr Node) -> void { return }\narena fn clear(p: ptr ptr? Node) -> void { #p = null }\n";
+    let prefix = "struct Node { value: i32 }\nfn take(p: ptr Node) -> void { return }\nfn clear(p: ptr ptr? Node) -> void { #p = null }\n";
     for body in [
         "fix ptr p: ptr Node = null",
         "var ptr p = new Node { value: 1 }\np = null",

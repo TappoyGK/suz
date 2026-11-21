@@ -1,21 +1,5 @@
-//! 関数境界の借用とarena fnの契約を、既存の候補伝播へ落とす。
-//! 本体の実装を呼び出しごとに再解析せず、型と契約から保守的な効果を作る。
+//! 関数の仮引数と返却先を寿命要約の境界へ写す。
 use super::*;
-
-#[derive(Clone)]
-pub(super) struct CallCheck {
-    arguments: Vec<(Type, Leaves)>,
-    pub region: usize,
-    location: Location,
-}
-
-#[derive(Clone)]
-pub(super) struct CallGroup {
-    pub region: usize,
-    ty: Type,
-    reachable: Node,
-    local: Node,
-}
 
 impl Analysis {
     pub(super) fn field_type(&self, mut ty: Type, path: &[usize]) -> Type {
@@ -29,7 +13,7 @@ impl Analysis {
     }
 
     // 再帰構造体でも有限になるよう、型ごとの未知の実体を先に登録してからメンバーを埋める。
-    fn parameter_object(
+    pub(super) fn parameter_object(
         &mut self,
         ty: Type,
         region: usize,
@@ -72,31 +56,15 @@ impl Analysis {
         scope: &Scope,
     ) -> (usize, Option<usize>) {
         self.regions[0].end = function.end;
-        // arena fnでは0が呼び出し元のR。ローカル変数の寿命はRより短い。
-        let body = if function.arena {
-            self.region(0, function.end)
-        } else {
-            0
-        };
-        self.return_region = function.arena.then_some(0);
+        // 0が呼び出し時の現在のArena。引数の実体は要約を適用するときに
+        // 実引数の由来へ置き換える。ローカル変数の保存場所は関数の終了まで。
+        let body = self.region(0, function.end);
+        self.return_region = Some(0);
         for (id, parameter) in function.parameters.iter().enumerate() {
             let ty = scope
                 .resolve_type_at(parameter.ty, parameter.location)
                 .expect("parameter type was checked before lifetime analysis");
-            if !contains(ty, scope) {
-                continue;
-            }
-            let region = if function.arena {
-                0
-            } else {
-                let region = self.regions.len();
-                self.regions.push(Region {
-                    parent: None,
-                    end: parameter.location,
-                });
-                self.borrowed.insert(region);
-                region
-            };
+            let region = 0;
             let mut private = Vec::new();
             let objects = &mut private;
             // 参照捕捉の保存場所は呼び出し元にある。値捕捉・通常の仮引数はローカルなコピー。
@@ -124,7 +92,7 @@ impl Analysis {
                     .insert(object, summaries::Object::Parameter(id, ty));
             }
         }
-        (body, function.arena.then_some(0))
+        (body, Some(0))
     }
 
     pub(super) fn return_value(&mut self, ty: Type, value: Shape, location: Location) {
@@ -156,212 +124,5 @@ impl Analysis {
                 location,
             ));
         }
-    }
-
-    pub(super) fn arena_call(
-        &mut self,
-        arguments: &[(Type, Shape)],
-        result_ty: Type,
-        region: usize,
-        location: Location,
-    ) -> Shape {
-        let result = self.shape(result_ty);
-        for (ty, shape) in arguments {
-            for (path, &source) in shape {
-                let target = self.field_type(*ty, path).pointee().unwrap();
-                let (reachable, _) = self.call_group(region, target, location);
-                self.constraints.push(Constraint::Copy(reachable, source));
-            }
-        }
-        for (path, &node) in &result {
-            let target = self.field_type(result_ty, path).pointee().unwrap();
-            let (_, local) = self.call_group(region, target, location);
-            self.constraints
-                .push(Constraint::Limit(node, local, region));
-        }
-        self.calls.push(CallCheck {
-            arguments: arguments
-                .iter()
-                .map(|(ty, shape)| {
-                    (
-                        *ty,
-                        shape
-                            .iter()
-                            .map(|(path, &node)| (path.clone(), node))
-                            .collect(),
-                    )
-                })
-                .collect(),
-            region,
-            location,
-        });
-        result
-    }
-
-    // 同じR・型の呼び出し効果は一組だけ作る。R以外に届く実引数は必ず拒否するので、
-    // この合流で保存・返却の寿命判定は変わらない。呼び出しごとに同じ密な参照グラフを
-    // 複製すると、実体数に対する二乗の伝播をさらに呼び出し回数だけ繰り返してしまう。
-    fn add_call_group(&mut self, region: usize, ty: Type) -> (Node, Node) {
-        let reachable = self.node();
-        let local = self.node();
-        self.call_regions.insert(local, region);
-        self.constraints.push(Constraint::Copy(local, reachable));
-        self.call_groups.push(CallGroup {
-            region,
-            ty,
-            reachable,
-            local,
-        });
-        (reachable, local)
-    }
-
-    fn call_group(&mut self, region: usize, ty: Type, location: Location) -> (Node, Node) {
-        if let Some(group) = self
-            .call_groups
-            .iter()
-            .find(|g| g.region == region && g.ty == ty)
-        {
-            return (group.reachable, group.local);
-        }
-        let start = self.call_groups.len();
-        let root = self.add_call_group(region, ty);
-        let mut index = start;
-        while index < self.call_groups.len() {
-            let CallGroup {
-                ty,
-                reachable,
-                local,
-                ..
-            } = self.call_groups[index];
-            let allocated = self.cell(region, location, ty);
-            self.cells.get_mut(&allocated).unwrap().origin = Origin::Call;
-            self.targets[reachable].insert(Reference::object(allocated));
-            for path in self.paths(ty) {
-                let target = self.field_type(ty, &path).pointee().unwrap();
-                let (other_reachable, other_local) = if let Some(group) = self
-                    .call_groups
-                    .iter()
-                    .find(|g| g.region == region && g.ty == target)
-                {
-                    (group.reachable, group.local)
-                } else {
-                    self.add_call_group(region, target)
-                };
-                // R外に届く入力は検査のためにたどるが、その実体への書き込みや
-                // R外の参照の返却を、別の呼び出しへ伝播させてはならない。
-                self.constraints.push(Constraint::Load(
-                    other_reachable,
-                    Place::Indirect(reachable, path.clone()),
-                ));
-                self.constraints.push(Constraint::Store(
-                    Place::Indirect(local, path),
-                    other_local,
-                    location,
-                ));
-            }
-            index += 1;
-        }
-        root
-    }
-
-    pub(super) fn validate_calls(&self) -> Result<(), Diagnostic> {
-        self.validate_call_regions(false)
-    }
-
-    pub(super) fn validate_direct_calls(&self) -> Result<(), Diagnostic> {
-        self.validate_call_regions(true)
-    }
-
-    fn validate_call_regions(&self, direct: bool) -> Result<(), Diagnostic> {
-        let mut secondary = None;
-        let mut visited = BTreeSet::new();
-        let calls = self
-            .calls
-            .iter()
-            .map(|call| (&call.arguments, call.region, call.location))
-            .chain(
-                self.direct_calls
-                    .iter()
-                    .filter(|_| direct)
-                    .map(|call| (&call.arguments, call.region, call.location)),
-            );
-        for (arguments, region, location) in calls {
-            // 実引数から実体をたどり、違反に至るメンバーの経路を診断にも残す。
-            // 同じ実体は一度だけ調べ、循環するグラフでも停止させる。
-            let mut pending = std::collections::VecDeque::new();
-            for (index, (ty, shape)) in arguments.iter().enumerate() {
-                for (path, node) in shape {
-                    let node = *node;
-                    let target = self.field_type(*ty, path).pointee().unwrap();
-                    let label = self.field_label(*ty, path, format!("argument {}", index + 1));
-                    pending.push_back((target, node, label));
-                }
-            }
-            while let Some((ty, node, label)) = pending.pop_front() {
-                for reference in &self.targets[node] {
-                    let target = reference.target;
-                    if !visited.insert((region, target)) {
-                        continue;
-                    }
-                    let cell = &self.cells[&target];
-                    if cell.region != region {
-                        let mut error = location.error(
-                            ErrorKind::InvalidSource,
-                            crate::diagnostic!(
-                                "arena.fn-call",
-                                "{label} may reach an object outside the innermost arena"
-                            ),
-                        );
-                        error.related.push(cell.location.error(
-                            ErrorKind::InvalidSource,
-                            crate::diagnostic!("arena.lifetime", "this reachable object belongs to another arena or a borrowed parameter"),
-                        ));
-                        error.related.push(self.regions[cell.region].end.error(
-                            ErrorKind::InvalidSource,
-                            crate::diagnostic!(
-                                "arena.lifetime",
-                                "{}",
-                                if self.borrowed.contains(&cell.region) {
-                                    "this parameter is borrowed only for the duration of the call"
-                                } else {
-                                    "its arena ends here"
-                                }
-                            ),
-                        ));
-                        // 短命な候補は別の違反から伝わった結果かもしれない。
-                        // 外側や借用先へ届く呼び出しを優先し、それがなければこの診断を使う。
-                        if self.outlives(cell.region, region) {
-                            return Err(error);
-                        }
-                        if secondary.is_none() {
-                            secondary = Some(error);
-                        }
-                    }
-                    for path in self.paths(ty) {
-                        let mut full_path = cell.path.clone();
-                        full_path.extend_from_slice(&path);
-                        if let Some(&field) = self.projections.get(&(cell.root, full_path)) {
-                            let next = self.field_type(ty, &path).pointee().unwrap();
-                            let label = self.field_label(ty, &path, label.clone());
-                            pending.push_back((next, field, label));
-                        }
-                    }
-                }
-            }
-        }
-        secondary.map_or(Ok(()), Err)
-    }
-
-    fn field_label(&self, mut ty: Type, path: &[usize], mut label: String) -> String {
-        for &index in path {
-            let Type::Struct(id) = ty else {
-                unreachable!("checked field path")
-            };
-            let field = &self.structs.get(id).fields[index];
-            label.push('.');
-            label.push_str(&field.name);
-            ty = field.ty;
-        }
-        label
     }
 }

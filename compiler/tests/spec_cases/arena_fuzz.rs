@@ -269,7 +269,7 @@ fn Node[T]#bump(delta: T) -> void {
     return
 }
 
-arena fn make_node[T](v: T, tail: ptr? Node[T]) -> ptr Node[T] {
+fn make_node[T](v: T, tail: ptr? Node[T]) -> ptr Node[T] {
     return new Node[T] { value: v, next: tail }
 }
 
@@ -315,12 +315,12 @@ fn apply_action(f: fn NodeAction, arg: ptr? $Node) -> i32 {
     return f(arg)
 }
 
-arena fn attach(h: ptr $Holder) -> void {
+fn attach(h: ptr $Holder) -> void {
     h.q#next = new $Node { value: 7, next: null }
     return
 }
 
-arena fn build_chain(v: i32, tail: ptr? $Node, depth: i32) -> ptr $Node {
+fn build_chain(v: i32, tail: ptr? $Node, depth: i32) -> ptr $Node {
     if depth <= 0 {
         return new $Node { value: v, next: tail }
     }
@@ -328,7 +328,7 @@ arena fn build_chain(v: i32, tail: ptr? $Node, depth: i32) -> ptr $Node {
     return new $Node { value: v, next: next }
 }
 
-arena fn maybe_alloc(flag: bool, fallback: ptr? $Node) -> ptr? $Node {
+fn maybe_alloc(flag: bool, fallback: ptr? $Node) -> ptr? $Node {
     if flag {
         return new $Node { value: 7, next: fallback }
     }
@@ -438,7 +438,7 @@ fn main() -> u8 {
 
     out.push_str("        outer_opt = outer_opt\n        outer_mut = outer_mut\n        outer_holder = outer_holder\n        outer_pair = outer_pair\n        sink = sink\n    }\n    return 0\n}\n");
     if generic {
-        // arena fnの具体化も通す。通常版と同じ値と参照を返す。
+        // fnの具体化も通す。通常版と同じ値と参照を返す。
         // コールバックは型引数付きfnshapeと具体化した関数値を経由して転送する。
         out = out
             .replace("fn NodeAction,", "fn NodeAction[i32],")

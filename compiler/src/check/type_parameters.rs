@@ -116,7 +116,6 @@ pub(super) fn call(
             value: Value::Call {
                 id,
                 arguments: checked_arguments,
-                arena: signature.arena,
                 location: expr.location,
             },
         },

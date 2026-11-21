@@ -94,7 +94,7 @@ fn objection_never_removes_proven_lifetime_violations() {
         );
         assert_eq!(error.related.len(), 2);
     }
-    let source = b"arena fn bad() -> ptr? i32 { arena { objection [claim] { return new (1 as i32) } } }\nfn main() -> u8 { return 0 }";
+    let source = b"fn bad() -> ptr? i32 { arena { objection [claim] { return new (1 as i32) } } }\nfn main() -> u8 { return 0 }";
     assert!(
         suz::compile(source)
             .unwrap_err()
@@ -159,27 +159,11 @@ fn main() -> u8 {
 fn objection_does_not_override_explicit_contracts_or_callee_checks() {
     for (source, rule) in [
         (
-            "fn change(p: ptr? ptr? i32) -> void { objection [claim] { let q = p { #q = null } } }\nfn main() -> u8 { return 0 }",
-            "arena.parameter",
-        ),
-        (
-            "fn bad() -> ptr? i32 { objection [claim] { return null } }\nfn main() -> u8 { return 0 }",
-            "arena.parameter",
-        ),
-        (
-            "arena fn make() -> ptr? i32 { return new (1 as i32) }\nfn main() -> u8 { objection [claim] { make() }\nreturn 0 }",
-            "arena.fn-call",
-        ),
-        (
             "fn main() -> u8 { objection [claim] { fix ptr p: ptr? i32 = null\nfix n = .p }\nreturn 0 }",
             "arena.null-deref",
         ),
         (
-            "fn bad(p: ptr? ptr? i32) -> void { let q = p { #q = null } }\nfn main() -> u8 { objection [claim] { bad(null) }\nreturn 0 }",
-            "arena.parameter",
-        ),
-        (
-            "arena fn bad(flag: bool) -> ptr? i32 { arena { fix ptr p: ptr? i32 = ifexpr flag { new (1 as i32) } else { null }\nreturn p } }\nfn main() -> u8 { arena { objection [caller guarantee] { bad(false) } }\nreturn 0 }",
+            "fn bad(flag: bool) -> ptr? i32 { arena { fix ptr p: ptr? i32 = ifexpr flag { new (1 as i32) } else { null }\nreturn p } }\nfn main() -> u8 { arena { objection [caller guarantee] { bad(false) } }\nreturn 0 }",
             "arena.store",
         ),
         (

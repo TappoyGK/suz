@@ -90,7 +90,6 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
                 }),
                 needs: function.needs.clone(),
                 method,
-                arena: function.arena,
                 external: false,
                 id,
                 parameters: function
@@ -225,7 +224,10 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
             break;
         }
     }
-    super::arena::check_program(&mut functions)?;
+    super::arena::check_program(
+        &mut functions,
+        program.functions.len()..program.functions.len() + program.externs.len(),
+    )?;
     warnings.sort_by_key(|l| (l.line, l.column));
     // 整数演算の箇所は汎用検査と具体化の両方で集まるため、ソースの演算ごとに一度だけ報告する。
     // 比較・除算の候補は汎用検査からだけ集まる。
@@ -458,22 +460,7 @@ pub(super) fn check_with_captures(
 ) -> Result<(CheckedFunction, Vec<crate::ast::Location>), Diagnostic> {
     control::validate_return_positions(&function.statements)?;
     scope.trusted_block = false;
-    scope.arena_depth = usize::from(function.arena);
-    scope.arena_used = Default::default();
-    if !function.arena
-        && super::arena::contains(
-            scope.resolve_type_at(function.result, function.location)?,
-            &scope,
-        )
-    {
-        return Err(function.location.error(
-            ErrorKind::InvalidSource,
-            crate::diagnostic!(
-                "arena.parameter",
-                "only arena fn can return values containing arena pointers"
-            ),
-        ));
-    }
+    scope.arena_depth = 1;
     scope.recovery = None;
     scope.loop_depth = 0;
     let mut warnings = Vec::new();
@@ -588,15 +575,7 @@ pub(super) fn call(
             },
         )
     })?;
-    if signature.arena && scope.arena_depth == 0 {
-        return Err(expr.location.error(
-            ErrorKind::InvalidSource,
-            crate::diagnostic!(
-                "arena.fn-call",
-                "arena fn requires an enclosing arena or arena fn"
-            ),
-        ));
-    }
+
     if signature.external && !scope.trusted_block {
         return Err(expr.location.error(
             ErrorKind::InvalidSource,
@@ -653,7 +632,6 @@ pub(super) fn call(
             value: Value::Call {
                 id,
                 arguments,
-                arena: signature.arena,
                 location: expr.location,
             },
         },

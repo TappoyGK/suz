@@ -71,17 +71,7 @@ fn reference(analysis: &mut Analysis, constraints: &[Constraint]) {
                 }
             };
             for dst in destinations {
-                let accepted: Vec<_> = values
-                    .iter()
-                    .copied()
-                    .filter(|value| {
-                        analysis
-                            .call_regions
-                            .get(&dst)
-                            .is_none_or(|region| analysis.cells[&value.target].region == *region)
-                    })
-                    .collect();
-                analysis.targets[dst].extend(accepted);
+                analysis.targets[dst].extend(values.iter().copied());
             }
         }
         if before == analysis.targets {
@@ -154,16 +144,6 @@ fn delta_solver_matches_full_iteration_with_aliases_and_cycles() {
         let mut expected = fixture(&scope, count);
         actual.node();
         expected.node();
-        // 領域を限定した呼び出し効果も、後から増える候補や循環を含めて全体反復と比べる。
-        if seed % 2 == 0 {
-            for analysis in [&mut actual, &mut expected] {
-                analysis.cells.get_mut(&1).unwrap().region = 1;
-                analysis.cells.get_mut(&3).unwrap().region = 1;
-                analysis.call_regions.insert(count + 2, 0);
-                analysis.call_regions.insert(count + 4, 1);
-                analysis.targets[count + 4].clear();
-            }
-        }
         let originals = actual.targets.len();
         Worklist::default().run(&mut actual, &constraints);
         reference(&mut expected, &constraints);
@@ -271,94 +251,6 @@ fn mixed_arena_cycles_do_not_repeat_store_candidates_for_each_read() {
         }
         assert!(
             work.propagated <= 30 * count * count,
-            "{} for {count}",
-            work.propagated
-        );
-    }
-}
-
-#[test]
-fn aliases_of_filtered_values_preserve_the_region_filter() {
-    let scope = Scope::default();
-    let mut actual = fixture(&scope, 2);
-    let mut expected = fixture(&scope, 2);
-    for analysis in [&mut actual, &mut expected] {
-        analysis.cells.get_mut(&1).unwrap().region = 1;
-        let filtered = analysis.node();
-        analysis.call_regions.insert(filtered, 0);
-        analysis.node();
-    }
-    let constraints = [
-        Constraint::Copy(4, 2),
-        Constraint::Copy(4, 3),
-        Constraint::Copy(5, 4),
-        Constraint::Copy(4, 5),
-    ];
-    Worklist::default().run(&mut actual, &constraints);
-    reference(&mut expected, &constraints);
-    assert_eq!(actual.targets, expected.targets);
-    assert_eq!(actual.targets[5], BTreeSet::from([Reference::object(0)]));
-}
-
-#[test]
-fn connected_arena_calls_do_not_repeat_dense_propagation_per_call() {
-    use crate::ast::{StructDeclaration, StructField};
-    let ty = Type::Struct(0);
-    let scope = Scope {
-        structs: std::rc::Rc::new(
-            vec![StructDeclaration {
-                external: None,
-                type_parameters: Vec::new(),
-                needs: Vec::new(),
-                application: None,
-                symbolic: false,
-                name: "Node".into(),
-                location: HERE,
-                start: 0,
-                end: 0,
-                fields: ["next", "other"]
-                    .into_iter()
-                    .map(|name| StructField {
-                        name: name.into(),
-                        ty: ty.pointer(),
-                        location: HERE,
-                    })
-                    .collect(),
-            }]
-            .into(),
-        ),
-        ..Scope::default()
-    };
-    for count in [32, 64] {
-        let mut analysis = Analysis::new(&scope);
-        let mut arguments = Vec::new();
-        for _ in 0..count {
-            let cell = analysis.cell(0, HERE, ty);
-            let node = analysis.node();
-            analysis.targets[node].insert(Reference::object(cell));
-            arguments.push((
-                ty.pointer(),
-                std::collections::BTreeMap::from([(vec![], node)]),
-            ));
-        }
-        // 連結する実体の数と呼び出し数を一緒に増やす。戻り値も実体のフィールドへ保存する。
-        for i in 0..5 * count {
-            let a = &arguments[i % count];
-            let b = &arguments[(i + 1) % count];
-            let result = analysis.arena_call(&[a.clone(), b.clone()], ty.pointer(), 0, HERE);
-            analysis.constraints.push(Constraint::Store(
-                Place::Indirect(a.1[&vec![]], vec![1]),
-                result[&vec![]],
-                HERE,
-            ));
-        }
-        let constraints = std::mem::take(&mut analysis.constraints);
-        let mut work = Worklist::default();
-        work.run(&mut analysis, &constraints);
-        analysis.validate(&constraints).unwrap();
-        // 時間に依存しない作業量の上限。呼び出しごとの密なグラフによる三乗への退行を検出する。
-        assert!(
-            work.propagated <= 100 * count * count,
             "{} for {count}",
             work.propagated
         );

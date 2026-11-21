@@ -4,6 +4,18 @@
 
 suz_arena_state suz_arena;
 
+/* mainが返ってから全ブロックを解放する。明示的なarenaの巻き戻しは再利用のため
+   記憶領域を保持するが、プログラムの終了境界では保持する必要がない。 */
+void suz_arena_destroy(void) {
+    suz_arena_chunk *chunk = suz_arena.first;
+    while (chunk != NULL) {
+        suz_arena_chunk *next = chunk->next;
+        suz_env_free(chunk);
+        chunk = next;
+    }
+    suz_arena = (suz_arena_state){0};
+}
+
 _Noreturn void suz_arena_overflow(const char *source, size_t line, size_t column) {
     suz_panic(source, line, column, "arena size calculation overflow [rt.arena-allocation]");
 }

@@ -561,7 +561,6 @@ pub(crate) struct Function {
     pub type_parameters: Vec<generics::TypeParameter>,
     pub needs: Vec<generics::Need>,
     pub method: Option<Method>,
-    pub arena: bool,
     pub keyword_location: Location,
     pub name: String,
     pub location: Location,

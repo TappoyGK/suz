@@ -143,19 +143,10 @@ fn invoke(
     scope: &Scope,
     handler: Option<&FailureHandler>,
 ) -> Result<CheckedExpression, Diagnostic> {
-    let (arena, mutable) = match need.operation {
-        RequiredOperation::Method { arena, mutable, .. } => (arena, mutable),
-        _ => (false, false),
-    };
-    if arena && scope.arena_depth == 0 {
-        return Err(expr.location.error(
-            ErrorKind::InvalidSource,
-            crate::diagnostic!(
-                "arena.fn-call",
-                "arena method requires an enclosing arena or arena fn"
-            ),
-        ));
-    }
+    let mutable = matches!(
+        need.operation,
+        RequiredOperation::Method { mutable: true, .. }
+    );
     let receiver = if matches!(need.operation, RequiredOperation::Method { .. }) {
         crate::check::methods::receiver(receiver, mutable, scope)?
     } else {
@@ -177,7 +168,6 @@ fn invoke(
             value: Value::Call {
                 id: usize::MAX,
                 arguments: checked,
-                arena,
                 location: expr.location,
             },
         },
@@ -377,15 +367,8 @@ pub(super) fn satisfy(
                 scope.type_name(target),
                 match &need.operation {
                     RequiredOperation::Operator(op) => (*op).to_owned(),
-                    RequiredOperation::Method {
-                        name,
-                        mutable,
-                        arena,
-                    } => format!(
-                        "{}{}{name}",
-                        if *arena { "arena " } else { "" },
-                        if *mutable { "#" } else { "." }
-                    ),
+                    RequiredOperation::Method { name, mutable } =>
+                        format!("{}{name}", if *mutable { "#" } else { "." }),
                 },
                 parameters
                     .iter()
@@ -459,16 +442,11 @@ pub(super) fn satisfy(
         .map(|(i, &ty)| argument(i + 1, ty))
         .collect();
     let kind = match &need.operation {
-        RequiredOperation::Method {
-            name,
-            mutable,
-            arena,
-        } => {
+        RequiredOperation::Method { name, mutable } => {
             let key = format!("{}.{}", scope.method_owner_name(target), name);
             let signature = scope.functions.get(&key).ok_or_else(error)?;
             let signature = super::method_signature(signature, target, scope, location)?;
             if signature.method.is_none_or(|m| m.mutable != *mutable)
-                || signature.arena != *arena
                 || signature.parameters[1..] != parameters
                 || signature.result != result
                 || signature.errors != need.errors

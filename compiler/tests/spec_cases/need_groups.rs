@@ -86,14 +86,14 @@ error Failed { Read }
 struct Number { n: i32 }
 fn Number.read() -> i32 or Failed { return self.n }
 fn Number#increment() -> void { self#n = self.n + 1 }
-arena fn Number.copy() -> ptr Number { return new self }
+fn Number.copy() -> ptr Number { return new self }
 needs Mutable[T] {
     T: .read() -> i32 or Failed
     T: #increment() -> void
-    T: arena .copy() -> ptr T
+    T: .copy() -> ptr T
 }
 @needs Mutable[T]
-arena fn duplicate[T](value: T) -> ptr T {
+fn duplicate[T](value: T) -> ptr T {
     fix ptr copy = value.copy()
     copy#increment()
     return copy

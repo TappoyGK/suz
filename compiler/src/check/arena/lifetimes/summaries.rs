@@ -16,15 +16,21 @@ pub(super) enum Object {
     RecursiveAllocation(usize, Type),
 }
 
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub(super) struct CallNote {
+    pub location: Location,
+    pub message: String,
+}
 #[derive(Clone)]
 pub(super) struct Call {
     pub id: usize,
     pub arguments: Vec<(Type, Leaves)>,
-    pub result_ty: Type,
     pub result: Leaves,
     pub receiver: Option<Place>,
+    pub captures: BTreeMap<usize, Place>,
     pub region: usize,
     pub location: Location,
+    pub notes: BTreeSet<CallNote>,
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
@@ -33,6 +39,7 @@ struct CallKey<'a> {
     region: usize,
     arguments: Vec<(usize, Type, &'a [usize], Node)>,
     receiver: Option<Place>,
+    captures: BTreeMap<usize, Place>,
 }
 impl Call {
     fn result_node(&self, path: &[usize]) -> Option<Node> {
@@ -55,6 +62,7 @@ impl Call {
                     })
                 })
                 .collect(),
+            captures: self.captures.clone(),
             receiver: self.receiver.as_ref().map(|place| match place {
                 Place::Direct(node) => Place::Direct(*node),
                 Place::Indirect(node, path) => Place::Indirect(representative[*node], path.clone()),
@@ -91,6 +99,7 @@ pub(crate) struct Summary {
     objects: BTreeMap<Object, ObjectInfo>,
     returned: BTreeMap<Vec<usize>, BTreeSet<Endpoint>>,
     stores: BTreeMap<StoreInfo, StoreEffect>,
+    notes: BTreeMap<StoreInfo, BTreeSet<CallNote>>,
 }
 
 impl Summary {
@@ -173,7 +182,6 @@ impl Analysis {
     ) -> Option<Summary> {
         if self.return_region != Some(0)
             || !self.root_references_only()
-            || !self.closures.is_empty()
             || self.direct_calls.len() > 1
             || self
                 .objects
@@ -260,28 +268,6 @@ impl Analysis {
         Some(result)
     }
 
-    // 構文の移行までは従来のarena fn契約も検査する。要約用の制約には混ぜない。
-    pub(super) fn legacy_calls(&mut self) {
-        for call in self.direct_calls.clone() {
-            let arguments: Vec<_> = call
-                .arguments
-                .iter()
-                .map(|(ty, leaves)| (*ty, leaves.iter().cloned().collect::<Shape>()))
-                .collect();
-            if let Some(receiver) = &call.receiver {
-                let ty = call.arguments[0].0;
-                let updated = self.arena_call(&arguments, ty, call.region, call.location);
-                self.write(receiver.clone(), updated, call.location);
-            }
-            let value = self.arena_call(&arguments, call.result_ty, call.region, call.location);
-            for (path, source) in value {
-                if let Some(destination) = call.result_node(&path) {
-                    self.constraints.push(Constraint::Copy(destination, source));
-                }
-            }
-        }
-    }
-
     fn endpoint(&self, reference: Reference) -> Option<Endpoint> {
         let cell = &self.cells[&reference.target];
         let object = *self.objects.get(&cell.root)?;
@@ -351,6 +337,13 @@ impl Analysis {
             if destinations.is_empty() {
                 continue;
             }
+            if let Some(notes) = self.effect_notes.get(&index) {
+                result
+                    .notes
+                    .entry(info)
+                    .or_default()
+                    .extend(notes.iter().cloned());
+            }
             let effect = result.stores.entry(info).or_default();
             effect.destinations.extend(destinations);
             effect.values.extend(values);
@@ -369,8 +362,10 @@ impl Analysis {
             match object {
                 Object::Parameter(..) => {}
                 Object::Slot(index) => {
-                    if index == 0
-                        && let Some(receiver) = &call.receiver
+                    if let Some(receiver) = call
+                        .captures
+                        .get(&index)
+                        .or_else(|| (index == 0).then_some(call.receiver.as_ref()).flatten())
                     {
                         self.constraints
                             .push(Constraint::Address(node, receiver.clone()));
@@ -461,6 +456,9 @@ impl Analysis {
             self.effect_calls
                 .insert(self.constraints.len(), call.location);
             self.effect_stores.insert(self.constraints.len(), *info);
+            let mut notes = summary.notes.get(info).cloned().unwrap_or_default();
+            notes.extend(call.notes.iter().cloned());
+            self.effect_notes.insert(self.constraints.len(), notes);
             self.constraints
                 .push(Constraint::Store(place, source, info.location));
         }
@@ -591,6 +589,7 @@ fn components(bodies: &BTreeMap<usize, Rc<Analysis>>) -> Vec<Vec<usize>> {
 }
 
 struct Inferred {
+    #[cfg(test)]
     summaries: BTreeMap<usize, Rc<Summary>>,
     checked: BTreeMap<usize, Analysis>,
     #[cfg(test)]
@@ -620,12 +619,7 @@ fn infer_checked(
             callers.entry(call.id).or_default().insert(id);
         }
     }
-    let mut exported: BTreeSet<_> = callers.keys().copied().collect();
-    let mut closures: Vec<_> = bodies.values().flat_map(|body| &body.closures).collect();
-    while let Some(body) = closures.pop() {
-        exported.extend(body.direct_calls.iter().map(|call| call.id));
-        closures.extend(&body.closures);
-    }
+    let exported: BTreeSet<_> = callers.keys().copied().collect();
     let mut pending = VecDeque::new();
     for component in components(&bodies) {
         let recursive = component.len() > 1
@@ -689,6 +683,7 @@ fn infer_checked(
         }
     }
     Ok(Inferred {
+        #[cfg(test)]
         summaries,
         checked,
         #[cfg(test)]
@@ -715,29 +710,17 @@ pub(in crate::check) fn check_program(functions: &mut [CheckedFunction]) -> Resu
             Some(Body::Resolved(summary)) => {
                 ready.insert(function.id, summary);
             }
-            None => {}
+            Some(Body::Input(_)) => unreachable!("callable contexts are resolved first"),
+            None => {
+                ready.insert(function.id, Rc::new(Summary::default()));
+            }
         }
     }
-    let Inferred {
-        summaries, checked, ..
-    } = infer_checked(bodies, false, ready)?;
-    let mut pending = Vec::new();
+    let Inferred { checked, .. } = infer_checked(bodies, false, ready)?;
     for mut analysis in checked.into_values() {
-        pending.extend(analysis.closures.iter().cloned());
         if analysis.resolved || analysis.root_references_only() {
             continue;
         }
-        analysis.validate_direct_calls()?;
-        let constraints = std::mem::take(&mut analysis.constraints);
-        analysis.validate(&constraints)?;
-    }
-    while let Some(body) = pending.pop() {
-        pending.extend(body.closures.iter().cloned());
-        let mut analysis = Rc::unwrap_or_clone(body).resolve_summaries(&summaries)?;
-        if analysis.resolved || analysis.root_references_only() {
-            continue;
-        }
-        analysis.validate_direct_calls()?;
         let constraints = std::mem::take(&mut analysis.constraints);
         analysis.validate(&constraints)?;
     }

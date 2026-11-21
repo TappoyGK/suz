@@ -116,7 +116,6 @@ pub(super) fn statement(
 ) -> Result<(), Diagnostic> {
     match statement {
         Statement::Arena { body, end, .. } => {
-            context.bindings.arena_used.set(true);
             context.bindings.arena_depth += 1;
             let result =
                 statements::block(body, context.bindings, context.next_id, context.loop_depth);
@@ -341,16 +340,9 @@ pub(super) fn check_lifetimes(
     references: &std::collections::BTreeMap<String, Binding>,
     id: usize,
 ) -> Result<Option<LifetimeBody>, Diagnostic> {
-    if !scope.arena_used.get()
-        && !function.arena
-        && !function.parameters.iter().any(|p| {
-            contains(
-                scope
-                    .resolve_type_at(p.ty, p.location)
-                    .expect("parameter type was checked before lifetime analysis"),
-                scope,
-            )
-        })
+    // 記号的な型の本体は型検査を行い、寿命効果は具体化した本体から求める。
+    if scope.generic_check()
+        || (!function.type_parameters.is_empty() && scope.named.type_arguments.is_none())
     {
         return Ok(None);
     }

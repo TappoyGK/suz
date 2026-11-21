@@ -5,6 +5,7 @@
 //! 変換してから検査し、構文ごとに個別の寿命検査を書かない。式・文・失敗処理で分岐する
 //! match には `_` を使わず全種類を列挙する。
 mod boundaries;
+mod callables;
 mod solver;
 mod summaries;
 
@@ -39,6 +40,7 @@ type Leaves = Vec<(Vec<usize>, Node)>;
 /// 呼び出しのない関数の解析グラフを、全具体化が終わるまで保持しない。
 #[derive(Clone)]
 pub(crate) enum Body {
+    Input(Rc<callables::Input>),
     Pending(Rc<Analysis>),
     Resolved(Rc<summaries::Summary>),
 }
@@ -88,9 +90,9 @@ pub(crate) struct Analysis {
     returned: Shape,
     direct_calls: Vec<summaries::Call>,
     effect_calls: BTreeMap<usize, Location>,
+    effect_notes: BTreeMap<usize, BTreeSet<summaries::CallNote>>,
+    candidate_notes: BTreeMap<(usize, Location), BTreeSet<summaries::CallNote>>,
     effect_stores: BTreeMap<usize, summaries::StoreInfo>,
-    closures: Vec<Rc<Analysis>>,
-    borrowed: BTreeSet<usize>,
     objection: bool,
     // 字句上のobjection内で作ったStoreの添字。呼出し契約由来の制約は含めない。
     objections: BTreeSet<usize>,
@@ -98,9 +100,6 @@ pub(crate) struct Analysis {
     nonnull_values: BTreeSet<Node>,
     return_region: Option<usize>,
     recovery: Option<Shape>,
-    calls: Vec<boundaries::CallCheck>,
-    call_groups: Vec<boundaries::CallGroup>,
-    call_regions: BTreeMap<Node, usize>,
     // 各値が指しうる保存場所。実体の領域は参照変数の宣言位置から独立している。
     targets: Vec<BTreeSet<Reference>>,
     cells: BTreeMap<Node, Cell>,
@@ -120,17 +119,14 @@ impl Analysis {
             returned: Shape::new(),
             direct_calls: Vec::new(),
             effect_calls: BTreeMap::new(),
+            effect_notes: BTreeMap::new(),
+            candidate_notes: BTreeMap::new(),
             effect_stores: BTreeMap::new(),
-            closures: Vec::new(),
-            borrowed: BTreeSet::new(),
             objection: false,
             objections: BTreeSet::new(),
             nonnull_values: BTreeSet::new(),
             return_region: None,
             recovery: None,
-            calls: Vec::new(),
-            call_groups: Vec::new(),
-            call_regions: BTreeMap::new(),
             targets: vec![],
             cells: BTreeMap::new(),
             projections: BTreeMap::new(),
@@ -377,7 +373,6 @@ impl Analysis {
             }
             Value::Call {
                 arguments,
-                arena: is_arena,
                 location,
                 id,
             } => {
@@ -385,40 +380,52 @@ impl Analysis {
                     .iter()
                     .map(|argument| (argument.ty, self.expr(argument, region, arena)))
                     .collect();
-                if *is_arena {
-                    let receiver = if let Some(CheckedExpression {
-                        value:
-                            Value::Receiver {
-                                target,
-                                mutable: true,
-                            },
-                        ..
-                    }) = arguments.first()
-                    {
-                        Some(self.place(target, region, arena))
-                    } else {
-                        None
-                    };
-                    let result = self.shape(value.ty);
-                    self.direct_calls.push(summaries::Call {
-                        id: *id,
-                        arguments: shapes
-                            .into_iter()
-                            .map(|(ty, shape)| (ty, shape.into_iter().collect()))
-                            .collect(),
-                        result_ty: value.ty,
-                        result: result
-                            .iter()
-                            .map(|(path, &node)| (path.clone(), node))
-                            .collect(),
-                        receiver,
-                        region: arena.expect("checked arena call"),
-                        location: *location,
-                    });
-                    result
+                let receiver = if let Some(CheckedExpression {
+                    value:
+                        Value::Receiver {
+                            target,
+                            mutable: true,
+                        },
+                    ..
+                }) = arguments.first()
+                {
+                    Some(self.place(target, region, arena))
                 } else {
-                    Shape::new()
-                }
+                    None
+                };
+                let result = self.shape(value.ty);
+                let captures = arguments
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, arg)| match &arg.value {
+                        Value::Receiver {
+                            target,
+                            mutable: true,
+                        } => Some((i, self.place(target, region, arena))),
+                        _ => None,
+                    })
+                    .collect();
+                self.direct_calls.push(summaries::Call {
+                    id: *id,
+                    arguments: shapes
+                        .into_iter()
+                        .map(|(ty, shape)| (ty, shape.into_iter().collect()))
+                        .collect(),
+                    result: result
+                        .iter()
+                        .map(|(path, &node)| (path.clone(), node))
+                        .collect(),
+                    receiver,
+                    captures,
+                    region: arena.expect("checked arena call"),
+                    location: *location,
+                    notes: self
+                        .candidate_notes
+                        .get(&(*id, *location))
+                        .cloned()
+                        .unwrap_or_default(),
+                });
+                result
             }
             Value::Invoke {
                 target, arguments, ..
@@ -455,10 +462,11 @@ impl Analysis {
                 Shape::new()
             }
             Value::Closure(closure) => {
-                if let Some(Body::Pending(body)) = &closure.function.lifetime {
-                    self.closures.push(body.clone());
+                // 本体は呼び出し文脈ごとに別の要約へ移した。ここでは捕捉値の評価だけを行う。
+                for capture in &closure.captures {
+                    self.expr(&capture.value, region, arena);
                 }
-                Shape::new() // 呼び出し専用の関数値には、まだ通常関数の借用契約を適用する。
+                Shape::new()
             }
             Value::Receiver { target, .. } => self.expr(target, region, arena),
             Value::Cast(v)
@@ -488,11 +496,31 @@ impl Analysis {
                 self.expr(right, region, arena);
                 Shape::new()
             }
-            // 比較メソッドはarena fnではなくboolを返す通常関数。引数の評価以外の
-            // 寿命への効果はないので、組み込み比較と同じく各オペランドを一度だけ訪問する。
-            Value::Comparison { operands, .. } => {
-                for operand in operands {
-                    self.expr(operand, region, arena);
+            Value::Comparison {
+                operands, methods, ..
+            } => {
+                let values: Vec<_> = operands
+                    .iter()
+                    .map(|operand| {
+                        (
+                            operand.ty,
+                            self.expr(operand, region, arena).into_iter().collect(),
+                        )
+                    })
+                    .collect();
+                for (index, method) in methods.iter().enumerate() {
+                    if let Some(id) = method {
+                        self.direct_calls.push(summaries::Call {
+                            id: *id,
+                            arguments: vec![values[index].clone(), values[index + 1].clone()],
+                            result: Vec::new(),
+                            receiver: None,
+                            captures: BTreeMap::new(),
+                            region: arena.expect("functions have a current arena"),
+                            location: self.regions[region].end,
+                            notes: BTreeSet::new(),
+                        });
+                    }
                 }
                 Shape::new()
             }
@@ -559,8 +587,9 @@ impl Analysis {
         }
     }
     fn call_location(call: &CheckedExpression) -> Location {
-        match call.value {
-            Value::Call { location, .. } | Value::Invoke { location, .. } => location,
+        match &call.value {
+            Value::Call { location, .. } | Value::Invoke { location, .. } => *location,
+            Value::If { otherwise, .. } => Self::call_location(otherwise),
             _ => unreachable!("checked call handler"),
         }
     }
@@ -791,9 +820,7 @@ impl Analysis {
     }
     fn outlives(&self, source: usize, mut destination: usize) -> bool {
         // 借用先は呼び出し中ずっと有効。ただし借用した実体への参照保存は別途禁止する。
-        if self.borrowed.contains(&source) {
-            return !self.borrowed.contains(&destination);
-        }
+
         loop {
             if source == destination {
                 return true;
@@ -838,6 +865,14 @@ impl Analysis {
         result
     }
     fn call_diagnostic(&self, index: usize, mut error: Diagnostic) -> Diagnostic {
+        if let Some(notes) = self.effect_notes.get(&index) {
+            for note in notes {
+                error.related.push(note.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("arena.call-diagnostic", "{}", note.message),
+                ));
+            }
+        }
         if let Some(location) = self.effect_calls.get(&index) {
             error.related.push(location.error(
                 ErrorKind::InvalidSource,
@@ -854,13 +889,10 @@ impl Analysis {
         // 全参照が呼び出し元のArenaに属し、より短い利用期間もなければ、
         // 本体内の保存先より長命である。局所変数のアドレスや内側のArena、
         // 独立した借用先を含む場合は通常の検査に回す。
-        self.borrowed.is_empty()
-            && self
-                .regions
-                .iter()
-                .skip(1)
-                .all(|region| region.parent.is_some())
-            && self.calls.iter().all(|call| call.region == 0)
+        self.regions
+            .iter()
+            .skip(1)
+            .all(|region| region.parent.is_some())
             && self.direct_calls.iter().all(|call| call.region == 0)
             && self.targets.iter().flatten().all(|source| {
                 self.cells[&source.target].region == 0
@@ -872,34 +904,11 @@ impl Analysis {
         if self.root_references_only() {
             return Ok(());
         }
-        self.validate_calls()?;
         for (index, constraint) in constraints.iter().enumerate() {
             let Constraint::Store(place, src, location) = constraint else {
                 continue;
             };
             let destinations = self.destinations(place);
-            // 借用先への保存は禁止。objectionの有無や候補の組み合わせで解除しない。
-            for &destination in &destinations {
-                if self.borrowed.contains(&self.cells[&destination].region) {
-                    let cell = &self.cells[&destination];
-                    let mut error = location.error(
-                        ErrorKind::InvalidSource,
-                        crate::diagnostic!(
-                            "arena.parameter",
-                            "cannot store a pointer into a borrowed caller object{}",
-                            self.member_path(destination)
-                        ),
-                    );
-                    error.related.push(cell.location.error(
-                        ErrorKind::InvalidSource,
-                        crate::diagnostic!(
-                            "arena.parameter-regions",
-                            "this parameter is borrowed only for the duration of the call"
-                        ),
-                    ));
-                    return Err(self.call_diagnostic(index, error));
-                }
-            }
             // 実行される保存について、非nullで全候補対が違反する場合だけを証明済みとする。
             // 候補の空集合は証明に使わない。集合が変わらない状態で全保存先をまとめて判定する。
             let proven = self.nonnull_values.contains(src)
@@ -1003,24 +1012,22 @@ pub(super) fn check(
     let mut analysis = Analysis::new(scope);
     analysis.function_id = id;
     let (region, arena) = analysis.parameters(function, references, scope);
-    analysis.statements(statements, region, arena);
-    if scope.generic_check()
-        || (!function.type_parameters.is_empty() && scope.named.type_arguments.is_none())
-    {
-        // 記号的な汎用本体は具体化一覧に入らないため、ここで従来契約を検査する。
-        analysis.legacy_calls();
-        analysis.solve()?;
-        analysis.resolved = true;
-    } else if analysis.direct_calls.is_empty() && analysis.closures.is_empty() {
-        let summary = if let Some(summary) = analysis.forwarded_summary(&BTreeMap::new()) {
-            summary
-        } else {
-            analysis.solve()?;
-            analysis.summary()
-        };
-        return Ok(Body::Resolved(Rc::new(summary)));
-    }
-    Ok(Body::Pending(Rc::new(analysis)))
+    Ok(Body::Input(Rc::new(callables::Input {
+        base: analysis,
+        region,
+        arena,
+        parameters: function
+            .parameters
+            .iter()
+            .map(|p| scope.resolve_type_at(p.ty, p.location).unwrap())
+            .collect(),
+        name: function.name.clone(),
+        location: function.location,
+        result: scope.result,
+        errors: function.errors.clone(),
+        function_types: scope.function_types.clone(),
+        statements: statements.to_vec(),
+    })))
 }
 
-pub(in crate::check) use summaries::check_program;
+pub(in crate::check) use callables::check_program;

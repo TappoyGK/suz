@@ -307,7 +307,6 @@ pub(crate) enum Value {
     },
     Void,
     Call {
-        arena: bool,
         location: Location,
         id: usize,
         arguments: Vec<CheckedExpression>,

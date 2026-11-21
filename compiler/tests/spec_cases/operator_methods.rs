@@ -85,11 +85,6 @@ fn operator_methods_reject_invalid_definitions_and_calls() {
             "",
             "operator.method",
         ),
-        (
-            "arena fn Num.+(n: Num) -> Num { return n }",
-            "",
-            "operator.method",
-        ),
         ("fn Num.+(n: Num) -> void {}", "", "operator.method"),
         (
             "fn Num.<(n: Num) -> Num { return n }",
@@ -377,11 +372,6 @@ fn unary_minus_methods_reject_invalid_definitions_and_call_contexts() {
         ("fn Num.-() -> void {}", "", "operator.method"),
         ("fn Num#-() -> Num { return self }", "", "operator.method"),
         (
-            "arena fn Num.-() -> Num { return self }",
-            "",
-            "operator.method",
-        ),
-        (
             "fn Num.-() -> Num or Err { return self }",
             "",
             "operator.method",
@@ -430,8 +420,7 @@ fn unary_minus_methods_reject_invalid_definitions_and_call_contexts() {
         );
         assert_eq!(error.rule(), rule, "{source}\n{error}");
     }
-    let error = suz::compile(b"struct Ref { p: ptr i32 }\nfn Ref.-() -> ptr i32 { return self.p }\nfn main() -> u8 { return 0 }").unwrap_err();
-    assert_eq!(error.rule(), "arena.parameter", "{error}");
+    suz::compile(b"struct Ref { p: ptr i32 }\nfn Ref.-() -> ptr i32 { return self.p }\nfn main() -> u8 { return 0 }").unwrap();
 }
 
 #[test]
@@ -504,7 +493,7 @@ fn compound_operator_methods_save_destination_and_read_before_rhs() {
 struct Num { v: i32 }
 struct Body { pos: Num }
 fn Num.+(n: Num) -> Num { return Num { v: self.v + n.v } }
-arena fn select(p: ptr Body, count: ptr i32) -> ptr Body {
+fn select(p: ptr Body, count: ptr i32) -> ptr Body {
     #count = .count * 10 + 1
     return p
 }

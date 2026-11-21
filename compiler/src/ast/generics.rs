@@ -8,15 +8,11 @@ pub(crate) struct TypeParameter {
     pub location: Location,
 }
 
-/// 要求する演算子、または読み取り・書き換えとArenaの区別を持つメソッド。
+/// 要求する演算子、または読み取り・書き換えの区別を持つメソッド。
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum RequiredOperation {
     Operator(&'static str),
-    Method {
-        name: String,
-        mutable: bool,
-        arena: bool,
-    },
+    Method { name: String, mutable: bool },
 }
 
 /// 型引数が満たすべき操作の署名。対象の型引数は宣言内の添字で示す。

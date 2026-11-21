@@ -22,11 +22,8 @@ pub(in crate::check::arena::lifetimes) fn representatives(
             }
             _ => continue,
         };
-        // 領域で候補を絞る辺は等値関係にならないので、閉路の判定から除く。
-        if !analysis.call_regions.contains_key(&dst) {
-            outgoing[src].push(dst);
-            incoming[dst].push(src);
-        }
+        outgoing[src].push(dst);
+        incoming[dst].push(src);
     }
     // 読み出しや一時値に入力が1つしかなければ、その値は入力と等しい。
     // 逆辺を足して同じ成分へまとめる。保存場所は間接書込みで変わるので対象外。
@@ -36,14 +33,11 @@ pub(in crate::check::arena::lifetimes) fn representatives(
         if !dynamic[dst]
             && (!analysis.cells.contains_key(&dst)
                 || analysis.returned.values().any(|&node| node == dst))
-            && !analysis.call_regions.contains_key(&dst)
             && analysis.targets[dst].is_empty()
             && incoming[dst].len() == 1
         {
             let src = incoming[dst][0];
-            if !analysis.call_regions.contains_key(&src) {
-                outgoing[dst].push(src);
-            }
+            outgoing[dst].push(src);
             // 逆辺を追加しながら入力数を判定すると順序依存になるので、ここではoutgoingだけを変える。
         }
     }

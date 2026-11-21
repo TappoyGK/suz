@@ -363,7 +363,6 @@ fn arena_rejects_escaping_references_through_aliases_and_copies() {
 #[test]
 fn arena_rejects_invalid_pointer_operations_and_function_boundaries() {
     for (body, rule) in [
-        ("fix ptr p = new 1", "arena.new"),
         ("fix ptr p = null", "arena.null"),
         ("arena { fix p = new 1 }", "arena.ptr-decl"),
         ("fix ptr p = 1", "arena.ptr-decl"),
@@ -386,7 +385,7 @@ fn arena_rejects_invalid_pointer_operations_and_function_boundaries() {
     }
     let source = "fn make() -> ptr? i32 { arena { return new 1 } }\nfn main() -> u8 { return 0 }";
     let error = suz::compile(source.as_bytes()).unwrap_err();
-    assert!(error.to_string().contains("[arena.parameter]"), "{error}");
+    assert!(error.to_string().contains("[arena.store]"), "{error}");
 }
 
 #[test]
@@ -397,7 +396,7 @@ fn arena_rewinds_on_return_failure_recovery_and_loop_exits() {
         &source,
         r#"
 error Err { Bad }
-arena fn recursive(n: i64) -> ptr? i64 {
+fn recursive(n: i64) -> ptr? i64 {
     fix ptr p = new n
     if n == 0 { return p }
     fix ptr q = recursive(n -% 1)
@@ -574,7 +573,6 @@ fn arena_rejects_pointer_conversions_captures_and_aggregate_operations() {
         "fn main() -> u8 { fix ptr p: ptr? void = null\nreturn 0 }",
         "fix Ptr: ptr? i32 = null\nfn main() -> u8 { return 0 }",
         "extern \"x.h\" { fn take(p: ptr? i32) -> void }\nfn main() -> u8 { return 0 }",
-        "fnshape Read() -> i32\nfn invoke(f: fn Read) -> i32 { return f() }\nfn main() -> u8 { arena { invoke(fn []() -> i32 { fix ptr p = new 1\nreturn 0 }) }\nreturn 0 }",
     ] {
         assert!(suz::compile(source.as_bytes()).is_err(), "{source}");
     }

@@ -26,11 +26,12 @@ fn call(id: usize, arguments: Vec<(Type, Node)>, result: Node, region: usize) ->
             .into_iter()
             .map(|(ty, value)| (ty, vec![(vec![], value)]))
             .collect(),
-        result_ty: Type::Bool.pointer(),
         result: vec![(vec![], result)],
         receiver: None,
+        captures: BTreeMap::new(),
         region,
         location: HERE,
+        notes: BTreeSet::new(),
     }
 }
 fn identity() -> (BTreeMap<usize, Rc<Analysis>>, BTreeMap<usize, Rc<Summary>>) {
@@ -471,13 +472,12 @@ fn recursive_ring(count: usize, writes_input: bool) -> BTreeMap<usize, Rc<Analys
                 .push(Constraint::Store(Place::Indirect(p, vec![1]), q, HERE));
         }
         let recursive = f.node();
-        let mut invocation = call(
+        let invocation = call(
             (id + 1) % count,
             vec![(ty.pointer(), fresh), (ty.pointer(), p)],
             recursive,
             0,
         );
-        invocation.result_ty = ty.pointer();
         f.direct_calls.push(invocation);
         let result = f.node();
         f.constraints.extend([
@@ -527,13 +527,12 @@ fn recursive_allocation_abstraction_keeps_stores_into_older_arguments_visible() 
     let (older, _) = pointer(&mut caller, 0, ty);
     let (younger, _) = pointer(&mut caller, inner, ty);
     let result = caller.node();
-    let mut invocation = call(
+    let invocation = call(
         0,
         vec![(ty.pointer(), older), (ty.pointer(), younger)],
         result,
         inner,
     );
-    invocation.result_ty = ty.pointer();
     caller.direct_calls.push(invocation);
     let mut checked = caller.with_summaries(&summaries).unwrap();
     let constraints = checked.constraints.clone();
