@@ -67,7 +67,10 @@ pub(super) fn value(
         {
             return Ok(CheckedExpression {
                 ty: Type::StaticFunction(id),
-                value: Value::Function(signature.id),
+                value: Value::Function {
+                    id: signature.id,
+                    location: expr.location,
+                },
             });
         }
     }
@@ -166,7 +169,10 @@ pub(super) fn value(
     };
     Ok(CheckedExpression {
         ty,
-        value: Value::Function(id),
+        value: Value::Function {
+            id,
+            location: expr.location,
+        },
     })
 }
 

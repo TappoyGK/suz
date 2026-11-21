@@ -86,6 +86,7 @@ enum Constraint {
 pub(crate) struct Analysis {
     structs: Rc<crate::check::type_parameters::structs::Structs>,
     function_id: usize,
+    warn_allocations: bool,
     resolved: bool,
     objects: BTreeMap<Node, summaries::Object>,
     candidate_allocations: BTreeMap<(Location, usize, Type), Node>,
@@ -124,6 +125,7 @@ impl Analysis {
         Self {
             structs,
             function_id: 0,
+            warn_allocations: true,
             resolved: false,
             objects: BTreeMap::new(),
             candidate_allocations: BTreeMap::new(),
@@ -303,14 +305,16 @@ impl Analysis {
                 let cell = self.cell(arena.expect("new has a lexical arena"), *location, ty);
                 self.objects
                     .insert(cell, summaries::Object::Allocation(self.function_id, cell));
-                self.allocations.insert(
-                    cell,
-                    vec![accumulation::Allocation {
-                        site: *location,
-                        trace: accumulation::Trace::allocation(*location),
-                        loop_region: self.active_loop,
-                    }],
-                );
+                if self.warn_allocations {
+                    self.allocations.insert(
+                        cell,
+                        vec![accumulation::Allocation {
+                            site: *location,
+                            trace: accumulation::Trace::allocation(*location),
+                            loop_region: self.active_loop,
+                        }],
+                    );
+                }
                 self.write(Place::Direct(cell), initial, *location);
                 let n = self.node();
                 self.targets[n].insert(Reference::object(cell));
@@ -593,7 +597,7 @@ impl Analysis {
             | Value::GenericNumericLiteral { .. }
             | Value::Integer { .. }
             | Value::Float(_)
-            | Value::Function(_)
+            | Value::Function { .. }
             | Value::Bool(_)
             | Value::Text { .. }
             | Value::Void => Shape::new(),

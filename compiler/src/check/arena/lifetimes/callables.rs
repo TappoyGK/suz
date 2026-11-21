@@ -24,10 +24,11 @@ pub(crate) struct Input {
 
 impl Input {
     // 全本体の型検査が終わってポインタの使用が分かるまで、制約やIRの複製を作らない。
-    fn with_body(&self, statements: &[CheckedStatement]) -> Rc<Self> {
+    fn with_body(&self, statements: &[CheckedStatement], warn_allocations: bool) -> Rc<Self> {
         let mut input = self.clone();
         let mut analysis = Analysis::with_structs(input.structs.clone());
         analysis.function_id = input.function_id;
+        analysis.warn_allocations = warn_allocations;
         (input.region, input.arena) = analysis.parameters(&input.parameter_metadata, input.end);
         input.base = Some(Rc::new(analysis));
         input.statements = statements.to_vec();
@@ -101,6 +102,7 @@ struct Context {
 }
 #[derive(Default)]
 struct Program {
+    warn_allocations: bool,
     templates: BTreeMap<usize, Rc<Input>>,
     closures: BTreeMap<usize, usize>,
     contexts: BTreeMap<usize, Context>,
@@ -226,7 +228,8 @@ impl Program {
         let id = self.next;
         self.next += 1;
         self.closures.insert(key, id);
-        self.templates.insert(id, input.with_body(statements));
+        self.templates
+            .insert(id, input.with_body(statements, self.warn_allocations));
         id
     }
 }
@@ -238,7 +241,6 @@ struct Walk<'a> {
     locals: BTreeMap<usize, Values>,
     returned: Values,
     recoveries: Vec<Values>,
-    site: Location,
     next_capture: usize,
     function_types: Rc<std::cell::RefCell<Vec<crate::ast::FunctionType>>>,
 }
@@ -363,9 +365,9 @@ impl Walk<'_> {
     fn expr(&mut self, expr: &mut CheckedExpression) -> Values {
         let ty = expr.ty;
         let mut values = match &mut expr.value {
-            Value::Function(id) => single(Bound {
+            Value::Function { id, location } => single(Bound {
                 function: *id,
-                site: self.site,
+                site: *location,
                 captures: Vec::new(),
             }),
             Value::Local(id) => self.locals.get(id).cloned().unwrap_or_default(),
@@ -393,7 +395,7 @@ impl Walk<'_> {
                     .collect();
                 single(Bound {
                     function,
-                    site: self.site,
+                    site: input.location,
                     captures,
                 })
             }
@@ -508,9 +510,7 @@ impl Walk<'_> {
                                 },
                                 summaries::CallNote {
                                     location: bound.site,
-                                    message:
-                                        "this initialization or assignment supplies the call target"
-                                            .into(),
+                                    message: "this function value supplies the call target".into(),
                                 },
                             ]);
                     }
@@ -689,13 +689,6 @@ impl Walk<'_> {
     }
     fn statements(&mut self, statements: &mut [CheckedStatement]) {
         for statement in statements {
-            match &*statement {
-                CheckedStatement::Binding { location, .. }
-                | CheckedStatement::Assign { location, .. }
-                | CheckedStatement::Return { location, .. }
-                | CheckedStatement::Store { location, .. } => self.site = *location,
-                _ => {}
-            }
             match statement {
                 CheckedStatement::Binding {
                     id, initializer, ..
@@ -848,11 +841,13 @@ pub(in crate::check) fn check_program(
     functions: &mut [CheckedFunction],
     external: std::ops::Range<usize>,
     externs: &[crate::ast::ExternFunction],
+    warn_allocations: bool,
 ) -> Result<Vec<(Location, String, Vec<Diagnostic>)>, Diagnostic> {
     if functions.iter().all(|function| function.lifetime.is_none()) {
         return Ok(Vec::new());
     }
     let mut program = Program {
+        warn_allocations,
         next: functions.iter().map(|f| f.id).max().unwrap_or(0) + 1,
         ..Program::default()
     };
@@ -867,6 +862,7 @@ pub(in crate::check) fn check_program(
             id,
             lifetime: externs
                 .get(id - external_start)
+                .filter(|_| warn_allocations)
                 .map(|function| Body::Resolved(Rc::new(summaries::Summary::external(function)))),
             mutable_receiver: false,
             parameters: vec![],
@@ -878,7 +874,7 @@ pub(in crate::check) fn check_program(
     for function in functions.iter_mut() {
         match function.lifetime.take() {
             Some(Body::Input(input)) => {
-                let input = input.with_body(&function.statements);
+                let input = input.with_body(&function.statements, warn_allocations);
                 if !input.callables {
                     let mut analysis = input.base.as_deref().expect("input has its body").clone();
                     analysis.statements(&input.statements, input.region, input.arena);
@@ -928,7 +924,6 @@ pub(in crate::check) fn check_program(
             locals: BTreeMap::new(),
             returned: Values::new(),
             recoveries: Vec::new(),
-            site: input.location,
             next_capture: input.parameters.len(),
             function_types: input.function_types.clone(),
         };

@@ -217,9 +217,13 @@ fn check_statement(
                 pattern_warnings: patterns.warnings,
             });
         }
-        Statement::For { .. } => check_for(statement, context)?,
+        Statement::For { .. } => {
+            context.bindings.program_loops_used.set(true);
+            check_for(statement, context)?;
+        }
 
         Statement::Loop { condition, body } => {
+            context.bindings.program_loops_used.set(true);
             let condition = condition
                 .as_ref()
                 .map(|expr| {

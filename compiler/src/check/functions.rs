@@ -231,6 +231,7 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
             &mut functions,
             program.functions.len()..program.functions.len() + program.externs.len(),
             &program.externs,
+            globals.program_loops_used.get(),
         )?
     } else {
         for function in &mut functions {

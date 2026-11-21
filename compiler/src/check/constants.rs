@@ -462,7 +462,7 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
     }
     let value = match expr.ty {
         Type::StaticFunction(_) | Type::Function(_) => match expr.value {
-            Value::Function(_) => expr.value.clone(),
+            Value::Function { .. } => expr.value.clone(),
             _ => return None,
         },
         Type::Pointer { .. }

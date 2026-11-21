@@ -9,6 +9,7 @@ pub(super) struct Trace(Rc<TraceStep>);
 #[derive(Debug)]
 struct TraceStep {
     origin: Location,
+    depth: usize,
     site: Location,
     notes: Vec<summaries::CallNote>,
     next: Option<Trace>,
@@ -34,6 +35,7 @@ impl Trace {
     pub fn allocation(site: Location) -> Self {
         Self(Rc::new(TraceStep {
             origin: site,
+            depth: 1,
             site,
             notes: vec![],
             next: None,
@@ -42,6 +44,7 @@ impl Trace {
     pub fn through(&self, call: &summaries::Call) -> Self {
         Self(Rc::new(TraceStep {
             origin: self.0.origin,
+            depth: self.0.depth + 1,
             site: call.location,
             notes: call.notes.iter().cloned().collect(),
             next: Some(self.clone()),
@@ -52,27 +55,45 @@ impl Trace {
     }
     fn notes(&self) -> Vec<Diagnostic> {
         let mut notes = Vec::new();
-        let mut seen = BTreeSet::new();
+        // 注記の組み立ても表示も、警告数×経路の全長には比例させない。
+        const MAX_STEPS: usize = 16;
+        let mut shown = 0;
         let mut current = Some(self);
         while let Some(trace) = current {
             let step = &trace.0;
-            if !seen.insert(step.site) {
+            if shown == MAX_STEPS && step.next.is_some() {
+                notes.push(step.site.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "arena.call-diagnostic",
+                        "{} intermediate allocation calls omitted",
+                        step.depth.saturating_sub(1)
+                    ),
+                ));
+                notes.push(step.origin.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("arena.call-diagnostic", "the object is allocated here"),
+                ));
                 break;
             }
-            notes.push(
-                step.site.error(
-                    ErrorKind::InvalidSource,
-                    crate::DiagnosticMessage {
-                        rule: "arena.call-diagnostic",
-                        text: if step.next.is_some() {
-                            "this call leads to the allocation"
-                        } else {
-                            "the object is allocated here"
-                        }
-                        .into(),
-                    },
-                ),
-            );
+            shown += 1;
+            // 先頭の位置は警告本体に表示済み。関数値の候補はこの後で残す。
+            if shown > 1 {
+                notes.push(
+                    step.site.error(
+                        ErrorKind::InvalidSource,
+                        crate::DiagnosticMessage {
+                            rule: "arena.call-diagnostic",
+                            text: if step.next.is_some() {
+                                "this call leads to the allocation"
+                            } else {
+                                "the object is allocated here"
+                            }
+                            .into(),
+                        },
+                    ),
+                );
+            }
             for note in &step.notes {
                 notes.push(note.location.error(
                     ErrorKind::InvalidSource,

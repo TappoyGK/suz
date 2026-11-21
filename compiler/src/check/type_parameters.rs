@@ -432,7 +432,10 @@ pub(super) fn function_value(
     };
     Ok(CheckedExpression {
         ty,
-        value: Value::Function(id),
+        value: Value::Function {
+            id,
+            location: expr.location,
+        },
     })
 }
 

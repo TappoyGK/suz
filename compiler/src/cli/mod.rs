@@ -99,7 +99,8 @@ pub fn run() -> Result<Outcome> {
                 .map_err(diagnostic)?;
                 (Some(compiled.c), compiled.warnings)
             };
-            let mut stderr = io::stderr().lock();
+            // 注記を含む大量の警告を、書式の断片ごとのシステム呼び出しにしない。
+            let mut stderr = io::BufWriter::new(io::stderr().lock());
             for warning in warnings {
                 writeln!(
                     stderr,
@@ -117,6 +118,7 @@ pub fn run() -> Result<Outcome> {
                         .map_err(|e| Failure::tool(2, "tool.messages", e))?;
                 }
             }
+            stderr.flush().map_err(|e| Failure::tool(2, "tool.messages", e))?;
             drop(stderr);
             if let Some(c) = c {
                 if let Some(build) = build {

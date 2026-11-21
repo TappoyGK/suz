@@ -665,19 +665,8 @@ impl Analysis {
         let representative = solver::representatives(&self, &self.constraints);
         // 同じ保存場所へ結果を渡す確保は、警告に必要な区別を失わずに共有できる。
         // 戻り値と一時変数は別の保存場所なので、片方だけ残す場合は合流しない。
-        let mut destinations: BTreeMap<Node, Option<Node>> = BTreeMap::new();
-        for constraint in &self.constraints {
-            if let Constraint::Store(Place::Direct(destination), source, _) = constraint {
-                destinations
-                    .entry(*source)
-                    .and_modify(|known| {
-                        if *known != Some(*destination) {
-                            *known = None;
-                        }
-                    })
-                    .or_insert(Some(*destination));
-            }
-        }
+        let original_constraints = self.constraints.len();
+        let mut destinations = None;
         let calls = std::mem::take(&mut self.direct_calls);
         let mut analysis = self;
         let mut allocations_by_call: Vec<Vec<(Node, accumulation::Trace)>> = Vec::new();
@@ -698,6 +687,23 @@ impl Analysis {
             // 同じ変数を何度も渡すコードで、密な到達グラフを呼び出し回数分作らない。
             let mut key = call.key(&representative);
             if !summary.allocations.is_empty() {
+                let destinations = destinations.get_or_insert_with(|| {
+                    let mut destinations: BTreeMap<Node, Option<Node>> = BTreeMap::new();
+                    for constraint in analysis.constraints.iter().take(original_constraints) {
+                        if let Constraint::Store(Place::Direct(destination), source, _) = constraint
+                        {
+                            destinations
+                                .entry(*source)
+                                .and_modify(|known| {
+                                    if *known != Some(*destination) {
+                                        *known = None;
+                                    }
+                                })
+                                .or_insert(Some(*destination));
+                        }
+                    }
+                    destinations
+                });
                 let places: Option<Vec<_>> = call
                     .result
                     .iter()

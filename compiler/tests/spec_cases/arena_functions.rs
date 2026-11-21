@@ -688,7 +688,7 @@ fn apply(f: static fn Link, a: ptr Node, b: ptr Node) -> void { f(a, b) }
             error
                 .related
                 .iter()
-                .any(|note| note.message().contains("initialization or assignment")),
+                .any(|note| note.message().contains("supplies the call target")),
             "{error}"
         );
     }

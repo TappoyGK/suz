@@ -42,6 +42,16 @@ fn iteration_lifetime_is_distinct_from_allocation_arena() {
 fn summaries_separate_temporary_allocations_from_retained_results() {
     for (extra, body, expected) in [
         (
+            "fn work[T](value: T) -> void { loop { fix ptr p = new value\nbreak } }",
+            "work(1 as i32)",
+            1,
+        ),
+        (
+            "fnshape Act() -> void\nfn run(f: fn Act) -> void { f() }",
+            "run(fn []() -> void { loop { fix ptr p = make()\nbreak } })",
+            1,
+        ),
+        (
             "error Err { Failed }\nfn work() -> void or Err { fix ptr p = make() }\nfn wrap() -> void { work() or ignore [failure is unused] }",
             "loop { wrap()\nbreak }",
             1,
@@ -253,4 +263,58 @@ fn cli_prints_allocation_route_notes() {
             && stderr.contains("route.suz:1:"),
         "{stderr}"
     );
+}
+
+#[test]
+fn direct_function_arguments_point_to_the_function_value_expression() {
+    let source = "fn work() -> void { fix ptr p = new (1 as i32) }\nfnshape Act() -> void\nfn run(f: fn Act) -> void { f() }\nfn main() -> u8 {\nfor i in 0..<3 { run(fn work) }\nreturn 0 }";
+    let found = suz::check_source(source.as_bytes(), suz::ArithmeticMode::Default).unwrap();
+    let note = found[0]
+        .related
+        .iter()
+        .find(|note| note.message().contains("supplies the call target"))
+        .unwrap();
+    assert_eq!(
+        (note.line, note.column),
+        (
+            5,
+            source.lines().nth(4).unwrap().find("fn work").unwrap() + 1
+        )
+    );
+}
+
+#[test]
+fn long_allocation_routes_bound_each_warning_and_keep_the_allocation_site() {
+    for depth in [16, 17, 256] {
+        let mut source = String::from("fn c0x() -> void { fix ptr p = new (1 as i32) }\n");
+        for i in 1..depth {
+            source.push_str(&format!("fn c{i}x() -> void {{ c{}x() }}\n", i - 1));
+        }
+        source.push_str("fn main() -> u8 { loop {\n");
+        for _ in 0..32 {
+            source.push_str(&format!("c{}x()\n", depth - 1));
+        }
+        source.push_str("break }\nreturn 0 }");
+        let found = suz::check_source(source.as_bytes(), suz::ArithmeticMode::Default).unwrap();
+        assert_eq!(found.len(), 32);
+        for warning in found {
+            assert!(
+                warning.related.len() <= 18,
+                "depth={depth}: {:?}",
+                warning.related
+            );
+            assert_eq!(warning.related.last().unwrap().line, 1);
+            let omitted = warning
+                .related
+                .iter()
+                .find(|note| note.message().contains("calls omitted"));
+            assert_eq!(omitted.is_some(), depth > 16);
+            if let Some(note) = omitted {
+                assert!(
+                    note.message()
+                        .contains(&format!("{} intermediate", depth - 16))
+                );
+            }
+        }
+    }
 }

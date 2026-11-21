@@ -259,7 +259,10 @@ pub(crate) enum Value {
         call: Box<CheckedExpression>,
         handler: Box<CallHandler>,
     },
-    Function(usize),
+    Function {
+        id: usize,
+        location: Location,
+    },
     FunctionBorrow(Box<CheckedExpression>),
     Closure(Box<CheckedClosure>),
     Invoke {
@@ -453,7 +456,7 @@ macro_rules! constant_children_visitor {
                     return handler(h, visit);
                 }
                 Self::Null | Self::CIntegerLiteral { .. } | Self::GenericNumericLiteral { .. } | Self::Integer { .. } | Self::Float(_)
-                | Self::Function(_) | Self::Bool(_) | Self::Text { .. } => {}
+                | Self::Function { .. } | Self::Bool(_) | Self::Text { .. } => {}
                 Self::Panic { .. } | Self::HandledCall { .. } | Self::Closure(_) | Self::Local(_) | Self::Void | Self::Invoke { .. } | Self::Call { .. } | Self::Block { .. }
                 | Self::Match { .. } | Self::If { .. } | Self::CastReturn { .. } => return false,
             }
