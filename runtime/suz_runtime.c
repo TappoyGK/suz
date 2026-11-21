@@ -144,6 +144,11 @@ static void lock_output(void) {
     while (atomic_flag_test_and_set_explicit(&output_lock, memory_order_acquire)) {}
 }
 
+void suz_log_report_begin(void) {
+    lock_output();
+    output_level = SUZ_LOG_INFO;
+}
+
 void suz_log_begin(suz_log_level level, const char *source, size_t line) {
     lock_output();
     output_level = level;

@@ -178,6 +178,7 @@ fn generated_bool_values_preserve_negation_and_copies() {
                 crate::ArenaOptions::default(),
                 crate::LogLevel::default(),
                 false,
+                false,
             ),
         )
         .unwrap();
@@ -363,6 +364,7 @@ return result != {expected} || trace != {trace};
                 crate::TextPoolLimit::default(),
                 crate::ArenaOptions::default(),
                 crate::LogLevel::default(),
+                false,
                 false
             )
         );

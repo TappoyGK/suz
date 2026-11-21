@@ -43,6 +43,7 @@ pub struct Options {
     pub force: bool,
     pub log_allow: bool,
     pub log_ignore: bool,
+    pub log_arena: bool,
     pub log_level: suz::LogLevel,
     pub mode: suz::ArithmeticMode,
     pub text_pool_limit: suz::TextPoolLimit,
@@ -89,6 +90,8 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
     let mut force = false;
     let mut log_allow = false;
     let mut log_ignore = false;
+    let mut log_arena = false;
+    let mut arena_format = None;
     let mut log_level = None;
     let mut help = false;
     let mut paths_only = false;
@@ -112,6 +115,42 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
                 }
                 Some("--") => {
                     paths_only = true;
+                    continue;
+                }
+                Some("--log-arena") if command != Command::Check => {
+                    if log_arena {
+                        return Err(Failure::tool(
+                            2,
+                            "tool.log-arena",
+                            "duplicate --log-arena option",
+                        ));
+                    }
+                    log_arena = true;
+                    continue;
+                }
+                Some("--log-arena-format") if command != Command::Check => {
+                    if arena_format.is_some() {
+                        return Err(Failure::tool(
+                            2,
+                            "tool.log-arena",
+                            "duplicate --log-arena-format option",
+                        ));
+                    }
+                    let value = args.next().ok_or_else(|| {
+                        Failure::tool(
+                            2,
+                            "tool.log-arena",
+                            "expected FORMAT after --log-arena-format",
+                        )
+                    })?;
+                    if value != "summary" {
+                        return Err(Failure::tool(
+                            2,
+                            "tool.log-arena",
+                            "unsupported arena report format",
+                        ));
+                    }
+                    arena_format = Some(value);
                     continue;
                 }
                 Some("--log-ignore") => {
@@ -242,6 +281,13 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
     if help {
         return Ok(Action::Help(Some(command)));
     }
+    if arena_format.is_some() && !log_arena {
+        return Err(Failure::tool(
+            2,
+            "tool.log-arena",
+            "--log-arena-format requires --log-arena",
+        ));
+    }
     let input = input.ok_or_else(|| invalid("missing input file"))?;
     if matches!(command, Command::Build | Command::EmitC) && output.is_none() {
         return Err(invalid("missing output path; use -o PATH"));
@@ -257,6 +303,7 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
         force,
         log_allow,
         log_ignore,
+        log_arena,
         log_level: log_level.unwrap_or_default(),
         mode: mode.unwrap_or_default(),
         text_pool_limit: text_pool_limit.unwrap_or_default(),

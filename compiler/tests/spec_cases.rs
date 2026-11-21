@@ -8,6 +8,8 @@ mod arena_accumulation;
 mod arena_functions;
 #[path = "spec_cases/arena_fuzz.rs"]
 mod arena_fuzz;
+#[path = "spec_cases/arena_report.rs"]
+mod arena_report;
 #[path = "spec_cases/arithmetic.rs"]
 mod arithmetic;
 #[path = "spec_cases/arithmetic_handlers.rs"]

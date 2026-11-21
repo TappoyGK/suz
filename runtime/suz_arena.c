@@ -161,3 +161,20 @@ suz_arena_cursor suz_arena_expand(suz_arena_chunk *current, size_t size, const c
     *unused = chunk;
     return (suz_arena_cursor){chunk->bytes, chunk->capacity, size, chunk};
 }
+
+/* ブロックはmain終了まで解放されないため、終了時の合計が確保容量の最大値。
+   再利用で数を増やさないよう、実際に残っているブロックを数える。 */
+void suz_arena_report_summary(size_t peak, bool initial_block) {
+    uint64_t blocks = 0;
+    for (suz_arena_chunk *chunk = suz_arena.first; chunk; chunk = chunk->next) ++blocks;
+    suz_log_report_begin();
+    suz_log_text("arena peak=", sizeof("arena peak=") - 1);
+    suz_log_u64(peak);
+    suz_log_text(" reserved=", sizeof(" reserved=") - 1);
+    suz_log_u64(suz_arena.total);
+    suz_log_text(" blocks=", sizeof(" blocks=") - 1);
+    suz_log_u64(blocks);
+    suz_log_text(" expansions=", sizeof(" expansions=") - 1);
+    suz_log_u64(blocks - (initial_block ? 1 : 0));
+    suz_log_end();
+}

@@ -43,6 +43,7 @@ struct ExpressionContext {
     c_literal_checks: BTreeSet<String>,
     log_level: crate::LogLevel,
     log_ignore: bool,
+    log_arena: bool,
     function_result: Option<crate::ast::Type>,
     text_literals: std::collections::BTreeMap<String, usize>,
     uses_text: bool,
@@ -89,6 +90,7 @@ pub(crate) fn generate(
     arena: crate::ArenaOptions,
     log_level: crate::LogLevel,
     log_ignore: bool,
+    log_arena: bool,
 ) -> String {
     let mut c = String::from(
         r#"#include <limits.h>
@@ -113,6 +115,7 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
     let mut context = ExpressionContext {
         log_level,
         log_ignore,
+        log_arena,
         arrays: program.arrays.clone(),
         source_name: source_name.into(),
         enums: program.enums.clone(),
@@ -148,6 +151,9 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
         .map(|function| functions::emit(function, &mut context))
         .collect();
     if context.uses_arena {
+        if log_arena {
+            c.push_str("#define SUZ_LOG_ARENA 1\n");
+        }
         c.push_str("#include \"suz_arena.h\"\n");
     }
     arrays::declarations(&mut c, &context);
@@ -194,9 +200,14 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
     for (value, id) in &context.text_literals {
         writeln!(text_init, "    suz_text_constant_{id} = suz_text_intern(suz_text_literal_{id}, UINT64_C({}), true, {});", value.len(), text::position(program.main_location, &context)).unwrap();
     }
+    let report = if log_arena {
+        "    suz_arena_report();\n"
+    } else {
+        ""
+    };
     let exit = if context.uses_arena {
         format!(
-            "    int result = (int)suz_fn_{}();\n    suz_arena_destroy();\n    return result;",
+            "    int result = (int)suz_fn_{}();\n{report}    suz_arena_destroy();\n    return result;",
             program.main_id
         )
     } else {

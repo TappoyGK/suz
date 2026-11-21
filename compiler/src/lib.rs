@@ -182,6 +182,8 @@ pub struct CompilationOptions {
     pub log_level: LogLevel,
     /// 実行されたignoreの位置と理由を記録する。既定では記録しない。
     pub log_ignore: bool,
+    /// 作業領域の使用量を計測し、正常終了時に出力する。
+    pub log_arena: bool,
     pub log_allow: bool,
     pub arithmetic_mode: ArithmeticMode,
     pub text_pool_limit: TextPoolLimit,
@@ -244,6 +246,7 @@ pub fn compile_with_options(
             options.arena,
             options.log_level,
             options.log_ignore,
+            options.log_arena,
         ),
         warnings,
     })
