@@ -549,7 +549,7 @@ fn disabled_arena_reporting_does_not_link_reporting_functions() {
 }
 
 #[test]
-fn arena_tree_shares_debug_helpers_and_inlines_optimized_helpers() {
+fn arena_tree_shares_debug_helpers_and_optimizes_small_loops() {
     let directory = TemporaryDirectory::new();
     let source = directory.0.join("main.suz");
     fs::write(&source, "fn main() -> u8 {\narena { fix ptr p = new (1 as u8) }\narena { fix ptr p = new (2 as i64) }\nreturn 0 }").unwrap();
@@ -568,7 +568,12 @@ fn arena_tree_shares_debug_helpers_and_inlines_optimized_helpers() {
         let output = Command::new("nm").arg(&executable).output().unwrap();
         assert!(output.status.success(), "{output:?}");
         let symbols = String::from_utf8_lossy(&output.stdout);
-        // 大量の位置を通常テストでビルドせず、共有する本体の有無を直接検査する。
+        // 初回・再帰などの処理は、最適化の有無によらず共通関数に残す。
+        assert!(
+            symbols.contains("suz_arena_tree_enter_uncached"),
+            "{symbols}"
+        );
+        // 小さい例での展開を確認する。多数の位置がある場合は共有してもよい。
         for name in [
             "suz_arena_tree_enter",
             "suz_arena_tree_leave",

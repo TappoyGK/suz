@@ -3,14 +3,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* -O0では位置の数だけ本体を複製せず、通常の関数呼出しにする。
-   最適化するビルドでは、反復の通常経路に関数呼出しを残さない。 */
-#if defined(__OPTIMIZE__)
-#define SUZ_ARENA_REPORT_INLINE static inline __attribute__((always_inline))
-#else
-#define SUZ_ARENA_REPORT_INLINE static inline
-#endif
-
 typedef enum {
     SUZ_ARENA_REPORT_TREE = 1,
     SUZ_ARENA_REPORT_TREE_BYTES = 2,
@@ -55,31 +47,28 @@ typedef struct {
 void suz_arena_tree_init(suz_arena_tree *tree, size_t capacity, const char *source, size_t line, size_t column);
 size_t suz_arena_tree_find(suz_arena_tree *tree, const suz_arena_report_site *site, size_t parent);
 
-/* 反復・再帰の通常経路では外部関数や文字列比較を使わない。
-   異なる親へ切り替わったときだけ、固定サイズの索引を検索する。 */
-SUZ_ARENA_REPORT_INLINE void suz_arena_tree_enter(
+/* 初回・親の切替・再帰・表示省略の判定は、各ソース位置に複製しない。 */
+void suz_arena_tree_enter_uncached(suz_arena_tree *tree, suz_arena_report_frame *frame);
+
+/* 同じ親への再進入を小さく保ち、Cコンパイラが反復内へ展開できるようにする。
+   強制展開はせず、多数のソース位置がある場合は関数本体の共有を許す。 */
+static inline void suz_arena_tree_enter(
     suz_arena_tree *tree, suz_arena_report_frame *frame, size_t position, suz_arena_report_site *site) {
     *frame = (suz_arena_report_frame){ .previous = tree->active, .node = SIZE_MAX, .base = position, .peak = position, .site = site };
     tree->active = frame;
-    if (frame->previous && frame->previous->node == SIZE_MAX) return;
-    if (site->active) {
-        frame->node = site->active->node;
-        tree->nodes[frame->node].recursive = true;
-        return;
-    }
     size_t parent = frame->previous ? frame->previous->node : 0;
-    if (site->cached_parent != parent) {
-        site->cached_node = suz_arena_tree_find(tree, site, parent);
-        site->cached_parent = parent;
-    }
-    frame->node = site->cached_node;
-    if (frame->node != SIZE_MAX) {
-        frame->outermost = true;
-        site->active = frame;
+    if (!site->active && parent != SIZE_MAX && site->cached_parent == parent) {
+        frame->node = site->cached_node;
+        if (frame->node != SIZE_MAX) {
+            frame->outermost = true;
+            site->active = frame;
+        }
+    } else {
+        suz_arena_tree_enter_uncached(tree, frame);
     }
 }
 
-SUZ_ARENA_REPORT_INLINE void suz_arena_tree_leave(suz_arena_tree *tree, suz_arena_report_frame *frame) {
+static inline void suz_arena_tree_leave(suz_arena_tree *tree, suz_arena_report_frame *frame) {
     /* 再帰した内側の退出では、外側の基準位置とアクティブ状態を解除しない。 */
     if (frame->outermost) {
         size_t peak = frame->peak - frame->base;
