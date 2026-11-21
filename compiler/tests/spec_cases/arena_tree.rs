@@ -568,11 +568,6 @@ fn arena_tree_shares_debug_helpers_and_optimizes_small_loops() {
         let output = Command::new("nm").arg(&executable).output().unwrap();
         assert!(output.status.success(), "{output:?}");
         let symbols = String::from_utf8_lossy(&output.stdout);
-        // 初回・再帰などの処理は、最適化の有無によらず共通関数に残す。
-        assert!(
-            symbols.contains("suz_arena_tree_enter_uncached"),
-            "{symbols}"
-        );
         // 小さい例での展開を確認する。多数の位置がある場合は共有してもよい。
         for name in [
             "suz_arena_tree_enter",

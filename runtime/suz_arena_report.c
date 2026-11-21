@@ -56,25 +56,6 @@ size_t suz_arena_tree_find(suz_arena_tree *tree, const suz_arena_report_site *si
     return id;
 }
 
-/* 再帰は最も外側の行へ集約する。省略した親の下では新たな行を作らない。 */
-void suz_arena_tree_enter_uncached(suz_arena_tree *tree, suz_arena_report_frame *frame) {
-    if (frame->previous && frame->previous->node == SIZE_MAX) return;
-    suz_arena_report_site *site = frame->site;
-    if (site->active) {
-        frame->node = site->active->node;
-        tree->nodes[frame->node].recursive = true;
-        return;
-    }
-    size_t parent = frame->previous ? frame->previous->node : 0;
-    site->cached_node = suz_arena_tree_find(tree, site, parent);
-    site->cached_parent = parent;
-    frame->node = site->cached_node;
-    if (frame->node != SIZE_MAX) {
-        frame->outermost = true;
-        site->active = frame;
-    }
-}
-
 void suz_arena_tree_destroy(suz_arena_tree *tree) {
     suz_env_free(tree->nodes);
     *tree = (suz_arena_tree){0};
