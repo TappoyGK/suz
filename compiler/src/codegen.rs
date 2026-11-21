@@ -37,6 +37,7 @@ struct RecoveryTarget {
 struct ExpressionContext {
     uses_arena: bool,
     report_function: String,
+    report_sites: std::collections::BTreeMap<(usize, usize), (usize, String)>,
     arrays: crate::ast::arrays::Types,
     uses_c_byte_len: bool,
     uses_c_integer: bool,
@@ -165,6 +166,10 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
             }
         }
         c.push_str("#include \"suz_arena.h\"\n");
+    }
+    for (&(line, column), (id, function)) in &context.report_sites {
+        writeln!(c, "static suz_arena_report_site suz_arena_report_site_{id} = {{ .id = {id}, .source = {}, .line = {line}, .column = {column}, .function = {}, .cached_parent = SIZE_MAX }};",
+            expressions::c_string(source_name), expressions::c_string(function)).unwrap();
     }
     arrays::declarations(&mut c, &context);
     ffi::checks(&mut c, program, &context);

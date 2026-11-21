@@ -7,10 +7,15 @@
 /* 行数はCLIでは1..65535。公開Rust APIの値も同じ範囲で、計算量と容量に上限がある。 */
 void suz_arena_tree_init(suz_arena_tree *tree, size_t capacity, const char *source, size_t line, size_t column) {
     assert(capacity > 0 && capacity <= UINT16_MAX);
-    size_t bytes = capacity * (sizeof(suz_arena_report_node) + sizeof(size_t));
+    size_t lookup_capacity = 2;
+    while (lookup_capacity < capacity * 2) lookup_capacity *= 2;
+    size_t bytes = capacity * (sizeof(suz_arena_report_node) + sizeof(size_t)) + lookup_capacity * sizeof(size_t);
     tree->nodes = suz_env_alloc(bytes);
     if (!tree->nodes) suz_panic(source, line, column, "arena report allocation failed [rt.arena-report-storage]");
     tree->path = (size_t *)(tree->nodes + capacity);
+    tree->lookup = tree->path + capacity;
+    tree->lookup_capacity = lookup_capacity;
+    memset(tree->lookup, 0, lookup_capacity * sizeof(size_t));
     tree->capacity = capacity;
     tree->count = 1;
     tree->active = NULL;
@@ -20,58 +25,35 @@ void suz_arena_tree_init(suz_arena_tree *tree, size_t capacity, const char *sour
     };
 }
 
-static bool same_site(const suz_arena_report_node *node, const char *source, size_t line, size_t column) {
-    return node->line == line && node->column == column && strcmp(node->source, source) == 0;
-}
-
-void suz_arena_tree_enter(suz_arena_tree *tree, suz_arena_report_frame *frame, size_t position,
-                          const char *source, size_t line, size_t column, const char *function) {
-    *frame = (suz_arena_report_frame){ .previous = tree->active, .node = SIZE_MAX, .base = position, .peak = position };
-    tree->active = frame;
-    /* 省略した枝の内側を別の親へ付け替えない。計測値の伝播だけは通常どおり行う。 */
-    if (frame->previous && frame->previous->node == SIZE_MAX) return;
-    for (suz_arena_report_frame *ancestor = frame->previous; ancestor; ancestor = ancestor->previous) {
-        if (same_site(&tree->nodes[ancestor->node], source, line, column)) {
-            frame->node = ancestor->node;
-            tree->nodes[frame->node].recursive = true;
-            return;
-        }
-    }
-    size_t parent = frame->previous ? frame->previous->node : 0;
-    for (size_t child = tree->nodes[parent].first_child; child != SIZE_MAX; child = tree->nodes[child].next_sibling) {
-        if (same_site(&tree->nodes[child], source, line, column)) {
-            frame->node = child;
-            frame->outermost = true;
-            return;
-        }
+/* 使用率を半分以下に保つオープンアドレス法。兄弟の列や進入履歴を走査しない。
+   0は空欄、登録値はノード番号+1。表示順は別の兄弟リストで保持する。 */
+size_t suz_arena_tree_find(suz_arena_tree *tree, const suz_arena_report_site *site, size_t parent) {
+    uint64_t hash = (uint64_t)parent * UINT64_C(0x9e3779b97f4a7c15) + site->id;
+    hash = (hash ^ (hash >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);
+    hash = (hash ^ (hash >> 27)) * UINT64_C(0x94d049bb133111eb);
+    hash ^= hash >> 31;
+    size_t slot = (size_t)hash & (tree->lookup_capacity - 1);
+    while (tree->lookup[slot]) {
+        size_t id = tree->lookup[slot] - 1;
+        if (tree->nodes[id].parent == parent && tree->nodes[id].site_id == site->id) return id;
+        slot = (slot + 1) & (tree->lookup_capacity - 1);
     }
     if (tree->count == tree->capacity) {
         tree->nodes[parent].omitted = true;
-        return;
+        return SIZE_MAX;
     }
     size_t id = tree->count++;
     tree->nodes[id] = (suz_arena_report_node){
-        .source = source, .function = function, .line = line, .column = column,
+        .site_id = site->id, .source = site->source, .function = site->function,
+        .line = site->line, .column = site->column,
         .parent = parent, .first_child = SIZE_MAX, .last_child = SIZE_MAX, .next_sibling = SIZE_MAX,
         .depth = tree->nodes[parent].depth + 1
     };
     if (tree->nodes[parent].last_child != SIZE_MAX) tree->nodes[tree->nodes[parent].last_child].next_sibling = id;
     else tree->nodes[parent].first_child = id;
     tree->nodes[parent].last_child = id;
-    frame->node = id;
-    frame->outermost = true;
-}
-
-void suz_arena_tree_leave(suz_arena_tree *tree, suz_arena_report_frame *frame) {
-    assert(tree->active == frame);
-    /* 各確保では現在のframeだけを更新し、退出で親へ最大位置を渡す。
-       再帰を集約した行の基準は最も外側のframeだけが持つ。 */
-    if (frame->outermost && frame->node != SIZE_MAX) {
-        size_t peak = frame->peak - frame->base;
-        if (peak > tree->nodes[frame->node].peak) tree->nodes[frame->node].peak = peak;
-    }
-    if (frame->previous && frame->peak > frame->previous->peak) frame->previous->peak = frame->peak;
-    tree->active = frame->previous;
+    tree->lookup[slot] = id + 1;
+    return id;
 }
 
 void suz_arena_tree_destroy(suz_arena_tree *tree) {
@@ -183,7 +165,7 @@ void suz_arena_tree_output(suz_arena_tree *tree, size_t peak, bool initial_block
         if (strlen(buffer) > amount_width) amount_width = strlen(buffer);
     }
     /* 全行を1つのロック内で出す。出力中に領域の確保も再帰呼出しも行わない。 */
-    suz_log_report_begin();
+    suz_log_begin(SUZ_LOG_INFO, NULL, 0);
     if (format == SUZ_ARENA_REPORT_CSV) text("id,parent,depth,source,line,column,function,peak,recursive,omitted,reserved,blocks,expansions");
     else {
         text("arena"); spaces(site_width - 5 + 2);
@@ -224,5 +206,22 @@ void suz_arena_tree_output(suz_arena_tree *tree, size_t peak, bool initial_block
         text(" blocks="); suz_log_u64(blocks);
         text(" expansions="); suz_log_u64(expansions);
     }
+    suz_log_end();
+}
+
+/* ブロックはmain終了まで解放されないため、終了時の合計が確保容量の最大値。
+   再利用で数を増やさないよう、実際に残っているブロックを数える。 */
+void suz_arena_report_summary(size_t peak, bool initial_block) {
+    uint64_t blocks = 0;
+    for (suz_arena_chunk *chunk = suz_arena.first; chunk; chunk = chunk->next) ++blocks;
+    suz_log_begin(SUZ_LOG_INFO, NULL, 0);
+    suz_log_text("arena peak=", sizeof("arena peak=") - 1);
+    suz_log_u64(peak);
+    suz_log_text(" reserved=", sizeof(" reserved=") - 1);
+    suz_log_u64(suz_arena.total);
+    suz_log_text(" blocks=", sizeof(" blocks=") - 1);
+    suz_log_u64(blocks);
+    suz_log_text(" expansions=", sizeof(" expansions=") - 1);
+    suz_log_u64(blocks - (initial_block ? 1 : 0));
     suz_log_end();
 }

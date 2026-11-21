@@ -393,3 +393,157 @@ _Noreturn void suz_env_panic(void) { _Exit(101); }
     );
     assert!(!text.contains("reserved="), "{text}");
 }
+
+#[test]
+fn arena_tree_option_diagnostics_name_their_own_rules() {
+    let binary = env!("CARGO_BIN_EXE_suz");
+    for (option, valid, rule) in [
+        ("--log-arena-format", "tree", "[tool.arena-report-format]"),
+        ("--log-arena-limit", "256", "[tool.arena-report-limit]"),
+    ] {
+        for tail in [
+            vec![option],
+            vec![option, "invalid"],
+            vec![option, valid, option, valid],
+        ] {
+            let output = Command::new(binary)
+                .args(["run", "missing.suz", "--log-arena"])
+                .args(tail)
+                .output()
+                .unwrap();
+            assert_eq!(output.status.code(), Some(2), "{output:?}");
+            assert!(
+                String::from_utf8_lossy(&output.stderr).contains(rule),
+                "{output:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn arena_tree_indexes_alternating_parents_and_names_generic_methods() {
+    let directory = TemporaryDirectory::new();
+    // 同じ子の直前の親が毎回変わる。キャッシュが外れても索引から既存行を取得する。
+    let mut many = String::from(
+        "fn child() -> void { arena { fix ptr p = new [0 as u8; 3] } }\nfn main() -> u8 { for i in 0..<5 {\n",
+    );
+    for _ in 0..64 {
+        many.push_str("arena { child() }\n");
+    }
+    many.push_str("}\nreturn 0 }");
+    let methods = r#"
+struct Pt { x: i64 }
+fn Pt#bump() -> void {
+    arena { fix ptr p = new [0 as u8; 4] }
+    self#x = self.x +% 1
+}
+struct Box[T] { v: T }
+fn Box[T].get() -> T {
+    arena { fix ptr p = new [0 as u8; 2] }
+    return self.v
+}
+fn main() -> u8 {
+    var p = Pt { x: 1 }
+    p#bump()
+    fix a = Box[i64] { v: 1 }
+    fix b = Box[u8] { v: 2 }
+    fix x = a.get()
+    fix y = b.get()
+    return 0
+}
+"#;
+    let mut files = Vec::new();
+    for (id, source) in [many.as_str(), methods].iter().enumerate() {
+        let path = directory.0.join(format!("indexed-{id}.c"));
+        fs::write(
+            &path,
+            suz::compile_with_options(
+                source.as_bytes(),
+                "indexed.suz",
+                &options(ArenaReportFormat::Csv, 256),
+            )
+            .unwrap()
+            .c,
+        )
+        .unwrap();
+        files.push((id, path));
+    }
+    let batch = Batch::build_with_flags(
+        &directory.0,
+        &files,
+        2,
+        &["-O1", "-fsanitize=address,undefined"],
+    )
+    .unwrap();
+    let output = batch.run(0).unwrap();
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let text = String::from_utf8(output.stderr).unwrap();
+    let rows: Vec<Vec<&str>> = text
+        .lines()
+        .skip(1)
+        .map(|line| line.split(',').collect())
+        .collect();
+    assert_eq!(rows.len(), 129, "{text}");
+    for row in rows {
+        assert_eq!(row[7], "8"); // ASanの丸め後の3バイト配列。
+        assert_eq!(row[8], "false");
+        assert_eq!(row[9], "false");
+    }
+    let output = batch.run(1).unwrap();
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let text = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(text.matches("\"Pt.bump\"").count(), 1, "{text}");
+    assert_eq!(text.matches("\"Box.get\"").count(), 1, "{text}");
+}
+
+#[test]
+fn disabled_arena_reporting_does_not_link_reporting_functions() {
+    let directory = TemporaryDirectory::new();
+    let source = directory.0.join("main.suz");
+    fs::write(
+        &source,
+        "fn main() -> u8 { arena { fix ptr p = new (1 as u8) }\nreturn 0 }",
+    )
+    .unwrap();
+    let native = directory.0.join("native");
+    let output = Command::new(env!("CARGO_BIN_EXE_suz"))
+        .arg("build")
+        .arg(&source)
+        .arg("-o")
+        .arg(&native)
+        .arg("-O2")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let export = directory.0.join("export");
+    let output = Command::new(env!("CARGO_BIN_EXE_suz"))
+        .arg("emit-c")
+        .arg(&source)
+        .arg("-o")
+        .arg(&export)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let exported = directory.0.join("exported");
+    let output = Command::new("bash")
+        .arg(export.join("scripts/build-c.sh"))
+        .arg(export.join("program.c"))
+        .arg("-o")
+        .arg(&exported)
+        .arg("-O2")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    for executable in [native, exported] {
+        let output = Command::new("nm").arg(&executable).output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let symbols = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            !symbols.contains("suz_arena_report")
+                && !symbols.contains("suz_arena_tree")
+                && !symbols.contains("suz_log_report"),
+            "{symbols}"
+        );
+        assert!(Command::new(executable).status().unwrap().success());
+    }
+}

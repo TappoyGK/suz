@@ -28,9 +28,13 @@ pub(super) fn emit_block(
                         writeln!(c, "{indent}    size_t suz_arena_report_mark_{id} __attribute__((cleanup(suz_arena_report_restore))) = suz_arena_report_position;").unwrap();
                     } else {
                         writeln!(c, "{indent}    suz_arena_report_frame suz_arena_report_mark_{id} __attribute__((cleanup(suz_arena_report_leave)));").unwrap();
-                        writeln!(c, "{indent}    suz_arena_tree_enter(&suz_arena_report_tree, &suz_arena_report_mark_{id}, suz_arena_report_position, {}, {}, {}, {});",
-                            super::expressions::c_string(&context.source_name), location.line, location.column,
-                            super::expressions::c_string(&context.report_function)).unwrap();
+                        // 同じソース位置の具体化は同じ識別子とアクティブ状態を使う。
+                        let next = context.report_sites.len();
+                        let (site, _) = context
+                            .report_sites
+                            .entry((location.line, location.column))
+                            .or_insert_with(|| (next, context.report_function.clone()));
+                        writeln!(c, "{indent}    suz_arena_tree_enter(&suz_arena_report_tree, &suz_arena_report_mark_{id}, suz_arena_report_position, &suz_arena_report_site_{site});").unwrap();
                     }
                 }
                 emit_block(c, body, depth + 1, next_assignment, context);

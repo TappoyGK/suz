@@ -85,7 +85,7 @@ static inline void suz_arena_report_restore(size_t *position) {
 #ifdef SUZ_ARENA_REPORT_FORMAT
 #include "suz_arena_report.h"
 static suz_arena_tree suz_arena_report_tree;
-static inline void suz_arena_report_leave(suz_arena_report_frame *frame) {
+static inline __attribute__((always_inline)) void suz_arena_report_leave(suz_arena_report_frame *frame) {
     suz_arena_tree_leave(&suz_arena_report_tree, frame);
     suz_arena_report_position = frame->base;
 }

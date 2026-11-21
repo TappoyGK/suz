@@ -184,7 +184,6 @@ _BitInt(128) suz_compiler_probe;
             "program.c",
             "runtime/suz_runtime.c",
             "runtime/suz_arena.c",
-            "runtime/suz_arena_report.c",
             "runtime/suz_text.c",
             "runtime/suz_parse.c",
             "runtime/suz_parse_float.c",
@@ -196,6 +195,9 @@ _BitInt(128) suz_compiler_probe;
             "runtime/third_party/ryu/ryu/d2s.c",
         ] {
             command.arg(root.join(path));
+        }
+        if c.contains("#define SUZ_LOG_ARENA 1\n") {
+            command.arg(root.join("runtime/suz_arena_report.c"));
         }
         let result = command
             .args(&options.foreign.args)

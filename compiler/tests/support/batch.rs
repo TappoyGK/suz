@@ -70,6 +70,7 @@ impl Batch {
             Ok((
                 object,
                 needs_runtime,
+                text.contains("#define SUZ_LOG_ARENA 1\n"),
                 super::float_runtime::required(&text),
                 super::float_runtime::parser_required(&text),
                 super::float_runtime::struct_parser_required(&text),
@@ -79,15 +80,24 @@ impl Batch {
         let mut entries = Vec::new();
         let mut objects = Vec::new();
         let mut needs_runtime = false;
+        let mut needs_arena_report = false;
         let mut needs_float = false;
         let mut needs_float_parser = false;
         let mut needs_struct_parser = false;
         for ((index, _), result) in inputs.iter().zip(compiled) {
             match result {
-                Ok((object, uses_runtime, uses_float, uses_float_parser, uses_struct_parser)) => {
+                Ok((
+                    object,
+                    uses_runtime,
+                    uses_arena_report,
+                    uses_float,
+                    uses_float_parser,
+                    uses_struct_parser,
+                )) => {
                     entries.push(*index);
                     objects.push(object);
                     needs_runtime |= uses_runtime;
+                    needs_arena_report |= uses_arena_report;
                     needs_float |= uses_float;
                     needs_float_parser |= uses_float_parser;
                     needs_struct_parser |= uses_struct_parser;
@@ -132,7 +142,7 @@ impl Batch {
             command
                 .arg(runtime.join("suz_runtime.c"))
                 .arg(runtime.join("suz_arena.c"))
-                .arg(runtime.join("suz_arena_report.c"))
+                .args(needs_arena_report.then(|| runtime.join("suz_arena_report.c")))
                 .arg(runtime.join("suz_text.c"))
                 .arg(runtime.join("suz_parse.c"))
                 .arg("-lm")

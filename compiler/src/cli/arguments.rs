@@ -134,14 +134,14 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
                     if arena_format.is_some() {
                         return Err(Failure::tool(
                             2,
-                            "tool.log-arena",
+                            "tool.arena-report-format",
                             "duplicate --log-arena-format option",
                         ));
                     }
                     let value = args.next().ok_or_else(|| {
                         Failure::tool(
                             2,
-                            "tool.log-arena",
+                            "tool.arena-report-format",
                             "expected FORMAT after --log-arena-format",
                         )
                     })?;
@@ -153,7 +153,7 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
                         _ => {
                             return Err(Failure::tool(
                                 2,
-                                "tool.log-arena",
+                                "tool.arena-report-format",
                                 "expected summary, tree, tree-bytes, or csv",
                             ));
                         }
@@ -164,14 +164,14 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
                     if arena_report_capacity.is_some() {
                         return Err(Failure::tool(
                             2,
-                            "tool.log-arena",
+                            "tool.arena-report-limit",
                             "duplicate --log-arena-limit option",
                         ));
                     }
                     let value = args.next().ok_or_else(|| {
                         Failure::tool(
                             2,
-                            "tool.log-arena",
+                            "tool.arena-report-limit",
                             "expected COUNT after --log-arena-limit",
                         )
                     })?;
@@ -183,7 +183,7 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
                             .ok_or_else(|| {
                                 Failure::tool(
                                     2,
-                                    "tool.log-arena",
+                                    "tool.arena-report-limit",
                                     "expected 1..65535 after --log-arena-limit",
                                 )
                             })?,

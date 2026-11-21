@@ -144,14 +144,10 @@ static void lock_output(void) {
     while (atomic_flag_test_and_set_explicit(&output_lock, memory_order_acquire)) {}
 }
 
-void suz_log_report_begin(void) {
-    lock_output();
-    output_level = SUZ_LOG_INFO;
-}
-
 void suz_log_begin(suz_log_level level, const char *source, size_t line) {
     lock_output();
     output_level = level;
+    if (source == NULL) return; /* 計測結果など、位置接頭辞を付けない出力。 */
     switch (level) {
         case SUZ_LOG_DEBUG: write_text("debug"); break;
         case SUZ_LOG_INFO: write_text("info"); break;

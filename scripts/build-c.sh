@@ -89,11 +89,16 @@ done <<< "${SUZ_CFLAGS:-}"
 [[ "$environment_file" == /* ]] || environment_file="./$environment_file"
 [[ "$output_file" == /* ]] || output_file="./$output_file"
 runtime="$repo_dir/runtime"
+# 生成Cが計測を使う場合だけ実装をリンクする。通常の実行ファイルへ計測関数を残さない。
+report_sources=()
+if grep -q '^#define SUZ_LOG_ARENA 1$' "$source_file"; then
+    report_sources+=("$runtime/suz_arena_report.c")
+fi
 # externの<...>には内部ヘッダーを公開せず、引用符のincludeだけで探索する。
 exec "${CC:-clang}" "${extra_flags[@]+"${extra_flags[@]}"}" -std=c23 -Wall -Wextra -Werror "$optimization" \
     -fhonor-nans -fhonor-infinities -ffp-contract=off \
     -fdenormal-fp-math=ieee \
     -iquote "$runtime" -iquote "$runtime/third_party/ryu" \
-    "$source_file" "$runtime/suz_runtime.c" "$runtime/suz_arena.c" "$runtime/suz_arena_report.c" "$runtime/suz_text.c" "$runtime/suz_parse.c" "$runtime/suz_parse_float.c" "$runtime/suz_parse_struct.c" "$environment_file" "$runtime/suz_float.c" "$runtime/suz_format_float.c" \
+    "$source_file" "$runtime/suz_runtime.c" "$runtime/suz_arena.c" "${report_sources[@]+"${report_sources[@]}"}" "$runtime/suz_text.c" "$runtime/suz_parse.c" "$runtime/suz_parse_float.c" "$runtime/suz_parse_struct.c" "$environment_file" "$runtime/suz_float.c" "$runtime/suz_format_float.c" \
     "$runtime/third_party/ryu/ryu/f2s.c" "$runtime/third_party/ryu/ryu/d2s.c" \
     "${ffi_args[@]+"${ffi_args[@]}"}" -lm -o "$output_file"
