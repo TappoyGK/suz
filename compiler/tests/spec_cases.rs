@@ -12,6 +12,10 @@ mod arena_fuzz;
 mod arithmetic;
 #[path = "spec_cases/arithmetic_handlers.rs"]
 mod arithmetic_handlers;
+#[path = "spec_cases/array_bounds.rs"]
+mod array_bounds;
+#[path = "spec_cases/array_fuzz.rs"]
+mod array_fuzz;
 #[path = "spec_cases/arrays.rs"]
 mod arrays;
 #[path = "spec_cases/batch.rs"]

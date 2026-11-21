@@ -322,9 +322,11 @@ impl Parser<'_, '_> {
                 };
                 self.cursor += 1;
                 super::names::check(super::names::Shape::Value, &name, location)?;
+                let mut dimensions = Vec::new();
                 let annotation = if self.token().kind == Kind::Symbol(":") {
                     self.cursor += 1;
-                    let ty = self.stored_type()?;
+                    let (ty, names) = self.annotated_array_type(pointer && !mutable, false)?;
+                    dimensions = names;
                     if ty == Type::Void {
                         return Err(self.error(
                             ErrorKind::InvalidSource,
@@ -349,6 +351,7 @@ impl Parser<'_, '_> {
                     name,
                     location,
                     annotation,
+                    dimensions,
                     initializer: Box::new(initializer),
                 })
             }

@@ -31,3 +31,11 @@ impl Types {
         self.entries[id]
     }
 }
+
+/// 型の同一性には含めず、仮引数または不変の参照の宣言で束縛する寸法名。
+#[derive(Clone)]
+pub(crate) struct Dimension {
+    pub name: String,
+    pub index: usize,
+    pub location: super::Location,
+}

@@ -179,7 +179,7 @@ fn parts(
         format!("{source} = {}", expression(target, context))
     };
     let mut offset = String::new();
-    for (dimension, (index, location)) in indices.iter().enumerate() {
+    for (dimension, (index, location, proven)) in indices.iter().enumerate() {
         // 不変の添字もそのまま読む。可変の添字は後続の添字で変わり得るため保存する。
         let (local, evaluate) = if matches!(index.value, Value::Local(id) if context.immutable_locals.contains(&id))
         {
@@ -193,8 +193,12 @@ fn parts(
             || format!("{source}.lengths[{dimension}]"),
             |id| format!("suz_array_length_{id}_{dimension}"),
         );
-        let check = format!("({evaluate}(uint64_t){local} < (uint64_t){length})");
-        tests.push(if write {
+        let check = if *proven {
+            format!("({evaluate}true)")
+        } else {
+            format!("({evaluate}(uint64_t){local} < (uint64_t){length})")
+        };
+        tests.push(if write && !proven {
             context.uses_arena = true;
             let negative = if index.ty.integer_bounds().unwrap().0 < 0 {
                 format!("{local} < 0")
@@ -283,6 +287,7 @@ fn access_parts(
         start,
         end,
         index,
+        proven,
         location,
         ..
     } = &expr.value
@@ -313,7 +318,9 @@ fn access_parts(
     };
     let first = bound(start, "0".into());
     let last = bound(end, format!("{source}.lengths[0]"));
-    let test = if *index {
+    let test = if *proven {
+        "true".into()
+    } else if *index {
         format!("(uint64_t){first} < (uint64_t){source}.lengths[0]")
     } else {
         format!(
@@ -321,7 +328,7 @@ fn access_parts(
         )
     };
     // 同じ角括弧の境界は両方評価してから検査する。前の角括弧が失敗したら評価しない。
-    evaluations.push(if write {
+    evaluations.push(if write && !proven {
         context.uses_arena = true;
         let negative = |v: &Option<Box<CheckedExpression>>, name: &str| {
             if v.as_ref().is_some_and(|v| v.ty.integer_bounds().unwrap().0 < 0) {

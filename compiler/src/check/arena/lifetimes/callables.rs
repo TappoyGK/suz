@@ -381,7 +381,7 @@ impl Walk<'_> {
             }
             Value::ArrayElement { target, indices } => {
                 let result = self.expr(target);
-                for (index, _) in indices {
+                for (index, _, _) in indices {
                     self.expr(index);
                 }
                 result

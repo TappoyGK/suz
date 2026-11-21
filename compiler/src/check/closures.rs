@@ -86,6 +86,7 @@ pub(super) fn check(
             by_reference: capture.by_reference,
         });
         function.parameters.push(Parameter {
+            dimensions: Vec::new(),
             name: capture.name.clone(),
             ty: binding.ty,
             location: capture.location,
@@ -94,6 +95,8 @@ pub(super) fn check(
     let mut scope = outer.clone();
     scope.uncaptured.extend(scope.locals.keys().cloned());
     scope.locals.clear();
+    scope.array_bounds =
+        super::arrays::bounds::captures(&captures, closure.function.parameters.len(), outer);
     scope.value_captures = closure
         .captures
         .iter()

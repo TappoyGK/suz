@@ -309,7 +309,7 @@ impl Analysis {
             }
             Value::ArrayElement { target, indices } => {
                 let result = self.expr(target, region, arena);
-                for (index, _) in indices {
+                for (index, _, _) in indices {
                     self.expr(index, region, arena);
                 }
                 result
@@ -560,6 +560,7 @@ impl Analysis {
             | Value::CBytes(v)
             | Value::CByteLen { operand: v, .. }
             | Value::FunctionBorrow(v)
+            | Value::ArrayLength { target: v, .. }
             | Value::Len(v)
             | Value::Negate(v)
             | Value::Truncate(v)
@@ -577,7 +578,9 @@ impl Analysis {
                 self.expr(fallback, region, arena);
                 Shape::new()
             }
-            Value::Binary { left, right, .. } | Value::Logical { left, right, .. } => {
+            Value::ArrayDimensionGuard { left, right, .. }
+            | Value::Binary { left, right, .. }
+            | Value::Logical { left, right, .. } => {
                 self.expr(left, region, arena);
                 self.expr(right, region, arena);
                 Shape::new()

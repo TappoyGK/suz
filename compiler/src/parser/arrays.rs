@@ -8,6 +8,13 @@ use crate::{
 
 impl Parser<'_, '_> {
     pub(super) fn array_type(&mut self) -> Result<Type, Diagnostic> {
+        self.array_type_dimensions(false).map(|(ty, _)| ty)
+    }
+
+    pub(super) fn array_type_dimensions(
+        &mut self,
+        names: bool,
+    ) -> Result<(Type, Vec<crate::ast::arrays::Dimension>), Diagnostic> {
         let location = self.location();
         self.nested(location, |parser| {
             parser.expect(FixedToken::Symbol("["))?;
@@ -21,19 +28,22 @@ impl Parser<'_, '_> {
                     crate::diagnostic!("array.type", "array elements require a stored value type"),
                 ));
             }
+            let mut dimensions = Vec::new();
             let mut rank = 1;
             if parser.token().kind == Kind::Symbol(";") {
                 parser.cursor += 1;
                 rank = 0;
                 loop {
-                    if parser.token().kind != Kind::Wildcard {
-                        return Err(parser.error(
-                            ErrorKind::InvalidSource,
-                            crate::diagnostic!(
-                                "array.dimension-bind",
-                                "named dimensions are not implemented yet"
-                            ),
-                        ));
+                    match parser.token().kind {
+                        Kind::Wildcard => {},
+                        Kind::Ident(name) if names => {
+                            let location = parser.location();
+                            super::names::check(super::names::Shape::Value, name, location)?;
+                            dimensions.push(crate::ast::arrays::Dimension { name: name.into(), index: rank, location });
+                        }
+                        _ => return Err(parser.error(ErrorKind::InvalidSource, crate::diagnostic!(
+                            "array.dimension-bind", "dimension names require a nonnull array parameter or fix ptr annotation; use _ here"
+                        ))),
                     }
                     parser.cursor += 1;
                     rank += 1;
@@ -62,11 +72,8 @@ impl Parser<'_, '_> {
                 }
             }
             parser.expect(FixedToken::Symbol("]"))?;
-            Ok(parser
-                .applications
-                .borrow_mut()
-                .arrays
-                .intern(element, rank))
+            let ty = parser.applications.borrow_mut().arrays.intern(element, rank);
+            Ok((ty, dimensions))
         })
     }
 

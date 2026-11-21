@@ -567,6 +567,7 @@ pub(crate) struct Program {
 /// 関数の仮引数。ソース上の名前・型注釈・位置を保持する。
 #[derive(Clone)]
 pub(crate) struct Parameter {
+    pub dimensions: Vec<arrays::Dimension>,
     pub name: String,
     pub ty: Type,
     pub location: Location,
@@ -686,6 +687,7 @@ pub(crate) enum Statement {
         name: String,
         location: Location,
         annotation: Option<Type>,
+        dimensions: Vec<arrays::Dimension>,
         // 型とソース位置の追加で全ての文が肥大化しないよう、初期値を別に保持する。
         initializer: Box<Expression>,
     },

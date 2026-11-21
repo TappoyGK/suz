@@ -1,3 +1,4 @@
+#include <string.h>
 #include "suz_arena.h"
 #include "suz_runtime.h"
 #include <assert.h>
@@ -39,6 +40,19 @@ _Noreturn void suz_array_slice_bounds(const char *source, size_t line, size_t co
     suz_log_text(" length=", sizeof(" length=") - 1);
     suz_log_u64((uint64_t)length);
     suz_log_text(" [rt.array-bounds]", sizeof(" [rt.array-bounds]") - 1);
+    suz_panic_end();
+}
+
+/* 実引数をすべて評価した後、本体の入口で同じ寸法名の一致を検査する。 */
+_Noreturn void suz_array_dimensions(const char *source, size_t line, size_t column, const char *name, int32_t expected, int32_t actual) {
+    suz_panic_begin(source, line, column);
+    suz_log_text("array dimensions differ: ", sizeof("array dimensions differ: ") - 1);
+    suz_log_text(name, strlen(name));
+    suz_log_text(" expected=", sizeof(" expected=") - 1);
+    suz_log_u64((uint64_t)expected);
+    suz_log_text(" actual=", sizeof(" actual=") - 1);
+    suz_log_u64((uint64_t)actual);
+    suz_log_text(" [rt.array-dimensions]", sizeof(" [rt.array-dimensions]") - 1);
     suz_panic_end();
 }
 

@@ -312,3 +312,6 @@ return result != {expected} || trace != {trace};
         assert!(result.stdout.is_empty() && result.stderr.is_empty());
     }
 }
+
+#[path = "tests/array_bounds.rs"]
+mod array_bounds;

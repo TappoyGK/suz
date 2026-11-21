@@ -291,6 +291,29 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             format!("({})({})", expr.ty.c_name(), expression(inner, context))
         }
 
+        Value::ArrayLength {
+            ref target,
+            dimension,
+        } => {
+            format!("({}).lengths[{dimension}]", expression(target, context))
+        }
+        Value::ArrayDimensionGuard {
+            ref name,
+            ref left,
+            ref right,
+            location,
+        } => {
+            context.uses_arena = true;
+            let left = expression(left, context);
+            let right = expression(right, context);
+            format!(
+                "(({left}) == ({right}) ? (void)0 : suz_array_dimensions({}, {}, {}, {}, {left}, {right}))",
+                c_string(&context.source_name),
+                location.line,
+                location.column,
+                c_string(name)
+            )
+        }
         Value::Len(ref inner) => {
             let value = expression(inner, context);
             // 実体またはビューが保持する個数を読む。オペランドは一度だけ評価する。

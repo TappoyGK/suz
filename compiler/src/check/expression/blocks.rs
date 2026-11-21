@@ -55,6 +55,7 @@ pub(in crate::check) fn local_hints(input: &[Statement], bindings: &Scope) -> Sc
             annotation,
             initializer,
             location,
+            dimensions,
             ..
         } = statement
         {
@@ -65,6 +66,15 @@ pub(in crate::check) fn local_hints(input: &[Statement], bindings: &Scope) -> Sc
             local
                 .locals
                 .insert(name.clone(), statements::Binding::hint(ty, *location));
+            for dimension in dimensions {
+                local.locals.insert(
+                    dimension.name.clone(),
+                    statements::Binding::hint(
+                        crate::ast::Type::Integer(crate::ast::IntegerType::Len),
+                        dimension.location,
+                    ),
+                );
+            }
         }
     }
     local

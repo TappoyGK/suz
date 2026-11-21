@@ -245,7 +245,7 @@ pub(crate) enum Value {
     /// 要素の住所。添字は書き込み先の確定時に一度だけ評価する。
     ArrayElement {
         target: Box<CheckedExpression>,
-        indices: Vec<(CheckedExpression, Location)>,
+        indices: Vec<(CheckedExpression, Location, bool)>,
     },
     /// 実体を複製しない部分配列・切り出し。途中の失敗は末尾のハンドラーへ渡す。
     ArrayView {
@@ -253,8 +253,19 @@ pub(crate) enum Value {
         start: Option<Box<CheckedExpression>>,
         end: Option<Box<CheckedExpression>>,
         index: bool,
+        proven: bool,
         location: Location,
         handler: Option<CheckedHandler>,
+    },
+    ArrayLength {
+        target: Box<CheckedExpression>,
+        dimension: usize,
+    },
+    ArrayDimensionGuard {
+        name: String,
+        left: Box<CheckedExpression>,
+        right: Box<CheckedExpression>,
+        location: Location,
     },
     ArrayRead {
         address: Box<CheckedExpression>,
@@ -438,7 +449,7 @@ macro_rules! constant_children_visitor {
                     }
                     return handler(h, visit);
                 }
-                Self::Receiver { target: v, .. } | Self::New { value: v, .. } | Self::Deref(v) | Self::NonNull(v) | Self::CBytes(v) | Self::CByteLen { operand: v, .. } | Self::FunctionBorrow(v) | Self::Len(v) | Self::Cast(v) | Self::Negate(v) | Self::Truncate(v) | Self::BitNot(v)
+                Self::ArrayLength { target: v, .. } | Self::Receiver { target: v, .. } | Self::New { value: v, .. } | Self::Deref(v) | Self::NonNull(v) | Self::CBytes(v) | Self::CByteLen { operand: v, .. } | Self::FunctionBorrow(v) | Self::Len(v) | Self::Cast(v) | Self::Negate(v) | Self::Truncate(v) | Self::BitNot(v)
                 | Self::Not(v) | Self::TextView(v) | Self::Intern { operand: v, .. }
                 | Self::Field { target: v, .. } => visit(v),
                 // constant_structはオペランドの解析から得た具体的なキャッシュであり、ソースのオペランドではない。
@@ -480,9 +491,10 @@ macro_rules! constant_children_visitor {
                     for v in lengths { visit(v); }
                     return true;
                 }
+                Self::ArrayDimensionGuard { left, right, .. } => { visit(left); visit(right); return true; }
                 Self::ArrayElement { target, indices } => {
                     visit(target);
-                    for (v, _) in indices { visit(v); }
+                    for (v, _, _) in indices { visit(v); }
                     return true;
                 }
                 Self::ArrayRead { address, handler: h } => {

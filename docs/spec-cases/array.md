@@ -166,3 +166,84 @@ fn main() -> u8 {
 | 設定 | 結果 | 終了コード | 警告数 |
 |---|---|---:|---:|
 | 通常 | 正常終了 | 0 | 0 |
+
+
+### array-007 寸法名の一致条件と隣接要素の範囲保証
+
+主根拠：`[array.bounds-proof]`。
+
+**ソース：**
+
+```suz
+fn diff(a: ptr [i64; n], out: ptr [i64; n]) -> void {
+    for i in 1..<n { out#[i - 1] = a[i] - a[i - 1] }
+}
+fn main() -> u8 {
+    fix ptr a = new [1, 4, 9]
+    fix ptr out = new [0; 3]
+    diff(a, out)
+    if out[0] != 3 || out[1] != 5 { return 1 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### array-008 異なる長さの実引数は本体の前に拒否する
+
+主根拠：`[rt.array-dimensions]`。
+
+**ソース：**
+
+```suz
+fn same(a: ptr [i64; n], b: ptr [i64; n]) -> void {
+    panic `body entered`
+}
+fn main() -> u8 {
+    same(new [0; 2], new [0; 3])
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | パニック | 101 | 0 |
+
+**パニック診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[rt.array-dimensions]` | 1 | 39 |
+
+### array-009 別配列には長さの関係を移さない
+
+主根拠：`[array.dimension-origin]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix ptr a = new [1; 3]
+    fix ptr b = new [1; 3]
+    for i in 0..<len a { fix v = b[i] }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[array.access-handler]` | 4 | 35 |

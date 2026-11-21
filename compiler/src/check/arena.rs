@@ -201,6 +201,8 @@ pub(super) fn statement(
                 name.clone(),
                 Binding::local(id, ty, false, false, *location),
             );
+            let dimensions = super::arrays::bounds::shape(&value, context.bindings);
+            super::arrays::bounds::register(id, ty, false, dimensions, context.bindings);
             let body = statements::block_with_bindings(
                 body,
                 context.bindings,
@@ -317,6 +319,7 @@ fn store(
     location: Location,
     context: &mut StatementContext<'_>,
 ) -> Result<(), Diagnostic> {
+    super::writes::array(value, target)?;
     let target = super::arrays::write_target(target, context.bindings)?;
     fn indirect(value: &Value) -> bool {
         match value {

@@ -1,4 +1,7 @@
 //! 配列の初期化と要素へのアクセスを検査する。要素の保存先は寿命解析でも元の配列へ結ぶ。
+pub(super) mod bounds;
+pub(super) mod dimensions;
+
 use super::{
     constants, expression,
     ir::{CheckedExpression, CheckedHandler, Value},
@@ -178,7 +181,13 @@ fn access(expr: &Expression, scope: &Scope) -> Result<(CheckedExpression, bool),
                 let ExpressionKind::Slice { start: Some(i), .. } = &step.kind else {
                     unreachable!()
                 };
-                checked.push((bound(i, scope)?, step.location));
+                let mut value = bound(i, scope)?;
+                let proven = bounds::index(&target, &value, checked.len(), scope);
+                if proven {
+                    bounds::narrow(&mut value, scope);
+                }
+                fallible |= !proven;
+                checked.push((value, step.location, proven));
             }
             let address = CheckedExpression {
                 ty: array.element.pointer(),
@@ -195,7 +204,6 @@ fn access(expr: &Expression, scope: &Scope) -> Result<(CheckedExpression, bool),
                 },
             };
             position += array.rank;
-            fallible = true;
         } else {
             let step = steps[position];
             let ExpressionKind::Slice {
@@ -214,19 +222,27 @@ fn access(expr: &Expression, scope: &Scope) -> Result<(CheckedExpression, bool),
             } else {
                 target.ty
             };
-            fallible |= *index || start.is_some() || end.is_some();
+            let start = start
+                .as_ref()
+                .map(|v| bound(v, scope).map(Box::new))
+                .transpose()?;
+            let end = end
+                .as_ref()
+                .map(|v| bound(v, scope).map(Box::new))
+                .transpose()?;
+            let proven = if *index {
+                bounds::index(&target, start.as_ref().unwrap(), 0, scope)
+            } else {
+                bounds::slice(&target, start.as_deref(), end.as_deref(), scope)
+            };
+            fallible |= !proven;
             target = CheckedExpression {
                 ty,
                 value: Value::ArrayView {
                     target: Box::new(target),
-                    start: start
-                        .as_ref()
-                        .map(|v| bound(v, scope).map(Box::new))
-                        .transpose()?,
-                    end: end
-                        .as_ref()
-                        .map(|v| bound(v, scope).map(Box::new))
-                        .transpose()?,
+                    start,
+                    end,
+                    proven,
                     index: *index,
                     location: step.location,
                     handler: None,
@@ -282,7 +298,7 @@ pub(super) fn read_or_text(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(
                     "array.access-handler",
-                    "full slices cannot fail and do not accept or"
+                    "statically proven array access does not accept or"
                 ),
             ));
         }
