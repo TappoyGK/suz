@@ -304,7 +304,7 @@ constant symbolの本体は計測対象に含めない。dynamic symbolの本体
 
 切り出し・読み取り・暗黙変換・比較・反復・変換と定数評価は仕様例集で検証する。確保の禁止、範囲外のアクセス、インターン化による共有は `compiler/tests/spec_cases/text_views.rs` で、検証用の環境層とサニタイザーを使って検証する。
 
-## C FFI
+## 12. C FFI
 
 **[runtime.ffi-types]** extern関数はCの呼出規約を使い、隠れた引数を追加しない。各型は次のC型へ対応する。
 
@@ -336,7 +336,7 @@ constant symbolの本体は計測対象に含めない。dynamic symbolの本体
 
 `c_byte_len`は実体またはビューのバイト数を読み、`SIZE_MAX`以下であることを確認して`size_t`へ変換する。超える場合は [rt.ffi-byte-len] に従う。64ビットのsize_tでは保存された64ビットの長さをすべて表せるため、範囲検査を生成しなくてよい。取り出しの確保とコピーの制約は [ffi.byte-len] に従う。
 
-## 作業領域arena
+## 13. 作業領域arena
 
 **[runtime.arena]** [rt.arena-storage] と [rt.arena-allocation] の作業領域は、環境層の `suz_env_alloc` でブロックごとに確保する。各ブロックに管理情報と `max_align_t` に整列したデータ領域を置く。管理情報を含む要求サイズがCの `size_t` に収まらない場合は計算のあふれとして拒否し、値を切り詰めない。
 
@@ -377,7 +377,7 @@ Arena退出時には、保存位置以後の回収対象を再び毒にしてか
 
 これらの処理と配置の変更は、CコンパイラがASanの有効化を示す場合（`__has_feature(address_sanitizer)` または `__SANITIZE_ADDRESS__`）だけ適用する。通常ビルドには毒の管理処理やASan用の余白を加えない。
 
-## 関数値と汎用の生成
+## 14. 関数値と汎用の生成
 
 **[runtime.fn-value]** `static fn Shape` の値は、生成するCでは関数ポインタ1つで表す。呼び出し対象と実引数の評価順序は [fn.value-evaluation] に従い、Cの関数呼び出し式の評価順序には依存しない。
 

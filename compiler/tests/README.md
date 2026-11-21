@@ -88,7 +88,7 @@ SUZ_TIMINGS=1 ./scripts/test-spec-cases.sh
 - `compiler/tests/spec_cases/arena.rs`・`arena_runtime.c`：固定領域の整列・入れ子と再利用、容量と計算のあふれ、失敗前の状態保持、容量オプションと出力物への引き継ぎを検査する。`arena_asan.c`は、Suzでは拒否される回収後の読み書きを内部APIで作り、ASanの診断・生存中の実体の保護・再利用・整列の余白を検査する。生成Cの各退出経路もASanで確認する（[runtime.arena-poison](../../docs/runtime.md)）。
 - `compiler/tests/spec_cases/arena_tree.rs`：相互再帰の集約、繰り返しと別経路の区別、上限での省略、途中脱出、表示の桁揃え・CSV、計測領域の分離と確保失敗、emit-cの配布物からの実行を検査する。
 - `compiler/tests/spec_cases/arena_report.rs`：測定したpeakと同じ容量なら成功し、1バイト不足なら失敗することを、通常・ASanの両方で確認する。途中脱出・再帰・配列・クロージャ、ブロックの再利用、出力時に追加確保しないこととCLIからの引き継ぎも検査する。
-- `compiler/tests/spec_cases/arena_fuzz.rs`：**[test.arena-fuzz]** リリース検査用の `#[ignore]` テストとして、作業領域・ポインタ・構造体・制御文・クロージャ・`fn` を組み合わせたランダムなプログラム（`objection` と `trusted` を除く）を生成し、コンパイラが受理したものだけを ASan 有効でビルド・実行して回収済み実体への読み書きがないことを検証する。寿命検査の前提は[言語仕様](../../docs/spec.md#寿命検査の前提)、その経緯は[設計記録](../../docs/design.md)を参照すること。
+- `compiler/tests/spec_cases/arena_fuzz.rs`：**[test.arena-fuzz]** リリース検査用の `#[ignore]` テストとして、作業領域・ポインタ・構造体・制御文・クロージャ・`fn` を組み合わせたランダムなプログラム（`objection` と `trusted` を除く）を生成し、コンパイラが受理したものだけを ASan 有効でビルド・実行して回収済み実体への読み書きがないことを検証する。寿命検査の前提は[言語仕様](../../docs/spec.md#93-寿命検査の前提)、その経緯は[設計記録](../../docs/design.md)を参照すること。
 
   寿命検査の前提を変更する場合は、検査モデルを検証し直し、追加・変更する機能を生成テストの要素に加える。回収後・再利用前のアクセスをASanで検査する。境界検査を意図的に欠落させたコンパイラでは、配列実体の外へ出る生成例がASanで失敗することを確認する。
 

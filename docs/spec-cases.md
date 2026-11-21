@@ -118,15 +118,15 @@ IDは分野の接頭辞と番号で構成し、期待結果の種類を含めな
 | [字句](spec-cases/lex.md) | `lex` | 第3章 | 35 |
 | [プログラムの構造](spec-cases/prog.md) | `prog` | 第4章 | 18 |
 | [型](spec-cases/type.md) | `type` | 第5章 | 37 |
-| [symbolとtext](spec-cases/text.md) | `text` | 第5・6・7・8・10章 | 36 |
-| [配列](spec-cases/array.md) | `array` | 第5・7・9章 | 9 |
+| [symbolとtext](spec-cases/text.md) | `text` | 第5・6・7・8・14章 | 36 |
+| [配列](spec-cases/array.md) | `array` | 第5・7・13章 | 9 |
 | [定数・変数・代入](spec-cases/bind.md) | `bind` | 第6章 | 31 |
 | [式](spec-cases/expr.md) | `expr` | 第7・8章 | 78 |
-| [関数と制御](spec-cases/flow.md) | `flow` | 第8章 | 91 |
+| [関数と制御](spec-cases/flow.md) | `flow` | 第8・12章 | 91 |
 | [エラー型と失敗する関数](spec-cases/errors.md) | `err` | 第8章 | 10 |
-| [実行時の検査](spec-cases/runtime.md) | `runtime` | 第9章 | 18 |
-| [ログ](spec-cases/log.md) | `log` | 第10章 | 13 |
-| [警告と診断設定](spec-cases/diag.md) | `diag` | 第11章 | 14 |
+| [実行時の検査](spec-cases/runtime.md) | `runtime` | 第13章 | 18 |
+| [ログ](spec-cases/log.md) | `log` | 第14章 | 13 |
+| [警告と診断設定](spec-cases/diag.md) | `diag` | 第15章 | 14 |
 | 合計 | | | 390 |
 
 ### 結果別件数
@@ -140,6 +140,22 @@ IDは分野の接頭辞と番号で構成し、期待結果の種類を含めな
 | 合計 | 390 |
 
 期待結果が複数の設定を持つ例は「診断設定の比較」に1例として数える。設定が1つの例は、その結果で分類する。バイト列を指定する例も同じように数える。
+
+## 分野別の検証テスト
+
+次の分野には、仕様例集として独立した受理・拒否例はまだないが、Rustで書いた検証テストがある。言語仕様からテストを辿るための案内を示す。代表例を追加する作業は右端のイシューで扱う。この表のテストは上の390例の件数に含めない。
+
+| 分野・言語仕様 | 検証テスト | 代表例の追加 |
+|---|---|---|
+| [FFI](spec.md#10-c-ffi) | [ffi.rs](../compiler/tests/spec_cases/ffi.rs)、[ffi_bytes.rs](../compiler/tests/spec_cases/ffi_bytes.rs)、[ffi_pointers.rs](../compiler/tests/spec_cases/ffi_pointers.rs)、[ffi_structs.rs](../compiler/tests/spec_cases/ffi_structs.rs)、[ffi_link.rs](../compiler/tests/spec_cases/ffi_link.rs) | 未掲載・[#154](https://github.com/TappoyGK/suz/issues/154) |
+| [作業領域とポインタ](spec.md#9-作業領域とポインタ) | [arena.rs](../compiler/tests/spec_cases/arena.rs)、[nullable_pointers.rs](../compiler/tests/spec_cases/nullable_pointers.rs)、[arena_functions.rs](../compiler/tests/spec_cases/arena_functions.rs)、[objection.rs](../compiler/tests/spec_cases/objection.rs)、[arena_accumulation.rs](../compiler/tests/spec_cases/arena_accumulation.rs) | 未掲載・[#155](https://github.com/TappoyGK/suz/issues/155) |
+| [メソッド](spec.md#111-メソッド) | [methods.rs](../compiler/tests/spec_cases/methods.rs) | 未掲載・[#156](https://github.com/TappoyGK/suz/issues/156) |
+| [演算子メソッド](spec.md#112-演算子メソッド) | [operator_methods.rs](../compiler/tests/spec_cases/operator_methods.rs) | 未掲載・[#157](https://github.com/TappoyGK/suz/issues/157) |
+| [型引数と要求](spec.md#122-型引数を持つ宣言) | [type_parameters.rs](../compiler/tests/spec_cases/type_parameters.rs)、[generic_structs.rs](../compiler/tests/spec_cases/generic_structs.rs)、[need_groups.rs](../compiler/tests/spec_cases/need_groups.rs) | 未掲載・[#158](https://github.com/TappoyGK/suz/issues/158) |
+| [クロージャ](spec.md#88-クロージャ) | [closures.rs](../compiler/tests/spec_cases/closures.rs) | 未掲載・[#159](https://github.com/TappoyGK/suz/issues/159) |
+| [関数値とfnshape](spec.md#87-関数値) | [function_values.rs](../compiler/tests/spec_cases/function_values.rs)、[generic_function_values.rs](../compiler/tests/spec_cases/generic_function_values.rs) | 未掲載・[#160](https://github.com/TappoyGK/suz/issues/160) |
+
+検証テストの実行方法と、通常検査・リリース検査の区別は[テスト基盤](../compiler/tests/README.md)を参照すること。
 
 ## 生成結果の検証
 
