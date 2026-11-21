@@ -100,7 +100,7 @@ pub(super) struct Instances {
     pub analyzed_functions: BTreeMap<usize, std::rc::Rc<Analysis>>,
 }
 impl Instances {
-    // [num.monomorphize] 宣言した関数の番号を先頭に置き、具体化には別の番号を付ける。
+    // [runtime.num-monomorphize] 宣言した関数の番号を先頭に置き、具体化には別の番号を付ける。
     // 同じ型の代入には同じ番号を共有する。
     pub fn new(first_id: usize) -> Self {
         Self {

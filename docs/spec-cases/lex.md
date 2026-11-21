@@ -239,7 +239,7 @@ fn main() -> u8 {
 
 ### lex-009 infoを通常の識別子とログレベルに使う
 
-主根拠：`[src.info]`。
+主根拠：`[src.log-level-words]`。
 
 補助根拠：`[log.output]`。
 

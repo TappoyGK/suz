@@ -103,6 +103,10 @@ cd generated
 
 `emit-c` は新規ディレクトリへ、生成C・ランタイム・Ryu・ライセンス・ビルドスクリプトを出力する。出力自体には外部ツールを使わない。`--env FILE` を指定すると、そのCソースを `runtime/suz_env.c` として収録する。出力先が既に存在する場合はエラーとなる。
 
+## コンパイラAPI
+
+コンパイラAPIでは`CompilationOptions.log_level`に`LogLevel`列挙型を指定する。既定値と設定を省略するAPIは`Info`を使う。
+
 ## 検証
 
 ```sh
