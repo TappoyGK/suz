@@ -1014,6 +1014,7 @@ pub(super) fn check(
     let (region, arena) = analysis.parameters(function, references, scope);
     Ok(Body::Input(Rc::new(callables::Input {
         base: analysis,
+        callables: scope.callables_used.get() || function.name.is_empty(),
         region,
         arena,
         parameters: function

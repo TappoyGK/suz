@@ -29,6 +29,38 @@ fn contains_in(ty: Type, structs: &super::type_parameters::structs::Structs) -> 
     }
 }
 
+// ポインタの寿命と、関数候補の流れに必要な解析を別々に記録する。
+pub(super) fn callable_type(ty: Type, structs: &super::type_parameters::structs::Structs) -> bool {
+    let mut pending = vec![ty];
+    let mut seen = std::collections::BTreeSet::new();
+    while let Some(ty) = pending.pop() {
+        match ty {
+            Type::Function(_) | Type::StaticFunction(_) => return true,
+            Type::Pointer { .. } => pending.push(ty.pointee().unwrap()),
+            Type::Struct(id) if seen.insert(id) => {
+                pending.extend(structs.get(id).fields.iter().map(|f| f.ty))
+            }
+            _ => {}
+        }
+    }
+    false
+}
+pub(super) fn observe_type(ty: Type, scope: &Scope) {
+    if !matches!(
+        ty,
+        Type::Pointer { .. } | Type::Struct(_) | Type::Function(_) | Type::StaticFunction(_)
+    ) {
+        return;
+    }
+    if !scope.callables_used.get() && callable_type(ty, &scope.structs) {
+        scope.callables_used.set(true);
+        scope.lifetime_used.set(true);
+    }
+    if !scope.lifetime_used.get() && contains(ty, scope) {
+        scope.lifetime_used.set(true);
+    }
+}
+
 pub(super) fn deref(
     value: CheckedExpression,
     location: Location,
@@ -344,6 +376,9 @@ pub(super) fn check_lifetimes(
     if scope.generic_check()
         || (!function.type_parameters.is_empty() && scope.named.type_arguments.is_none())
     {
+        return Ok(None);
+    }
+    if !scope.lifetime_used.get() && !function.name.is_empty() {
         return Ok(None);
     }
     lifetimes::check(statements, scope, function, references, id).map(Some)

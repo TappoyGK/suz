@@ -130,6 +130,8 @@ pub(super) struct Scope {
     // 定数初期値では、演算子構文による関数呼び出しも拒否する。
     pub constant_initializer: bool,
     pub arena_depth: usize,
+    pub lifetime_used: Rc<std::cell::Cell<bool>>,
+    pub callables_used: Rc<std::cell::Cell<bool>>,
     pub trusted_block: bool,
     // 最も内側のerror腕の成功型。関数の戻り値型とは独立し、クロージャ境界で解除する。
     pub recovery: Option<Type>,
@@ -330,6 +332,8 @@ impl Default for Scope {
             has_operator_methods: false,
             constant_initializer: false,
             arena_depth: 0,
+            lifetime_used: Default::default(),
+            callables_used: Default::default(),
             trusted_block: false,
             recovery: None,
             loop_depth: 0,

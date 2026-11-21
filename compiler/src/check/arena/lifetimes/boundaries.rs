@@ -49,6 +49,34 @@ impl Analysis {
         cell
     }
 
+    // 仮引数自身の実体と、そのフィールドから到達する実体は区別する。
+    // 同じ型というだけでまとめると、n.nextへの保存がn自身への保存先候補を増やす。
+    pub(super) fn parameter_root(
+        &mut self,
+        index: usize,
+        ty: Type,
+        region: usize,
+        location: Location,
+        roots: &mut BTreeMap<Type, Node>,
+        objects: &mut Vec<(Type, Node)>,
+    ) -> Node {
+        if let Some(&root) = roots.get(&ty) {
+            return root;
+        }
+        let root = self.cell(region, location, ty);
+        self.cells.get_mut(&root).unwrap().origin = Origin::Parameter;
+        self.objects
+            .insert(root, summaries::Object::Parameter(index, ty));
+        roots.insert(ty, root);
+        for path in self.paths(ty) {
+            let target = self.field_type(ty, &path).pointee().unwrap();
+            let object = self.parameter_object(target, region, location, objects);
+            let field = self.project(root, &path);
+            self.targets[field].insert(Reference::object(object));
+        }
+        root
+    }
+
     pub(super) fn parameters(
         &mut self,
         function: &crate::ast::Function,
@@ -67,6 +95,7 @@ impl Analysis {
             let region = 0;
             let mut private = Vec::new();
             let objects = &mut private;
+            let mut roots = BTreeMap::new();
             // 参照捕捉の保存場所は呼び出し元にある。値捕捉・通常の仮引数はローカルなコピー。
             let storage = if references.contains_key(&parameter.name) {
                 region
@@ -83,13 +112,20 @@ impl Analysis {
             }
             for path in self.paths(ty) {
                 let pointee = self.field_type(ty, &path).pointee().unwrap();
-                let object = self.parameter_object(pointee, region, parameter.location, objects);
+                let object = self.parameter_root(
+                    id,
+                    pointee,
+                    region,
+                    parameter.location,
+                    &mut roots,
+                    objects,
+                );
                 let field = self.project(local, &path);
                 self.targets[field].insert(Reference::object(object));
             }
             for &(ty, object) in objects.iter() {
                 self.objects
-                    .insert(object, summaries::Object::Parameter(id, ty));
+                    .insert(object, summaries::Object::ReachableParameter(id, ty));
             }
         }
         (body, Some(0))

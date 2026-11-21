@@ -6,6 +6,7 @@ use crate::check::ir::{CallHandler, CheckedFunction};
 #[derive(Clone)]
 pub(crate) struct Input {
     pub base: Analysis,
+    pub callables: bool,
     pub region: usize,
     pub arena: Option<usize>,
     pub parameters: Vec<Type>,
@@ -56,11 +57,22 @@ fn single(bound: Bound) -> Values {
     BTreeMap::from([(vec![], BTreeMap::from([(bound.key(), bound)]))])
 }
 fn merge(into: &mut Values, from: Values) -> bool {
-    let before = value_key(into);
+    let mut changed = false;
     for (path, values) in from {
-        into.entry(path).or_default().extend(values);
+        let set = into.entry(path).or_default();
+        for (key, value) in values {
+            changed |= set.insert(key, value).is_none();
+        }
     }
-    before != value_key(into)
+    changed
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum Flow {
+    Parameter(usize, usize),
+    Return(usize),
+    Heap(usize),
+    Field(usize, usize, Type),
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -77,31 +89,56 @@ struct Program {
     contexts: BTreeMap<usize, Context>,
     keys: BTreeMap<ContextKey, usize>,
     // static fnは呼び出し文脈を分けず、宣言の仮引数・戻り値・構造体フィールドごとに合流。
-    parameters: BTreeMap<(usize, usize), Values>,
-    returns: BTreeMap<usize, Values>,
+    values: BTreeMap<Flow, Values>,
+    readers: BTreeMap<Flow, BTreeSet<usize>>,
+    pending: std::collections::VecDeque<usize>,
+    queued: BTreeSet<usize>,
+    current: usize,
     allocations: BTreeMap<(usize, Location), usize>,
-    heap: BTreeMap<usize, Values>,
-    fields: BTreeMap<(usize, usize), Values>,
     next: usize,
     empty: usize,
-    changed: bool,
     failure: Option<Diagnostic>,
     context_counts: BTreeMap<usize, usize>,
 }
 impl Program {
+    fn enqueue(&mut self, id: usize) {
+        if self.queued.insert(id) {
+            self.pending.push_back(id);
+        }
+    }
+    // 候補を読んだ文脈だけを、その候補が増えたときに再計算する。
+    // 名前付き呼び出しの長い連鎖で全本体を繰り返し走査しない。
+    fn read(&mut self, key: Flow) -> Values {
+        self.readers
+            .entry(key.clone())
+            .or_default()
+            .insert(self.current);
+        self.values.get(&key).cloned().unwrap_or_default()
+    }
+    fn write(&mut self, key: Flow, values: Values) {
+        if values.is_empty() {
+            return;
+        }
+        if merge(self.values.entry(key.clone()).or_default(), values) {
+            for id in self.readers.get(&key).cloned().unwrap_or_default() {
+                self.enqueue(id);
+            }
+        }
+    }
+
     fn request(&mut self, function: usize, arguments: &[Values]) -> usize {
-        let Some(input) = self.templates.get(&function) else {
+        let Some(input) = self.templates.get(&function).cloned() else {
             return function;
         };
+        if !input.callables {
+            return function;
+        }
         let mut bound = vec![Values::new(); input.parameters.len()];
         for (index, (&ty, values)) in input.parameters.iter().zip(arguments).enumerate() {
             if matches!(ty, Type::Function(_)) {
                 bound[index] = values.clone();
             } else {
-                self.changed |= merge(
-                    self.parameters.entry((function, index)).or_default(),
-                    values.clone(),
-                );
+                self.write(Flow::Parameter(function, index), values.clone());
             }
         }
         // 再帰のたびに前のクロージャを捕捉する形では、環境の木が無限に深くなる。
@@ -144,8 +181,15 @@ impl Program {
             return self.empty;
         }
         *count += 1;
-        let id = self.next;
-        self.next += 1;
+        // 関数値による特殊化のない文脈は元の関数番号を保つ。
+        // 関数値を扱わない呼び出し元の要約からも、そのまま参照できる。
+        let id = if bound.iter().all(Values::is_empty) {
+            function
+        } else {
+            let id = self.next;
+            self.next += 1;
+            id
+        };
         self.keys.insert(key, id);
         self.contexts.insert(
             id,
@@ -154,7 +198,7 @@ impl Program {
                 arguments: bound,
             },
         );
-        self.changed = true;
+        self.enqueue(id);
         id
     }
     fn closure(&mut self, input: Rc<Input>) -> usize {
@@ -204,18 +248,24 @@ impl Walk<'_> {
                             .insert(cell, summaries::Object::Slot(index));
                     }
                     let mut objects = Vec::new();
+                    let mut roots = BTreeMap::new();
                     for path in self.analysis.paths(ty) {
                         let target = self.analysis.field_type(ty, &path).pointee().unwrap();
-                        let object =
-                            self.analysis
-                                .parameter_object(target, 0, location, &mut objects);
+                        let object = self.analysis.parameter_root(
+                            index,
+                            target,
+                            0,
+                            location,
+                            &mut roots,
+                            &mut objects,
+                        );
                         let field = self.analysis.project(cell, &path);
                         self.analysis.targets[field].insert(Reference::object(object));
                     }
                     for (ty, object) in objects {
                         self.analysis
                             .objects
-                            .insert(object, summaries::Object::Parameter(index, ty));
+                            .insert(object, summaries::Object::ReachableParameter(index, ty));
                     }
                     capture.value = CheckedExpression {
                         ty,
@@ -252,31 +302,18 @@ impl Walk<'_> {
             }
         }
     }
-    fn field_key(&self, owner: usize, index: usize) -> (usize, usize) {
+    fn field_key(&self, owner: usize, index: usize) -> Flow {
         let decl = self.analysis.structs.get(owner);
-        (
+        Flow::Field(
             decl.application.as_ref().map_or(owner, |a| a.declaration),
             index,
+            // 関数葉は宣言単位で合流し、呼び出しで具体型を照合する。
+            // 複合型の経路は具体型で区別し、Box[T]のTへ別のTの経路を注入しない。
+            match decl.fields[index].ty {
+                Type::StaticFunction(_) => Type::Void,
+                ty => ty,
+            },
         )
-    }
-    fn field_values(&self, ty: Type) -> Values {
-        let Some(id) = (match ty {
-            Type::Struct(id) => Some(id),
-            _ => None,
-        }) else {
-            return Values::new();
-        };
-        let mut result = Values::new();
-        for index in 0..self.analysis.structs.get(id).fields.len() {
-            if let Some(values) = self.program.fields.get(&self.field_key(id, index)) {
-                for (path, set) in values {
-                    let mut path = path.clone();
-                    path.insert(0, index);
-                    result.insert(path, set.clone());
-                }
-            }
-        }
-        result
     }
     fn save_fields(&mut self, ty: Type, values: &Values) {
         let Type::Struct(id) = ty else { return };
@@ -287,7 +324,7 @@ impl Walk<'_> {
                 .map(|(path, set)| (path[1..].to_vec(), set.clone()))
                 .collect();
             let key = self.field_key(id, index);
-            self.program.changed |= merge(self.program.fields.entry(key).or_default(), selected);
+            self.program.write(key, selected);
         }
     }
     fn call(
@@ -314,11 +351,7 @@ impl Walk<'_> {
                 site: self.site,
                 captures: Vec::new(),
             }),
-            Value::Local(id) => {
-                let mut values = self.locals.get(id).cloned().unwrap_or_default();
-                merge(&mut values, self.field_values(ty));
-                values
-            }
+            Value::Local(id) => self.locals.get(id).cloned().unwrap_or_default(),
             Value::FunctionBorrow(value)
             | Value::Cast(value)
             | Value::Receiver { target: value, .. } => self.expr(value),
@@ -347,15 +380,25 @@ impl Walk<'_> {
             }
             Value::Field { target, index } => {
                 let values = self.expr(target);
-                values
+                let mut values = values
                     .into_iter()
                     .filter_map(|(path, set)| {
                         (path.first() == Some(index)).then(|| (path[1..].to_vec(), set))
                     })
-                    .collect()
+                    .collect();
+                if let Type::Struct(owner) = target.ty {
+                    merge(
+                        &mut values,
+                        self.program.read(self.field_key(owner, *index)),
+                    );
+                }
+                values
             }
             Value::New { value, location } => {
                 let values = self.expr(value);
+                if !super::super::callable_type(value.ty, &self.analysis.structs) {
+                    return Values::new();
+                }
                 let key = (self.function, *location);
                 let id = if let Some(&id) = self.program.allocations.get(&key) {
                     id
@@ -365,7 +408,7 @@ impl Walk<'_> {
                     self.program.allocations.insert(key, id);
                     id
                 };
-                self.program.changed |= merge(self.program.heap.entry(id).or_default(), values);
+                self.program.write(Flow::Heap(id), values);
                 single(Bound {
                     function: id,
                     site: *location,
@@ -374,16 +417,9 @@ impl Walk<'_> {
             }
             Value::Deref(target) => {
                 let pointers = self.expr(target);
-                let mut values = self.field_values(ty);
+                let mut values = Values::new();
                 for pointer in pointers.values().flat_map(|set| set.values()) {
-                    merge(
-                        &mut values,
-                        self.program
-                            .heap
-                            .get(&pointer.function)
-                            .cloned()
-                            .unwrap_or_default(),
-                    );
+                    merge(&mut values, self.program.read(Flow::Heap(pointer.function)));
                 }
                 values
             }
@@ -412,11 +448,7 @@ impl Walk<'_> {
                 let function = *id;
                 let values: Vec<_> = arguments.iter_mut().map(|a| self.expr(a)).collect();
                 *id = self.call(function, arguments, &values);
-                self.program
-                    .returns
-                    .get(&function)
-                    .cloned()
-                    .unwrap_or_default()
+                self.program.read(Flow::Return(function))
             }
             Value::Invoke {
                 target,
@@ -473,11 +505,7 @@ impl Walk<'_> {
                     });
                     merge(
                         &mut returned,
-                        self.program
-                            .returns
-                            .get(&bound.function)
-                            .cloned()
-                            .unwrap_or_default(),
+                        self.program.read(Flow::Return(bound.function)),
                     );
                 }
                 // 候補は全て検査する。分岐は寿命検査専用で、生成Cの間接呼び出しはそのまま。
@@ -597,7 +625,6 @@ impl Walk<'_> {
                 Values::new()
             }
         };
-        merge(&mut values, self.field_values(ty));
         if let Type::StaticFunction(shape) = ty {
             let types = self.function_types.borrow();
             let required = &types[shape];
@@ -691,10 +718,8 @@ impl Walk<'_> {
                     self.statements(body);
                     let values = self.expr(value);
                     for pointer in indirect.values().flat_map(|set| set.values()) {
-                        self.program.changed |= merge(
-                            self.program.heap.entry(pointer.function).or_default(),
-                            values.clone(),
-                        );
+                        self.program
+                            .write(Flow::Heap(pointer.function), values.clone());
                     }
                     self.save_fields(target.ty, &values);
                     // フィールドへのポインタ経由の保存も、所有する構造体宣言の集合へ加える。
@@ -702,8 +727,7 @@ impl Walk<'_> {
                         && let Type::Struct(owner) = target.ty
                     {
                         let key = self.field_key(owner, *index);
-                        self.program.changed |=
-                            merge(self.program.fields.entry(key).or_default(), values);
+                        self.program.write(key, values);
                     }
                 }
                 CheckedStatement::Return { value, .. } => {
@@ -805,6 +829,9 @@ pub(in crate::check) fn check_program(
     functions: &mut [CheckedFunction],
     external: std::ops::Range<usize>,
 ) -> Result<(), Diagnostic> {
+    if functions.iter().all(|function| function.lifetime.is_none()) {
+        return Ok(());
+    }
     let mut program = Program {
         next: functions.iter().map(|f| f.id).max().unwrap_or(0) + 1,
         ..Program::default()
@@ -827,12 +854,33 @@ pub(in crate::check) fn check_program(
     for function in functions.iter_mut() {
         match function.lifetime.take() {
             Some(Body::Input(input)) => {
+                if !input.callables {
+                    let mut analysis = input.base.clone();
+                    analysis.statements(&input.statements, input.region, input.arena);
+                    let mut function = CheckedFunction {
+                        id: function.id,
+                        lifetime: None,
+                        mutable_receiver: false,
+                        parameters: vec![],
+                        result: Type::Void,
+                        fallible: false,
+                        statements: vec![],
+                    };
+                    function.lifetime = Some(Body::Pending(Rc::new(analysis)));
+                    checked.push(function);
+                }
                 program.templates.insert(function.id, input);
             }
             other => {
-                let mut function = function.clone();
-                function.lifetime = other;
-                checked.push(function);
+                checked.push(CheckedFunction {
+                    id: function.id,
+                    lifetime: other,
+                    mutable_receiver: false,
+                    parameters: vec![],
+                    result: Type::Void,
+                    fallible: false,
+                    statements: vec![],
+                });
             }
         }
     }
@@ -841,75 +889,59 @@ pub(in crate::check) fn check_program(
         program.request(id, &[]);
     }
     let mut finished = BTreeMap::new();
-    loop {
-        program.changed = false;
-        let contexts: Vec<_> = program
-            .contexts
-            .iter()
-            .map(|(&id, context)| (id, context.clone()))
-            .collect();
-        for (id, context) in contexts {
-            let input = program.templates[&context.function].clone();
-            let mut analysis = input.base.clone();
-            analysis.function_id = id;
-            let mut walk = Walk {
-                program: &mut program,
-                analysis,
-                function: context.function,
-                locals: BTreeMap::new(),
-                returned: Values::new(),
-                recoveries: Vec::new(),
-                site: input.location,
-                next_capture: input.parameters.len(),
-                function_types: input.function_types.clone(),
+    while let Some(id) = program.pending.pop_front() {
+        program.queued.remove(&id);
+        program.current = id;
+        let context = program.contexts[&id].clone();
+        let input = program.templates[&context.function].clone();
+        let mut analysis = input.base.clone();
+        analysis.function_id = id;
+        let mut walk = Walk {
+            program: &mut program,
+            analysis,
+            function: context.function,
+            locals: BTreeMap::new(),
+            returned: Values::new(),
+            recoveries: Vec::new(),
+            site: input.location,
+            next_capture: input.parameters.len(),
+            function_types: input.function_types.clone(),
+        };
+        for (index, (&ty, values)) in input.parameters.iter().zip(&context.arguments).enumerate() {
+            let values = if matches!(ty, Type::Function(_)) {
+                walk.bind(values)
+            } else {
+                walk.program.read(Flow::Parameter(context.function, index))
             };
-            for (index, (&ty, values)) in
-                input.parameters.iter().zip(&context.arguments).enumerate()
-            {
-                let values = if matches!(ty, Type::Function(_)) {
-                    walk.bind(values)
-                } else {
-                    walk.program
-                        .parameters
-                        .get(&(context.function, index))
-                        .cloned()
-                        .unwrap_or_default()
-                };
-                walk.locals.insert(index, values);
-            }
-            let statements = loop {
-                let before: Vec<_> = walk
-                    .locals
-                    .iter()
-                    .map(|(id, v)| (*id, value_key(v)))
-                    .collect();
-                let mut statements = input.statements.clone();
-                walk.statements(&mut statements);
-                let after: Vec<_> = walk
-                    .locals
-                    .iter()
-                    .map(|(id, v)| (*id, value_key(v)))
-                    .collect();
-                if before == after {
-                    break statements;
-                }
-            };
-            walk.program.changed |= merge(
-                walk.program.returns.entry(context.function).or_default(),
-                walk.returned,
-            );
-            if let Some(error) = walk.program.failure.take() {
-                return Err(error);
-            }
-            let mut analysis = walk.analysis;
-            analysis.statements(&statements, input.region, input.arena);
-            finished.insert(id, analysis);
+            walk.locals.insert(index, values);
         }
-        if !program.changed {
-            break;
+        let statements = loop {
+            let before: Vec<_> = walk
+                .locals
+                .iter()
+                .map(|(id, v)| (*id, value_key(v)))
+                .collect();
+            let mut statements = input.statements.clone();
+            walk.statements(&mut statements);
+            let after: Vec<_> = walk
+                .locals
+                .iter()
+                .map(|(id, v)| (*id, value_key(v)))
+                .collect();
+            if before == after {
+                break statements;
+            }
+        };
+        walk.program
+            .write(Flow::Return(context.function), walk.returned);
+        if let Some(error) = walk.program.failure.take() {
+            return Err(error);
         }
+        // 関数候補の収束中はIRだけを更新する。寿命の制約と要約は収束後に一度作る。
+        finished.insert(id, (walk.analysis, statements, input.region, input.arena));
     }
-    for (id, mut analysis) in finished {
+    for (id, (mut analysis, statements, region, arena)) in finished {
+        analysis.statements(&statements, region, arena);
         let body = if analysis.direct_calls.is_empty() {
             let summary = if let Some(summary) = analysis.forwarded_summary(&BTreeMap::new()) {
                 summary

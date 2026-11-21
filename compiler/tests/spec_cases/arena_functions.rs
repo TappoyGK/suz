@@ -776,3 +776,84 @@ fn main() -> u8 {
 "#;
     suz::compile(source.as_bytes()).unwrap();
 }
+
+#[test]
+fn callee_objection_cannot_override_a_proven_call_store() {
+    for body in [
+        "n#next = new Node { v: 2, next: null }",
+        "objection [locally assumed safe] { n#next = new Node { v: 2, next: null } }",
+    ] {
+        for call in [
+            "attach(n)",
+            "relay(n)",
+            "invoke(fn attach, n)",
+            "choose()(n)",
+            "cycle(n, false)",
+            "generic[Node](n)",
+            "run(fn [n]() -> void { attach(n) })",
+        ] {
+            let source = format!(
+                r#"
+struct Node {{ v: i32, next: ptr? Node }}
+fnshape Attach(ptr Node) -> void
+fn attach(n: ptr Node) -> void {{ {body} }}
+fn relay(n: ptr Node) -> void {{ attach(n) }}
+fn invoke(f: static fn Attach, n: ptr Node) -> void {{ f(n) }}
+fn choose() -> static fn Attach {{ return fn attach }}
+fnshape Act() -> void
+fn run(f: fn Act) -> void {{ f() }}
+fn cycle(n: ptr Node, flag: bool) -> void {{ if flag {{ back(n) }} else {{ attach(n) }} }}
+fn back(n: ptr Node) -> void {{ cycle(n, false) }}
+fn generic[T](n: ptr Node) -> void {{ attach(n) }}
+fn main() -> u8 {{
+    fix ptr n = new Node {{ v: 1, next: null }}
+    arena {{ {call} }}
+    return 0
+}}
+"#
+            );
+            let error = suz::compile(source.as_bytes()).unwrap_err();
+            assert_eq!(error.rule(), "arena.store", "{error}");
+            assert!(
+                error.to_string().contains("proven lifetime violation"),
+                "{error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn nested_generic_fields_do_not_expand_callable_paths() {
+    for ty in ["ptr Node", "static fn Read"] {
+        let initial = if ty == "ptr Node" { "outer" } else { "fn read" };
+        let source = format!(
+            r#"
+struct Box[T] {{ value: T }}
+struct Node {{ v: i32 }}
+fnshape Read(ptr Node) -> i32
+fn read(n: ptr Node) -> i32 {{ return n.v }}
+fn main() -> u8 {{
+    fix ptr outer = new Node {{ v: 1 }}
+    fix c = Box[{ty}] {{ value: {initial} }}
+    fix b = Box[Box[{ty}]] {{ value: c }}
+    return 0
+}}
+"#
+        );
+        suz::compile(source.as_bytes()).unwrap();
+    }
+    let source = r#"
+struct Box[T] { value: T }
+struct Node { v: i32 }
+fn main() -> u8 {
+    fix ptr outer = new Node { v: 1 }
+    var b = Box[Box[ptr Node]] { value: Box[ptr Node] { value: outer } }
+    arena { b.value#value = new Node { v: 2 } }
+    return 0
+}
+"#;
+    assert_eq!(
+        suz::compile(source.as_bytes()).unwrap_err().rule(),
+        "arena.store"
+    );
+}

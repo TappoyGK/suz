@@ -9,6 +9,7 @@ use std::collections::VecDeque;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum Object {
     Parameter(usize, Type),
+    ReachableParameter(usize, Type),
     // 書き込みメソッドの受け手、または参照捕捉された変数の保存場所。
     Slot(usize),
     Allocation(usize, Node),
@@ -103,6 +104,37 @@ pub(crate) struct Summary {
 }
 
 impl Summary {
+    // 使われない仮引数の到達先を呼び出しごとに読み直さない。
+    // 到達先を要約が実際に使う仮引数だけは、そこまでの経路も保持する。
+    fn retain_used_objects(&mut self) {
+        let used: BTreeSet<_> = self
+            .returned
+            .values()
+            .flatten()
+            .chain(
+                self.stores
+                    .values()
+                    .flat_map(|effect| effect.destinations.iter().chain(&effect.values)),
+            )
+            .map(|endpoint| endpoint.object)
+            .collect();
+        let traversed: BTreeSet<_> = used
+            .iter()
+            .filter_map(|object| match object {
+                Object::ReachableParameter(index, _) => Some(*index),
+                _ => None,
+            })
+            .collect();
+        self.objects.retain(|object, _| {
+            used.contains(object)
+                || match object {
+                    Object::Parameter(index, _) | Object::ReachableParameter(index, _) => {
+                        traversed.contains(index)
+                    }
+                    _ => false,
+                }
+        });
+    }
     // 再帰を一周するたびに、同じArena・型の確保箇所を全呼び出し元へ展開しない。
     // 参照先の領域は共通なので、寿命検査では一つの候補にまとめられる。
     // 仮引数と受け手はまとめず、外側の実体への保存を引き続き区別する。
@@ -115,7 +147,9 @@ impl Summary {
                     Object::Allocation(..) | Object::RecursiveAllocation(..) => {
                         Object::RecursiveAllocation(component, info.ty)
                     }
-                    Object::Parameter(..) | Object::Slot(..) => object,
+                    Object::Parameter(..) | Object::ReachableParameter(..) | Object::Slot(..) => {
+                        object
+                    }
                 };
                 (object, target)
             })
@@ -183,10 +217,12 @@ impl Analysis {
         if self.return_region != Some(0)
             || !self.root_references_only()
             || self.direct_calls.len() > 1
-            || self
-                .objects
-                .values()
-                .any(|object| !matches!(object, Object::Parameter(..)))
+            || self.objects.values().any(|object| {
+                !matches!(
+                    object,
+                    Object::Parameter(..) | Object::ReachableParameter(..)
+                )
+            })
             || self.constraints.iter().any(|constraint| match constraint {
                 Constraint::Copy(..) | Constraint::Load(_, Place::Direct(_)) => false,
                 Constraint::Store(Place::Direct(cell), _, _) => {
@@ -214,6 +250,15 @@ impl Analysis {
             }
             let mut inputs = BTreeMap::new();
             for &object in callee.objects.keys() {
+                // 仮引数の初期グラフには、返却に使わない到達先も含まれる。
+                // 直接の参照の転送には不要なので、戻り値が参照する実体だけを代入する。
+                if !callee
+                    .returned
+                    .values()
+                    .any(|values| values.iter().any(|value| value.object == object))
+                {
+                    continue;
+                }
                 let Object::Parameter(index, ty) = object else {
                     return None;
                 };
@@ -265,6 +310,7 @@ impl Analysis {
                 );
             }
         }
+        result.retain_used_objects();
         Some(result)
     }
 
@@ -348,6 +394,7 @@ impl Analysis {
             effect.destinations.extend(destinations);
             effect.values.extend(values);
         }
+        result.retain_used_objects();
         self.constraints = constraints;
         result
     }
@@ -360,7 +407,7 @@ impl Analysis {
             let node = self.node();
             mapped.insert(object, node);
             match object {
-                Object::Parameter(..) => {}
+                Object::Parameter(..) | Object::ReachableParameter(..) => {}
                 Object::Slot(index) => {
                     if let Some(receiver) = call
                         .captures
@@ -390,12 +437,13 @@ impl Analysis {
         }
         // 読み出しの辺を残すことで、別名経由の後続の書き込みも実引数の到達先に反映する。
         for (&object, &node) in &mapped {
-            let Object::Parameter(index, ty) = object else {
+            let (Object::Parameter(index, ty) | Object::ReachableParameter(index, ty)) = object
+            else {
                 continue;
             };
             for path in self.paths(ty) {
                 let target = self.field_type(ty, &path).pointee().unwrap();
-                if let Some(&next) = mapped.get(&Object::Parameter(index, target)) {
+                if let Some(&next) = mapped.get(&Object::ReachableParameter(index, target)) {
                     self.constraints
                         .push(Constraint::Load(next, Place::Indirect(node, path)));
                 }
@@ -450,9 +498,8 @@ impl Analysis {
             if info.nonnull {
                 self.nonnull_values.insert(source);
             }
-            if info.objection {
-                self.objections.insert(self.constraints.len());
-            }
+            // 呼び出し先の字句上のobjectionは呼び出し元へ持ち出さない。
+            // 実引数を代入して初めて分かる保存先の寿命は、この境界で必ず検査する。
             self.effect_calls
                 .insert(self.constraints.len(), call.location);
             self.effect_stores.insert(self.constraints.len(), *info);

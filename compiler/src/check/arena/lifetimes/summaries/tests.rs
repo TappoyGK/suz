@@ -267,7 +267,7 @@ fn missing_callee_is_an_error_not_an_empty_effect() {
 }
 
 #[test]
-fn objection_keeps_the_joint_destination_candidates_and_the_nonnull_proof() {
+fn callee_objection_is_lexical_and_call_store_keeps_the_nonnull_proof() {
     let mut f = body(1);
     let a = parameter(&mut f, 0, Type::Bool.pointer());
     let b = parameter(&mut f, 1, Type::Bool.pointer());
@@ -324,7 +324,10 @@ fn objection_keeps_the_joint_destination_candidates_and_the_nonnull_proof() {
                     .any(|note| note.rule_id == "arena.call-diagnostic" && note.line == 20)
             );
         } else {
-            checked.validate(&constraints).unwrap();
+            // 本体のobjectionは呼び出し側では効かない。混合候補なら未証明の拒否。
+            let error = checked.validate(&constraints).unwrap_err();
+            assert_eq!(error.rule_id, "arena.store");
+            assert!(error.message.contains("may outlive"));
         }
     }
 }

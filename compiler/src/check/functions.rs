@@ -461,6 +461,8 @@ pub(super) fn check_with_captures(
     control::validate_return_positions(&function.statements)?;
     scope.trusted_block = false;
     scope.arena_depth = 1;
+    scope.lifetime_used = Default::default();
+    scope.callables_used = Default::default();
     scope.recovery = None;
     scope.loop_depth = 0;
     let mut warnings = Vec::new();
@@ -472,6 +474,7 @@ pub(super) fn check_with_captures(
     }
     scope.errors = Rc::new(function.errors.clone());
     scope.result = scope.resolve_type_at(function.result, function.location)?;
+    super::arena::observe_type(scope.result, &scope);
     let mut declared = Vec::new();
     for (parameter_id, parameter) in function.parameters.iter().enumerate() {
         if declared.contains(&parameter.name) {
@@ -490,6 +493,7 @@ pub(super) fn check_with_captures(
             ));
         }
         let parameter_type = scope.resolve_type_at(parameter.ty, parameter.location)?;
+        super::arena::observe_type(parameter_type, &scope);
         if let Some(binding) = references.get(&parameter.name) {
             let mut binding = binding.clone();
             binding.id = parameter_id;
