@@ -1008,7 +1008,7 @@ symbolの要求型は、各構文の型検査規則に従って決める。以�
 - [type.expected]・[type.context]：symbolの型注釈のある初期値、symbolへの代入、symbol仮引数の実引数、symbol戻り値のreturn、symbolフィールドの初期値、symbolを対象とするmatch・matchexprのパターン。
 - [struct.with-fields]：withで差し替えるsymbolフィールドの初期値。
 - [array.initializer-type]：外側から要求される配列参照の要素型がsymbolの場合の、列挙初期化の各要素と反復初期化の初期値。
-- [type.branch-inference]：外側からの要求型、または分岐の型をそろえる規則でsymbolが要求される分岐。
+- [type.branch-inference]：外側からsymbolが要求されるifexpr・matchexprの分岐。外側からの要求型がない場合は、他の分岐がsymbolでもテンプレートにはsymbolを要求せず、[text.join] に従う。実行時の埋め込みを持つテンプレートにはtextbufが必要である。
 
 例えば、nameがsymbolフィールドなら `` v with { name: `${x}` } `` はそのテンプレートをsymbolとして生成する。`` var ptr items: ptr [symbol] = new [`${x}`; n] `` も、初期値のテンプレートをsymbolとして1回生成してから各要素へコピーする。
 
