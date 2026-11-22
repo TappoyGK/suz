@@ -177,3 +177,42 @@ fn constant_arithmetic_diagnostics_are_reported_once_at_the_declaration() {
     assert_eq!((error.line, error.column), (2, 16));
     assert!(error.message().contains("diagnostic.arithmetic"));
 }
+
+#[test]
+fn constant_allocations_report_the_operation_instead_of_methods_or_arena_context() {
+    for (source, column, message) in [
+        (
+            "fix PALETTE: ptr [i32] = new [1, 2, 3]",
+            26,
+            "array allocation is not a constant expression",
+        ),
+        (
+            "fix B = new [0; 3]",
+            9,
+            "array allocation is not a constant expression",
+        ),
+        (
+            "fix A = new (1 as i32)",
+            9,
+            "new is not a constant expression",
+        ),
+        (
+            "fix P = Pt { x: 1 }.get()",
+            21,
+            "method calls are not constant expressions",
+        ),
+    ] {
+        let source = format!(
+            "{source}\nstruct Pt {{ x: i32 }}\nfn Pt.get() -> i32 {{ return self.x }}\nfn main() -> u8 {{ return 0 }}"
+        );
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(error.kind, suz::ErrorKind::InvalidSource, "{source}");
+        assert_eq!(error.rule(), "const.expression", "{source}");
+        assert_eq!((error.line, error.column), (1, column), "{source}");
+        assert_eq!(
+            error.message(),
+            format!("{message} [const.expression]"),
+            "{source}"
+        );
+    }
+}

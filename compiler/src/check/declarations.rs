@@ -19,9 +19,22 @@ pub(super) fn dependencies(
     names: &mut Vec<(String, Location)>,
 ) -> Result<(), Diagnostic> {
     match &expr.kind {
-        ExpressionKind::ArrayInit { .. }
-        | ExpressionKind::MethodCall { .. }
-        | ExpressionKind::Receiver { .. } => {
+        ExpressionKind::New(_) | ExpressionKind::ArrayInit { .. } => {
+            let allocation = match &expr.kind {
+                ExpressionKind::New(inner) => &inner.kind,
+                kind => kind,
+            };
+            let message = if matches!(allocation, ExpressionKind::ArrayInit { .. }) {
+                crate::diagnostic!(
+                    "const.expression",
+                    "array allocation is not a constant expression"
+                )
+            } else {
+                crate::diagnostic!("const.expression", "new is not a constant expression")
+            };
+            return Err(expr.location.error(ErrorKind::InvalidSource, message));
+        }
+        ExpressionKind::MethodCall { .. } | ExpressionKind::Receiver { .. } => {
             return Err(expr.location.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(
@@ -84,7 +97,6 @@ pub(super) fn dependencies(
         | ExpressionKind::Variant { .. } => {}
         ExpressionKind::Group(inner)
         | ExpressionKind::Negate(inner)
-        | ExpressionKind::New(inner)
         | ExpressionKind::Deref(inner)
         | ExpressionKind::CBytes(inner)
         | ExpressionKind::CByteLen(inner)
