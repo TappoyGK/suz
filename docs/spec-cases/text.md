@@ -18,7 +18,7 @@ fn make(name: symbol) -> symbol {
     return `Hello, ${name}`
 }
 fn main() -> u8 {
-    var name = `Suz`
+    var name: symbol = `Suz`
     var first = Message { body: make(name) }
     fix copied = first
     name = `World`
@@ -46,7 +46,7 @@ fn main() -> u8 {
 fn identity(value: symbol) -> symbol { return value }
 fn main() -> u8 {
     fix name = identity(`Suz`)
-    fix generated = `${name}`
+    fix generated: symbol = `${name}`
     fix empty = identity(``)
     if name == generated && generated != `suz` && empty == `` { return 0 }
     return 1
@@ -68,13 +68,14 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
+fn symbol_value(value: symbol) -> symbol { return value }
 fn main() -> u8 {
-    fix composed = `é`
-    fix decomposed = `é`
-    if not (`` < `a` && `a` < `aa` && `A` < `a` <= `a`) { return 1 }
-    if not (`あ` < `い` && `𐀀` > ``) { return 2 }
+    fix composed = symbol_value(`é`)
+    fix decomposed = symbol_value(`é`)
+    if not (symbol_value(``) < symbol_value(`a`) && symbol_value(`a`) < symbol_value(`aa`) && symbol_value(`A`) < symbol_value(`a`) <= symbol_value(`a`)) { return 1 }
+    if not (symbol_value(`あ`) < symbol_value(`い`) && symbol_value(`𐀀`) > symbol_value(``)) { return 2 }
     if composed == decomposed { return 3 }
-    if not (`a\0b` > `a` && `\0` < `\t`) { return 4 }
+    if not (symbol_value(`a\0b`) > symbol_value(`a`) && symbol_value(`\0`) < symbol_value(`\t`)) { return 4 }
     return 0
 }
 ```
@@ -93,7 +94,9 @@ fn main() -> u8 {
 
 ```suz
 fn main() -> u8 {
-    fix value = `a` + `b`
+    fix left: symbol = `a`
+    fix right: symbol = `b`
+    fix value = left + right
     return 0
 }
 ```
@@ -108,7 +111,7 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[symbol.operations]` | 2 | 21 |
+| 通常 | `[symbol.operations]` | 4 | 22 |
 
 ### text-026 symbolをtextとして渡し、分岐と構造体に保持する
 
@@ -117,14 +120,15 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
+fix ORIGINAL: symbol = `abc`
 struct Message { body: text }
 fn keep(value: text) -> text { return value }
 fn main() -> u8 {
-    var original = `abc`
+    var original: symbol = `abc`
     fix saved = keep(original)
     original = `other`
-    fix first = ifexpr true { `abc` } else { saved }
-    fix second = ifexpr false { saved } else { `abc` }
+    fix first = ifexpr true { ORIGINAL } else { saved }
+    fix second = ifexpr false { saved } else { ORIGINAL }
     fix message = Message { body: first }
     if message.body != second { return 1 }
     if saved != `abc` { return 2 }
@@ -173,9 +177,9 @@ fn main() -> u8 {
 struct Label {
     name: symbol,
 }
-fix PRODUCT = `Suz`
+fix PRODUCT: symbol = `Suz`
 fix MAJOR: u8 = 1
-fix LABEL = `${PRODUCT} ${MAJOR}`
+fix LABEL: symbol = `${PRODUCT} ${MAJOR}`
 fix COUNT: u8 = `256` as u8 or 10
 fix WRAPPED = `257` as% u8 or 10
 fix OBJECT = `Label { name: \`Suz\` }` as Label or Label { name: `` }
@@ -199,7 +203,7 @@ fn main() -> u8 {
 
 ```suz
 fn main() -> u8 {
-    fix value = `${`bad` as u8 or return 1}`
+    fix value: symbol = `${`bad` as u8 or return 1}`
     return 0
 }
 ```
@@ -214,7 +218,7 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[expr.or-return-position]` | 2 | 35 |
+| 通常 | `[expr.or-return-position]` | 2 | 43 |
 
 ### text-024 symbol生成でも埋め込みを左から右へ1回ずつ評価する
 
@@ -228,7 +232,7 @@ fn piece(value: u8) -> symbol {
     return `${value}`
 }
 fn main() -> u8 {
-    fix value = `${piece(1)}:${piece(2)}`
+    fix value: symbol = `${piece(1)}:${piece(2)}`
     if value == `1:2` { return 0 }
     return 1
 }
@@ -834,9 +838,9 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
-fix NAME = `ready`
+fix NAME: symbol = `ready`
 fn main() -> u8 {
-    match `ready` {
+    match NAME {
         NAME => { return 0 }
         `${NAME}` => { return 1 }
         _ => { return 2 }
@@ -863,8 +867,9 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
+fix STATE: symbol = `ready`
 fn main() -> u8 {
-    match `ready` {
+    match STATE {
         `ready` => { return 0 }
     }
     return 1
@@ -881,7 +886,7 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[match.exhaustive]` | 2 | 5 |
+| 通常 | `[match.exhaustive]` | 3 | 5 |
 
 ### text-021 symbolをmatchとmatchexprで分岐する
 

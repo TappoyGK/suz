@@ -2672,7 +2672,7 @@ fn main() -> u8 {
 fn twice(n: i32) -> i32 { return n * 2 }
 fn main() -> u8 {
     fix f = fn twice
-    fix rendered = `${f}`
+    fix rendered: symbol = `${f}`
     return 0
 }
 ```
@@ -2687,7 +2687,7 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[symbol.interpolation]` | 4 | 23 |
+| 通常 | `[symbol.interpolation]` | 4 | 31 |
 
 ### flow-117 要求型から匿名汎用の関数値を具体化する
 

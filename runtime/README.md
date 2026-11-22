@@ -15,7 +15,7 @@
 | `suz_char.h` | Unicodeスカラー値の検査とUTF-8の符号化・復号 |
 | `suz_parse_struct.h`・`suz_parse_struct.c` | 型情報に従う構造体の検査と、各フィールドの値・文字列範囲の取得 |
 | `suz_parse_float.c` | 10進の入力から浮動小数点への直接の最近接・偶数丸め |
-| `suz_text.h`・`suz_text.c` | `symbol` の共有実体と `text` の範囲参照・切り出し、テキストプール、インターン化、容量計測、一時バッファ |
+| `suz_text.h`・`suz_text.c` | `symbol` の共有実体と `text` の範囲参照・切り出し、シンボルプール、インターン化、容量計測、一時バッファ |
 | `third_party/ryu/` | 最短の十進表記へ変換するRyuのC実装とライセンス |
 | `suz_env.h` | メモリ確保・解放、出力、パニック終了の環境関数の宣言 |
 | `suz_env.c` | `malloc`・`free` とC標準入出力を使う標準環境層 |
@@ -28,7 +28,7 @@
 
 正確な整数算術は、符号と `unsigned _BitInt(128)` の絶対値を分けて保持する。コンパイラの範囲検査で中間値が収まることを保証し、生成コードがゼロ除算と格納先の範囲を検査する。整数と浮動小数点数の比較では、浮動小数点数の仮数と指数を取り出して比較し、整数を丸めない。これらの計算と正確な整数のログ出力は動的メモリを確保しない。
 
-## テキストプール
+## シンボルプール
 
 Cの型 `suz_text` はSuzの `symbol` を表し、終了まで移動・解放しない実体へのポインタである。実体には本文へのポインタ、バイト長、Unicodeスカラー値の個数、検索用のハッシュ値を保持する。constant symbolは静的な本文を参照し、dynamic symbolは実体の管理情報と本文をまとめて確保する。本文に終端バイトは付けず、NULも長さに含めて扱う。
 
@@ -36,7 +36,7 @@ Cの型 `suz_text` はSuzの `symbol` を表し、終了まで移動・解放し
 
 `suz_text_pool_init(limit)` は起動時に1回呼ぶ。続けて、生成したCがすべてのconstant symbolを登録し、実体へのポインタを静的変数に保持する。通常の参照はこの変数を読み、ハッシュ計算や検索を行わない。
 
-CのAPIでは上限0を無制限として扱う。テキストプールを使う生成プログラムでは、Suzのmainを呼ぶ前に初期化する。上限は `--text-pool-limit` で指定した値を生成Cに埋め込み、省略時は1,073,741,824バイトとする。使用量は確保要求のサイズで数え、検索表の拡張中は旧領域と新領域の両方を数える。旧領域の解放後、その要求サイズを差し引く。
+CのAPIでは上限0を無制限として扱う。シンボルプールを使う生成プログラムでは、Suzのmainを呼ぶ前に初期化する。上限は `--symbol-pool-limit` で指定した値を生成Cに埋め込み、省略時は1,073,741,824バイトとする。使用量は確保要求のサイズで数え、検索表の拡張中は旧領域と新領域の両方を数える。旧領域の解放後、その要求サイズを差し引く。
 
 Suzの `text` はCの型 `suz_text_view` で表す。本文へのポインタ、バイト長、Unicodeスカラー値の個数を保持し、`symbol` の本文を共有する。
 
@@ -96,7 +96,7 @@ cargo test --test spec_cases symbol_runtime::
 
 環境層・整数検査・パニックのテストは [runtime.rs](../compiler/tests/spec_cases/runtime.rs)、ログのテストは [logs.rs](../compiler/tests/spec_cases/logs.rs) に置く。
 
-テキストプールは [symbol_runtime.rs](../compiler/tests/spec_cases/symbol_runtime.rs) から検証用のCプログラムを実行して確認する。環境層で確保要求と解放を記録し、共有実体、容量計測、上限超過、確保失敗、診断中の追加確保の有無を検査する。普段は最適化なしで動作を検査する。リリース検査ではAddressSanitizer・UndefinedBehaviorSanitizerを有効にし、最適化なし・ありの両方を検査する。
+シンボルプールは [symbol_runtime.rs](../compiler/tests/spec_cases/symbol_runtime.rs) から検証用のCプログラムを実行して確認する。環境層で確保要求と解放を記録し、共有実体、容量計測、上限超過、確保失敗、診断中の追加確保の有無を検査する。普段は最適化なしで動作を検査する。リリース検査ではAddressSanitizer・UndefinedBehaviorSanitizerを有効にし、最適化なし・ありの両方を検査する。
 
 起動時の一括登録、初期化後の定数参照、ログの追加確保の有無は [symbol_startup.rs](../compiler/tests/spec_cases/symbol_startup.rs) で検証する。
 
