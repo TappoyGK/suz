@@ -1108,7 +1108,7 @@ fn main() -> u8 { return 0 }
 
 ### text-039 静的な文字列の参照は内側の関数呼び出しで短命にならない
 
-主根拠：`[text.value]`。
+主根拠：`[arena.return-lifetime]`。
 
 **ソース：**
 
