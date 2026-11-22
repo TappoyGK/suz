@@ -814,3 +814,68 @@ fn static_text_and_symbol_bytes_do_not_acquire_an_arena_lifetime() {
         checked.validate(&constraints).unwrap();
     }
 }
+
+#[test]
+fn append_chains_share_current_arena_requirements_and_check_actual_objects() {
+    // 追記のたびに返却候補は増えても、仮引数へ課す所属条件は同じ1件である。
+    // 経過時間ではなく、要約と展開後の条件数で再膨張を検出する。
+    let count = 64;
+    let mut bodies = BTreeMap::new();
+    for id in 0..count {
+        let mut f = body(id);
+        let parameter = parameter(&mut f, 0, Type::Void);
+        let source = if id == 0 {
+            parameter
+        } else {
+            let source = f.node();
+            f.direct_calls
+                .push(call(id - 1, vec![(Type::Text, parameter)], source, 0));
+            source
+        };
+        f.append_requirements.push((source, 0, HERE));
+        let allocation = f.allocation(Some(0), HERE, Type::Void);
+        let result = f.node();
+        f.targets[result].insert(Reference::object(allocation));
+        f.constraints.push(Constraint::Copy(result, source));
+        f.returned.insert(vec![], result);
+        bodies.insert(id, Rc::new(f));
+    }
+    let inferred = infer_checked(bodies, true, BTreeMap::new()).unwrap();
+    for id in 0..count {
+        let summary = &inferred.summaries[&id];
+        assert_eq!(
+            summary.current_arena,
+            BTreeSet::from([Endpoint {
+                object: Object::Parameter(0, Type::Void),
+                path: vec![],
+                limited: false,
+            }])
+        );
+        assert!(inferred.checked[&id].append_requirements.len() <= 2);
+    }
+    for kind in ["current", "outer", "static", "unknown"] {
+        let mut caller = body(count);
+        let inner = caller.region(0, HERE);
+        let source = match kind {
+            "current" => pointer(&mut caller, inner, Type::Void).0,
+            "outer" => pointer(&mut caller, 0, Type::Void).0,
+            "static" => caller.permanent_text(Type::Text)[&vec![]],
+            "unknown" => caller.node(),
+            _ => unreachable!(),
+        };
+        let result = caller.node();
+        caller
+            .direct_calls
+            .push(call(count - 1, vec![(Type::Text, source)], result, inner));
+        let checked = caller.with_summaries(&inferred.summaries).unwrap();
+        if kind == "current" {
+            checked.validate_appends().unwrap();
+        } else {
+            assert_eq!(
+                checked.validate_appends().unwrap_err().rule_id,
+                "text.append-arena",
+                "{kind}"
+            );
+        }
+    }
+}

@@ -112,8 +112,9 @@ pub(crate) struct Summary {
     // 呼び出し元へ参照を返さない一時確保。診断用の代表位置だけを伝播する。
     discarded: Option<accumulation::Trace>,
     kept: BTreeSet<Endpoint>,
-    // 追記ごとに候補の集合を保つ。未知の候補を別の追記先で埋めてはならない。
-    current_arena: BTreeSet<BTreeSet<Endpoint>>,
+    // すべての追記先候補が現在のArenaに属する必要があるため、端点ごとにまとめる。
+    // 適用時も各端点を別々に検査し、未知の候補を別の候補で埋めない。
+    current_arena: BTreeSet<Endpoint>,
 }
 
 impl Summary {
@@ -147,7 +148,7 @@ impl Summary {
                     .flat_map(|effect| effect.destinations.iter().chain(&effect.values)),
             )
             .chain(&self.kept)
-            .chain(self.current_arena.iter().flatten())
+            .chain(&self.current_arena)
             .map(|endpoint| endpoint.object)
             .collect();
         let traversed: BTreeSet<_> = used
@@ -203,13 +204,7 @@ impl Summary {
                 .collect();
         };
         endpoints(&mut self.kept);
-        self.current_arena = std::mem::take(&mut self.current_arena)
-            .into_iter()
-            .map(|mut values| {
-                endpoints(&mut values);
-                values
-            })
-            .collect();
+        endpoints(&mut self.current_arena);
         let mut allocations = BTreeMap::new();
         for (object, location) in std::mem::take(&mut self.allocations) {
             allocations
@@ -405,13 +400,24 @@ impl Analysis {
             ..Summary::default()
         };
         for &(node, region, _) in &self.append_requirements {
-            if region == 0 {
-                result.current_arena.insert(
-                    self.targets[node]
-                        .iter()
-                        .filter_map(|&v| self.endpoint(v))
-                        .collect(),
-                );
+            if region != 0 {
+                continue;
+            }
+            for reference in &self.targets[node] {
+                let Some(mut endpoint) = self.endpoint(*reference) else {
+                    continue;
+                };
+                // 現在のArenaに確保する実体は呼び出し側への条件にならない。
+                // 内側の実体や未知の候補への追記は、本体のvalidate_appendsで拒否する。
+                if matches!(
+                    endpoint.object,
+                    Object::Allocation(..) | Object::RecursiveAllocation(..)
+                ) {
+                    continue;
+                }
+                // 利用期間の制限は実体の所属を変えない。保存・返却では別途検査する。
+                endpoint.limited = false;
+                result.current_arena.insert(endpoint);
             }
         }
         for &node in &self.kept {
@@ -610,11 +616,7 @@ impl Analysis {
             .collect();
         self.record_allocations(call, &allocations, summary.discarded.as_ref());
         for required in &summary.current_arena {
-            let source = self.node();
-            for value in required {
-                let value = self.call_value(value, &objects, call.region);
-                self.constraints.push(Constraint::Copy(source, value));
-            }
+            let source = self.call_value(required, &objects, call.region);
             self.append_requirements
                 .push((source, call.region, call.location));
         }
