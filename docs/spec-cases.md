@@ -115,10 +115,10 @@ IDは分野の接頭辞と番号で構成し、期待結果の種類を含めな
 
 | 分野 | ID接頭辞 | 対応する仕様 | 件数 |
 |---|---|---|---:|
-| [字句](spec-cases/lex.md) | `lex` | 第3章 | 38 |
+| [字句](spec-cases/lex.md) | `lex` | 第3章 | 39 |
 | [プログラムの構造](spec-cases/prog.md) | `prog` | 第4章 | 18 |
 | [型](spec-cases/type.md) | `type` | 第3・5章 | 37 |
-| [symbolとtext](spec-cases/text.md) | `text` | 第5・6・7・8・9・10・14章 | 67 |
+| [symbolとtext](spec-cases/text.md) | `text` | 第5・6・7・8・9・10・14章 | 66 |
 | [配列](spec-cases/array.md) | `array` | 第5・7・13章 | 9 |
 | [定数・変数・代入](spec-cases/bind.md) | `bind` | 第4・6・9章 | 34 |
 | [式](spec-cases/expr.md) | `expr` | 第7・9章 | 78 |

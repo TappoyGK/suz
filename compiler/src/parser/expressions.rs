@@ -54,7 +54,10 @@ impl Parser<'_, '_> {
         if self.token().kind == Kind::Symbol("<-") {
             return Err(self.error(
                 ErrorKind::InvalidSource,
-                crate::diagnostic!("text.append", "text append is a statement, not an expression; use < - for comparison with a negative value"),
+                crate::diagnostic!(
+                    "text.append",
+                    "text append is a statement, not an expression"
+                ),
             ));
         }
         if matches!(
