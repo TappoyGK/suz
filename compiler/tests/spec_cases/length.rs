@@ -67,7 +67,7 @@ fn main() -> u8 {
     fix signed_join = n + signed
     fix check_signed: i32 = signed_join
     if check_join != 4 || check_signed != 2 { return 15 }
-    if `${n}` != `3` { return 16 }
+    if textbuf `${n}` != `3` { return 16 }
     if PARSED != hi || REJECTED != 7 { return 19 }
     if narrow(2147483647) != hi || narrow(2147483648) != 7 { return 20 }
     if parse_size(`Size { count: 2147483647 }`).count != hi { return 21 }

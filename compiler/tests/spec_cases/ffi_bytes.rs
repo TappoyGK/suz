@@ -49,7 +49,7 @@ struct Data { pointer: *const void, size: _size_t }
 fnshape Message() -> symbol
 fn message(make: fn Message) -> symbol { return make() }
 fn make_data(value: i32) -> Data {
-    fix message_text = `x${value}`
+    fix message_text: symbol = `x${value}`
     trusted { return Data { pointer: c_bytes message_text, size: c_byte_len message_text } }
 }
 fn forward(pointer: *const void) -> *const void { return pointer }
@@ -73,11 +73,12 @@ return `Aあ\0B` })) != 1 || calls != 3 { return 5 }
         current = get(fn [pointer]() -> *const void { return pointer })
         save(current, stored.size)
     }
-    for i in 0..<100 { fix churn = `new${i}` }
+    for i in 0..<100 { fix churn: symbol = `new${i}` }
     trusted { if retained() != 1 { return 6 } }
     fix empty = original[4:4] or return 7
     if c_byte_len empty != 0 || c_byte_len `` != 0 { return 8 }
-    trusted { if identity(c_bytes ``, c_byte_len ``) != 1 { return 9 } }
+    fix empty_symbol: symbol = ``
+    trusted { if identity(c_bytes empty_symbol, c_byte_len empty_symbol) != 1 { return 9 } }
     return 0
 }
 "#;
@@ -165,7 +166,7 @@ fn ffi_pointer_operations_and_trusted_boundaries_are_rejected() {
         ),
         (
             "fix a = `abc`\nfix n = c_byte_len (a + 1)",
-            "symbol.operations",
+            "text.operations",
         ),
     ] {
         let source = format!(

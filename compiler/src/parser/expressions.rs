@@ -14,6 +14,25 @@ use crate::{
 };
 
 impl Parser<'_, '_> {
+    fn text_buffer(&mut self) -> Result<Expression, Diagnostic> {
+        let location = self.location();
+        self.cursor += 1;
+        let capacity = if self.token().kind == Kind::Symbol("[") {
+            self.cursor += 1;
+            let value = self.expression()?;
+            self.expect(FixedToken::Symbol("]"))?;
+            Some(Box::new(value))
+        } else {
+            None
+        };
+        let kind = ExpressionKind::TextBuffer {
+            capacity,
+            value: Box::new(self.unary()?),
+        };
+        let result = self.primary_node(kind, location)?;
+        self.postfix(result)
+    }
+
     pub(super) fn expression(&mut self) -> Result<Expression, Diagnostic> {
         let result = self.expression_before_assignment()?;
         self.check_value_context()?;
@@ -29,6 +48,15 @@ impl Parser<'_, '_> {
                 crate::diagnostic!(
                     "assign.target",
                     "target#field is an assignment target, not a value; use target.field to read the field"
+                ),
+            ));
+        }
+        if self.token().kind == Kind::Symbol("<-") {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "text.append",
+                    "text append is a statement, not an expression"
                 ),
             ));
         }
@@ -466,6 +494,7 @@ impl Parser<'_, '_> {
                 }
                 ExpressionKind::Deref(Box::new(operand))
             }
+            Kind::Keyword("textbuf") => return self.text_buffer(),
             Kind::Keyword("new")
                 if self
                     .tokens

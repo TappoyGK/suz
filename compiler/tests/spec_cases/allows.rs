@@ -155,7 +155,7 @@ fn trailing_allows_reject_blocks_at_any_expression_depth() {
 #[test]
 fn allow_reasons_are_literal_even_inside_template_interpolations() {
     let source = r#"fn main() -> u8 {
-    fix message = `value: ${expr { 1 + 2 allow [diagnostic.arithmetic: literal ` ${ // { : , \n 日本語] }}`
+    fix message: symbol = `value: ${expr { 1 + 2 allow [diagnostic.arithmetic: literal ` ${ // { : , \n 日本語] }}`
     log warn `${message}`
     return 0
 }"#;

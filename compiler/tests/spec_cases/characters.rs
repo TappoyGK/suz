@@ -98,7 +98,7 @@ fix ITEM{value} = `Item {{ ch: '\\u{{{value:x}}}' }}` as Item or Item {{ ch: '?'
     if integer({value}) != CH{value} {{ return 3 }}
     if parse_text(`${{CH{value}}}`) != CH{value} {{ return 4 }}
     if PARSED{value} != CH{value} {{ return 5 }}
-    fix input = `Item {{ ch: '\\u{{{value:x}}}' }}`
+    fix input: symbol = `Item {{ ch: '\\u{{{value:x}}}' }}`
     if structure(input) != ITEM{value} || ITEM{value}.ch != CH{value} {{ return 6 }}
 }}
 "#
@@ -181,12 +181,12 @@ int main(void) {
     suz_text text = suz_text_intern("a\xe3\x81\x82\xf0\x9f\x98\x80\0", 9, true, location);
     suz_text empty = suz_text_intern("", 0, true, location);
     size_t calls = text_calls;
-    uint64_t used = suz_text_pool_used();
+    uint64_t used = suz_symbol_pool_used();
     text_fail_after = calls;
     assert(suz_fn_0(text) == 8);
     assert(suz_fn_0(empty) == 0);
     assert(suz_fn_1() == 7);
-    assert(text_calls == calls && suz_text_pool_used() == used);
+    assert(text_calls == calls && suz_symbol_pool_used() == used);
     return 0;
 }
 "#;

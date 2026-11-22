@@ -131,6 +131,8 @@ mod symbol_struct_runtime;
 mod syntax_diagnostics;
 #[path = "support/test_util.rs"]
 mod test_util;
+#[path = "spec_cases/text_buffer.rs"]
+mod text_buffer;
 #[path = "spec_cases/text_views.rs"]
 mod text_views;
 #[path = "spec_cases/value_blocks.rs"]

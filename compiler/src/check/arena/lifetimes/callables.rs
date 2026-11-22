@@ -269,7 +269,7 @@ impl Walk<'_> {
                     let mut objects = Vec::new();
                     let mut roots = BTreeMap::new();
                     for path in self.analysis.paths(ty) {
-                        let target = self.analysis.field_type(ty, &path).pointee().unwrap();
+                        let target = reference_target(self.analysis.field_type(ty, &path)).unwrap();
                         let object = self.analysis.parameter_root(
                             index,
                             target,

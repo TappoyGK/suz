@@ -25,6 +25,7 @@ bundled!(
     "runtime/suz_arena.c",
     "runtime/suz_arena_report.c",
     "runtime/suz_text.h",
+    "runtime/suz_textbuf.h",
     "runtime/suz_parse.h",
     "runtime/suz_char.h",
     "runtime/suz_parse_struct.h",

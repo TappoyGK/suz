@@ -182,6 +182,9 @@ fn statement_height(statement: &Statement) -> usize {
 fn kind_height(kind: &ExpressionKind) -> usize {
     use ExpressionKind::*;
     1 + match kind {
+        TextBuffer { capacity, value } => {
+            value.height.max(capacity.as_ref().map_or(0, |v| v.height))
+        }
         ArrayInit {
             values, lengths, ..
         } => values
@@ -251,7 +254,9 @@ fn kind_height(kind: &ExpressionKind) -> usize {
                 .max()
                 .unwrap_or(0),
         ),
-        Binary { left, right, .. } | Logical { left, right, .. } => left.height.max(right.height),
+        TextAppend { left, right } | Binary { left, right, .. } | Logical { left, right, .. } => {
+            left.height.max(right.height)
+        }
         Comparison { operands, .. } => operands.iter().map(|v| v.height).max().unwrap_or(0),
         Integer { negative: true, .. } => 1,
         Float(value) if value.starts_with('-') => 1,

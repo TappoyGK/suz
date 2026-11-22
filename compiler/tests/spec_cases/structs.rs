@@ -156,7 +156,7 @@ fn main() -> u8 {
         x,
         y,
     }
-    fix label = `original`
+    fix label: symbol = `original`
     fix boxed = Box { pair, label }
     pair#x = 4
     if boxed.pair.x != 3 || boxed.label != label { return 2 }

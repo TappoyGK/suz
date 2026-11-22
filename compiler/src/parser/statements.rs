@@ -50,7 +50,7 @@ impl Parser<'_, '_> {
         false
     }
 
-    fn assignment_operator(&self) -> Option<Option<BinaryOperator>> {
+    fn assignment_operator(&self) -> Option<Option<crate::ast::AssignmentOperator>> {
         let mut cursor = self.cursor + 1;
         while self
             .tokens
@@ -68,9 +68,11 @@ impl Parser<'_, '_> {
         }
         match self.tokens.get(cursor)?.kind {
             Kind::Symbol("=") => Some(None),
+            Kind::Symbol("<-") => Some(Some(crate::ast::AssignmentOperator::Append)),
             Kind::Symbol(symbol) => symbol
                 .strip_suffix('=')
                 .and_then(BinaryOperator::from_symbol)
+                .map(crate::ast::AssignmentOperator::Binary)
                 .map(Some),
             _ => None,
         }
@@ -405,15 +407,11 @@ impl Parser<'_, '_> {
                 let operator_location = self.location();
                 self.cursor += 1;
                 let right = self.expression()?;
-                // 二項演算への変換では、右辺を評価する前に現在の代入先の値を読む。
+                // 複合代入と追記は、右辺を評価する前に現在の代入先の値を読む。
                 let value = if let Some(operator) = operator {
                     Expression {
                         height: 1 + target.height.max(right.height),
-                        kind: ExpressionKind::Binary {
-                            operator,
-                            left: Box::new(target),
-                            right: Box::new(right),
-                        },
+                        kind: operator.expression(target, right),
                         location: operator_location,
                     }
                 } else {

@@ -103,16 +103,16 @@ pub enum ArithmeticMode {
 /// 生成プログラムに埋め込む上限。Cランタイムでは0を無制限の指定に予約しているため、
 /// 有限の上限として0は指定できない。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TextPoolLimit {
+pub enum SymbolPoolLimit {
     Bytes(NonZeroU64),
     Unlimited,
 }
-impl Default for TextPoolLimit {
+impl Default for SymbolPoolLimit {
     fn default() -> Self {
         Self::Bytes(NonZeroU64::new(1_073_741_824).unwrap())
     }
 }
-impl TextPoolLimit {
+impl SymbolPoolLimit {
     fn runtime_value(self) -> u64 {
         match self {
             Self::Bytes(bytes) => bytes.get(),
@@ -209,7 +209,7 @@ pub struct CompilationOptions {
     pub arena_report: ArenaReportOptions,
     pub log_allow: bool,
     pub arithmetic_mode: ArithmeticMode,
-    pub text_pool_limit: TextPoolLimit,
+    pub symbol_pool_limit: SymbolPoolLimit,
     pub arena: ArenaOptions,
 }
 
@@ -265,7 +265,7 @@ pub fn compile_with_options(
         c: codegen::generate(
             &checked,
             source_name,
-            options.text_pool_limit,
+            options.symbol_pool_limit,
             options.arena,
             options.log_level,
             options.log_ignore,

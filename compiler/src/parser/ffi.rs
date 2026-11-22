@@ -61,13 +61,10 @@ impl Parser<'_, '_> {
             }
             ty
         };
-        if keep && ty.pointee().is_none() {
+        if keep && ty.pointee().is_none() && ty != Type::CPointer {
             return Err(modifier_location.error(
                 ErrorKind::InvalidSource,
-                crate::diagnostic!(
-                    "ffi.keep",
-                    "keep requires a typed C pointer parameter (*const T or *T)"
-                ),
+                crate::diagnostic!("ffi.keep", "keep requires a C pointer parameter"),
             ));
         }
         // keepはABIを変えず、蓄積警告でCへの保持を判定するために残す。

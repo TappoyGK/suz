@@ -61,7 +61,7 @@ fn log_threshold_removes_reads_output_and_log_only_data() {
     );
 
     // log固有の表示名は消す。独立した定数宣言や、残るログの表示名は消さない。
-    let source = b"enum Hidden: u8 { HiddenVariant }\nenum Visible: u8 { VisibleVariant }\nfix DECLARED = `declared-symbol`\nfn main() -> u8 { log debug `${Hidden.HiddenVariant} ${Visible.VisibleVariant} ${DECLARED}`\nlog warn `${Visible.VisibleVariant}`\nreturn 0 }";
+    let source = b"enum Hidden: u8 { HiddenVariant }\nenum Visible: u8 { VisibleVariant }\nfix DECLARED: symbol = `declared-symbol`\nfn main() -> u8 { log debug `${Hidden.HiddenVariant} ${Visible.VisibleVariant} ${DECLARED}`\nlog warn `${Visible.VisibleVariant}`\nreturn 0 }";
     let c = suz::compile_with_options(source, "data.suz", &options(LogLevel::Warn))
         .unwrap()
         .c;

@@ -42,6 +42,15 @@ fn invalid_syntax_reports_source_errors_through_check() {
             "fn main() -> u8 { return match true { true => 0\nfalse => 1 } }",
             "expected an expression [syntax.grammar]",
         ),
+        // 型をまだ知らない構文診断に、数値比較だけの案内を混ぜない。
+        (
+            "fn f() -> void { var s = textbuf `a`\nfix y = s <- `b` }\nfn main() -> u8 { return 0 }",
+            "text append is a statement, not an expression [text.append]",
+        ),
+        (
+            "fn main() -> u8 { fix x: i32 = 0\nif x<-1 { return 1 }\nreturn 0 }",
+            "text append is a statement, not an expression [text.append]",
+        ),
         ("fn main() -> u8 { return 0, }", "[src.statement-end]"),
         ("fn main() -> u8 { return 0 ) }", "[src.statement-end]"),
     ]

@@ -111,9 +111,11 @@ impl Parser<'_, '_> {
         let location = self.location();
         let operator = match self.token().kind {
             Kind::Symbol("=") => Some(None),
+            Kind::Symbol("<-") => Some(Some(crate::ast::AssignmentOperator::Append)),
             Kind::Symbol(symbol) => symbol
                 .strip_suffix('=')
                 .and_then(BinaryOperator::from_symbol)
+                .map(crate::ast::AssignmentOperator::Binary)
                 .map(Some),
             _ => None,
         };

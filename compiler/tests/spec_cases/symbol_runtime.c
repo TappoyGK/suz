@@ -22,11 +22,11 @@ static size_t diagnostic_length;
 
 void *suz_env_alloc(size_t size) {
     assert(size != 0);
-    if (!temporary_allocations) assert(suz_text_pool_used() == live);
+    if (!temporary_allocations) assert(suz_symbol_pool_used() == live);
     ++calls;
     assert(calls < sizeof(allocations) / sizeof(allocations[0]));
     if (calls == fail_call) {
-        used_before_failure = suz_text_pool_used();
+        used_before_failure = suz_symbol_pool_used();
         return NULL;
     }
     void *ptr = malloc(size);
@@ -41,7 +41,7 @@ void *suz_env_alloc(size_t size) {
 
 void suz_env_free(void *ptr) {
     if (ptr == NULL) return;
-    if (!temporary_allocations) assert(suz_text_pool_used() == live);
+    if (!temporary_allocations) assert(suz_symbol_pool_used() == live);
     for (size_t i = 1; i <= calls; ++i) {
         if (allocations[i].ptr == ptr) {
             live -= allocations[i].size;
@@ -67,15 +67,15 @@ _Noreturn void suz_env_panic(void) {
     assert(strstr(diagnostic, "[rt.symbol-allocation]") != NULL);
     if (fail_call != 0) {
         assert(calls == fail_call);
-        assert(suz_text_pool_used() == used_before_failure);
+        assert(suz_symbol_pool_used() == used_before_failure);
         assert(strstr(diagnostic, "memory allocation failed") != NULL);
     }
     if (limit_failure) {
         assert(calls == 0);
-        assert(suz_text_pool_used() == 0);
+        assert(suz_symbol_pool_used() == 0);
         assert(strstr(diagnostic, "limit=1, used=0, required=") != NULL);
     }
-    if (!temporary_allocations) assert(suz_text_pool_used() == live);
+    if (!temporary_allocations) assert(suz_symbol_pool_used() == live);
     fwrite(diagnostic, 1, diagnostic_length, stderr);
     exit(101);
 }
@@ -108,7 +108,7 @@ static void identity(void) {
     assert(a == intern("dynamic first", true));
     assert(b == intern("constant first", false));
     assert(empty == intern("", false));
-    assert(live == suz_text_pool_used());
+    assert(live == suz_symbol_pool_used());
     assert(frees > 0);
 }
 
@@ -125,7 +125,7 @@ static void collision(void) {
 static void accounting(void) {
     static const char large_constant[4096] = "constant";
     suz_text_intern(large_constant, sizeof(large_constant), true, location);
-    assert(live == suz_text_pool_used());
+    assert(live == suz_symbol_pool_used());
     assert(live < sizeof(large_constant));
     uint64_t before = live;
     intern("other constant", true);
@@ -134,7 +134,7 @@ static void accounting(void) {
     before = live;
     intern("dynamic", false);
     assert(live - before == metadata + strlen("dynamic"));
-    assert(live == suz_text_pool_used());
+    assert(live == suz_symbol_pool_used());
     before = live;
     size_t before_calls = calls;
     intern("dynamic", true);
@@ -147,7 +147,7 @@ static void growth(void) {
         char text[32];
         snprintf(text, sizeof(text), "entry %zu", calls);
         intern(text, false);
-        assert(live == suz_text_pool_used());
+        assert(live == suz_symbol_pool_used());
     }
     assert(peak > live);
     assert(frees == 1);
@@ -169,7 +169,7 @@ static void temporary(void) {
         suz_text_buffer_append(&buffer, fragment, sizeof(fragment), location);
         assert(buffer.length == 161 && buffer.bytes[32] == '\0');
         assert(memcmp(buffer.bytes + 33, fragment, sizeof(fragment)) == 0);
-        assert(suz_text_pool_used() == retained);
+        assert(suz_symbol_pool_used() == retained);
         suz_text_buffer_dispose(&buffer);
         assert(buffer.bytes == NULL && buffer.length == 0 && buffer.capacity == 0);
         assert(live == retained);
@@ -211,7 +211,7 @@ static void scalar_parsing(void) {
     long_integer[sizeof(long_integer) - 1] = '1';
     assert(suz_parse_integer(long_integer, sizeof(long_integer), 64, false, true, &value));
     assert(value == 1);
-    assert(calls == 0 && live == 0 && suz_text_pool_used() == 0);
+    assert(calls == 0 && live == 0 && suz_symbol_pool_used() == 0);
 }
 
 static void float_parsing(void) {
@@ -244,14 +244,14 @@ static void float_parsing(void) {
     long_input[325] = '2';
     long_input[sizeof(long_input) - 1] = '1';
     assert(suz_parse_float_bits(long_input, sizeof(long_input), 64, &bits) && bits == 0);
-    assert(calls == 0 && live == 0 && suz_text_pool_used() == 0);
+    assert(calls == 0 && live == 0 && suz_symbol_pool_used() == 0);
 }
 
 int main(int argc, char **argv) {
     assert(argc >= 2);
     uint64_t limit = argc > 2 ? strtoull(argv[2], NULL, 10) : 0;
-    suz_text_pool_init(strcmp(argv[1], "oom") == 0 ? 0 : limit);
-    assert(calls == 0 && suz_text_pool_used() == 0);
+    suz_symbol_pool_init(strcmp(argv[1], "oom") == 0 ? 0 : limit);
+    assert(calls == 0 && suz_symbol_pool_used() == 0);
     if (strcmp(argv[1], "scalar-limit") == 0) {
         /* プール無制限でも一つのsymbolの個数上限は変わらない。
            巨大な文字列を確保せず、本番の登録処理が使う上限判定を検証する。 */
@@ -280,11 +280,11 @@ int main(int argc, char **argv) {
     else if (strcmp(argv[1], "empty") == 0) assert(live == 0);
     else if (strcmp(argv[1], "reuse") == 0) {
         suz_text value = intern("existing", false);
-        uint64_t before = suz_text_pool_used();
+        uint64_t before = suz_symbol_pool_used();
         size_t before_calls = calls;
         assert(intern("existing", true) == value);
         assert(intern("existing", false) == value);
-        assert(calls == before_calls && suz_text_pool_used() == before);
+        assert(calls == before_calls && suz_symbol_pool_used() == before);
         printf("%llu\n", (unsigned long long)before);
     } else if (strcmp(argv[1], "limit") == 0) {
         panic_expected = limit_failure = true;

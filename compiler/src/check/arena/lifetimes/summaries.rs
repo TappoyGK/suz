@@ -8,6 +8,7 @@ use std::collections::VecDeque;
 /// 再帰型の無限な参照経路を列挙せず、同じ仮引数から同じ型へ届く候補を合流させる。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum Object {
+    Permanent,
     Parameter(usize, Type),
     ReachableParameter(usize, Type),
     // 書き込みメソッドの受け手、または参照捕捉された変数の保存場所。
@@ -111,6 +112,9 @@ pub(crate) struct Summary {
     // 呼び出し元へ参照を返さない一時確保。診断用の代表位置だけを伝播する。
     discarded: Option<accumulation::Trace>,
     kept: BTreeSet<Endpoint>,
+    // すべての追記先候補が現在のArenaに属する必要があるため、端点ごとにまとめる。
+    // 適用時も各端点を別々に検査し、未知の候補を別の候補で埋めない。
+    current_arena: BTreeSet<Endpoint>,
 }
 
 impl Summary {
@@ -118,7 +122,7 @@ impl Summary {
         let mut summary = Self::default();
         for (index, parameter) in function.parameters.iter().enumerate() {
             if parameter.keep
-                && let Some(ty) = parameter.ty.pointee()
+                && let Some(ty) = reference_target(parameter.ty)
             {
                 let object = Object::Parameter(index, ty);
                 summary.objects.insert(object, ObjectInfo { ty });
@@ -144,6 +148,7 @@ impl Summary {
                     .flat_map(|effect| effect.destinations.iter().chain(&effect.values)),
             )
             .chain(&self.kept)
+            .chain(&self.current_arena)
             .map(|endpoint| endpoint.object)
             .collect();
         let traversed: BTreeSet<_> = used
@@ -177,9 +182,10 @@ impl Summary {
                     Object::Allocation(..) | Object::RecursiveAllocation(..) => {
                         Object::RecursiveAllocation(component, info.ty)
                     }
-                    Object::Parameter(..) | Object::ReachableParameter(..) | Object::Slot(..) => {
-                        object
-                    }
+                    Object::Permanent
+                    | Object::Parameter(..)
+                    | Object::ReachableParameter(..)
+                    | Object::Slot(..) => object,
                 };
                 (object, target)
             })
@@ -198,6 +204,7 @@ impl Summary {
                 .collect();
         };
         endpoints(&mut self.kept);
+        endpoints(&mut self.current_arena);
         let mut allocations = BTreeMap::new();
         for (object, location) in std::mem::take(&mut self.allocations) {
             allocations
@@ -237,6 +244,7 @@ impl Summary {
         if self.objects != other.objects
             || self.returned != other.returned
             || self.kept != other.kept
+            || self.current_arena != other.current_arena
             || self.discarded.is_some() != other.discarded.is_some()
             || !self.allocations.keys().eq(other.allocations.keys())
         {
@@ -262,7 +270,8 @@ impl Analysis {
         &self,
         summaries: &BTreeMap<usize, Rc<Summary>>,
     ) -> Option<Summary> {
-        if self.return_region != Some(0)
+        if !self.append_requirements.is_empty()
+            || self.return_region != Some(0)
             || !self.root_references_only()
             || self.direct_calls.len() > 1
             || self.objects.values().any(|object| {
@@ -293,7 +302,8 @@ impl Analysis {
         }
         if let Some(call) = self.direct_calls.first() {
             let callee = summaries.get(&call.id)?;
-            if !callee.stores.is_empty()
+            if !callee.current_arena.is_empty()
+                || !callee.stores.is_empty()
                 || !callee.kept.is_empty()
                 || callee.discarded.is_some()
                 || !callee.allocations.is_empty()
@@ -315,7 +325,7 @@ impl Analysis {
                     return None;
                 };
                 let (argument_ty, shape) = call.arguments.get(index)?;
-                if argument_ty.pointee() != Some(ty) {
+                if reference_target(*argument_ty) != Some(ty) {
                     return None;
                 }
                 let source = representative[shape.iter().find(|(path, _)| path.is_empty())?.1];
@@ -389,6 +399,27 @@ impl Analysis {
             discarded: self.discarded_allocation(),
             ..Summary::default()
         };
+        for &(node, region, _) in &self.append_requirements {
+            if region != 0 {
+                continue;
+            }
+            for reference in &self.targets[node] {
+                let Some(mut endpoint) = self.endpoint(*reference) else {
+                    continue;
+                };
+                // 現在のArenaに確保する実体は呼び出し側への条件にならない。
+                // 内側の実体や未知の候補への追記は、本体のvalidate_appendsで拒否する。
+                if matches!(
+                    endpoint.object,
+                    Object::Allocation(..) | Object::RecursiveAllocation(..)
+                ) {
+                    continue;
+                }
+                // 利用期間の制限は実体の所属を変えない。保存・返却では別途検査する。
+                endpoint.limited = false;
+                result.current_arena.insert(endpoint);
+            }
+        }
         for &node in &self.kept {
             result.kept.extend(
                 self.targets[node]
@@ -474,6 +505,10 @@ impl Analysis {
             let node = self.node();
             mapped.insert(object, node);
             match object {
+                Object::Permanent => {
+                    let cell = self.permanent_cell();
+                    self.targets[node].insert(Reference::object(cell));
+                }
                 Object::Parameter(..) | Object::ReachableParameter(..) => {}
                 Object::Slot(index) => {
                     if let Some(receiver) = call
@@ -514,7 +549,7 @@ impl Analysis {
         for (index, (ty, shape)) in call.arguments.iter().enumerate() {
             for (path, source) in shape {
                 let source = *source;
-                let ty = self.field_type(*ty, path).pointee().unwrap();
+                let ty = reference_target(self.field_type(*ty, path)).unwrap();
                 if let Some(&node) = mapped.get(&Object::Parameter(index, ty)) {
                     self.constraints.push(Constraint::Copy(node, source));
                 }
@@ -527,7 +562,7 @@ impl Analysis {
                 continue;
             };
             for path in self.paths(ty) {
-                let target = self.field_type(ty, &path).pointee().unwrap();
+                let target = reference_target(self.field_type(ty, &path)).unwrap();
                 if let Some(&next) = mapped.get(&Object::ReachableParameter(index, target)) {
                     self.constraints
                         .push(Constraint::Load(next, Place::Indirect(node, path)));
@@ -580,6 +615,11 @@ impl Analysis {
             })
             .collect();
         self.record_allocations(call, &allocations, summary.discarded.as_ref());
+        for required in &summary.current_arena {
+            let source = self.call_value(required, &objects, call.region);
+            self.append_requirements
+                .push((source, call.region, call.location));
+        }
         for value in &summary.kept {
             let value = self.call_value(value, &objects, call.region);
             self.kept.push(value);
@@ -929,6 +969,7 @@ pub(in crate::check) fn check_program(
     let Inferred { checked, .. } = infer_checked(bodies, false, ready)?;
     let mut warnings = Vec::new();
     for mut analysis in checked.into_values() {
+        analysis.validate_appends()?;
         warnings.extend(analysis.loop_warnings());
         if analysis.resolved || analysis.root_references_only() {
             continue;

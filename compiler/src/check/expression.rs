@@ -130,7 +130,9 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
                 Some(Type::Integer(IntegerType::Len))
             }
         }
-        ExpressionKind::Template(_) => Some(Type::Symbol),
+        ExpressionKind::TextAppend { .. }
+        | ExpressionKind::Template(_)
+        | ExpressionKind::TextBuffer { .. } => Some(Type::Text),
         ExpressionKind::Struct { ty, .. } => bindings.resolve_type_at(*ty, expr.location).ok(),
         ExpressionKind::With { target, .. } => operand_type(target, bindings),
         ExpressionKind::Field { target, name } => {
@@ -592,9 +594,9 @@ fn expression_checked(
                 super::function_values::invoke(expr, target, arguments, bindings, None)?
             }
             ExpressionKind::Slice { .. } => super::arrays::read_or_text(expr, bindings)?,
-            ExpressionKind::Template(parts) => {
-                super::text::template(parts, expr.location, bindings)?
-            }
+            ExpressionKind::TextAppend { .. }
+            | ExpressionKind::TextBuffer { .. }
+            | ExpressionKind::Template(_) => super::text::expression(expr, required, bindings)?,
             ExpressionKind::Struct { .. }
             | ExpressionKind::With { .. }
             | ExpressionKind::Field { .. } => structs::check(expr, bindings)?,
@@ -924,6 +926,9 @@ pub(super) fn joined_type(types: impl Iterator<Item = Option<Type>>) -> Option<T
 // 代替の型選択も型の代入ごとに適用する。共通型がなくても、
 // 先頭オペランドの型への通常の変換判定まで進む。
 fn joined_or_first(a: Type, b: Type) -> Type {
+    if a.is_text() && b.is_text() && a != b {
+        return Type::Text;
+    }
     if a.lifts_to(b) {
         return b;
     }

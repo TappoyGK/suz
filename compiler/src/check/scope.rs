@@ -136,7 +136,7 @@ pub(super) struct Scope {
     pub calls_used: Rc<std::cell::Cell<bool>>,
     // ループがないプログラムでは、寿命検査だけを行い蓄積警告の情報を作らない。
     pub program_loops_used: Rc<std::cell::Cell<bool>>,
-    pub program_pointers_used: Rc<std::cell::Cell<bool>>,
+    pub program_references_used: Rc<std::cell::Cell<bool>>,
     pub callables_used: Rc<std::cell::Cell<bool>>,
     pub trusted_block: bool,
     // 最も内側のerror腕の成功型。関数の戻り値型とは独立し、クロージャ境界で解除する。
@@ -350,7 +350,7 @@ impl Default for Scope {
             lifetime_used: Default::default(),
             calls_used: Default::default(),
             program_loops_used: Default::default(),
-            program_pointers_used: Default::default(),
+            program_references_used: Default::default(),
             callables_used: Default::default(),
             trusted_block: false,
             recovery: None,

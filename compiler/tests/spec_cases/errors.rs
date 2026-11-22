@@ -176,7 +176,7 @@ fnshape Once() -> void
 fn run(f: fn Once) -> i32 { f()
     return 7 }
 fn main() -> u8 {
-    fix message = `${run(fn []() -> void { send() or ignore [// ` ${x} } { [ ' \] })}`
+    fix message: symbol = `${run(fn []() -> void { send() or ignore [// ` ${x} } { [ ' \] })}`
     log info `${message}`
     return 0
 }

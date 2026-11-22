@@ -34,6 +34,8 @@ struct RawValue {
     bits: u64,
     start: u64,
     length: u64,
+    decoded_length: u64,
+    scalars: u64,
     seen: bool,
 }
 

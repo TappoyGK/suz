@@ -1,7 +1,7 @@
-//! テンプレートの補間値を検査し、定数文字列を評価・登録する。浮動小数点の表記はランタイムと共通の変換を使う。
+//! テンプレートの要求型とtextbufを検査し、定数文字列を評価する。symbolだけを登録対象にする。
 //!
 //! 利用元: [`crate::check::expression`]、[`crate::check::statements`]。
-//! 主な対象規則: `[symbol.interpolation]`。
+//! 主な対象規則: `[symbol.template]`、`[symbol.interpolation]`、`[text.buffer]`。
 
 use super::{
     constants,
@@ -50,9 +50,49 @@ pub(super) fn parts(
         .collect()
 }
 
+pub(super) fn expression(
+    expr: &Expression,
+    required: Option<Type>,
+    scope: &Scope,
+) -> Result<CheckedExpression, Diagnostic> {
+    match &expr.kind {
+        crate::ast::ExpressionKind::Template(parts) => template(
+            parts,
+            expr.location,
+            required == Some(Type::Symbol),
+            false,
+            scope,
+        ),
+        crate::ast::ExpressionKind::TextBuffer { capacity, value } => {
+            buffer(capacity.as_deref(), value, expr.location, scope)
+        }
+        crate::ast::ExpressionKind::TextAppend { left, right } => {
+            let left = super::expression::expression(left, None, scope)?;
+            if left.ty != Type::Text {
+                return Err(expr.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("text.append", "append requires a text destination"),
+                ));
+            }
+            let right = content(right, scope)?;
+            Ok(CheckedExpression {
+                ty: Type::Text,
+                value: Value::TextAppend {
+                    left: Box::new(left),
+                    right: Box::new(right),
+                    location: expr.location,
+                },
+            })
+        }
+        _ => unreachable!(),
+    }
+}
+
 pub(super) fn template(
     input: &[TemplatePart<Expression>],
     location: Location,
+    symbol: bool,
+    buffer: bool,
     bindings: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
     let parts = parts(input, bindings)?;
@@ -69,14 +109,64 @@ pub(super) fn template(
             ),
         ));
     }
+    if !symbol && !buffer && constant.is_none() {
+        return Err(location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!("symbol.template", "runtime text templates require textbuf"),
+        ));
+    }
     Ok(CheckedExpression {
-        ty: Type::Symbol,
+        ty: if symbol { Type::Symbol } else { Type::Text },
         value: Value::Template {
             parts,
             location,
             constant,
         },
     })
+}
+
+// 直接のテンプレートだけは、実行時の埋め込みを現在の作業領域へ構築できる。
+// 既存のtextはその参照範囲をコピーする。容量の評価順はIRにも残す。
+pub(super) fn buffer(
+    capacity: Option<&Expression>,
+    value: &Expression,
+    location: Location,
+    scope: &Scope,
+) -> Result<CheckedExpression, Diagnostic> {
+    if scope.arena_depth == 0 {
+        return Err(location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!("text.buffer", "textbuf requires a current arena"),
+        ));
+    }
+    let capacity = capacity
+        .map(|v| {
+            super::expression::coerced(v, Some(Type::Integer(crate::ast::IntegerType::Len)), scope)
+                .map(Box::new)
+        })
+        .transpose()?;
+    let value = content(value, scope)?;
+    Ok(CheckedExpression {
+        ty: Type::Text,
+        value: Value::TextBuffer {
+            capacity,
+            value: Box::new(value),
+            location,
+        },
+    })
+}
+
+fn content(value: &Expression, scope: &Scope) -> Result<CheckedExpression, Diagnostic> {
+    let mut value = value;
+    while let crate::ast::ExpressionKind::Group(inner) = &value.kind {
+        value = inner;
+    }
+    let value = if let crate::ast::ExpressionKind::Template(parts) = &value.kind {
+        template(parts, value.location, false, true, scope)?
+    } else {
+        super::expression::coerced(value, Some(Type::Text), scope)?
+    };
+    Ok(value)
 }
 
 pub(super) fn constant_parts(
@@ -155,7 +245,7 @@ pub(super) fn register_constants(value: &CheckedExpression, scope: &Scope) {
         Value::Template {
             constant: Some(text),
             ..
-        } => {
+        } if value.ty == Type::Symbol => {
             scope
                 .outputs
                 .constant_texts

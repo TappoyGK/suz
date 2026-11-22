@@ -20,7 +20,7 @@ int main(int argc, char **argv) {
     assert(argc >= 2);
     uint64_t limit = strcmp(argv[1], "limit") == 0 ? strtoull(argv[2], NULL, 10) : 0;
     assert(suz_program() == 0);
-    suz_text_pool_init(limit);
+    suz_symbol_pool_init(limit);
     suz_text fallback = input("fallback");
     if (strcmp(argv[1], "validation") == 0) {
         const char *invalid[] = {
@@ -32,25 +32,25 @@ int main(int argc, char **argv) {
         };
         for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i) {
             suz_text source = input(invalid[i]);
-            uint64_t before = suz_text_pool_used();
+            uint64_t before = suz_symbol_pool_used();
             size_t calls_before = text_calls;
             for (unsigned repeat = 0; repeat < 100; ++repeat) assert(suz_fn_0(source) == fallback);
-            assert(suz_text_pool_used() == before && text_calls == calls_before);
+            assert(suz_symbol_pool_used() == before && text_calls == calls_before);
         }
         suz_text source = input("Item { inner: Inner { name: `a\\0b`, count: 1 }, valid: true }");
         suz_text parsed = suz_fn_0(source);
         assert(suz_text_length(parsed) == 3 && memcmp(suz_text_bytes(parsed), "a\0b", 3) == 0);
-        uint64_t before = suz_text_pool_used();
+        uint64_t before = suz_symbol_pool_used();
         for (unsigned repeat = 0; repeat < 100; ++repeat) {
             assert(suz_fn_0(source) == parsed);
-            assert(suz_text_pool_used() == before && text_live == before);
+            assert(suz_symbol_pool_used() == before && text_live == before);
         }
         assert(suz_text_intern("a\0b", 3, true, input_location) == parsed);
         return 0;
     }
     suz_text source = input("Item { inner: Inner { name: `a\\0b`, count: 1 }, valid: true }");
     if (strcmp(argv[1], "probe") == 0) {
-        printf("%llu\n", (unsigned long long)suz_text_pool_used());
+        printf("%llu\n", (unsigned long long)suz_symbol_pool_used());
         return 0;
     }
     if (strcmp(argv[1], "oom") == 0) {
@@ -97,7 +97,7 @@ fn struct_symbol_parsing_does_not_intern_failed_inputs_and_frees_temporary_stora
         );
         if mode == "limit" {
             assert!(
-                diagnostic.contains("text pool limit exceeded:"),
+                diagnostic.contains("symbol pool limit exceeded:"),
                 "{diagnostic}"
             );
         } else {
@@ -126,18 +126,18 @@ fn main() -> u8 {{ return 0 }}
     let driver = r#"
 int main(int argc, char **argv) {
     assert(suz_program() == 0);
-    uint64_t used = suz_text_pool_used();
+    uint64_t used = suz_symbol_pool_used();
     assert(used < 1000); /* Static payloads are excluded from the pool limit. */
     if (argc == 1) {
         printf("%llu\n", (unsigned long long)used);
         return 0;
     }
-    suz_text_pool_init(strtoull(argv[1], NULL, 10));
+    suz_symbol_pool_init(strtoull(argv[1], NULL, 10));
     text_fail_after = text_calls;
     suz_text first = suz_fn_0();
     assert(suz_text_length(first) == 1000);
     assert(suz_fn_1() == first);
-    assert(suz_text_pool_used() == strtoull(argv[1], NULL, 10));
+    assert(suz_symbol_pool_used() == strtoull(argv[1], NULL, 10));
     return 0;
 }
 "#;
