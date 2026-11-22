@@ -821,13 +821,13 @@ fn main() -> u8 {
 
 主根拠：`[lit.float-rounding]`。
 
-補助根拠：`[lit.integer-as-float]`、`[lit.float-negative-zero]`、`[expr.nan-comparison]`。
+補助根拠：`[lit.float-negative-zero]`、`[expr.nan-comparison]`。
 
 **ソース：**
 
 ```suz
 fn main() -> u8 {
-    fix rounded: f32 = 16_777_217
+    fix rounded: f32 = 16_777_217.0
     fix tiny: f32 = -1.0e-50
     fix negative_inf = -inf
     fix not_number = nan
@@ -982,3 +982,90 @@ fn main() -> u8 {
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
 | 通常 | `[char.literal]` | 2 | 14 |
+
+
+### lex-036 整数リテラルの正確な表現と明示的な丸め
+
+主根拠：`[lit.integer-as-float]`。
+
+補助根拠：`[arith.cast]`、`[arith.compare]`。
+
+2^24を超えても、f32で正確に表せる整数は受理する。丸めたい場合は小数点かasを明記する。比較では整数リテラルを丸めない。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix base: f32 = 16777216
+    fix next: f32 = 16_777_218
+    fix wide: f64 = 9007199254740992
+    fix rounded: f32 = 16777217.0
+    fix converted = 16777217 as f32
+    if base != rounded || base != converted { return 1 }
+    if not (base < 16777217 < next) { return 2 }
+    if not (wide < 9007199254740993) { return 3 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### lex-037 浮動小数点型で正確に表せない整数リテラル
+
+主根拠：`[lit.integer-as-float]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix value: f32 = 16777217
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[lit.integer-as-float]` | 2 | 22 |
+
+### lex-038 型引数の推論でも整数リテラルを黙って丸めない
+
+主根拠：`[lit.integer-as-float]`。
+
+補助根拠：`[generic.inference]`。
+
+**ソース：**
+
+```suz
+fn first[T](a: T, b: T) -> T {
+    return a
+}
+fn main() -> u8 {
+    fix x: f32 = 2.0
+    fix y = first(16777217, x)
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[lit.integer-as-float]` | 6 | 19 |
