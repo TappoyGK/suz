@@ -1,4 +1,4 @@
-# 10. ログ
+# ログ
 
 [目次と書式](../spec-cases.md)
 
@@ -350,7 +350,7 @@ warn log-011.suz:3: count: 7
 
 主根拠：`[log.level]`。
 
-補助根拠：`[src.info]`、`[log.output]`。
+補助根拠：`[src.log-level-words]`、`[log.output]`。
 
 **ソース：**
 

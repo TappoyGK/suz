@@ -2,6 +2,7 @@
 #include "suz_env.h"
 
 #include <fenv.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <limits.h>
 #include <stdatomic.h>
@@ -17,6 +18,10 @@ void suz_runtime_init(void) {
     /* 丸めだけでなく、例外マスクとフラグも初期化する。
        fesetroundだけでは、継承した浮動小数点トラップが有効なまま残る。 */
     if (fesetenv(FE_DFL_ENV) != 0) abort();
+#ifdef SIGPIPE
+    /* 閉じたパイプへの出力をエラーとして扱う。ログごとの設定を避け、起動時に済ませる。 */
+    (void)signal(SIGPIPE, SIG_IGN);
+#endif
 }
 
 bool suz_try_add_i64(int64_t a, int64_t b, int64_t min, int64_t max, int64_t *result) {

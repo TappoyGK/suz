@@ -1,0 +1,540 @@
+# 作業領域とポインタ
+
+[目次と書式](../spec-cases.md)
+
+### arena-001 明示した作業領域で確保して読む
+
+主根拠：`[arena.new]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    arena { fix ptr p = new (1 as i32)
+        if .p != 1 { return 1 } }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### arena-002 通常関数も呼び出し元の作業領域へ確保する
+
+主根拠：`[arena.default]`。
+
+**ソース：**
+
+```suz
+fn make() -> ptr i32 { return new (7 as i32) }
+fn main() -> u8 {
+    fix ptr p = make()
+    if .p != 7 { return 1 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### arena-003 ポインタの束縛にはptrを書く
+
+主根拠：`[arena.ptr-decl]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix p = new (1 as i32)
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[arena.ptr-decl]` | 2 | 9 |
+
+### arena-004 型のあるnullableポインタをnullから更新する
+
+主根拠：`[arena.null]`。
+
+**ソース：**
+
+```suz
+struct Node { value: i32, next: ptr? Node }
+fn main() -> u8 {
+    var ptr p: ptr? Node = null
+    p = new Node { value: 2, next: null }
+    let n = p { if n.value != 2 { return 1 } } else { return 2 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### arena-005 nullだけでは参照先の型を決められない
+
+主根拠：`[arena.null]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix ptr p = null
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[arena.null]` | 2 | 17 |
+
+### arena-006 非null型へnullを代入できない
+
+主根拠：`[arena.null]`。
+
+**ソース：**
+
+```suz
+struct Node { value: i32, next: ptr? Node }
+fn main() -> u8 {
+    fix ptr p: ptr Node = null
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[arena.null]` | 3 | 27 |
+
+### arena-007 nullableポインタは確認前に読めない
+
+主根拠：`[arena.null-deref]`。
+
+**ソース：**
+
+```suz
+fn read(p: ptr? i32) -> i32 { return .p }
+fn main() -> u8 {
+
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[arena.null-deref]` | 1 | 38 |
+
+### arena-008 letで得た参照から実体を更新する
+
+主根拠：`[arena.let]`。
+
+**ソース：**
+
+```suz
+struct Node { value: i32, next: ptr? Node }
+fn main() -> u8 {
+    fix ptr tail = new Node { value: 1, next: null }
+    fix ptr a = new Node { value: 0, next: tail }
+    let n = a.next { n#value += 1 }
+    if tail.value != 2 { return 1 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### arena-009 非null参照をnullableへ渡す
+
+主根拠：`[arena.ptr-conversion]`。
+
+**ソース：**
+
+```suz
+fn read(p: ptr? i32) -> i32 { let n = p { return .n }
+    return 0 }
+fn main() -> u8 {
+    fix ptr p = new (3 as i32)
+    if read(p) != 3 { return 1 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### arena-010 入れ子のポインタ型は拡大しない
+
+主根拠：`[arena.ptr-conversion]`。
+
+**ソース：**
+
+```suz
+fn read(p: ptr ptr? i32) -> void {}
+fn main() -> u8 {
+    fix ptr p = new (3 as i32)
+    fix ptr q = new p
+    read(q)
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[type.expected]` | 5 | 10 |
+
+### arena-011 参照とnullの分岐はnullableになる
+
+主根拠：`[arena.ptr-join]`。
+
+**ソース：**
+
+```suz
+struct Node { value: i32, next: ptr? Node }
+fn choose(ready: bool, a: ptr Node) -> ptr? Node { return ifexpr ready { a } else { null } }
+fn main() -> u8 {
+    fix ptr p = new Node { value: 3, next: null }
+    let n = choose(true, p) { if n.value != 3 { return 1 } } else { return 2 }
+    let n = choose(false, p) { return 3 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### arena-012 必須の再帰ポインタは初期化できない
+
+主根拠：`[arena.recursive-struct]`。
+
+**ソース：**
+
+```suz
+struct Node { next: ptr Node }
+fn main() -> u8 {
+
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[arena.recursive-struct]` | 1 | 15 |
+
+### arena-013 nullableの再帰ポインタを終端にする
+
+主根拠：`[arena.recursive-struct]`。
+
+**ソース：**
+
+```suz
+struct Node { value: i32, next: ptr? Node }
+fn main() -> u8 {
+    fix ptr p = new Node { value: 3, next: null }
+    if p.value != 3 { return 1 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### arena-014 returnの値は回収前に読む
+
+主根拠：`[arena.exit]`。
+
+**ソース：**
+
+```suz
+fn read() -> i32 { arena { fix ptr p = new (9 as i32)
+        return .p } }
+fn main() -> u8 {
+    if read() != 9 { return 1 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### arena-015 内側の実体を外側の変数へ残さない
+
+主根拠：`[arena.lifetime]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    var ptr saved: ptr? i32 = null
+    arena { saved = new (1 as i32) }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[arena.store]` | 3 | 13 |
+
+### arena-016 構造体の全体代入でも短命な参照を残せない
+
+主根拠：`[arena.aggregate]`。
+
+**ソース：**
+
+```suz
+struct Node { value: i32, next: ptr? Node }
+struct Holder { item: ptr? Node }
+struct Outer { holder: Holder }
+fn main() -> u8 {
+    fix ptr outer = new Outer { holder: Holder { item: null } }
+    arena { fix ptr inner = new Node { value: 1, next: null }
+        outer#holder = Holder { item: inner } }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[arena.store]` | 7 | 9 |
+
+### arena-017 先頭へノードを追加する関数
+
+主根拠：`[arena.default]`。
+
+**ソース：**
+
+```suz
+struct Node { value: i32, next: ptr? Node }
+fn prepend(value: i32, tail: ptr? Node) -> ptr Node { return new Node { value: value, next: tail } }
+fn main() -> u8 {
+    fix ptr head = prepend(2, prepend(1, null))
+    let n = head.next { if n.value != 1 { return 1 } } else { return 2 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### arena-018 確保する通常関数も関数値にできる
+
+主根拠：`[arena.function-value]`。
+
+**ソース：**
+
+```suz
+fn make() -> ptr i32 { return new (7 as i32) }
+fn main() -> u8 {
+    fix create = fn make
+    fix ptr p = create()
+    if .p != 7 { return 1 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### arena-019 同じ条件で選ぶ参照の寿命を保証する
+
+主根拠：`[arena.objection]`。
+
+**ソース：**
+
+```suz
+struct Node { value: i32, next: ptr? Node }
+fn connect(flag: bool) -> void {
+    fix ptr outer = new Node { value: 1, next: null }
+    arena {
+        fix ptr inner = new Node { value: 2, next: null }
+        fix ptr destination = ifexpr flag { outer } else { inner }
+        fix ptr source = ifexpr flag { outer } else { inner }
+        objection [両方とも同じ条件で同じ実体を選ぶ] {
+            let p = destination { p#next = source }
+        }
+    }
+}
+fn main() -> u8 {
+    connect(true)
+    connect(false)
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### arena-020 証明済みの寿命違反はobjectionでも解除しない
+
+主根拠：`[arena.objection-scope]`。
+
+**ソース：**
+
+```suz
+struct Node { value: i32, next: ptr? Node }
+fn main() -> u8 {
+    fix ptr outer = new Node { value: 1, next: null }
+    arena { fix ptr inner = new Node { value: 2, next: null }
+        objection [参照先の寿命を保証する] { outer#next = inner } }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[arena.store]` | 5 | 35 |
+
+### arena-021 反復ごとに回収しない確保を警告する
+
+主根拠：`[arena.loop-allocation]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    for i in 0..<2 {
+        fix ptr p = new (1 as i32)
+    }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 1 |
+
+**警告：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[arena.loop-allocation]` | 3 | 21 |
+
+### arena-022 有限の反復で確保の警告を抑える
+
+主根拠：`[arena.loop-allocation]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    for i in 0..<2 {
+        fix ptr p = new (1 as i32) allow [arena.loop-allocation: 反復回数は2回に限る]
+    }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |

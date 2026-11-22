@@ -8,7 +8,7 @@ fn function_count(source: &str) -> usize {
 
 #[test]
 fn emits_each_used_substitution_once_and_omits_unused_templates() {
-    // [num.monomorphize]: Cの書式に依存せず、検査済みの具体化の数を数える。
+    // [runtime.num-monomorphize]: Cの書式に依存せず、検査済みの具体化の数を数える。
     let prefix = "fn id(n: int) -> int { return n }\nfn unused(n: int) -> int { return n }\n";
     assert_eq!(
         function_count(&format!("{prefix}fn main() -> u8 {{ return 0 }}")),

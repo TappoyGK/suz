@@ -201,6 +201,7 @@ fn standard_environment_copies_buffered_output_and_preserves_exit_status_on_fail
 #include <string.h>
 int main(int argc, char **argv) {
     if (argc != 2) return 2;
+    suz_runtime_init();
     if (strcmp(argv[1], "closed") == 0 || strcmp(argv[1], "closed-panic") == 0) {
         if (setvbuf(stderr, NULL, _IONBF, 0) != 0) return 3;
         if (getchar() != 'x') return 4;
@@ -250,6 +251,42 @@ int main(int argc, char **argv) {
         assert_eq!(result.status.code(), Some(code));
         assert!(result.stdout.is_empty());
     }
+}
+
+#[test]
+fn runtime_initializes_sigpipe_before_output_without_resetting_it_per_log() {
+    // 初期化直後の状態と、出力経路がsignalを呼ばないことを別々に確認する。
+    // suz_env.cだけを置換対象にし、ランタイムの起動時設定は実際に実行する。
+    let source = r#"#include "suz_runtime.h"
+#include <signal.h>
+#include <stdlib.h>
+#ifdef SIGPIPE
+static void verify_initialization(void) {
+    if (signal(SIGPIPE, SIG_DFL) == SIG_ERR) exit(2);
+    suz_runtime_init();
+    if (signal(SIGPIPE, SIG_IGN) != SIG_IGN) exit(3);
+}
+#else
+static void verify_initialization(void) { suz_runtime_init(); }
+#endif
+#define signal(...) (abort(), SIG_ERR)
+#include "suz_env.c"
+int main(void) {
+    verify_initialization();
+    suz_env_log(SUZ_LOG_INFO, "first\n", 6);
+    suz_env_log(SUZ_LOG_INFO, "second\n", 7);
+    return 0;
+}
+"#;
+    let directory = TemporaryDirectory::new();
+    let path = directory.0.join("signal-init.c");
+    fs::write(&path, source).unwrap();
+    let executable = directory.0.join("signal-init");
+    build(&path, &executable, "-O2", false);
+    let result = Command::new(executable).output().unwrap();
+    assert_eq!(result.status.code(), Some(0));
+    assert_eq!(result.stderr, b"first\nsecond\n");
+    assert!(result.stdout.is_empty());
 }
 
 #[test]

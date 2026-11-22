@@ -160,6 +160,7 @@ fn source(lines: &[&str]) -> Result<Source> {
             "diagnostic.arithmetic"
                 | "diagnostic.constant-comparison"
                 | "diagnostic.integer-division-to-float"
+                | "arena.loop-allocation"
         ) {
             return Err("expected a supported warning rule".into());
         }

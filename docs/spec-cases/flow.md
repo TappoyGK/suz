@@ -1,4 +1,4 @@
-# 8. 関数と制御
+# 関数と制御
 
 [目次と書式](../spec-cases.md)
 
@@ -2028,422 +2028,19 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | `[loop.jump-context]` | 2 | 5 |
 
-### flow-068 戻り値だけに汎用型を持つ関数を呼ぶ
+### flow-092 値を捕捉したクロージャを渡す
 
-主根拠：`[num.fn]`。
-
-仮引数がなくても、戻り値に `int` を持つ関数は汎用関数である。受け取り先から具体型を決める。
+主根拠：`[closure.expression]`。
 
 **ソース：**
 
 ```suz
-fn one() -> int {
-    return 1
-}
+fnshape Calc(i32) -> i32
+fn apply(f: fn Calc, value: i32) -> i32 { return f(value) }
 fn main() -> u8 {
-    fix small: u8 = one()
-    fix large: u64 = one()
-    return ifexpr small == 1 && large == 1 { 0 } else { 1 }
-}
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | 正常終了 | 0 | 0 |
-
-### flow-069 引数・戻り値・ローカル変数を同じ具体型にする
-
-主根拠：`[num.fn-same]`。
-
-補助根拠：`[num.fn-body-type]`、`[num.fn-recursion]`。
-
-`count` の引数・戻り値・`previous` は、最初の呼び出しでは `u8`、次の呼び出しでは `u16` になる。再帰呼び出しでも、それぞれ同じ具体型を使う。
-
-**ソース：**
-
-```suz
-fn count(n: int) -> int {
-    if n == 0 { return 0 }
-    fix previous: int = count(n - 1)
-    return previous + 1
-}
-fn main() -> u8 {
-    fix small: u8 = 3
-    fix large: u16 = 300
-    fix a = count(small)
-    fix b = count(large)
-    return ifexpr a == 3 && b == 300 { 0 } else { 1 }
-}
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | 正常終了 | 0 | 0 |
-
-### flow-070 独立したintとfloat、候補のない呼び出し
-
-主根拠：`[num.fn-resolve]`。
-
-`first` の `int` は `u8`、`float` は `f32` になる。`zero()` は受け取り先の要求型がなければ `i64`、`narrow` の初期値では `u8` になる。`half(4.0)` では受け取り先の `f32` を使う。
-
-**ソース：**
-
-```suz
-fn first(value: int, factor: float) -> int {
-    return value
-}
-fn zero() -> int {
-    return 0
-}
-fn half(value: float) -> float {
-    return value * 0.5
-}
-fn main() -> u8 {
-    fix value: u8 = 12
-    fix factor: f32 = 0.5
-    fix picked = first(value, factor)
-    fix plain = zero()
-    fix narrow: u8 = zero()
-    fix scaled: f32 = half(4.0)
-    return ifexpr picked == 12 && plain == 0 && narrow == 0 && scaled == 2.0 { 0 } else { 1 }
-}
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | 正常終了 | 0 | 0 |
-
-### flow-071 intの結果を浮動小数点型で受け取る
-
-主根拠：`[num.fn-convert]`。
-
-補助根拠：`[num.fn-resolve]`。
-
-`f64` は `int` の型候補に入らない。`identity(input)` は `u8` を返し、その結果を損失なく `f64` に広げる。算術式を渡した呼び出しでは、要求型なしで決まる `u8` を使う。
-
-**ソース：**
-
-```suz
-fn identity(value: int) -> int {
-    return value
-}
-fn main() -> u8 {
-    fix input: u8 = 3
-    fix result: f64 = identity(input)
-    fix sum: u8 = identity(input + input)
-    return ifexpr result == 3.0 && sum == 6 { 0 } else { 1 }
-}
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | 正常終了 | 0 | 0 |
-
-### flow-072 floatを返す内側の呼び出しをintの引数に渡す
-
-主根拠：`[num.fn-convert]`。
-
-補助根拠：`[num.fn-nested]`。
-
-`half` の戻り値は `f32` であり、`int` の引数には渡せない。種類が異なる呼び出し間では具体型をそろえない。
-
-**ソース：**
-
-```suz
-fn half(value: float) -> float {
-    return value * 0.5
-}
-fn identity(value: int) -> int {
-    return value
-}
-fn main() -> u8 {
-    fix input: f32 = 4.0
-    fix result = identity(half(input))
-    return 0
-}
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | コンパイルエラー | — | 0 |
-
-**コンパイル診断：**
-
-| 設定 | 規則 | 行 | 列 |
-|---|---|---:|---:|
-| 通常 | `[num.fn-convert]` | 9 | 27 |
-
-### flow-073 入れ子の呼び出し全体で具体型を決める
-
-主根拠：`[num.fn-nested]`。
-
-`input` の `u8` と受け取り先の `u16` をそろえ、`square` と `clamp` の `int` をともに `u16` にする。二乗はオーバーフローせず、40000を返す。
-
-**ソース：**
-
-```suz
-fn square(value: int) -> int {
-    return value * value
-}
-fn clamp(value: int, lo: int, hi: int) -> int {
-    return ifexpr value < lo { lo } elif value > hi { hi } else { value }
-}
-fn main() -> u8 {
-    fix input: u8 = 200
-    fix result: u16 = clamp((square(input)), 0, 50_000)
-    return ifexpr result == 40_000 { 0 } else { 1 }
-}
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | 正常終了 | 0 | 0 |
-
-### flow-074 汎用検査の診断にはintを使う
-
-主根拠：`[num.fn-check]`。
-
-呼び出しで型を決める前に、戻り値のboolがintと一致しないことを検出する。診断の型名はintとなる。
-
-**ソース：**
-
-```suz
-fn identity(value: int) -> int {
-    return true
-}
-fn main() -> u8 {
-    return 0
-}
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | コンパイルエラー | — | 0 |
-
-**コンパイル診断：**
-
-| 設定 | 規則 | 行 | 列 |
-|---|---|---:|---:|
-| 通常 | `[type.expected]` | 2 | 12 |
-
-### flow-075 型に依存する判定を保留して外側の演算を検査する
-
-主根拠：`[num.fn-check-judge]`。
-
-300が収まるかは具体型に依存するため保留する。その式とboolの加算はどの具体型でもできないため、本体で診断する。
-
-**ソース：**
-
-```suz
-fn add(value: int) -> int {
-    fix result = (value +% 300) + true
-    return result
-}
-fn main() -> u8 {
-    return 0
-}
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | コンパイルエラー | — | 0 |
-
-**コンパイル診断：**
-
-| 設定 | 規則 | 行 | 列 |
-|---|---|---:|---:|
-| 通常 | `[expr.operator-types]` | 2 | 35 |
-
-### flow-076 呼び出しで決まった型が本体の戻り値型に収まらない
-
-主根拠：`[num.fn-body]`。
-
-`small` の `int` は `u16` になる。本体の `return value` は `u8` へ暗黙に縮小できないため、呼び出し位置に診断し、本体の違反位置も示す。
-
-**ソース：**
-
-```suz
-fn small(value: int) -> u8 {
-    return value
-}
-fn main() -> u8 {
-    fix value: u16 = 300
-    return small(value)
-}
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | コンパイルエラー | — | 0 |
-
-**コンパイル診断：**
-
-| 設定 | 規則 | 行 | 列 |
-|---|---|---:|---:|
-| 通常 | `[num.fn-body]` | 6 | 12 |
-
-### flow-077 汎用検査を打ち切るまでに保留した判定を呼び出しで行う
-
-主根拠：`[num.fn-body]`。
-
-補助根拠：`[num.fn-check]`。
-
-300がintに収まるかを保留した後で、boolへの整数の代入を検出する。呼び出しでは先に保留した判定を行い、u8に300が収まらないことを報告する。関連診断は7行18列の `[lit.range]` となる。
-
-**ソース：**
-
-```suz
-fn main() -> u8 {
-    fix a: u8 = 1
-    fix k = f(a)
-    return 0
-}
-fn f(n: int) -> int {
-    fix y = n +% 300
-    fix z: bool = 1
-    return n
-}
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | コンパイルエラー | — | 0 |
-
-**コンパイル診断：**
-
-| 設定 | 規則 | 行 | 列 |
-|---|---|---:|---:|
-| 通常 | `[num.fn-body]` | 3 | 13 |
-
-### flow-078 汎用検査を打ち切った後の判定は呼び出しで行わない
-
-主根拠：`[num.fn-body]`。
-
-補助根拠：`[num.fn-check]`。
-
-boolへの整数の代入で汎用検査を打ち切るため、その後の300については判定を保留していない。呼び出し位置ではエラーを出さず、本体の違反を宣言順に報告する。
-
-**ソース：**
-
-```suz
-fn main() -> u8 {
-    fix a: u8 = 1
-    fix k = f(a)
-    return 0
-}
-fn f(n: int) -> int {
-    fix z: bool = 1
-    fix y = n +% 300
-    return n
-}
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | コンパイルエラー | — | 0 |
-
-**コンパイル診断：**
-
-| 設定 | 規則 | 行 | 列 |
-|---|---|---:|---:|
-| 通常 | `[type.expected]` | 7 | 19 |
-
-### flow-079 未使用の汎用関数から未宣言の名前を参照する
-
-主根拠：`[num.fn-unused]`。
-
-`unused` を呼び出さなくても、`missing` が未宣言であることは検出する。
-
-**ソース：**
-
-```suz
-fn unused(value: int) -> int {
-    return missing
-}
-fn main() -> u8 {
-    return 0
-}
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | コンパイルエラー | — | 0 |
-
-**コンパイル診断：**
-
-| 設定 | 規則 | 行 | 列 |
-|---|---|---:|---:|
-| 通常 | `[decl.local-scope]` | 2 | 12 |
-
-### flow-080 未使用関数の型に依存しない誤りを検出する
-
-主根拠：`[num.fn-unused]`。
-
-`narrowed` の初期化は具体型によって成否が変わるが、整数リテラルを `text` にする初期化は具体型によらず誤りである。前の文の型検査に失敗する組み合わせがあっても、後の誤りを見逃さない。
-
-**ソース：**
-
-```suz
-fn unused(value: int) -> u8 {
-    fix narrowed: u8 = value
-    fix message: text = 5
-    return narrowed
-}
-fn main() -> u8 {
-    return 0
-}
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | コンパイルエラー | — | 0 |
-
-**コンパイル診断：**
-
-| 設定 | 規則 | 行 | 列 |
-|---|---|---:|---:|
-| 通常 | `[type.expected]` | 3 | 25 |
-
-### flow-081 未使用関数の整数演算にもallowを適用する
-
-主根拠：`[num.fn-unused]`。
-補助根拠：`[allow.unused]`。
-
-関数を呼び出さなくても整数演算の警告対象を集計する。警告設定を省略した場合も、対象があるためallowを受理する。強制設定のエラーは抑制しない。
-
-**ソース：**
-
-```suz
-fn next(value: int) -> int {
-    return value + 1 allow [diagnostic.arithmetic: bounded by the caller]
-}
-fn main() -> u8 {
+    fix scale: i32 = 2
+    fix result = apply(fn [scale](n: i32) -> i32 { return n * scale }, 3)
+    if result != 6 { return 1 }
     return 0
 }
 ```
@@ -2453,62 +2050,16 @@ fn main() -> u8 {
 | 設定 | 結果 | 終了コード | 警告数 |
 |---|---|---:|---:|
 | 通常 | 正常終了 | 0 | 0 |
-| 警告 | 正常終了 | 0 | 0 |
-| 強制 | コンパイルエラー | — | 0 |
 
-**コンパイル診断：**
+### flow-093 クロージャを変数に保存しない
 
-| 設定 | 規則 | 行 | 列 |
-|---|---|---:|---:|
-| 強制 | `[diagnostic.arithmetic]` | 2 | 18 |
-
-### flow-082 未使用関数でもすべての具体型で一定の比較を警告する
-
-主根拠：`[num.fn-warning]`。
-
-`value >= 0` は符号付き整数型では一定にならず、警告しない。`small >= 0` はどの具体型でも常に真になるため、関数を呼ばなくても1回警告する。
+主根拠：`[closure.place]`。
 
 **ソース：**
 
 ```suz
-fn nonnegative(value: int) -> bool {
-    return value >= 0
-}
-fn always(value: int) -> bool {
-    fix small: u8 = 5
-    return small >= 0
-}
 fn main() -> u8 {
-    return 0
-}
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | 正常終了 | 0 | 1 |
-
-**警告：**
-
-| 設定 | 規則 | 行 | 列 |
-|---|---|---:|---:|
-| 通常 | `[diagnostic.constant-comparison]` | 6 | 18 |
-
-### flow-083 宣言していないfloatを変換先に使う
-
-主根拠：`[num.fn-undeclared]`。
-
-関数の引数型と戻り値型に現れる汎用型は `int` だけである。`float` は関数本体の変換先にも使えない。
-
-**ソース：**
-
-```suz
-fn convert(value: int) -> int {
-    fix converted = value as float
-    return value
-}
-fn main() -> u8 {
+    fix f = fn []() -> i32 { return 1 }
     return 0
 }
 ```
@@ -2523,160 +2074,19 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[num.fn-undeclared]` | 2 | 27 |
+| 通常 | `[closure.place]` | 2 | 13 |
 
-### flow-084 本体のint注釈と注釈なしの型推論を区別する
+### flow-094 クロージャを丸括弧で包まない
 
-主根拠：`[num.fn-body-type]`。
-
-`typed` は呼び出しごとに `u8`・`u64` となり、255に1を加えるラップ演算の結果は0・256となる。注釈のない `inferred` はどちらも `i64` となり、結果は256となる。
+主根拠：`[closure.place]`。
 
 **ソース：**
 
 ```suz
-fn values(input: int) -> int {
-    fix typed: int = 255
-    fix inferred = 255
-    if inferred +% 1 != 256 { return 99 }
-    return typed +% 1
-}
+fnshape Once() -> i32
+fn run(f: fn Once) -> i32 { return f() }
 fn main() -> u8 {
-    fix small: u8 = 1
-    fix large: u64 = 1
-    return ifexpr values(small) == 0 && values(large) == 256 { 0 } else { 1 }
-}
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | 正常終了 | 0 | 0 |
-
-### flow-085 安全な具体型で呼び出してもキャストのorを省略できない
-
-主根拠：`[num.fn-cast]`。
-
-この呼び出しでは `int` が `u8` になるが、他の具体型では変換が失敗しうる。関数本体の `as u8` には `or` が必要である。
-
-**ソース：**
-
-```suz
-fn narrow(value: int) -> u8 {
-    return value as u8
-}
-fn main() -> u8 {
-    fix value: u8 = 1
-    return narrow(value)
-}
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | コンパイルエラー | — | 0 |
-
-**コンパイル診断：**
-
-| 設定 | 規則 | 行 | 列 |
-|---|---|---:|---:|
-| 通常 | `[num.fn-cast]` | 2 | 18 |
-
-### flow-086 具体型を経由した定数のキャストを受理する
-
-主根拠：`[num.fn-cast]`。
-
-中間の `u16` への変換後も、内側の `as% int` による値の違いを判定する。1はすべての具体型で最終的に `u8` に収まる。
-
-**ソース：**
-
-```suz
-fn narrow(input: int) -> u8 {
-    return ((1 as% int) as u16 or 0) as u8
-}
-fn main() -> u8 {
-    fix input: u8 = 0
-    return ifexpr narrow(input) == 1 { 0 } else { 1 }
-}
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | 正常終了 | 0 | 0 |
-
-### flow-087 具体型を経由した定数のキャストにもorを要求する
-
-主根拠：`[num.fn-cast]`。
-
-中間の `u16` への変換後も、内側の `as% int` による値の違いを判定する。300は `int` が `u16` などの場合に `u8` に収まらない。呼び出しで `u8` を選んでも、末尾の `as u8` に `or` が必要である。
-
-**ソース：**
-
-```suz
-fn narrow(input: int) -> u8 {
-    return ((300 as% int) as u16 or 0) as u8
-}
-fn main() -> u8 {
-    fix input: u8 = 0
-    return ifexpr narrow(input) == 1 { 0 } else { 1 }
-}
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | コンパイルエラー | — | 0 |
-
-**コンパイル診断：**
-
-| 設定 | 規則 | 行 | 列 |
-|---|---|---:|---:|
-| 通常 | `[num.fn-cast]` | 2 | 40 |
-
-### flow-088 汎用関数同士を相互再帰で呼ぶ
-
-主根拠：`[num.fn-recursion]`。
-
-`even` と `odd` を行き来しても、各呼び出しで決まった `u8`・`u16` を引き継ぐ。
-
-**ソース：**
-
-```suz
-fn even(value: int) -> bool {
-    if value == 0 { return true }
-    return odd(value - 1)
-}
-fn odd(value: int) -> bool {
-    if value == 0 { return false }
-    return even(value - 1)
-}
-fn main() -> u8 {
-    fix small: u8 = 4
-    fix large: u16 = 301
-    return ifexpr even(small) && odd(large) { 0 } else { 1 }
-}
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | 正常終了 | 0 | 0 |
-
-### flow-089 mainの戻り値をintにする
-
-主根拠：`[num.fn-main]`。
-
-`main` の戻り値は `u8` であり、汎用型の `int` にはできない。
-
-**ソース：**
-
-```suz
-fn main() -> int {
+    fix n = run((fn []() -> i32 { return 1 }))
     return 0
 }
 ```
@@ -2691,81 +2101,186 @@ fn main() -> int {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[prog.main]` | 1 | 14 |
+| 通常 | `[closure.place]` | 4 | 18 |
 
-### flow-090 メソッドの受け手とselfのキャプチャー
+### flow-095 外側の変数を暗黙に捕捉しない
 
-主根拠：`[method.eval-order]`。
+主根拠：`[closure.scope]`。
 
 **ソース：**
 
 ```suz
-struct Counter { value: i32 }
-struct Holder { counter: Counter, pointer: ptr Counter }
-enum Mode: u8 { Off, On }
-fnshape Read() -> i32
+fnshape Once() -> i32
+fn run(f: fn Once) -> i32 { return f() }
+fn main() -> u8 {
+    fix scale: i32 = 2
+    fix n = run(fn []() -> i32 { return scale })
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[closure.scope]` | 5 | 41 |
+
+### flow-096 fixを参照キャプチャーしない
+
+主根拠：`[closure.capture-list]`。
+
+**ソース：**
+
+```suz
+fnshape Once() -> i32
+fn run(f: fn Once) -> i32 { return f() }
+fn main() -> u8 {
+    fix scale: i32 = 2
+    fix n = run(fn [var scale]() -> i32 { return scale })
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[closure.capture-list]` | 5 | 21 |
+
+### flow-097 同じ名前を2回捕捉しない
+
+主根拠：`[closure.capture-list]`。
+
+**ソース：**
+
+```suz
+fnshape Once() -> i32
+fn run(f: fn Once) -> i32 { return f() }
+fn main() -> u8 {
+    fix scale: i32 = 2
+    fix n = run(fn [scale, scale]() -> i32 { return scale })
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[closure.capture-list]` | 5 | 28 |
+
+### flow-098 トップレベルの定数を捕捉一覧へ書かない
+
+主根拠：`[closure.capture-list]`。
+
+**ソース：**
+
+```suz
+fix SCALE: i32 = 2
+fnshape Once() -> i32
+fn run(f: fn Once) -> i32 { return f() }
+fn main() -> u8 {
+    fix n = run(fn [SCALE]() -> i32 { return SCALE })
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[closure.capture-list]` | 5 | 21 |
+
+### flow-099 値キャプチャーは作成時の値を保つ
+
+主根拠：`[closure.capture-value]`。
+
+**ソース：**
+
+```suz
+fnshape Calc(i32) -> i32
+fn apply(f: fn Calc, value: i32) -> i32 { return f(value) }
+fn main() -> u8 {
+    var scale: i32 = 2
+    fix result = apply(fn [scale](n: i32) -> i32 { return n * scale }, expr { scale = 10
+        3 })
+    if result != 6 || scale != 10 { return 1 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### flow-100 値キャプチャーを書き換えない
+
+主根拠：`[closure.capture-value]`。
+
+**ソース：**
+
+```suz
+fnshape Once() -> i32
+fn run(f: fn Once) -> i32 { return f() }
+fn main() -> u8 {
+    fix scale: i32 = 2
+    fix n = run(fn [scale]() -> i32 { scale = 3
+        return scale })
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[closure.capture-value]` | 5 | 39 |
+
+### flow-101 参照キャプチャーから外側を更新する
+
+主根拠：`[closure.capture-reference]`。
+
+**ソース：**
+
+```suz
 fnshape Action() -> void
-fn read(f: fn Read) -> i32 { return f() }
-fn act(f: fn Action) -> void { f() }
-fn Counter.get() -> i32 { return self.value }
-fn Counter.get_after(ignored: i32) -> i32 { return self.value }
-fn Counter#add(n: int) -> void { self#value += n as i32 or 0 }
-fn Counter.echo(n: int) -> int { return n }
-fn Counter.echo_float(n: float) -> float { return n }
-fn Counter.sum(n: int) -> int {
-    if n == 0 { return 0 }
-    return self.sum(n - 1) + n
-}
-fn Counter#reset() -> void { self = Counter { value: 0 } }
-fn Counter#twice() -> void { self#add(1 as i16)
-    self#add(1 as i16) }
-fn Counter#capture() -> i32 {
-    act(fn [var self]() -> void { self#twice() })
-    return read(fn [self]() -> i32 { return self.get() })
-}
-fn Counter#observe_alias(other: ptr Counter) -> i32 {
-    self#value = 30
-    return other.value
-}
-fn Holder.bump_pointer() -> void { self.pointer#add(1 as u8) }
-fn Mode.enabled() -> bool { return self == Mode.On }
-fn Mode#toggle() -> void { self = ifexpr self == Mode.On { Mode.Off } else { Mode.On } }
+fn run(f: fn Action) -> void { f() }
 fn main() -> u8 {
-    var count = Counter { value: 1 }
-    count#add(2 as i16)
-    if count.get() != 3 || count.echo(9 as u16) != 9 { return 1 }
-    if count.echo(1 as u8) + count.echo(300 as u16) != 301 { return 13 }
-    if count.echo_float(1.25 as f32) + count.echo_float(2.5 as f64) != 3.75 { return 14 }
-    if count.sum(3 as u8) != 6 { return 15 }
-    if count#capture() != 5 || count.value != 5 { return 2 }
-    count#reset()
-    if count.value != 0 { return 3 }
-    var mode = Mode.Off
-    mode#toggle()
-    if not mode.enabled() { return 4 }
-    if not Mode.On.enabled() { return 5 }
-    if (Counter { value: 8 }).get() != 8 { return 6 }
-    arena {
-        fix ptr first = new Counter { value: 10 }
-        fix ptr second = new Counter { value: 20 }
-        var ptr selected = first
-        selected#add(expr { selected = second
-            2 as i16 })
-        if first.value != 12 || second.value != 20 { return 7 }
-        if first.get_after(expr { first#value = 15
-            0 }) != 12 { return 8 }
-        if first#observe_alias(first) != 30 { return 9 }
-        var holder = Holder { counter: Counter { value: 2 }, pointer: first }
-        holder.counter#add(3 as i8)
-        holder.bump_pointer()
-        if holder.counter.value != 5 || first.value != 31 { return 10 }
-        fix ptr maybe: ptr? Counter = first
-        let p = maybe { p#reset() }
-        if first.value != 0 { return 11 }
-        selected = expr { selected#reset()
-            first }
-        if selected.get() != 0 || second.get() != 0 { return 12 }
-    }
+    var count: i32 = 0
+    run(fn [var count]() -> void { count += 1 })
+    if count != 1 { return 1 }
     return 0
 }
 ```
@@ -2776,36 +2291,44 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | 正常終了 | 0 | 0 |
 
-### flow-091 Arenaメソッドと失敗処理
+### flow-102 クロージャ自身を匿名汎用にしない
 
-主根拠：`[method.arena]`。
+主根拠：`[closure.generic]`。
 
 **ソース：**
 
 ```suz
-struct Node { next: ptr? Node, value: i32 }
-error Trouble { Empty }
-fn Node#append(value: i32) -> ptr Node {
-    fix ptr child = new Node { next: null, value }
-    self#next = child
-    return child
-}
-fn Node.follow() -> ptr? Node { return self.next }
-fn Node.read() -> i32 or Trouble {
-    if self.value == 0 { fail Trouble.Empty }
-    return self.value
-}
-fn make() -> ptr Node { return new Node { next: null, value: 0 } }
+fnshape Calc(i32) -> i32
+fn apply(f: fn Calc, value: i32) -> i32 { return f(value) }
 fn main() -> u8 {
-    arena {
-        fix ptr p = make()
-        fix ptr child = p#append(9)
-        if (child.read() or 0) != 9 { return 1 }
-        fix ptr next = p.follow()
-        let n = next { if n.value != 9 { return 2 } } else { return 3 }
-        if (p.read() or 7) != 7 { return 4 }
-        make()#append(4)
-    }
+    fix result = apply(fn [](n: int) -> i32 { return 0 }, 3)
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[closure.generic]` | 4 | 24 |
+
+### flow-103 名前から作った関数値を呼ぶ
+
+主根拠：`[fn.value-from-name]`。
+
+**ソース：**
+
+```suz
+fn twice(n: i32) -> i32 { return n * 2 }
+fn main() -> u8 {
+    fix other = fn twice
+    if other(3) != 6 { return 1 }
     return 0
 }
 ```
@@ -2815,3 +2338,503 @@ fn main() -> u8 {
 | 設定 | 結果 | 終了コード | 警告数 |
 |---|---|---:|---:|
 | 通常 | 正常終了 | 0 | 0 |
+
+### flow-104 mainを関数値にしない
+
+主根拠：`[fn.value-from-name]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix f = fn main
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[fn.value-from-name]` | 2 | 13 |
+
+### flow-105 fnshape名だけでは型を書けない
+
+主根拠：`[fn.type-mark]`。
+
+**ソース：**
+
+```suz
+fnshape Transform(i32) -> i32
+fn twice(n: i32) -> i32 { return n * 2 }
+fn main() -> u8 {
+    fix f: Transform = fn twice
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[fn.type-mark]` | 4 | 12 |
+
+### flow-106 fnの後ろにはfnshapeを指定する
+
+主根拠：`[fn.type-mark]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix f: static fn i32 = fn main
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[fn.type-mark]` | 2 | 22 |
+
+### flow-107 呼び出し専用の関数を変数へ保存しない
+
+主根拠：`[fn.type-call]`。
+
+**ソース：**
+
+```suz
+fnshape Transform(i32) -> i32
+fn twice(n: i32) -> i32 { return n * 2 }
+fn main() -> u8 {
+    fix f: fn Transform = fn twice
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[fn.type-call]` | 4 | 12 |
+
+### flow-108 呼び出し専用の関数を戻り値型にしない
+
+主根拠：`[fn.type-call]`。
+
+**ソース：**
+
+```suz
+fnshape Transform(i32) -> i32
+fn twice(n: i32) -> i32 { return n * 2 }
+fn get() -> fn Transform { return fn twice }
+fn main() -> u8 {
+
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[fn.type-call]` | 3 | 13 |
+
+### flow-109 呼び出し専用の仮引数を返さない
+
+主根拠：`[fn.call-only]`。
+
+**ソース：**
+
+```suz
+fnshape Transform(i32) -> i32
+fn get(f: fn Transform) -> static fn Transform { return f }
+fn main() -> u8 {
+
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[fn.call-only]` | 2 | 57 |
+
+### flow-110 呼び出し専用の仮引数を括弧で転送しない
+
+主根拠：`[fn.call-only]`。
+
+**ソース：**
+
+```suz
+fnshape Calc(i32) -> i32
+fn apply(f: fn Calc, value: i32) -> i32 { return f(value) }
+fn forward(f: fn Calc) -> i32 { return apply((f), 1) }
+fn main() -> u8 {
+
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[fn.call-only]` | 3 | 47 |
+
+### flow-111 保存可能な関数値を呼び出し専用の仮引数へ渡す
+
+主根拠：`[fn.type-convert]`。
+
+**ソース：**
+
+```suz
+fnshape Calc(i32) -> i32
+fn apply(f: fn Calc, value: i32) -> i32 { return f(value) }
+fn twice(n: i32) -> i32 { return n * 2 }
+fn main() -> u8 {
+    fix f: static fn Calc = fn twice
+    if apply(f, 3) != 6 { return 1 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### flow-112 fnを呼び出し式に付けない
+
+主根拠：`[fn.value-mark]`。
+
+**ソース：**
+
+```suz
+fnshape Transform(i32) -> i32
+fn twice(n: i32) -> i32 { return n * 2 }
+fn pick(i: i32) -> static fn Transform { return fn twice }
+fn main() -> u8 {
+    fix f = fn pick(0)
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[fn.value-mark]` | 5 | 20 |
+
+### flow-113 返された関数値をその場で呼ぶ
+
+主根拠：`[fn.value-call]`。
+
+**ソース：**
+
+```suz
+fnshape Transform(i32) -> i32
+fn twice(n: i32) -> i32 { return n * 2 }
+fn pick(i: i32) -> static fn Transform { return fn twice }
+fn main() -> u8 {
+    if pick(0)(3) != 6 { return 1 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### flow-114 引数で変数を更新しても呼ぶ関数は変わらない
+
+主根拠：`[fn.value-evaluation]`。
+
+**ソース：**
+
+```suz
+fnshape Transform(i32) -> i32
+fn twice(n: i32) -> i32 { log info `twice`
+    return n * 2 }
+fn triple(n: i32) -> i32 { log info `triple`
+    return n * 3 }
+fn main() -> u8 {
+    var f: static fn Transform = fn twice
+    fix result = f(expr { log info `argument`
+        f = fn triple
+        3 })
+    if result != 6 || f(3) != 9 { return 1 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+**標準エラー：**
+
+```text
+info flow-114.suz:8: argument
+info flow-114.suz:2: twice
+info flow-114.suz:4: triple
+```
+
+### flow-115 関数値を比較しない
+
+主根拠：`[fn.value-compare]`。
+
+**ソース：**
+
+```suz
+fn twice(n: i32) -> i32 { return n * 2 }
+fn main() -> u8 {
+    fix f = fn twice
+    fix equal = f == f
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[fn.value-compare]` | 4 | 19 |
+
+### flow-116 関数値をテンプレートに埋め込まない
+
+主根拠：`[fn.value-compare]`。
+
+**ソース：**
+
+```suz
+fn twice(n: i32) -> i32 { return n * 2 }
+fn main() -> u8 {
+    fix f = fn twice
+    fix rendered = `${f}`
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[symbol.interpolation]` | 4 | 23 |
+
+### flow-117 要求型から匿名汎用の関数値を具体化する
+
+主根拠：`[fn.value-generic]`。
+
+**ソース：**
+
+```suz
+fnshape Transform(i32) -> i32
+fn identity(n: int) -> int { return n }
+fn main() -> u8 {
+    fix action: static fn Transform = fn identity
+    if action(3) != 3 { return 1 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### flow-118 匿名汎用の関数値には要求型が必要
+
+主根拠：`[fn.value-generic]`。
+
+**ソース：**
+
+```suz
+fn identity(n: int) -> int { return n }
+fn main() -> u8 {
+    fix f = fn identity
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[fn.value-generic]` | 3 | 13 |
+
+### flow-119 fnshapeの引数にvoidを使わない
+
+主根拠：`[fnshape.decl]`。
+
+**ソース：**
+
+```suz
+fnshape Wrong(void) -> i32
+fn main() -> u8 {
+
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[type.void]` | 1 | 9 |
+
+### flow-120 fnshapeの引数にintを使わない
+
+主根拠：`[fnshape.decl]`。
+
+**ソース：**
+
+```suz
+fnshape Wrong(int) -> i32
+fn main() -> u8 {
+
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[num.places]` | 1 | 9 |
+
+### flow-121 名前が違っても同じ形の関数型を渡せる
+
+主根拠：`[fnshape.same]`。
+
+**ソース：**
+
+```suz
+fnshape Transform(i32) -> i32
+fnshape Other(i32) -> i32
+fn apply(f: fn Other, n: i32) -> i32 { return f(n) }
+fn twice(n: i32) -> i32 { return n * 2 }
+fn main() -> u8 {
+    fix f: static fn Transform = fn twice
+    if apply(f, 3) != 6 { return 1 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### flow-122 fnshapeの再帰を拒否する
+
+主根拠：`[fnshape.recursion]`。
+
+**ソース：**
+
+```suz
+fnshape Recursive(static fn Recursive) -> void
+fn main() -> u8 {
+
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[fnshape.recursion]` | 1 | 9 |
