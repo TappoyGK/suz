@@ -906,13 +906,6 @@ fn infer_checked(
     })
 }
 
-#[cfg(test)]
-fn infer(
-    bodies: &BTreeMap<usize, Rc<Analysis>>,
-) -> Result<BTreeMap<usize, Rc<Summary>>, Diagnostic> {
-    Ok(infer_checked(bodies.clone(), true, BTreeMap::new())?.summaries)
-}
-
 /// 全具体化の要約を収束させて呼び出しを検査し、C生成には不要な解析本体を取り除く。
 pub(in crate::check) fn check_program(
     functions: &mut [CheckedFunction],
@@ -946,6 +939,13 @@ pub(in crate::check) fn check_program(
     warnings.sort_by_key(|warning| warning.0);
     warnings.dedup_by_key(|warning| warning.0);
     Ok(warnings)
+}
+
+#[cfg(test)]
+fn infer(
+    bodies: &BTreeMap<usize, Rc<Analysis>>,
+) -> Result<BTreeMap<usize, Rc<Summary>>, Diagnostic> {
+    Ok(infer_checked(bodies.clone(), true, BTreeMap::new())?.summaries)
 }
 
 #[cfg(test)]

@@ -87,7 +87,8 @@ pub fn rename_new(_source: &Path, _destination: &Path) -> io::Result<()> {
     ))
 }
 
-#[cfg(all(test, target_os = "macos"))]
+#[cfg(test)]
+#[cfg(target_os = "macos")]
 mod tests {
     use super::*;
 
