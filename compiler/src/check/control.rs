@@ -174,6 +174,12 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
                 }
                 visit(otherwise, false, true)?;
             }
+            ExpressionKind::TextBuffer { capacity, value } => {
+                if let Some(capacity) = capacity {
+                    visit(capacity, false, in_value)?;
+                }
+                visit(value, false, in_value)?;
+            }
             ExpressionKind::Negate(inner)
             | ExpressionKind::New(inner)
             | ExpressionKind::Deref(inner)

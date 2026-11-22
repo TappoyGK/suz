@@ -47,10 +47,11 @@ bool suz_parse_bool(const char *bytes, uint64_t length, bool *output) {
     return false;
 }
 
-bool suz_parse_string(const char *bytes, uint64_t length, uint64_t *consumed,
-                       char *output, uint64_t *decoded_length) {
+bool suz_parse_string_counts(const char *bytes, uint64_t length, uint64_t *consumed,
+                       char *output, uint64_t *decoded_length, uint64_t *scalars) {
     if (!length || bytes[0] != '`') return false;
     uint64_t written = 0;
+    *scalars = 0;
     for (uint64_t index = 1; index < length; ++index) {
         char c = bytes[index];
         if (c == '`') {
@@ -71,10 +72,17 @@ bool suz_parse_string(const char *bytes, uint64_t length, uint64_t *consumed,
                 default: return false;
             }
         }
+        if (((unsigned char)c & 0xc0) != 0x80) ++*scalars;
         if (output) output[written] = c;
         ++written;
     }
     return false;
+}
+
+bool suz_parse_string(const char *bytes, uint64_t length, uint64_t *consumed,
+                      char *output, uint64_t *decoded_length) {
+    uint64_t scalars;
+    return suz_parse_string_counts(bytes, length, consumed, output, decoded_length, &scalars);
 }
 
 bool suz_parse_char(const char *bytes, uint64_t length, uint32_t *output) {

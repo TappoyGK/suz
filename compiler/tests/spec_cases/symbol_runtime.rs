@@ -125,7 +125,7 @@ fn table_growth_accounts_both_allocations() {
         .unwrap();
     run(false, "growth", &peak.to_string(), 0);
     let output = run(false, "growth", &(peak - 1).to_string(), 101);
-    assert!(String::from_utf8_lossy(&output.stderr).contains("text pool limit exceeded"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("symbol pool limit exceeded"));
 }
 
 #[test]
@@ -149,7 +149,7 @@ fn allocation_failures_preserve_accounting_and_do_not_allocate_for_diagnostics()
 
 #[test]
 #[ignore = "release check: run scripts/test-release.sh"]
-fn optimized_text_pool_preserves_identity_accounting_and_failures() {
+fn optimized_symbol_pool_preserves_identity_accounting_and_failures() {
     for mode in [
         "identity",
         "collision",
@@ -199,6 +199,7 @@ pub(super) fn build_with_environment_optimized(
     c.push_str(include_str!("text_environment.c"));
     c.push_str(driver);
     let path = directory.0.join("program.c");
+    let needs_arena = c.contains("#include \"suz_arena.h\"");
     let needs_float_parser = crate::support::float_runtime::parser_required(&c);
     let needs_struct_parser = crate::support::float_runtime::struct_parser_required(&c);
     let needs_float_format = crate::support::float_runtime::required(&c);
@@ -214,6 +215,7 @@ pub(super) fn build_with_environment_optimized(
         .arg(&runtime)
         .arg(path)
         .arg(runtime.join("suz_runtime.c"))
+        .args(needs_arena.then(|| runtime.join("suz_arena.c")))
         .arg(runtime.join("suz_text.c"))
         .arg(runtime.join("suz_parse.c"))
         .args(needs_float_parser.then(|| runtime.join("suz_parse_float.c")))
@@ -251,7 +253,7 @@ int main(void) {
     text_fail_after = 0;
     assert(suz_program() == 0);
     assert(text_calls == 0 && text_live == 0 && text_peak == 0);
-    assert(suz_text_pool_used() == 0);
+    assert(suz_symbol_pool_used() == 0);
     return 0;
 }
 "#,
@@ -272,14 +274,14 @@ int main(void) {
 fn allocation_failures_report_the_operation_location() {
     for (source, line, column) in [
         (
-            "fn main() -> u8 {\n    fix message = `constant`\n    return 0\n}",
+            "fn main() -> u8 {\n    fix message: symbol = `constant`\n    return 0\n}",
             1,
             1,
         ),
         (
-            "fn main() -> u8 {\n    fix message = `${ifexpr true { 7 } else { 8 }}`\n    return 0\n}",
+            "fn main() -> u8 {\n    fix message: symbol = `${ifexpr true { 7 } else { 8 }}`\n    return 0\n}",
             2,
-            19,
+            27,
         ),
     ] {
         let result = generated_with_environment(
@@ -298,8 +300,7 @@ fn allocation_failures_report_the_operation_location() {
 
 #[test]
 fn logs_preserve_embedded_nul_bytes() {
-    let source =
-        "fn main() -> u8 {\n    fix message = `a\\0b`\n    log info `${message}`\n    return 0\n}";
+    let source = "fn main() -> u8 {\n    fix message: symbol = `a\\0b`\n    log info `${message}`\n    return 0\n}";
     let result = generated_with_environment(source, "int main(void) { return suz_program(); }\n");
     assert_eq!(result.status.code(), Some(0));
     assert_eq!(result.stderr, b"info text.suz:3: a\0b\n");

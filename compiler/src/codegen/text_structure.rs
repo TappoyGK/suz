@@ -14,6 +14,17 @@ fn key(ty: Type) -> String {
     }
 }
 
+pub(super) fn has_text(ty: Type, context: &ExpressionContext) -> bool {
+    match ty {
+        Type::Text => true,
+        Type::Struct(id) => context.structs[id]
+            .fields
+            .iter()
+            .any(|f| has_text(f.ty, context)),
+        _ => false,
+    }
+}
+
 pub(super) fn prepare(context: &mut ExpressionContext) {
     fn visit(
         ty: Type,
@@ -192,15 +203,13 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
                 format!("({})(values[{index}].bits)", ty.c_name())
             }
             Type::Float(ty) => format!("suz_parsed_{}(values[{index}].bits)", ty.name()),
-            Type::Symbol | Type::Text => format!(
+            Type::Text => format!(
+                "suz_textbuf_from_parsed(bytes + values[{index}].start, values[{index}].length, values[{index}].decoded_length, values[{index}].scalars, location)"
+            ),
+            Type::Symbol => format!(
                 "suz_text_from_parsed(bytes + values[{index}].start, values[{index}].length, location)"
             ),
             _ => unreachable!(),
-        };
-        let value = if ty == Type::Text {
-            format!("suz_text_as_view({value})")
-        } else {
-            value
         };
         writeln!(c, "    {path} = {value};").unwrap();
     }

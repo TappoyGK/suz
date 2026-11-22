@@ -111,7 +111,7 @@ impl Parser<'_, '_> {
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(
                     "ffi.keep",
-                    "keep is only allowed on extern typed C pointer parameters"
+                    "keep is only allowed on extern C pointer parameters"
                 ),
             ));
         }

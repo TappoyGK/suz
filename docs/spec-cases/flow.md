@@ -1879,7 +1879,7 @@ iを参照できるのはループ本体の中だけ。
 **ソース：**
 
 ```suz
-fn read(value: symbol) -> symbol {
+fn read(value: text) -> text {
     log info `read`
     return value
 }

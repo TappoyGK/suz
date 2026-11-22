@@ -243,7 +243,7 @@ fn output_interpolations_reject_computation_for_logs_and_both_panic_forms() {
             "risky() or panic",
         ] {
             let source = format!(
-                "{declarations}fn main() -> u8 {{ fix n = 1\nfix message = `x`\nfix point = Point {{ x: 1 }}\nfix f: static fn Action = fn read\n{output} `${{{expression}}}`\nreturn 0 }}"
+                "{declarations}fn main() -> u8 {{ fix n = 1\nfix message: symbol = `x`\nfix point = Point {{ x: 1 }}\nfix f: static fn Action = fn read\n{output} `${{{expression}}}`\nreturn 0 }}"
             );
             let error = suz::compile(source.as_bytes()).unwrap_err().to_string();
             assert!(error.contains("[output.embed-value]"), "{source}\n{error}");
@@ -251,7 +251,7 @@ fn output_interpolations_reject_computation_for_logs_and_both_panic_forms() {
     }
     // 通常のsymbolテンプレートは、計算した値を整形する用途を引き続き持つ。
     let source = format!(
-        "{declarations}fn main() -> u8 {{ fix message = `${{read() + 2}}`\nlog info `${{message}}`\nreturn 0 }}"
+        "{declarations}fn main() -> u8 {{ fix message: symbol = `${{read() + 2}}`\nlog info `${{message}}`\nreturn 0 }}"
     );
     let output = crate::test_util::compile_and_run_c23(&source, "symbol.suz");
     assert_eq!(output.status.code(), Some(0), "{output:?}");

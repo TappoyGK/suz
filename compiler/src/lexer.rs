@@ -12,6 +12,7 @@ const KEYWORDS: &[&str] = &[
     "arena",
     "objection",
     "new",
+    "textbuf",
     "ptr",
     "null",
     "let",

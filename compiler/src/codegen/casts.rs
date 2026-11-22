@@ -45,6 +45,7 @@ pub(super) fn cast_parts(
         let output = context.temporaries.len();
         if let Type::Struct(id) = target {
             context.struct_parsers.insert(id);
+            context.uses_arena |= super::text_structure::has_text(Type::Struct(id), context);
             context.temporaries.push(target);
             let position = super::text::position(location, context);
             let input = if operand.ty == Type::Symbol {

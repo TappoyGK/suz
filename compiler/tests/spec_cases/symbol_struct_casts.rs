@@ -4,7 +4,7 @@ use crate::test_util::compile_and_run_c23;
 fn struct_symbol_casts_preserve_constants_scalar_types_and_lazy_evaluation() {
     let source = r#"enum Mode: u8 { First, Last }
 struct Values { low: i8, high: u64, small: f32, wide: f64, flag: bool, mode: Mode, label: symbol }
-fix INPUT = `Values { low: -128, high: 18446744073709551615, small: 1.0000000596046447753906250000000001, wide: -0, flag: true, mode: Mode.Last, label: \`a\\0b\` }`
+fix INPUT: symbol = `Values { low: -128, high: 18446744073709551615, small: 1.0000000596046447753906250000000001, wide: -0, flag: true, mode: Mode.Last, label: \`a\\0b\` }`
 fix FALLBACK = Values { low: 0, high: 0, small: 0.0, wide: 0.0, flag: false, mode: Mode.First, label: `` }
 fix SAVED = INPUT as Values or FALLBACK
 fix FAILED = `bad` as Values or SAVED

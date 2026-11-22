@@ -926,6 +926,10 @@ pub(crate) enum ExpressionKind {
         repeated: bool,
     },
     New(Box<Expression>),
+    TextBuffer {
+        capacity: Option<Box<Expression>>,
+        value: Box<Expression>,
+    },
     Deref(Box<Expression>),
     Null,
     /// or panicの内部表現。通常の値式としては構文から作らない。

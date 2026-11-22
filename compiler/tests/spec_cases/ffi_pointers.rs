@@ -259,8 +259,24 @@ fn main() -> u8 {
 }
 
 #[test]
-fn keep_is_a_typed_pointer_modifier_not_a_reserved_name() {
-    for ty in ["i32", "_int", "f64", "bool", "*const void", "State"] {
+fn keep_is_a_c_pointer_modifier_not_a_reserved_name() {
+    // Cが保持するバイト列も、型付きポインタと同じく反復外へ残る実体として扱う。
+    for (keep, warnings) in [("keep ", 0), ("", 1)] {
+        let source = format!(
+            "extern \"retain.h\" {{ fn retain({keep}bytes: *const void) -> void }}\nfn main() -> u8 {{ for i in 0..<2 {{ fix t = textbuf `held`\ntrusted {{ retain(c_bytes t) }} }}\nreturn 0 }}"
+        );
+        let compiled = suz::compile_with_source_name(
+            source.as_bytes(),
+            suz::ArithmeticMode::Default,
+            "keep.suz",
+        )
+        .unwrap();
+        assert_eq!(compiled.warnings.len(), warnings);
+        if let Some(warning) = compiled.warnings.first() {
+            assert_eq!(warning.rule(), "arena.loop-allocation");
+        }
+    }
+    for ty in ["i32", "_int", "f64", "bool", "State"] {
         let source = format!(
             "extern \"f.h\" {{\nstruct state as State {{ value: i32 }}\nfn attach(keep p: {ty}) -> void\n}}\nfn main() -> u8 {{ return 0 }}"
         );

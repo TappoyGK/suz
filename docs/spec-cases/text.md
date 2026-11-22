@@ -1137,3 +1137,358 @@ fn main() -> u8 {
 | 設定 | 結果 | 終了コード | 警告数 |
 |---|---|---:|---:|
 | 通常 | 正常終了 | 0 | 0 |
+
+### text-040 symbolを要求する場所だけで実行時テンプレートをインターン化する
+
+主根拠：`[symbol.template]`。
+
+**ソース：**
+
+```suz
+struct Label { name: symbol }
+fn echo(s: symbol) -> symbol { return s }
+fn make(n: u8) -> symbol { return `${n}` }
+fn main() -> u8 {
+    fix n: u8 = 3
+    var s: symbol = `${n}`
+    s = `${n}x`
+    fix item = Label { name: `${n}` }
+    fix changed = item with { name: `${n}x` }
+    fix ptr items: ptr [symbol] = new [`${n}`, `${n}x`]
+    fix choice: symbol = ifexpr true { `${n}` } else { `${n}x` }
+    fix selected: symbol = matchexpr true { true => `${n}`
+false => `${n}x` }
+    if s != `3x` || changed.name != s || items[1] != s { return 1 }
+    if choice != echo(`${n}`) || selected != make(n) { return 2 }
+    fix joined = ifexpr true { `static` } else { s }
+    if joined != `static` { return 3 }
+    match choice { `3` => {}
+_ => { return 4 } }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### text-041 型指定なしの実行時テンプレートにはtextbufが必要
+
+主根拠：`[symbol.template]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix n: u8 = 1
+    fix s: symbol = `name`
+    fix t = `${n}`
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[symbol.template]` | 4 | 13 |
+
+### text-042 asの変換先はテンプレートの要求型にならない
+
+主根拠：`[symbol.template]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix n: u8 = 1
+    fix s: symbol = `name`
+    fix t = `${n}` as symbol
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[symbol.template]` | 4 | 13 |
+
+### text-043 他方の分岐のsymbolはテンプレートの要求型にならない
+
+主根拠：`[symbol.template]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix n: u8 = 1
+    fix s: symbol = `name`
+    fix t = ifexpr true { `${n}` } else { s }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[symbol.template]` | 4 | 27 |
+
+### text-044 比較はテンプレートへsymbolを要求しない
+
+主根拠：`[symbol.template]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix n: u8 = 1
+    fix s: symbol = `name`
+    fix t = s == `${n}`
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[symbol.template]` | 4 | 18 |
+
+### text-045 textbuf内の入れ子テンプレートにも生成先が必要
+
+主根拠：`[symbol.template]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix n: u8 = 1
+    fix s: symbol = `name`
+    fix t = textbuf `${`${n}`}`
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[symbol.template]` | 4 | 24 |
+
+### text-046 textbufは定数式ではない
+
+主根拠：`[const.expression]`。
+
+**ソース：**
+
+```suz
+fix T = textbuf `constant`
+fn main() -> u8 { return 0 }
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[const.expression]` | 1 | 9 |
+
+### text-047 作業領域のtextを外側へ保存しない
+
+主根拠：`[arena.store]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    var saved: text = ``
+    arena { saved = textbuf `inner` }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[arena.store]` | 3 | 13 |
+
+### text-048 切り出してもtextの寿命は延びない
+
+主根拠：`[arena.store]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    var saved: text = ``
+    arena { saved = (textbuf `inner`)[1:] or `` }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[arena.store]` | 3 | 13 |
+
+### text-049 関数で作ったtextを外側へ保存しない
+
+主根拠：`[arena.store]`。
+
+**ソース：**
+
+```suz
+fn copy(t: text) -> text { return textbuf t }
+fn main() -> u8 {
+    var saved: text = ``
+    arena { saved = copy(`inner`) }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[arena.store]` | 4 | 13 |
+
+### text-050 構造体変換で作ったtextを外側へ保存しない
+
+主根拠：`[arena.store]`。
+
+**ソース：**
+
+```suz
+struct Item { body: text }
+fn parse(t: text) -> Item { return t as Item or Item { body: `` } }
+fn main() -> u8 {
+    var saved: text = ``
+    fix input = `Item { body: \`inner\` }`
+    arena { saved = parse(input).body }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[arena.store]` | 6 | 13 |
+
+### text-051 c_bytesもtextの実体の寿命に従う
+
+主根拠：`[arena.store]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    trusted {
+        var saved = c_bytes ``
+        arena { saved = c_bytes textbuf `inner` }
+    }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[arena.store]` | 4 | 17 |
+
+### text-052 反復ごとに回収しないtextbufの確保を警告する
+
+主根拠：`[arena.loop-allocation]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    for i in 0..<2 { fix t = textbuf `${i}` }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 1 |
+
+**警告：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[arena.loop-allocation]` | 2 | 30 |

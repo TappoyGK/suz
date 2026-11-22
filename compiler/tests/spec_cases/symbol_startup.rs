@@ -3,8 +3,8 @@ use std::process::Command;
 
 #[test]
 fn startup_registers_unused_folded_and_pattern_symbols_before_direct_access() {
-    let source = r#"fix UNUSED = `unused`
-fix FOLDED = `${`fold`}${`ed`}`
+    let source = r#"fix UNUSED: symbol = `unused`
+fix FOLDED: symbol = `${`fold`}${`ed`}`
 fn unused() -> symbol { return `not called` }
 fn compare(t: symbol) -> u8 {
     var count: u8 = 0
@@ -20,23 +20,23 @@ fn compare(t: symbol) -> u8 {
     return count
 }
 fn main() -> u8 {
-    if false { fix message = `not selected` }
+    if false { fix message: symbol = `not selected` }
     return 0
 }
 "#;
     let generated = suz::compile(source.as_bytes()).unwrap();
     let (functions, entry) = generated.split_once("int main(void)").unwrap();
     assert!(!functions.contains("suz_text_intern("));
-    assert_eq!(entry.matches("suz_text_intern(").count(), 8);
+    assert_eq!(entry.matches("suz_text_intern(").count(), 5);
     let driver = r#"
 #include <string.h>
 int main(void) {
     assert(suz_program() == 0);
     size_t calls = text_calls;
-    uint64_t used = suz_text_pool_used();
+    uint64_t used = suz_symbol_pool_used();
     assert(calls > 0 && used == text_live);
     text_fail_after = calls;
-    const char *values[] = { "unused", "fold", "ed", "folded", "not called", "not selected", "v1", "" };
+    const char *values[] = { "unused", "folded", "not called", "not selected", "v1" };
     suz_text_location location = {"driver", 1, 1};
     for (size_t i = 0; i < sizeof(values) / sizeof(values[0]); ++i) {
         suz_text value = suz_text_intern(values[i], strlen(values[i]), true, location);
@@ -44,7 +44,7 @@ int main(void) {
     }
     suz_text target = suz_text_intern("v1", 2, false, location);
     for (unsigned repeat = 0; repeat < 1000; ++repeat) assert(suz_fn_1(target) == 12);
-    assert(text_calls == calls && suz_text_pool_used() == used);
+    assert(text_calls == calls && suz_symbol_pool_used() == used);
     return 0;
 }
 "#;
@@ -66,8 +66,7 @@ int main(void) {
 
 #[test]
 fn startup_failure_points_to_main_keyword_before_main_body_runs() {
-    let source =
-        "fix UNUSED = `not used`\n  fn    main() -> u8 { log info `main entered`\nreturn 0 }";
+    let source = "fix UNUSED: symbol = `not used`\n  fn    main() -> u8 { log info `main entered`\nreturn 0 }";
     let driver = "int main(void) { text_fail_after = 0; text_expected_panic_calls = 1; return suz_program(); }";
     let (_directory, executable) = build_with_environment(source, driver);
     let result = Command::new(executable).output().unwrap();

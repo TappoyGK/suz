@@ -86,7 +86,7 @@ impl ExpressionContext {
 pub(crate) fn generate(
     program: &CheckedProgram,
     source_name: &str,
-    text_pool_limit: crate::TextPoolLimit,
+    symbol_pool_limit: crate::SymbolPoolLimit,
     arena: crate::ArenaOptions,
     log_level: crate::LogLevel,
     log_ignore: bool,
@@ -163,7 +163,7 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
                 writeln!(c, "#define SUZ_ARENA_REPORT_FORMAT {format}\n#define SUZ_ARENA_REPORT_CAPACITY {}", report.capacity).unwrap();
             }
         }
-        c.push_str("#include \"suz_arena.h\"\n");
+        c.push_str("#include \"suz_arena.h\"\n#include \"suz_textbuf.h\"\n");
     }
     for (&(line, column), (id, function)) in &context.report_sites {
         writeln!(c, "static suz_arena_report_site suz_arena_report_site_{id} = {{ .id = {id}, .source = {}, .line = {line}, .column = {column}, .function = {}, .cached_parent = SIZE_MAX }};",
@@ -193,8 +193,8 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
         .collect();
     let mut text_init = if context.uses_text {
         format!(
-            "    suz_text_pool_init(UINT64_C({}));\n",
-            text_pool_limit.runtime_value()
+            "    suz_symbol_pool_init(UINT64_C({}));\n",
+            symbol_pool_limit.runtime_value()
         )
     } else {
         String::new()

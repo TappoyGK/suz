@@ -353,25 +353,24 @@ impl Analysis {
             Value::Null => self.shape(value.ty),
             // 最外側の暗黙変換は実体と、保存直前の非nullの証明を変えない。
             Value::Cast(inner) if value.ty.pointee().is_some() => self.expr(inner, region, arena),
+            Value::TextBuffer {
+                capacity,
+                value,
+                location,
+            } => {
+                if let Some(capacity) = capacity {
+                    self.expr(capacity, region, arena);
+                }
+                self.expr(value, region, arena);
+                self.text_allocations(Type::Text, arena, *location)
+            }
             Value::New {
                 value: initial,
                 location,
             } => {
                 let ty = initial.ty;
                 let initial = self.expr(initial, region, arena);
-                let cell = self.cell(arena.expect("new has a lexical arena"), *location, ty);
-                self.objects
-                    .insert(cell, summaries::Object::Allocation(self.function_id, cell));
-                if self.warn_allocations {
-                    self.allocations.insert(
-                        cell,
-                        vec![accumulation::Allocation {
-                            site: *location,
-                            trace: accumulation::Trace::allocation(*location),
-                            loop_region: self.active_loop,
-                        }],
-                    );
-                }
+                let cell = self.allocation(arena, *location, ty);
                 self.write(Place::Direct(cell), initial, *location);
                 let n = self.node();
                 self.targets[n].insert(Reference::object(cell));
@@ -537,6 +536,7 @@ impl Analysis {
                 Shape::new()
             }
             Value::CastReturn {
+                location: cast_location,
                 return_location: location,
                 operand,
                 return_value,
@@ -545,7 +545,7 @@ impl Analysis {
                 self.expr(operand, region, arena);
                 let returned = self.expr(return_value, region, arena);
                 self.return_value(return_value.ty, returned, *location);
-                Shape::new()
+                self.text_allocations(value.ty, arena, *cast_location)
             }
             Value::Closure(closure) => {
                 // 本体は呼び出し文脈ごとに別の要約へ移した。ここでは捕捉値の評価だけを行う。
@@ -575,12 +575,21 @@ impl Analysis {
                 Shape::new()
             }
             Value::CheckedCast {
-                operand, fallback, ..
+                operand,
+                fallback,
+                constant_struct,
+                location,
+                ..
             } => {
                 self.expr(operand, region, arena);
                 let fallback = self.expr(fallback, region, arena);
                 // 解析成功時の文字列は生成元とは独立する。代替値は元の由来を保つ。
-                self.alternatives(value.ty, vec![fallback])
+                let success = if constant_struct.is_some() {
+                    Shape::new()
+                } else {
+                    self.text_allocations(value.ty, arena, *location)
+                };
+                self.alternatives(value.ty, vec![success, fallback])
             }
             Value::ArrayDimensionGuard { left, right, .. }
             | Value::Binary { left, right, .. }
@@ -909,6 +918,7 @@ impl Analysis {
                     self.write(Place::Direct(cell), value, *location);
                 }
                 CheckedStatement::CastReturn {
+                    location: cast_location,
                     return_location: location,
                     id,
                     ty,
@@ -921,6 +931,8 @@ impl Analysis {
                     self.return_value(return_value.ty, returned, *location);
                     let cell = self.cell(region, self.regions[region].end, *ty);
                     self.locals.insert(*id, cell);
+                    let parsed = self.text_allocations(*ty, arena, *cast_location);
+                    self.write(Place::Direct(cell), parsed, *cast_location);
                 }
                 CheckedStatement::Break
                 | CheckedStatement::Continue
@@ -938,6 +950,45 @@ impl Analysis {
                 .collect::<BTreeSet<_>>()
                 .into_iter()
                 .collect(),
+        }
+    }
+    // 文字列の本文もnewと同じ確保・蓄積の情報を持つ。本文にはSuzから参照解除できる型を付けない。
+    fn allocation(&mut self, arena: Option<usize>, location: Location, ty: Type) -> usize {
+        let cell = self.cell(arena.expect("allocation has a current arena"), location, ty);
+        self.objects
+            .insert(cell, summaries::Object::Allocation(self.function_id, cell));
+        if self.warn_allocations {
+            self.allocations.insert(
+                cell,
+                vec![accumulation::Allocation {
+                    site: location,
+                    trace: accumulation::Trace::allocation(location),
+                    loop_region: self.active_loop,
+                }],
+            );
+        }
+        cell
+    }
+    fn text_allocations(&mut self, ty: Type, arena: Option<usize>, location: Location) -> Shape {
+        match ty {
+            Type::Text => {
+                let cell = self.allocation(arena, location, Type::Void);
+                let n = self.node();
+                self.targets[n].insert(Reference::object(cell));
+                BTreeMap::from([(vec![], n)])
+            }
+            Type::Struct(id) => {
+                let types: Vec<_> = self.structs.get(id).fields.iter().map(|f| f.ty).collect();
+                let mut result = Shape::new();
+                for (index, ty) in types.into_iter().enumerate() {
+                    for (mut path, node) in self.text_allocations(ty, arena, location) {
+                        path.insert(0, index);
+                        result.insert(path, node);
+                    }
+                }
+                result
+            }
+            _ => Shape::new(),
         }
     }
     fn outlives(&self, source: usize, mut destination: usize) -> bool {

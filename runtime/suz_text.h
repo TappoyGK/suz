@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* インターン済みのSuzのsymbol。以下のビューは、不変でプロセス終了まで生存するバイト列を共有する。 */
+/* インターン済みのSuzのsymbol。実体はプロセス終了まで生存する。 */
 struct suz_text_entry {
     const char *bytes;
     uint64_t length;
@@ -25,7 +25,7 @@ typedef struct {
 
 /* Suzのmainより前、かつ文字列操作より前に一度呼ぶ。0は無制限を表す。
    初期化ではメモリを確保せず、エントリーは必要になってから登録する。 */
-void suz_text_pool_init(uint64_t limit);
+void suz_symbol_pool_init(uint64_t limit);
 
 /* 入力はNULを含めてもよい有効なUTF-8。定数の入力はプロセス終了まで有効でなければならない。
    動的な入力は未登録の場合だけコピーする。入力の種類によらず、同じ内容なら常に同じポインターを返す。 */
@@ -35,10 +35,19 @@ const char *suz_text_bytes(suz_text value);
 uint64_t suz_text_length(suz_text value);
 int suz_text_compare(suz_text left, suz_text right);
 
+/* 取得済みのビューを変えず、追記に使える末尾と容量を実体側に保存する。
+   静的文字列とsymbolのビューにはこのメタ情報を付けない。 */
+typedef struct {
+    uint64_t capacity;
+    uint64_t used;
+    char bytes[];
+} suz_text_storage;
+
 typedef struct {
     const char *bytes;
     uint64_t length;
     uint64_t scalars;
+    suz_text_storage *storage;
 } suz_text_view;
 
 /* これらの操作はメモリを確保せず、インターン表にもアクセスしない。
@@ -53,7 +62,7 @@ int suz_text_view_compare(suz_text_view left, suz_text_view right);
 static inline const char *suz_view_bytes(suz_text_view value) { return value.bytes; }
 static inline uint64_t suz_view_length(suz_text_view value) { return value.length; }
 /* ランタイムの使用量管理用であり、Suz言語のAPIではない。 */
-uint64_t suz_text_pool_used(void);
+uint64_t suz_symbol_pool_used(void);
 
 typedef struct {
     char *bytes;
@@ -65,6 +74,9 @@ typedef struct {
    一時領域はプールの使用量に含めない。 */
 void suz_text_buffer_append(suz_text_buffer *buffer, const char *bytes,
                             uint64_t length, suz_text_location location);
+/* 整数の表示を最大20バイトへ書く。戻り値はバイト数で、終端NULは書かない。 */
+size_t suz_text_format_u64(uint64_t value, char output[20]);
+size_t suz_text_format_i64(int64_t value, char output[20]);
 void suz_text_buffer_u64(suz_text_buffer *buffer, uint64_t value, suz_text_location location);
 void suz_text_buffer_i64(suz_text_buffer *buffer, int64_t value, suz_text_location location);
 void suz_text_buffer_dispose(suz_text_buffer *buffer);

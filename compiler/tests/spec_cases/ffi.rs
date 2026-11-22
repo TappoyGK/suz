@@ -403,8 +403,8 @@ fn main() -> u8 { return 0 }
 #[test]
 fn ffi_runtime_internals_and_void_values_are_rejected() {
     for declaration in [
-        "extern \"suz_text.h\" { fn suz_text_pool_init(limit: u64) -> void }",
-        "extern \"stdlib.h\" { fn suz_text_pool_init as initialize(limit: u64) -> void }",
+        "extern \"suz_text.h\" { fn suz_symbol_pool_init(limit: u64) -> void }",
+        "extern \"stdlib.h\" { fn suz_symbol_pool_init as initialize(limit: u64) -> void }",
     ] {
         let error =
             suz::compile(format!("{declaration}\nfn main() -> u8 {{ return 0 }}").as_bytes())

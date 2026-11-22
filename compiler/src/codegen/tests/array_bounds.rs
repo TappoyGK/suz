@@ -63,7 +63,7 @@ fn omitted_array_bounds_are_detected_by_asan() {
                 generate(
                     &program,
                     "array-negative.suz",
-                    crate::TextPoolLimit::default(),
+                    crate::SymbolPoolLimit::default(),
                     crate::ArenaOptions::default(),
                     crate::LogLevel::default(),
                     false,

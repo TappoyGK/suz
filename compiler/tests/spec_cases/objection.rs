@@ -210,7 +210,7 @@ fn objection_reason_inside_interpolation_is_not_template_syntax() {
     let source = r#"fnshape Number() -> u8
 fn value(f: fn Number) -> u8 { return f() }
 fn main() -> u8 {
-    fix message = `${value(fn []() -> u8 { objection [} ` ${ and { are annotation text] { return 42 } })}`
+    fix message: symbol = `${value(fn []() -> u8 { objection [} ` ${ and { are annotation text] { return 42 } })}`
     log info `${message}`
     return 0
 }"#;

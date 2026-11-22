@@ -23,7 +23,7 @@ fn main() -> u8 {
     fix selected = matchexpr a + b { 300 => 4
         _ => 9 }
     log info `${sum},${scaled},${narrow},${inner},${f},${rounded},${wrap},${negative},${cancel},${tiny},${zero},${selected}`
-    fix square = `${max * max}`
+    fix square: symbol = `${max * max}`
     log info `${square}`
     return 0
 }"#;
@@ -227,7 +227,7 @@ fix EXPECTED = `${MAX * MAX},${(MAX * MAX) as% u8},${(MAX * MAX) as f32},${(MAX 
 fn main() -> u8 {
     fix max: u64 = MAX
     fix min: i64 = -9_223_372_036_854_775_808
-    fix actual = `${max * max},${(max * max) as% u8},${(max * max) as f32},${(max * max) as f64 or 0.0}`
+    fix actual: symbol = `${max * max},${(max * max) as% u8},${(max * max) as f32},${(max * max) as f64 or 0.0}`
     fix negative = (min * max) as i64 or 7
     fix wrap = (min * max) as% i64
     fix kind = matchexpr max * max { MAX * MAX => 1

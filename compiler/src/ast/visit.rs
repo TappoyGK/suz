@@ -32,6 +32,12 @@ pub(crate) fn walk_expression<V: Visitor + ?Sized>(
     expr: &Expression,
 ) -> Result<(), Diagnostic> {
     match &expr.kind {
+        ExpressionKind::TextBuffer { capacity, value } => {
+            if let Some(capacity) = capacity {
+                visitor.expression(capacity)?;
+            }
+            visitor.expression(value)?;
+        }
         ExpressionKind::ArrayInit {
             values, lengths, ..
         } => {

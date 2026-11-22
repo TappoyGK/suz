@@ -90,11 +90,11 @@ int main(void) {
     suz_text source = suz_text_intern("x\xe3\x81\x82\xf0\x9f\x98\x80\0zy", 11, false, location);
     suz_text digits = suz_text_intern("x42y", 4, false, location);
     size_t calls = text_calls;
-    uint64_t used = suz_text_pool_used();
+    uint64_t used = suz_symbol_pool_used();
     text_fail_after = calls;
     assert(suz_fn_0(suz_text_as_view(source)) == 9);
     assert(suz_fn_1(suz_text_as_view(digits)) == 42);
-    assert(text_calls == calls && suz_text_pool_used() == used);
+    assert(text_calls == calls && suz_symbol_pool_used() == used);
     text_fail_after = SIZE_MAX;
     suz_text_view view;
     assert(suz_text_slice(suz_text_as_view(digits), 1, 3, &view));
@@ -165,7 +165,7 @@ int main(void) {
                 driver.push_str(&format!(
                     r#"{{
     suz_text_view result = suz_fn_0(view, {start}, {end});
-    suz_text_view expected = {{"{bytes}", {length}, {count}}};
+    suz_text_view expected = {{"{bytes}", {length}, {count}, NULL}};
     assert(result.length == {length});
     assert(result.scalars == {count});
     assert(memcmp(result.bytes, "{bytes}", {length}) == 0);
@@ -228,7 +228,7 @@ fn constant_views_preserve_diagnostics_and_lazy_failure_evaluation() {
 
 #[test]
 fn conversion_diagnostics_identify_the_source_type() {
-    for (value, ty) in [("`abc`", "symbol"), ("`abc`[:]", "text")] {
+    for (value, ty) in [("S", "symbol"), ("`abc`[:]", "text")] {
         for (conversion, message) in [
             (
                 "as u8",
@@ -246,8 +246,9 @@ fn conversion_diagnostics_identify_the_source_type() {
             if ty == "text" && conversion == "as symbol" {
                 continue;
             }
-            let source =
-                format!("fn main() -> u8 {{ fix value = ({value}) {conversion}\nreturn 0 }}");
+            let source = format!(
+                "fix S: symbol = `abc`\nfn main() -> u8 {{ fix value = ({value}) {conversion}\nreturn 0 }}"
+            );
             assert_eq!(
                 suz::compile(source.as_bytes()).unwrap_err().message(),
                 message

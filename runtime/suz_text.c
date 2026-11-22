@@ -53,7 +53,7 @@ static void *allocate(uint64_t size, bool retained, suz_text_location location) 
         /* 固定領域で、三つのu64値とこれらの文字列に足りる。
            メモリ不足の報告で、アロケーターへ追加のメモリを要求してはならない。 */
         char reason[192];
-        char *out = literal(reason, "text pool limit exceeded: limit=");
+        char *out = literal(reason, "symbol pool limit exceeded: limit=");
         out = decimal(out, pool.limit);
         out = literal(out, ", used=");
         out = decimal(out, pool.used);
@@ -72,11 +72,11 @@ static void *allocate(uint64_t size, bool retained, suz_text_location location) 
     return memory;
 }
 
-void suz_text_pool_init(uint64_t limit) {
+void suz_symbol_pool_init(uint64_t limit) {
     pool.limit = limit;
 }
 
-uint64_t suz_text_pool_used(void) {
+uint64_t suz_symbol_pool_used(void) {
     return pool.used;
 }
 
@@ -202,6 +202,16 @@ void suz_text_buffer_dispose(suz_text_buffer *buffer) {
     *buffer = (suz_text_buffer){0};
 }
 
+size_t suz_text_format_u64(uint64_t value, char output[20]) {
+    return (size_t)(decimal(output, value) - output);
+}
+
+size_t suz_text_format_i64(int64_t value, char output[20]) {
+    char *cursor = output;
+    if (value < 0) *cursor++ = '-';
+    return (size_t)(decimal(cursor, value < 0 ? UINT64_C(0) - (uint64_t)value : (uint64_t)value) - output);
+}
+
 void suz_text_buffer_u64(suz_text_buffer *buffer, uint64_t value, suz_text_location location) {
     char digits[20];
     size_t length = (size_t)(decimal(digits, value) - digits);
@@ -230,7 +240,7 @@ suz_text suz_text_from_parsed(const char *bytes, uint64_t length, suz_text_locat
 
 
 suz_text_view suz_text_as_view(suz_text value) {
-    return (suz_text_view){value->bytes, value->length, value->scalars};
+    return (suz_text_view){value->bytes, value->length, value->scalars, NULL};
 }
 
 bool suz_text_slice(suz_text_view value, uint64_t start, uint64_t end,
@@ -238,7 +248,7 @@ bool suz_text_slice(suz_text_view value, uint64_t start, uint64_t end,
     if (start > end || end > value.scalars) return false;
     if (value.length == value.scalars) {
         *output = (suz_text_view){start == 0 ? value.bytes : value.bytes + start,
-                                  end - start, end - start};
+                                  end - start, end - start, value.storage};
         return true;
     }
     uint64_t byte = 0;
@@ -256,7 +266,7 @@ bool suz_text_slice(suz_text_view value, uint64_t start, uint64_t end,
         }
     }
     *output = (suz_text_view){first == 0 ? value.bytes : value.bytes + first,
-                              byte - first, end - start};
+                              byte - first, end - start, value.storage};
     return true;
 }
 

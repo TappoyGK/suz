@@ -27,6 +27,8 @@ typedef struct {
     uint64_t bits;
     uint64_t start;
     uint64_t length;
+    uint64_t decoded_length;
+    uint64_t scalars;
     bool seen;
 } suz_parsed_value;
 

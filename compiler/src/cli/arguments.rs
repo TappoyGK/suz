@@ -1,7 +1,7 @@
 //! CLIのコマンドとオプションを解析し、パスや文字列プール上限などの入力を検証する。
 //!
 //! 利用元: [`crate::cli`]。
-//! 主な対象規則: `[tool.arguments]`、`[tool.text-pool-size]`。
+//! 主な対象規則: `[tool.arguments]`、`[tool.symbol-pool-size]`。
 
 use super::{Failure, Result};
 use std::{ffi::OsString, path::PathBuf};
@@ -47,7 +47,7 @@ pub struct Options {
     pub arena_report: suz::ArenaReportOptions,
     pub log_level: suz::LogLevel,
     pub mode: suz::ArithmeticMode,
-    pub text_pool_limit: suz::TextPoolLimit,
+    pub symbol_pool_limit: suz::SymbolPoolLimit,
     pub arena: suz::ArenaOptions,
 }
 
@@ -86,7 +86,7 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
     let mut cc = None;
     let mut environment = None;
     let mut mode = None;
-    let mut text_pool_limit = None;
+    let mut symbol_pool_limit = None;
     let mut arena_sizes = [None; 3];
     let mut force = false;
     let mut log_allow = false;
@@ -275,14 +275,14 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
                     arena_sizes[index] = Some(bytes);
                     continue;
                 }
-                Some("--text-pool-limit") if command != Command::Check => {
-                    if text_pool_limit.is_some() {
-                        return Err(pool_size_error("duplicate --text-pool-limit option"));
+                Some("--symbol-pool-limit") if command != Command::Check => {
+                    if symbol_pool_limit.is_some() {
+                        return Err(pool_size_error("duplicate --symbol-pool-limit option"));
                     }
-                    let value = args
-                        .next()
-                        .ok_or_else(|| pool_size_error("expected SIZE after --text-pool-limit"))?;
-                    text_pool_limit = Some(parse_pool_limit(&value)?);
+                    let value = args.next().ok_or_else(|| {
+                        pool_size_error("expected SIZE after --symbol-pool-limit")
+                    })?;
+                    symbol_pool_limit = Some(parse_pool_limit(&value)?);
                     continue;
                 }
                 Some("--force") if command == Command::Build && !force => {
@@ -347,7 +347,7 @@ pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Action> {
         },
         log_level: log_level.unwrap_or_default(),
         mode: mode.unwrap_or_default(),
-        text_pool_limit: text_pool_limit.unwrap_or_default(),
+        symbol_pool_limit: symbol_pool_limit.unwrap_or_default(),
         arena: suz::ArenaOptions {
             initial: arena_sizes[0].unwrap_or(suz::ArenaOptions::default().initial),
             grow: arena_sizes[1].unwrap_or(suz::ArenaOptions::default().grow),
@@ -373,21 +373,21 @@ fn path_option(
 }
 
 fn pool_size_error(message: impl std::fmt::Display) -> Failure {
-    Failure::tool(2, "tool.text-pool-size", message)
+    Failure::tool(2, "tool.symbol-pool-size", message)
 }
 
-fn parse_pool_limit(value: &std::ffi::OsStr) -> Result<suz::TextPoolLimit> {
+fn parse_pool_limit(value: &std::ffi::OsStr) -> Result<suz::SymbolPoolLimit> {
     let error = || {
         pool_size_error(
-            "expected a positive byte count, K/M/G suffix, or unlimited for --text-pool-limit",
+            "expected a positive byte count, K/M/G suffix, or unlimited for --symbol-pool-limit",
         )
     };
     let value = value.to_str().ok_or_else(error)?;
     if value == "unlimited" {
-        return Ok(suz::TextPoolLimit::Unlimited);
+        return Ok(suz::SymbolPoolLimit::Unlimited);
     }
     parse_byte_count(value)
-        .map(suz::TextPoolLimit::Bytes)
+        .map(suz::SymbolPoolLimit::Bytes)
         .ok_or_else(error)
 }
 

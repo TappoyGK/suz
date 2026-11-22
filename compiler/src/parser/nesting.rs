@@ -182,6 +182,9 @@ fn statement_height(statement: &Statement) -> usize {
 fn kind_height(kind: &ExpressionKind) -> usize {
     use ExpressionKind::*;
     1 + match kind {
+        TextBuffer { capacity, value } => {
+            value.height.max(capacity.as_ref().map_or(0, |v| v.height))
+        }
         ArrayInit {
             values, lengths, ..
         } => values

@@ -175,7 +175,7 @@ fn generated_bool_values_preserve_negation_and_copies() {
             generate(
                 &program,
                 "test.suz",
-                crate::TextPoolLimit::default(),
+                crate::SymbolPoolLimit::default(),
                 crate::ArenaOptions::default(),
                 crate::LogLevel::default(),
                 false,
@@ -363,7 +363,7 @@ return result != {expected} || trace != {trace};
             generate(
                 &program,
                 "test.suz",
-                crate::TextPoolLimit::default(),
+                crate::SymbolPoolLimit::default(),
                 crate::ArenaOptions::default(),
                 crate::LogLevel::default(),
                 false,

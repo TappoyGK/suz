@@ -274,6 +274,11 @@ pub(crate) enum Value {
         address: Box<CheckedExpression>,
         handler: Option<CheckedHandler>,
     },
+    TextBuffer {
+        capacity: Option<Box<CheckedExpression>>,
+        value: Box<CheckedExpression>,
+        location: Location,
+    },
     New {
         value: Box<CheckedExpression>,
         location: Location,
@@ -470,6 +475,11 @@ macro_rules! constant_children_visitor {
                         visit(value);
                     }
                     return !methods.iter().any(Option::is_some);
+                }
+                Self::TextBuffer { capacity, value, .. } => {
+                    if let Some(capacity) = capacity { visit(capacity); }
+                    visit(value);
+                    return false;
                 }
                 Self::Template { parts, .. } => {
                     for part in parts {

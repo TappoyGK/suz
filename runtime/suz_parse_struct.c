@@ -111,7 +111,8 @@ static bool value(reader *r, const suz_parse_type *type, suz_parsed_value *outpu
         output->bits = scalar;
     } else if (type->kind == SUZ_PARSE_TEXT) {
         uint64_t consumed, decoded;
-        if (!suz_parse_string(r->bytes + r->index, r->length - r->index, &consumed, NULL, &decoded)) return false;
+        if (!suz_parse_string_counts(r->bytes + r->index, r->length - r->index, &consumed, NULL, &decoded, &output->scalars)) return false;
+        output->decoded_length = decoded;
         output->start = r->index;
         output->length = consumed;
         r->index += consumed;

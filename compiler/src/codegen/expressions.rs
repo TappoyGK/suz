@@ -96,6 +96,11 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             )
         }
         Value::Receiver { ref target, .. } => expression(target, context),
+        Value::TextBuffer {
+            ref capacity,
+            ref value,
+            location,
+        } => super::text::buffer(capacity.as_deref(), value, location, context),
         Value::New {
             ref value,
             location,
@@ -180,7 +185,7 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             if expr.ty == crate::ast::Type::Text {
                 context.uses_text = true;
                 format!(
-                    "(suz_text_view){{{}, UINT64_C({}), UINT64_C({})}}",
+                    "(suz_text_view){{{}, UINT64_C({}), UINT64_C({}), NULL}}",
                     c_string(text),
                     text.len(),
                     text.chars().count()
@@ -194,6 +199,7 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             location,
             ref constant,
         } => match constant {
+            Some(text) if expr.ty == crate::ast::Type::Text => super::text::static_view(text),
             Some(text) => super::text::constant(text, context),
             None => super::text::template(parts, location, context),
         },

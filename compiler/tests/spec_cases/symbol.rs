@@ -2,7 +2,7 @@ use crate::test_util::compile_and_run_c23;
 
 #[test]
 fn templates_preserve_constant_dependencies_and_nested_value_scopes() {
-    let source = r#"fix LABEL = `${PRODUCT} ${COUNT} ${READY}`
+    let source = r#"fix LABEL: symbol = `${PRODUCT} ${COUNT} ${READY}`
 fix PRODUCT = `Suz`
 fix COUNT: u8 = 3
 fix READY = true
@@ -12,8 +12,8 @@ fix SAME = ITEM == Label { value: `Suz 3 true` }
 fn main() -> u8 {
     if not SAME { return 1 }
     fix count: u8 = 2
-    fix first = `${`nested ${count}`}`
-    fix captured = expr { `${count}` }
+    fix first: symbol = `${textbuf `nested ${count}`}`
+    fix captured: symbol = expr { `${count}` }
     if first != `nested 2` { return 3 }
     if captured != `2` { return 2 }
     return 0
@@ -77,7 +77,7 @@ fn float_templates(values: impl IntoIterator<Item = (String, &'static str)>) {
         source.push_str(&format!(
             "fix VALUE_{index}: {ty} = {literal}\nfix SAVED_{index} = `${{VALUE_{index}}}`\n"
         ));
-        body.push_str(&format!("{{\nfix dynamic = VALUE_{index}\nif SAVED_{index} != `${{dynamic}}` {{ log info `mismatch {index}: ${{SAVED_{index}}} ${{dynamic}}`\nreturn 1 }}\n}}\n"));
+        body.push_str(&format!("{{\nfix dynamic = VALUE_{index}\nfix rendered: symbol = `${{dynamic}}`\nif SAVED_{index} != rendered {{ log info `mismatch {index}: ${{SAVED_{index}}} ${{dynamic}}`\nreturn 1 }}\n}}\n"));
     }
     body.push_str("return 0\n}\n");
     source.push_str(&body);

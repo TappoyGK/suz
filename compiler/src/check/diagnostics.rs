@@ -20,6 +20,14 @@ pub(super) fn collect(expr: &CheckedExpression, locations: &mut Vec<Location>) {
             }
             e.leaves(&mut |v| collect(v, locations));
         }
+        Value::TextBuffer {
+            capacity, value, ..
+        } => {
+            if let Some(capacity) = capacity {
+                collect(capacity, locations);
+            }
+            collect(value, locations);
+        }
         Value::TextView(inner) | Value::Intern { operand: inner, .. } => collect(inner, locations),
         Value::Slice {
             target,

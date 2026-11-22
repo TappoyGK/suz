@@ -19,6 +19,12 @@ pub(super) fn dependencies(
     names: &mut Vec<(String, Location)>,
 ) -> Result<(), Diagnostic> {
     match &expr.kind {
+        ExpressionKind::TextBuffer { .. } => {
+            return Err(expr.location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("const.expression", "textbuf is not a constant expression"),
+            ));
+        }
         ExpressionKind::New(_) | ExpressionKind::ArrayInit { .. } => {
             let allocation = match &expr.kind {
                 ExpressionKind::New(inner) => &inner.kind,
