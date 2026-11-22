@@ -127,7 +127,7 @@ pub(super) fn allocate(
         values,
         lengths,
         repeated,
-        constant_counts,
+        metadata,
     } = &value.value
     else {
         unreachable!()
@@ -135,7 +135,7 @@ pub(super) fn allocate(
     context.uses_arena = true;
     let element = context.arrays.get(ty.array_id().unwrap()).element.c_name();
     let mut c = String::from("({ ");
-    for count in constant_counts {
+    for count in &metadata.constant_counts {
         write!(c, r#"_Static_assert(UINT64_C({count}) <= SIZE_MAX / sizeof({element}), "array byte size overflows size_t [array.layout]"); "#).unwrap();
     }
     for (i, value) in values.iter().enumerate() {
@@ -541,21 +541,17 @@ pub(super) fn constant(value: &CheckedExpression, context: &mut ExpressionContex
         values,
         lengths,
         repeated,
-        constant_counts,
+        metadata,
     } = &value.value
     else {
         unreachable!()
     };
     let array = context.arrays.get(value.ty.array_id().unwrap());
-    let mut static_initial = true;
     let initial = values
         .iter()
-        .map(|v| {
-            let (text, literal) = constant_element(v, context);
-            static_initial &= literal;
-            text
-        })
+        .map(|v| constant_element(v, context))
         .collect::<Vec<_>>();
+    let static_initial = initial.iter().all(|(_, literal)| *literal);
     let lengths = lengths
         .iter()
         .map(|v| match v.value {
@@ -564,8 +560,16 @@ pub(super) fn constant(value: &CheckedExpression, context: &mut ExpressionContex
         })
         .collect::<Vec<_>>()
         .join(", ");
-    let count = *constant_counts.last().unwrap();
-    let key = format!("{:?}:{lengths}:{repeated}:{}", value.ty, initial.join(", "));
+    let count = *metadata.constant_counts.last().unwrap();
+    let key = format!(
+        "{:?}:{lengths}:{repeated}:{}",
+        value.ty,
+        initial
+            .iter()
+            .map(|(text, _)| text.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
     let id = if let Some(id) = context.constant_arrays.get(&key) {
         *id
     } else {
@@ -574,16 +578,20 @@ pub(super) fn constant(value: &CheckedExpression, context: &mut ExpressionContex
         let element = array.element.c_name();
         let name = format!("suz_constant_array_{id}");
         let size = count.max(1);
-        for count in constant_counts {
+        for count in &metadata.constant_counts {
             writeln!(context.constant_array_data, r#"_Static_assert(UINT64_C({count}) <= SIZE_MAX / sizeof({element}), "array byte size overflows size_t [array.layout]");"#).unwrap();
         }
         if static_initial {
             let initial = if count == 0 {
                 "0".into()
             } else if *repeated {
-                format!("[0 ... {}] = {}", count - 1, initial[0])
+                format!("[0 ... {}] = {}", count - 1, initial[0].0)
             } else {
-                initial.join(", ")
+                initial
+                    .iter()
+                    .map(|(text, _)| text.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             };
             writeln!(
                 context.constant_array_data,
@@ -591,20 +599,35 @@ pub(super) fn constant(value: &CheckedExpression, context: &mut ExpressionContex
             )
             .unwrap();
         } else {
+            // 起動時の代入が必要な要素と、Cの静的初期値で表せる要素を分ける。
+            let static_values = initial
+                .iter()
+                .enumerate()
+                .filter(|(_, (_, literal))| *literal)
+                .map(|(i, (text, _))| format!("[{i}] = {text}"))
+                .collect::<Vec<_>>();
+            let initializer = if static_values.is_empty() {
+                "0".into()
+            } else {
+                static_values.join(", ")
+            };
             writeln!(
                 context.constant_array_data,
-                "static {element} {name}[{size}];"
+                "static {element} {name}[{size}] = {{ {initializer} }};"
             )
             .unwrap();
             if *repeated && count != 0 {
                 writeln!(
                     context.constant_array_init,
                     "    for (size_t i = 0; i < UINT64_C({count}); ++i) {name}[i] = {};",
-                    initial[0]
+                    initial[0].0
                 )
                 .unwrap();
             } else if !repeated {
-                for (index, initial) in initial.iter().enumerate() {
+                for (index, (initial, literal)) in initial.iter().enumerate() {
+                    if *literal {
+                        continue;
+                    }
                     writeln!(
                         context.constant_array_init,
                         "    {name}[{index}] = {initial};"

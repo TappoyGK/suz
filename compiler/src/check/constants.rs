@@ -445,10 +445,12 @@ fn array_access(expr: &CheckedExpression) -> Option<CheckedExpression> {
         end,
         index,
         handler,
+        location,
         ..
     } = &expr.value
     {
         let Value::Array {
+            metadata,
             values,
             mut lengths,
             repeated,
@@ -457,6 +459,7 @@ fn array_access(expr: &CheckedExpression) -> Option<CheckedExpression> {
         else {
             return None;
         };
+        let mut origins = metadata.origins;
         let length = constant_integer_raw(&lengths[0])?;
         let first = start
             .as_ref()
@@ -484,8 +487,12 @@ fn array_access(expr: &CheckedExpression) -> Option<CheckedExpression> {
                 .to_vec()
         };
         if *index {
+            origins.remove(0);
             lengths.remove(0);
         } else {
+            if start.is_some() || end.is_some() {
+                origins[0] = (*location, 0);
+            }
             lengths[0] = CheckedExpression {
                 ty: Type::Integer(IntegerType::Len),
                 value: Value::Integer {
@@ -503,10 +510,13 @@ fn array_access(expr: &CheckedExpression) -> Option<CheckedExpression> {
         return Some(CheckedExpression {
             ty: expr.ty,
             value: Value::Array {
+                metadata: Box::new(super::ir::ArrayMetadata {
+                    origins,
+                    constant_counts,
+                }),
                 values,
                 lengths,
                 repeated,
-                constant_counts,
             },
         });
     }
@@ -579,19 +589,19 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
         },
         Type::ReadOnlyArray(_) => {
             let Value::Array {
+                metadata,
                 values,
                 lengths,
                 repeated,
-                constant_counts,
             } = &expr.value
             else {
                 return None;
             };
             Value::Array {
+                metadata: metadata.clone(),
                 values: values.iter().map(evaluate_raw).collect::<Option<_>>()?,
                 lengths: lengths.iter().map(evaluate_raw).collect::<Option<_>>()?,
                 repeated: *repeated,
-                constant_counts: constant_counts.clone(),
             }
         }
         Type::Array(_)

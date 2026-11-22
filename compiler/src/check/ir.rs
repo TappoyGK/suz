@@ -4,6 +4,15 @@
 
 use crate::ast::{BinaryOperator, ComparisonOperator, Location, LogicalOperator, Type};
 
+/// 配列専用の補助情報をまとめ、ほかの式・文のIRの格納サイズを増やさない。
+#[derive(Clone)]
+pub(crate) struct ArrayMetadata {
+    /// 定数式を複製しても、同じ配列のlenを識別するための寸法の由来。
+    pub origins: Vec<(Location, usize)>,
+    /// 内側からの定数の要素数。対象C環境のsizeofでもコンパイル時に検査する。
+    pub constant_counts: Vec<u64>,
+}
+
 /// [`crate::ast::Program`] の意味検査結果。
 /// 型・名前を解決した関数、入口の関数番号、文字列定数と診断候補を保持する。
 /// 型宣言はASTの表現を共有し、関数は必要な汎用型の具体化も含めてC生成へ渡す。
@@ -242,8 +251,7 @@ pub(crate) enum Value {
         values: Vec<CheckedExpression>,
         lengths: Vec<CheckedExpression>,
         repeated: bool,
-        // 定数で決まる内側からの要素数。対象C環境のsizeofでもコンパイル時に検査する。
-        constant_counts: Vec<u64>,
+        metadata: Box<ArrayMetadata>,
     },
     /// 要素の住所。添字は書き込み先の確定時に一度だけ評価する。
     ArrayElement {

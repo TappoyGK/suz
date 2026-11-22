@@ -165,8 +165,24 @@ pub(super) fn expression(
             let value = if matches!(inner.kind, ExpressionKind::ArrayInit { .. }) {
                 super::arrays::initializer(inner, expected.and_then(Type::pointee), scope)?
             } else {
+                if matches!(
+                    expression::operand_type(inner, scope),
+                    Some(Type::ReadOnlyArray(_))
+                ) {
+                    return Err(expr.location.error(ErrorKind::InvalidSource,
+                        crate::diagnostic!("arena.new-value", "new cannot allocate a readonly array reference; store it in a struct field")));
+                }
                 expression::coerced(inner, expected.and_then(Type::pointee), scope)?
             };
+            if matches!(value.ty, Type::ReadOnlyArray(_)) {
+                return Err(expr.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "arena.new-value",
+                        "new cannot allocate a readonly array reference; store it in a struct field"
+                    ),
+                ));
+            }
             if value.ty == Type::Void || matches!(value.ty, Type::Function(_)) {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,

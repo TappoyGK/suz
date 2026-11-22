@@ -121,7 +121,12 @@ pub(super) fn initializer(
             values: initial,
             lengths: checked_lengths,
             repeated: *repeated,
-            constant_counts,
+            metadata: Box::new(super::ir::ArrayMetadata {
+                origins: (0..lengths.len())
+                    .map(|axis| (expr.location, axis))
+                    .collect(),
+                constant_counts,
+            }),
         },
     })
 }
@@ -155,6 +160,13 @@ fn bound(expr: &Expression, scope: &Scope) -> Result<CheckedExpression, Diagnost
 fn access(expr: &Expression, scope: &Scope) -> Result<(CheckedExpression, bool), Diagnostic> {
     let mut steps = Vec::new();
     let root = chain(expr, &mut steps, true);
+    let has_handler = matches!(
+        expr.kind,
+        ExpressionKind::Slice {
+            fallback: Some(_),
+            ..
+        }
+    );
     let mut target = expression::expression(root, None, scope)?;
     let mut position = 0;
     let mut fallible = false;
@@ -183,7 +195,8 @@ fn access(expr: &Expression, scope: &Scope) -> Result<(CheckedExpression, bool),
                     unreachable!()
                 };
                 let mut value = bound(i, scope)?;
-                if matches!(target.ty, Type::ReadOnlyArray(_))
+                if !has_handler
+                    && matches!(target.ty, Type::ReadOnlyArray(_))
                     && bounds::invalid_constant_index(&target, &value, checked.len(), scope)
                 {
                     return Err(step.location.error(
@@ -243,6 +256,7 @@ fn access(expr: &Expression, scope: &Scope) -> Result<(CheckedExpression, bool),
                 .map(|v| bound(v, scope).map(Box::new))
                 .transpose()?;
             if *index
+                && !has_handler
                 && matches!(target.ty, Type::ReadOnlyArray(_))
                 && bounds::invalid_constant_index(&target, start.as_ref().unwrap(), 0, scope)
             {
@@ -495,5 +509,21 @@ fn constant_element_type(
             constant_element_type(scope.structs.arrays.borrow().get(id).element, scope, seen)
         }
         _ => true,
+    }
+}
+
+/// 配列への参照を含む値にも比較を認めない。フィールドを通した比較も同じ規則で診断する。
+pub(super) fn contains_reference(ty: Type, scope: &Scope) -> bool {
+    if ty.array_id().is_some() {
+        return true;
+    }
+    match ty {
+        Type::Struct(id) => scope
+            .structs
+            .get(id)
+            .fields
+            .iter()
+            .any(|f| contains_reference(f.ty, scope)),
+        _ => false,
     }
 }

@@ -736,3 +736,32 @@ fn main() -> u8 {
     );
     assert!(!c.contains("memcpy("), "constant array elements are copied");
 }
+
+#[test]
+fn mixed_constant_arrays_initialize_only_nonliteral_elements_at_startup() {
+    // 値が同じでも、静的に置ける要素を起動時に代入し直すと起動の処理量が増える。
+    let c = suz::compile(
+        br#"
+fix VALUES: [f64] = [1.0, nan, inf]
+fn values() -> [f64] { return VALUES }
+fn main() -> u8 { fix a = values()
+    return ifexpr len a == 3 { 0 } else { 1 }
+}
+"#,
+    )
+    .unwrap();
+    let main = c.split("int main(void)").nth(1).unwrap();
+    assert_eq!(
+        main.matches("] = suz_f64(").count(),
+        2,
+        "nonfinite elements must be restored once"
+    );
+    assert!(
+        !main.contains("[0] ="),
+        "finite element is assigned at startup"
+    );
+    assert!(
+        c.contains("[0] = (0x10000000000000p-52)"),
+        "finite element has no static initializer"
+    );
+}

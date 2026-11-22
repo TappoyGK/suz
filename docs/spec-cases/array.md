@@ -315,6 +315,8 @@ fn main() -> u8 {
 
 主根拠：`[array.constant]`。
 
+補助根拠：`[array.dimension-bind]`・`[const.expression]`・`[array.bounds-proof]`・`[fn.value-call]`。
+
 **ソース：**
 
 ```suz
@@ -330,6 +332,11 @@ fn main() -> u8 {
     var sum: i32 = 0
     for i in 0..<n { sum += a[i] }
     if COUNT != 3 || FIRST != 17 || sum != 54 { return 1 }
+    var total: i32 = 0
+    for i in 0..<len PALETTE { total += PALETTE[i] }
+    if total != 54 { return 5 }
+    fix fallback = PALETTE[9] or 7
+    if fallback != 7 { return 6 }
     fix callback: static fn Reader = fn read
     if first(a) != 17 || callback(a, 1) != 18 { return 4 }
     if color(4) != 18 || read(a, 5) != -1 { return 2 }
@@ -350,6 +357,8 @@ fn main() -> u8 {
 
 主根拠：`[array.readonly]`。
 
+補助根拠：`[array.slice]`・`[array.iteration]`・`[array.initializer-type]`。
+
 **ソース：**
 
 ```suz
@@ -361,6 +370,11 @@ fn main() -> u8 {
     fix repeated = [7; 2, 3]
     if len empty != 0 || len repeated != 2 { return 1 }
     if LAST[1] != 6 || PART[0][0] != 3 { return 2 }
+    var total: i32 = 0
+    for i in 0..<len PART {
+        for j in 0..<len PART[i] { total += PART[i][j] }
+    }
+    if total != 18 { return 5 }
     var sum: i64 = 0
     rev row in repeated { for x in row { sum += x } }
     if sum != 42 { return 3 }
@@ -380,20 +394,26 @@ fn main() -> u8 {
 
 主根拠：`[array.constant]`。
 
+補助根拠：`[array.lifetime]`・`[const.expression]`・`[array.iteration]`。
+
 **ソース：**
 
 ```suz
 struct Label { caption: text, entries: [i32] }
+struct Node { children: [Node] }
 fix NUMBERS: [i32] = [2, 4]
 fix LABELS: [Label] = [Label { caption: `開始`, entries: NUMBERS }, Label { caption: `終了`, entries: [6 as i32] }]
 fix SYMBOLS: [symbol] = [`alpha`, `beta`]
 fix FLOATS: [f64] = [inf; 2]
+fix MIXED: [f64] = [1.0, nan, inf]
 fn labels() -> [Label] { return LABELS }
 fn read(a: [Label], i: u32) -> Label { return a[i] or LABELS[0] }
 fn main() -> u8 {
     var caption: text = ``
     arena { caption = read(labels(), 1).caption }
     if caption != `終了` { return 1 }
+    fix ptr root = new Node { children: [] }
+    if len root.children != 0 { return 5 }
     fix values = labels()
     var sum: i32 = 0
     for row in values { for n in row.entries { sum += n } }
@@ -404,6 +424,9 @@ fn main() -> u8 {
     if count != 1 { return 3 }
     fix floats = FLOATS
     for item in floats { if item != inf { return 4 } }
+    var finite: i32 = 0
+    for item in MIXED { if item == 1.0 { finite += 1 } }
+    if finite != 1 { return 6 }
     return 0
 }
 ```
@@ -417,6 +440,8 @@ fn main() -> u8 {
 ### array-013 読み取り専用の要素を書き換えない
 
 主根拠：`[array.readonly]`。
+
+補助根拠：`[array.write]`。
 
 **ソース：**
 
@@ -443,6 +468,8 @@ fn main() -> u8 {
 ### array-014 構造体の要素のフィールドを書き換えない
 
 主根拠：`[array.readonly]`。
+
+補助根拠：`[array.write]`・`[struct.field]`。
 
 **ソース：**
 
@@ -471,6 +498,8 @@ fn main() -> u8 {
 
 主根拠：`[array.readonly]`。
 
+補助根拠：`[array.index]`・`[array.write]`。
+
 **ソース：**
 
 ```suz
@@ -498,6 +527,8 @@ fn main() -> u8 {
 
 主根拠：`[array.constant]`。
 
+補助根拠：`[const.expression]`。
+
 **ソース：**
 
 ```suz
@@ -524,6 +555,8 @@ fn main() -> u8 {
 
 主根拠：`[array.constant]`。
 
+補助根拠：`[const.expression]`・`[array.layout]`。
+
 **ソース：**
 
 ```suz
@@ -547,12 +580,14 @@ fn main() -> u8 { return 0 }
 
 主根拠：`[array.constant-index]`。
 
+補助根拠：`[array.access-handler]`・`[const.evaluation]`。
+
 **ソース：**
 
 ```suz
 fix TABLE = [1, 2]
 fn main() -> u8 {
-    fix a = TABLE[2] or 0
+    fix a = TABLE[2]
     return 0
 }
 ```
@@ -572,6 +607,8 @@ fn main() -> u8 {
 ### array-019 定数配列に関数値を含めない
 
 主根拠：`[array.constant]`。
+
+補助根拠：`[fn.value-const]`。
 
 **ソース：**
 
@@ -599,6 +636,8 @@ fn main() -> u8 {
 
 主根拠：`[array.value]`。
 
+補助根拠：`[array.readonly]`・`[expr.equality]`。
+
 **ソース：**
 
 ```suz
@@ -619,4 +658,147 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[arena.ptr-operations]` | 3 | 10 |
+| 通常 | `[array.value]` | 3 | 10 |
+
+### array-021 配列参照をログのテンプレートに埋め込まない
+
+主根拠：`[symbol.interpolation]`。
+
+補助根拠：`[array.readonly]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix a: [i32] = [1]
+    log info `v=${a}`
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[symbol.interpolation]` | 3 | 19 |
+
+### array-022 トップレベルの定数配列もtextbufに埋め込まない
+
+主根拠：`[symbol.interpolation]`。
+
+補助根拠：`[array.readonly]`。
+
+**ソース：**
+
+```suz
+fix A: [i32] = [1]
+fn main() -> u8 {
+    fix message = textbuf `v=${A}`
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[symbol.interpolation]` | 3 | 32 |
+
+### array-023 読み取り専用の参照自体はnewの初期値にしない
+
+主根拠：`[arena.new-value]`。
+
+補助根拠：`[array.type]`。
+
+**ソース：**
+
+```suz
+fix A: [i32] = [1]
+fn main() -> u8 {
+    fix ptr q: ptr [i32] = new A
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[arena.new-value]` | 3 | 28 |
+
+### array-024 配列参照を含む構造体も比較しない
+
+主根拠：`[array.value]`。
+
+補助根拠：`[expr.equality]`。
+
+**ソース：**
+
+```suz
+struct Holder { values: [i32] }
+fn main() -> u8 {
+    fix a = Holder { values: [1] }
+    fix b = Holder { values: [1] }
+    if a == b { return 1 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[array.value]` | 5 | 10 |
+
+### array-025 別の定数配列に長さの関係を移さない
+
+主根拠：`[array.dimension-origin]`。
+
+補助根拠：`[array.bounds-proof]`。
+
+**ソース：**
+
+```suz
+fix A: [i32] = [1, 2]
+fix B: [i32] = [1, 2]
+fn main() -> u8 {
+    for i in 0..<len A { fix v = B[i] }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[array.access-handler]` | 4 | 35 |
