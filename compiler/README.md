@@ -115,7 +115,7 @@ cargo test
 RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps --document-private-items
 ```
 
-コードのコメント・rustdocとMarkdown文書は日本語で書く。コマンドの出力と診断メッセージは英語とする。
+配置・コメント・ターミナル出力・テスト・整形とリントは[ソースの開発規約](../docs/development.md)に従う。
 
 リリース前は、書式・Clippy・rustdocと、最適化・サニタイザー・大量入力を含む全検査を実行する。
 

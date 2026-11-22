@@ -14,9 +14,6 @@
 // 内部実装の案内も公開入口に載せるため、非公開項目を含むrustdoc生成を前提とする。
 #![allow(rustdoc::private_intra_doc_links)]
 
-#[cfg(test)]
-#[path = "../tests/support/integer_bounds.rs"]
-mod integer_bounds;
 mod numeric;
 
 mod ast;
@@ -332,6 +329,10 @@ fn analyze(
     let warnings = warnings::collect(&checked, &program.allows, options)?;
     Ok((checked, warnings))
 }
+
+#[cfg(test)]
+#[path = "../tests/support/integer_bounds.rs"]
+mod integer_bounds;
 
 #[cfg(test)]
 mod tests {

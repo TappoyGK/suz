@@ -19,8 +19,6 @@ mod logs;
 mod slices;
 mod statements;
 mod structs;
-#[cfg(test)]
-mod tests;
 mod text;
 mod text_structure;
 
@@ -235,3 +233,6 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
     .unwrap();
     c
 }
+
+#[cfg(test)]
+mod tests;
