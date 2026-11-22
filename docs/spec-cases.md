@@ -122,38 +122,41 @@ IDは分野の接頭辞と番号で構成し、期待結果の種類を含めな
 | [配列](spec-cases/array.md) | `array` | 第5・7・13章 | 9 |
 | [定数・変数・代入](spec-cases/bind.md) | `bind` | 第4・6・9章 | 31 |
 | [式](spec-cases/expr.md) | `expr` | 第7・9章 | 78 |
-| [関数と制御](spec-cases/flow.md) | `flow` | 第8・11・12章 | 91 |
+| [関数と制御](spec-cases/flow.md)・[メソッド](spec-cases/method.md)・[匿名汎用](spec-cases/generic.md) | `flow` | 第8・11・12章 | 122 |
 | [エラー型と失敗する関数](spec-cases/errors.md) | `err` | 第8章 | 10 |
+| [作業領域とポインタ](spec-cases/arena.md) | `arena` | 第9章 | 22 |
+| [C FFI](spec-cases/ffi.md) | `ffi` | 第10章 | 21 |
+| [メソッドと演算子メソッド](spec-cases/method.md) | `method` | 第11章 | 34 |
+| [汎用](spec-cases/generic.md) | `generic` | 第12章 | 22 |
 | [実行時の検査](spec-cases/runtime.md) | `runtime` | 第13章 | 18 |
 | [ログ](spec-cases/log.md) | `log` | 第7・14章 | 13 |
 | [警告と診断設定](spec-cases/diag.md) | `diag` | 第15章 | 14 |
-| 合計 | | | 390 |
+| 合計 | | | 520 |
+
+件数はID接頭辞ごとに数える。flow-090・flow-091はメソッドのファイルに、flow接頭辞の匿名汎用22例は汎用のファイルに掲載する。
 
 ### 結果別件数
 
 | 結果 | 件数 |
 |---|---:|
-| 受理 | 184 |
-| コンパイルエラー | 180 |
+| 受理 | 227 |
+| コンパイルエラー | 267 |
 | 実行時パニック | 15 |
 | 診断設定の比較 | 11 |
-| 合計 | 390 |
+| 合計 | 520 |
 
 期待結果が複数の設定を持つ例は「診断設定の比較」に1例として数える。設定が1つの例は、その結果で分類する。バイト列を指定する例も同じように数える。
 
-## 分野別の検証テスト
+## 例集の入出力だけでは検証できないこと
 
-次の分野には、仕様例集として独立した受理・拒否例はまだないが、Rustで書いた検証テストがある。言語仕様からテストを辿るための案内を示す。代表例を追加する作業は右端のイシューで扱う。この表のテストは上の390例の件数に含めない。
+次のテストは例集の件数には含めない。言語の受理・拒否・実行結果は各分野の例で示し、追加のCソースやビルド設定、生成Cの検査が必要な保証は以下で検証する。
 
-| 分野・言語仕様 | 検証テスト | 代表例の追加 |
+| 対象 | 検証テスト | 例集と分ける理由 |
 |---|---|---|
-| [FFI](spec.md#10-c-ffi) | [ffi.rs](../compiler/tests/spec_cases/ffi.rs)、[ffi_bytes.rs](../compiler/tests/spec_cases/ffi_bytes.rs)、[ffi_pointers.rs](../compiler/tests/spec_cases/ffi_pointers.rs)、[ffi_structs.rs](../compiler/tests/spec_cases/ffi_structs.rs)、[ffi_link.rs](../compiler/tests/spec_cases/ffi_link.rs) | 未掲載・[#154](https://github.com/TappoyGK/suz/issues/154) |
-| [作業領域とポインタ](spec.md#9-作業領域とポインタ) | [arena.rs](../compiler/tests/spec_cases/arena.rs)、[nullable_pointers.rs](../compiler/tests/spec_cases/nullable_pointers.rs)、[arena_functions.rs](../compiler/tests/spec_cases/arena_functions.rs)、[objection.rs](../compiler/tests/spec_cases/objection.rs)、[arena_accumulation.rs](../compiler/tests/spec_cases/arena_accumulation.rs) | 未掲載・[#155](https://github.com/TappoyGK/suz/issues/155) |
-| [メソッド](spec.md#111-メソッド) | [methods.rs](../compiler/tests/spec_cases/methods.rs) | 未掲載・[#156](https://github.com/TappoyGK/suz/issues/156) |
-| [演算子メソッド](spec.md#112-演算子メソッド) | [operator_methods.rs](../compiler/tests/spec_cases/operator_methods.rs) | 未掲載・[#157](https://github.com/TappoyGK/suz/issues/157) |
-| [型引数と要求](spec.md#122-型引数を持つ宣言) | [type_parameters.rs](../compiler/tests/spec_cases/type_parameters.rs)、[generic_structs.rs](../compiler/tests/spec_cases/generic_structs.rs)、[need_groups.rs](../compiler/tests/spec_cases/need_groups.rs) | 未掲載・[#158](https://github.com/TappoyGK/suz/issues/158) |
-| [クロージャ](spec.md#88-クロージャ) | [closures.rs](../compiler/tests/spec_cases/closures.rs) | 未掲載・[#159](https://github.com/TappoyGK/suz/issues/159) |
-| [関数値とfnshape](spec.md#87-関数値) | [function_values.rs](../compiler/tests/spec_cases/function_values.rs)、[generic_function_values.rs](../compiler/tests/spec_cases/generic_function_values.rs) | 未掲載・[#160](https://github.com/TappoyGK/suz/issues/160) |
+| FFIのポインタ書き換え・keepによる保持 | [ffi_pointers.rs](../compiler/tests/spec_cases/ffi_pointers.rs) | 独自のCヘッダーと関数の実体が必要であり、例集はSuzソースだけを入力とする |
+| C構造体・関数型のヘッダー照合、リンク失敗 | [ffi_structs.rs](../compiler/tests/spec_cases/ffi_structs.rs)・[ffi_link.rs](../compiler/tests/spec_cases/ffi_link.rs) | 不一致のCヘッダーやリンク対象を用意する必要がある |
+| 作業領域の容量と計測 | [arena.rs](../compiler/tests/spec_cases/arena.rs)・[arena_report.rs](../compiler/tests/spec_cases/arena_report.rs) | 初期容量・追加容量・上限・計測の設定を切り替える必要があり、例集の設定欄では指定できない |
+| 関数値・クロージャの環境をヒープへ確保しない保証 | [closures.rs](../compiler/tests/spec_cases/closures.rs)・[function_values.rs](../compiler/tests/spec_cases/function_values.rs) | 正常終了するだけでは無確保を確認できない。生成Cの確保呼び出しを検査する |
 
 検証テストの実行方法と、通常検査・リリース検査の区別は[テスト基盤](../compiler/tests/README.md)を参照すること。
 
