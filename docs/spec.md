@@ -1003,7 +1003,16 @@ fix shifted = (value << count) or return expr {
 
 **[symbol.template]** バッククォートで囲むテンプレートは、symbolを要求される場所ではsymbolを生成し、それ以外ではtextを生成する。textとして使う定数テンプレートは静的な文字列を参照し、インターン化しない。実行時の埋め込みを持つテンプレートをtextの値にするには [text.buffer] のtextbufが必要であり、省略するとコンパイルエラーである。ただし、追記の右辺に直接書くテンプレートは [text.append]、log・panicの本文は [output.template] に従う。取得済みのtextの値をsymbolにするには、要求型だけでは変換せず [text.to-symbol] のasを使う。エスケープ、本文、埋め込み、1行の制約、値の表示は [symbol.escape]、[symbol.template-text]、[symbol.interpolation]、[symbol.template-line]、[symbol.value-format] に従う。空のテンプレートは空文字列を表す。ログ文に直接書くテンプレートは [log.fragments] に従う。
 
-symbolを要求する場所は [type.expected]・[type.context] と、分岐の要求型を伝える [type.branch-inference] に従う。具体的には、symbolの型注釈のある初期値、symbolへの代入、symbol仮引数の実引数、symbol戻り値のreturn、symbolフィールドの初期値、およびsymbolを対象とするmatch・matchexprのパターンである。丸括弧は要求型を変えない。`as symbol` は変換元へsymbolを要求しない。比較のオペランド、match・matchexprの対象、テンプレートの埋め込みにも、それだけを理由にsymbolを要求しない。
+symbolの要求型は、各構文の型検査規則に従って決める。以下は代表例であり、要求型が伝わる場所をこの列挙だけに限定しない。
+
+- [type.expected]・[type.context]：symbolの型注釈のある初期値、symbolへの代入、symbol仮引数の実引数、symbol戻り値のreturn、symbolフィールドの初期値、symbolを対象とするmatch・matchexprのパターン。
+- [struct.with-fields]：withで差し替えるsymbolフィールドの初期値。
+- [array.initializer-type]：外側から要求される配列参照の要素型がsymbolの場合の、列挙初期化の各要素と反復初期化の初期値。
+- [type.branch-inference]：外側からの要求型、または分岐の型をそろえる規則でsymbolが要求される分岐。
+
+例えば、nameがsymbolフィールドなら `` v with { name: `${x}` } `` はそのテンプレートをsymbolとして生成する。`` var ptr items: ptr [symbol] = new [`${x}`; n] `` も、初期値のテンプレートをsymbolとして1回生成してから各要素へコピーする。
+
+丸括弧は要求型を変えない。`as symbol` は変換元へsymbolを要求しない。比較のオペランド、match・matchexprの対象、テンプレートの埋め込みにも、それだけを理由にsymbolを要求しない。
 
 例えば、実行時のxに対して `` `${x}` as symbol `` は拒否し、`` textbuf `${x}` as symbol `` または `` fix s: symbol = `${x}` `` と書く。`` name == `${x}` `` もsymbolへの暗黙の生成とはせず、`` name == textbuf `${x}` `` と書く。定数テンプレートとの比較はtextとの比較として受理する。
 
@@ -1907,7 +1916,7 @@ fn main() -> u8 {
 
 **[arena.aggregate]** 構造体内の参照にも再帰的に同じ制約を適用する。構造体のコピー・全体の上書き・フィールドの更新・別名経由の更新で制約を回避できない。配列要素に含まれる参照にも [array.lifetime] を適用する。同じ作業領域内では循環参照を作れる。回収時に参照をたどる必要はない。
 
-**[arena.region-shape]** 検査では確保箇所ごとの領域と、変数・実体内の参照先の候補集合を使う。通常のブロック内の保存場所の寿命も区別する。コピーと別名経由の読み書きによる候補の追加を、集合が変わらなくなるまで繰り返す。候補のいずれかが寿命の条件を満たさなければ保存を拒否する。分岐の相関や上書きで候補を絞らないため、安全な保存も拒否することがある。同じ作業領域構文を反復しても、前の反復の参照を次へ残すことはできない。
+**[arena.region-shape]** 検査では確保箇所ごとの領域と、変数・実体内の参照先の候補集合を使う。通常のブロック内の保存場所の寿命も区別する。コピーと別名経由の読み書きによる候補の追加を、集合が変わらなくなるまで繰り返す。候補のいずれかが寿命の条件を満たさなければ保存を拒否する。分岐の相関や上書きで候補を絞らないため、安全な保存も拒否することがある。同じ `arena` 文を反復しても、前の反復の参照を次へ残すことはできない。
 
 寿命の診断は保存位置を指し、参照先の確保位置と作業領域の終了位置を併記する。構造体内の保存では該当するフィールド名も示す。
 
@@ -1955,7 +1964,7 @@ struct Node { value: i32, next: ptr? Node }
 fn read(n: ptr Node) -> i32 { return n.value }
 fn identity(n: ptr Node) -> ptr Node { return n }
 fn main() -> u8 {
-    fix ptr outer = new Node { value: 1, next: null } // O: mainのarena
+    fix ptr outer = new Node { value: 1, next: null } // O: mainの作業領域
     var ptr saved: ptr? Node = null
     arena {                                        // R
         fix ptr inner = new Node { value: 2, next: null }
@@ -2044,7 +2053,7 @@ fn main() -> u8 {
             fix ptr inner = new Node { next: null }
             var ptr selected = outer
             selected = inner
-            objection [selectedをinnerへ差し替えたので、保存先も参照先も内側のarenaに属する] {
+            objection [selectedをinnerへ差し替えたので、保存先も参照先も内側の作業領域に属する] {
                 selected#next = inner
             }
         }
@@ -2480,7 +2489,7 @@ fn wrap[T](value: T) -> Box[T] {
 
 メソッドは `@needs T: .name(U) -> V` または `@needs T: #name(U) -> V` と書き、受け手の読み取り・書き換えを区別する。エラーを返すメソッドには、通常の戻り値と同じ `or Error` の指定を付ける。フィールド・型変換・リテラルからの生成を要求する構文は設けない。
 
-**[generic.needs-arena]** メソッドの要求には作業領域修飾を付けない。要求を通した呼び出しにも通常の関数と同じ確保・保存・返却の規則を適用し、寿命の検査は具体化した本体と要約で行う。
+**[generic.needs-arena]** メソッドの要求には `arena` 修飾を付けない。要求を通した呼び出しにも通常の関数と同じ確保・保存・返却の規則を適用し、寿命の検査は具体化した本体と要約で行う。
 
 ```suz
 @needs T: .copy() -> ptr T
@@ -2782,7 +2791,7 @@ fix b = top + 1     // パニックする
 
 **[output.template]** `log`・`panic`・`or panic`のテンプレートの記法と値の表示は [symbol.template-line]・[symbol.template-text]・[symbol.escape]・[symbol.interpolation]・[symbol.value-format]・[symbol.float-format] に従う。埋め込みに書ける式は [output.embed-value] に従う。
 
-**[output.embed-value]** `log`・`panic`・`or panic` のテンプレートの埋め込みには、名前と、そのフィールド参照だけを書ける。名前は、ブロック内の `fix`・`var`、仮引数、ループ変数、キャプチャーした名前、トップレベルの `fix`、enum・errorのバリアントを指す。関数呼び出し、演算、型変換、切り出し・添字、`len`、`with`、リテラル、入れ子のテンプレート、値ブロック、丸括弧で囲んだ式はコンパイルエラーである。計算が必要なら、先に `fix` などで値を受けてから埋め込む。値を生成するsymbolのテンプレートやtextbufのテンプレートには適用しない。埋め込める値の型は [symbol.interpolation] に従う。
+**[output.embed-value]** `log`・`panic`・`or panic` のテンプレートの埋め込みには、名前と、そのフィールド参照だけを書ける。名前は、ブロック内の `fix`・`var`、仮引数、ループ変数、キャプチャーした名前、トップレベルの `fix`、enum・errorのバリアントを指す。関数呼び出し、演算、型変換、切り出し・添字、`len`、`with`、リテラル、入れ子のテンプレート、値ブロック、丸括弧で囲んだ式はコンパイルエラーである。計算が必要なら、先に `fix` などで値を受けてから埋め込む。symbolを生成するテンプレート、textbufのテンプレート、追記の右辺に直接書くテンプレートには適用しない。埋め込める値の型は [symbol.interpolation] に従う。
 
 **[log.level]** `log` の直後には `debug`・`info`・`warn`・`error` のいずれかを書く。重要度は `debug < info < warn < error` とする。4種類とも [log.evaluation] と [log.fragments] に従い、出力後は後続の文へ進む。`log error` も関数やプログラムを終了しない。`panic`・`ignore`・`off` はログレベルとして書けない。
 
