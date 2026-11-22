@@ -307,7 +307,7 @@ fn keep_on_suz_parameters_explains_the_extern_only_modifier() {
         assert!(
             error
                 .to_string()
-                .contains("only allowed on extern typed C pointer parameters")
+                .contains("only allowed on extern C pointer parameters")
         );
     }
     suz::compile(b"fn value(keep: i32) -> i32 { return keep }\nfn main() -> u8 { return value(0) as u8 or 1 }").unwrap();

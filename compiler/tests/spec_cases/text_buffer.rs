@@ -2,6 +2,34 @@ use super::symbol_runtime::build_with_environment;
 use std::process::Command;
 
 #[test]
+fn text_buffers_omit_empty_literal_fragments() {
+    // 実行結果では見えない、断片ビューの初期化と走査の余分な回数を検出する。
+    for (template, fragments) in [("`a${n}`", 2), ("`${n}`", 1), ("``", 0)] {
+        let source = format!(
+            "fn build(n: i32) -> text {{ return textbuf {template} }}\nfn main() -> u8 {{ return 0 }}"
+        );
+        let generated = suz::compile(source.as_bytes()).unwrap();
+        let parts = generated
+            .lines()
+            .find(|line| line.contains("const suz_text_view parts[]"))
+            .unwrap();
+        assert_eq!(
+            parts.matches("(suz_text_view)").count(),
+            fragments.max(1),
+            "{parts}"
+        );
+        if fragments != 0 {
+            assert!(!parts.contains("\"\""), "{parts}");
+        }
+        let build = generated
+            .lines()
+            .find(|line| line.contains("return suz_textbuf_build("))
+            .unwrap();
+        assert!(build.contains(&format!(", parts, {fragments},")), "{build}");
+    }
+}
+
+#[test]
 fn text_buffers_build_directly_and_preserve_evaluation_order_and_views() {
     // 環境層の確保回数で、完成した一時文字列やインターンが混入しないことを検証する。
     let source = r#"struct Counter { n: len_t }

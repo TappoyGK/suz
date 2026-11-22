@@ -165,7 +165,9 @@ pub(super) fn buffer(
     for (index, part) in parts.iter().enumerate() {
         let value = match part {
             TemplatePart::Text(text) => {
-                fragments.push(static_view(text));
+                if !text.is_empty() {
+                    fragments.push(static_view(text));
+                }
                 continue;
             }
             TemplatePart::Value(value) => value,
@@ -216,7 +218,8 @@ pub(super) fn buffer(
         fragments.push(view);
     }
     let count = fragments.len();
-    // Cには長さ0の配列がない。空テンプレートは静的な空ビュー1個と同じ扱いにする。
+    // Cには長さ0の配列がないため、空テンプレートにはダミーを置く。
+    // countは0のままにし、構築時にはこの要素を走査しない。
     if fragments.is_empty() {
         fragments.push(static_view(""));
     }
