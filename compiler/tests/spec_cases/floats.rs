@@ -3,6 +3,86 @@ use crate::test_util::{TemporaryDirectory, build_and_run_c};
 use std::fs;
 
 #[test]
+fn integer_float_literals_require_exact_values_in_every_context() {
+    for (declarations, body) in [
+        ("", "fix x: f32 = 16777217"),
+        ("", "fix x: f32 = -16_777_217"),
+        ("", "fix x: f32 = (16777217)"),
+        ("", "fix x: f64 = 9007199254740993"),
+        ("", "var x: f32 = 0\nx = 16777217"),
+        ("fn f(x: f32) -> void {}", "f(16777217)"),
+        ("fn f() -> f32 { return 16777217 }", ""),
+        (
+            "struct Item { value: f32 }",
+            "fix x = Item { value: 16777217 }",
+        ),
+        ("", "fix x: f32 = ifexpr true { 16777217 } else { 0.5 }"),
+        ("", "fix x = ifexpr true { 9007199254740993 } else { 0.5 }"),
+        ("", "fix x: f32 = 2.0\nfix y = x * 16777217"),
+        ("", "fix x: f32 = 2.0\nfix y = 16777217 * x"),
+        (
+            "fn first[T](a: T, b: T) -> T { return a }",
+            "fix x: f32 = 2.0\nfix y = first(16777217, x)",
+        ),
+        (
+            "fn f(x: float) -> float { return x }",
+            "fix x: f32 = f(16777217)",
+        ),
+        (
+            "fn f(x: float) -> float { return x + 16777217 }",
+            "fix x: f32 = 0\nfix y = f(x)",
+        ),
+        ("fn f(x: float) -> float { return 9007199254740993 }", ""),
+    ] {
+        let source = format!("{declarations}\nfn main() -> u8 {{\n{body}\nreturn 0\n}}");
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert!(
+            error.rule() == "lit.integer-as-float"
+                || error
+                    .related
+                    .iter()
+                    .any(|cause| cause.rule() == "lit.integer-as-float"),
+            "{source}\n{error:?}"
+        );
+    }
+    let source = b"fn main() -> u8 {\n    fix x: f32 = -16777217\n    return 0\n}";
+    let error = suz::compile(source).unwrap_err();
+    assert!(error.message().contains("-16777217 cannot be represented exactly as f32 (nearest is -16777216.0); write -16777217.0 or use as"), "{error:?}");
+}
+
+#[test]
+fn integer_float_literals_accept_exact_values_beyond_integer_type_ranges() {
+    for (ty, exact, inexact) in [
+        ("f32", "16777218", "16777219"),
+        ("f64", "9007199254740994", "9007199254740995"),
+        // 2^128と2^200。u128に戻す判定や、一律の大きさ制限では扱えない。
+        (
+            "f64",
+            "340282366920938463463374607431768211456",
+            "340282366920938463463374607431768211457",
+        ),
+        (
+            "f64",
+            "1606938044258990275541962092341162602522202993782792835301376",
+            "1606938044258990275541962092341162602522202993782792835301377",
+        ),
+    ] {
+        for sign in ["", "-"] {
+            let source = format!("fn main() -> u8 {{ fix x: {ty} = {sign}{exact}\nreturn 0 }}");
+            suz::compile(source.as_bytes()).unwrap();
+            let source = source.replace(exact, inexact);
+            let error = suz::compile(source.as_bytes()).unwrap_err();
+            assert!(
+                error.message().contains("[lit.integer-as-float]"),
+                "{error:?}"
+            );
+        }
+    }
+    // 同じ汎用本体をf64で具体化すれば、16777217を正確に表せる。
+    suz::compile(b"fn f(x: float) -> float { return x + 16777217 }\nfn main() -> u8 { fix x: f64 = 0\nfix y = f(x)\nreturn 0 }").unwrap();
+}
+
+#[test]
 #[ignore = "release check: run scripts/test-release.sh"]
 fn float_literals_and_comparisons_preserve_types_and_special_values() {
     let source = r#"fn main() -> u8 {
@@ -13,7 +93,7 @@ fn float_literals_and_comparisons_preserve_types_and_special_values() {
     fix narrow: f32 = 0.5
     fix wide = 0.5
     if narrow != 0.5 || 0.5 != narrow || wide != 0.5 { return 1 }
-    fix integer: f32 = 16777217
+    fix integer: f32 = 16777217.0
     fix tie: f32 = 1.000000059604644775390625
     fix above_tie: f32 = 1.0000000596046447753906250000000000000001
     if integer != 16777216.0 || tie != 1.0 || above_tie != 1.00000011920928955078125 { return 2 }

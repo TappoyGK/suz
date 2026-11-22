@@ -1023,6 +1023,18 @@ fn literal(
             } else if ty.is_integer() {
                 crate::diagnostic!("lit.range", "integer literal is out of range for int")
                     .to_owned()
+            } else if !floating
+                && results.iter().flatten().any(|result| {
+                    result.as_ref().is_err_and(|error| {
+                        error.rule() == "lit.integer-as-float"
+                    })
+                })
+            {
+                crate::diagnostic!(
+                    "lit.integer-as-float",
+                    "integer literal cannot be represented exactly as any permitted float type; write a floating-point literal or use as"
+                )
+                .to_owned()
             } else {
                 crate::diagnostic!(
                     "lit.float-range",
@@ -1058,11 +1070,41 @@ pub(in crate::check) fn scalar_literal(
     match ty {
         Type::Integer(ty) if !floating => integer_literal(text, negative, ty, location),
         Type::Float(ty) => {
-            if negative {
-                float_literal(&format!("-{text}"), ty, location)
+            let spelling = if negative {
+                format!("-{text}")
             } else {
-                float_literal(text, ty, location)
+                text.to_owned()
+            };
+            let checked = float_literal(&spelling, ty, location)?;
+            if !floating {
+                let Value::Float(bits) = checked.value else {
+                    unreachable!()
+                };
+                let value = match ty {
+                    FloatType::F32 => f64::from(f32::from_bits(bits as u32)),
+                    FloatType::F64 => f64::from_bits(bits),
+                };
+                // 整数型へのキャストは大きな値を飽和させるため使わない。
+                // 整数リテラルを丸めた値は整数なので、小数点以下0桁で
+                // 正確な十進表記を取り出し、元の桁列と比較できる。
+                let digits = text.replace('_', "");
+                if format!("{:.0}", value.abs()).trim_start_matches('0')
+                    != digits.trim_start_matches('0')
+                {
+                    return Err(location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "lit.integer-as-float",
+                            "{} cannot be represented exactly as {} (nearest is {:.1}); write {}.0 or use as",
+                            spelling,
+                            ty.name(),
+                            value,
+                            spelling
+                        ),
+                    ));
+                }
             }
+            Ok(checked)
         }
         _ => Err(location.error(
             ErrorKind::InvalidSource,
