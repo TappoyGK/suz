@@ -109,7 +109,7 @@ cd generated
 | `--arena-initial SIZE` | 可 | 可 | | 可 | 作業領域の初期容量。既定は `64M` |
 | `--arena-grow SIZE` | 可 | 可 | | 可 | 作業領域の追加容量の基準。既定は `64M`、`0` は拡張禁止 |
 | `--arena-limit SIZE` | 可 | 可 | | 可 | 確保した作業領域の総容量上限。既定は `unlimited` |
-| `--text-pool-limit SIZE` | 可 | 可 | | 可 | テキストプールの上限。既定は `1G` |
+| `--symbol-pool-limit SIZE` | 可 | 可 | | 可 | シンボルプールの上限。既定は `1G` |
 | `--force` | 可 | | | | 既存の通常ファイルを出力先として置き換える |
 | `--log-ignore` | 可 | 可 | 可 | 可 | 実行されたignoreの位置と理由を記録する。既定は無効 |
 | `--log-level LEVEL` | 可 | 可 | 可 | 可 | 生成するログの最低レベル。既定はinfo |
@@ -141,18 +141,18 @@ CLIと出力用スクリプトは同じ許可リストを使う。受け付け�
 
 **[tool.size]** 容量の数値はASCIIの正の10進整数で書く。単位なしはバイト、大文字の`K`・`M`・`G`はそれぞれ1,024・1,048,576・1,073,741,824倍とする。単位換算はオーバーフローを検査してから使う。負数、不正な表記、換算後に64ビット符号なし整数の範囲を超える値、値の省略、同じオプションの重複はツールエラーである。`0`と`unlimited`を使えるかは各オプションの規則に従う。
 
-### 3.1 テキストプールの上限
+### 3.1 シンボルプールの上限
 
-テキストプール全体の容量と、一つの `symbol` の個数上限は別である。`unlimited` や `2G` 以上を指定しても、Unicodeスカラー値が2^31−1個を超える `symbol` の生成は [rt.len-limit] によりパニックする。
+シンボルプール全体の容量と、一つの `symbol` の個数上限は別である。`unlimited` や `2G` 以上を指定しても、Unicodeスカラー値が2^31−1個を超える `symbol` の生成は [rt.len-limit] によりパニックする。
 
-**[tool.text-pool-limit]** `--text-pool-limit SIZE` は、生成するプログラムのテキストプールの上限を指定する。`build`、`run`、`emit-c` で受け付ける。省略時は `1G` とする。設定は生成するプログラムに組み込む。`emit-c` では設定を生成物に含め、そのCから作った実行ファイルにも適用する。
+**[tool.symbol-pool-limit]** `--symbol-pool-limit SIZE` は、生成するプログラムのシンボルプールの上限を指定する。`build`、`run`、`emit-c` で受け付ける。省略時は `1G` とする。設定は生成するプログラムに組み込む。`emit-c` では設定を生成物に含め、そのCから作った実行ファイルにも適用する。
 
-**[tool.text-pool-size]** SIZEは [tool.size] に従う。`unlimited`は無制限とし、`0`は認めない。既定の1Gは1 GiB（1,073,741,824バイト）である。無制限でも実行環境のメモリや長さの表現範囲には制約される。計測対象は [runtime.symbol-accounting] に従う。
+**[tool.symbol-pool-size]** SIZEは [tool.size] に従う。`unlimited`は無制限とし、`0`は認めない。既定の1Gは1 GiB（1,073,741,824バイト）である。無制限でも実行環境のメモリや長さの表現範囲には制約される。計測対象は [runtime.symbol-accounting] に従う。静的なtextとArenaに置くtextは、このプールの上限に含めない。Arenaの容量は、この文書の「作業領域の容量」に従う。
 
 ```sh
-suz build program.suz -o program --text-pool-limit 256M
-suz run program.suz --text-pool-limit 2G
-suz emit-c program.suz -o generated --text-pool-limit unlimited
+suz build program.suz -o program --symbol-pool-limit 256M
+suz run program.suz --symbol-pool-limit 2G
+suz emit-c program.suz -o generated --symbol-pool-limit unlimited
 ```
 
 ### 3.2 作業領域の容量
@@ -198,7 +198,7 @@ reserved=128 blocks=1 expansions=0
 
 測定した実行と同じ確保・回収の経路では、`peak`を初期容量に指定して追加確保なしで実行できる。入力によって経路や配列の大きさが変わる場合は、その分の余裕を持たせること。ASanの有無を含め、実際に使うビルドと同じ設定で測ること。
 
-**[tool.arena-report-resources]** ツリーの記録・検索・出力に使うメモリは作業領域と別に、mainの実行前に一度だけ確保し、mainの終了時に解放する。summaryではこのメモリを確保しない。計測結果の出力中は動的確保やテキストプールへの登録を行わない。確保や反復のたびに祖先・兄弟を走査しない。実装は [runtime.arena-report] に従う。
+**[tool.arena-report-resources]** ツリーの記録・検索・出力に使うメモリは作業領域と別に、mainの実行前に一度だけ確保し、mainの終了時に解放する。summaryではこのメモリを確保しない。計測結果の出力中は動的確保やシンボルプールへの登録を行わない。確保や反復のたびに祖先・兄弟を走査しない。実装は [runtime.arena-report] に従う。
 
 #### 3.3.1 計測値と出力
 
