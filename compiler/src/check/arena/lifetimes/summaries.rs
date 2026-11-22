@@ -118,7 +118,7 @@ impl Summary {
         let mut summary = Self::default();
         for (index, parameter) in function.parameters.iter().enumerate() {
             if parameter.keep
-                && let Some(ty) = parameter.ty.pointee()
+                && let Some(ty) = reference_target(parameter.ty)
             {
                 let object = Object::Parameter(index, ty);
                 summary.objects.insert(object, ObjectInfo { ty });
@@ -315,7 +315,7 @@ impl Analysis {
                     return None;
                 };
                 let (argument_ty, shape) = call.arguments.get(index)?;
-                if argument_ty.pointee() != Some(ty) {
+                if reference_target(*argument_ty) != Some(ty) {
                     return None;
                 }
                 let source = representative[shape.iter().find(|(path, _)| path.is_empty())?.1];
@@ -514,7 +514,7 @@ impl Analysis {
         for (index, (ty, shape)) in call.arguments.iter().enumerate() {
             for (path, source) in shape {
                 let source = *source;
-                let ty = self.field_type(*ty, path).pointee().unwrap();
+                let ty = reference_target(self.field_type(*ty, path)).unwrap();
                 if let Some(&node) = mapped.get(&Object::Parameter(index, ty)) {
                     self.constraints.push(Constraint::Copy(node, source));
                 }
@@ -527,7 +527,7 @@ impl Analysis {
                 continue;
             };
             for path in self.paths(ty) {
-                let target = self.field_type(ty, &path).pointee().unwrap();
+                let target = reference_target(self.field_type(ty, &path)).unwrap();
                 if let Some(&next) = mapped.get(&Object::ReachableParameter(index, target)) {
                     self.constraints
                         .push(Constraint::Load(next, Place::Indirect(node, path)));

@@ -684,3 +684,127 @@ fn repeated_allocating_calls_share_effects_but_keep_each_warning_site() {
         }
     }
 }
+
+// 本文の実体と参照の保存先を異なる領域に置き、型付きIRで寿命制約を検証する。
+// 本文の葉はVoidで表すが、言語のptr voidを作るわけではない。
+#[test]
+fn text_slice_and_c_bytes_keep_the_callers_origin_and_return_limit() {
+    let mut callee = body(1);
+    let (region, arena) = callee.parameters(&[(Type::Text, HERE, false)], HERE);
+    let bytes = CheckedExpression {
+        ty: Type::CPointer,
+        value: Value::CBytes(Box::new(CheckedExpression {
+            ty: Type::Text,
+            value: Value::Slice {
+                target: Box::new(CheckedExpression {
+                    ty: Type::Text,
+                    value: Value::Local(0),
+                }),
+                start: None,
+                end: None,
+                index: false,
+                handler: None,
+            },
+        })),
+    };
+    let result = callee.expr(&bytes, region, arena);
+    callee.return_value(Type::CPointer, result, HERE);
+    let summaries = infer(&BTreeMap::from([(1, Rc::new(callee))])).unwrap();
+    let mut caller = body(0);
+    let inner = caller.region(0, HERE);
+    let (argument, object) = pointer(&mut caller, 0, Type::Void);
+    let result = caller.node();
+    caller
+        .direct_calls
+        .push(call(1, vec![(Type::Text, argument)], result, inner));
+    let saved = caller.cell(0, HERE, Type::CPointer);
+    caller
+        .constraints
+        .push(Constraint::Store(Place::Direct(saved), result, HERE));
+    let mut checked = caller.with_summaries(&summaries).unwrap();
+    assert_eq!(
+        checked.targets[result],
+        BTreeSet::from([Reference {
+            target: object,
+            limit: Some(inner)
+        }])
+    );
+    let constraints = checked.constraints.clone();
+    assert_eq!(
+        checked.validate(&constraints).unwrap_err().rule_id,
+        "arena.return-lifetime"
+    );
+}
+
+#[test]
+fn text_slice_fallback_cannot_hide_a_shorter_lived_source() {
+    for inner_in_fallback in [false, true] {
+        let mut analysis = body(0);
+        let inner = analysis.region(0, HERE);
+        let (source, _) = pointer(&mut analysis, inner, Type::Void);
+        let local = analysis.cell(inner, HERE, Type::Text);
+        analysis.locals.insert(0, local);
+        analysis.constraints.push(Constraint::Copy(local, source));
+        let borrowed = CheckedExpression {
+            ty: Type::Text,
+            value: Value::Local(0),
+        };
+        let static_text = CheckedExpression {
+            ty: Type::Text,
+            value: Value::Text {
+                text: "static".into(),
+            },
+        };
+        let (target, fallback) = if inner_in_fallback {
+            (static_text, borrowed)
+        } else {
+            (borrowed, static_text)
+        };
+        let sliced = CheckedExpression {
+            ty: Type::Text,
+            value: Value::Slice {
+                target: Box::new(target),
+                start: None,
+                end: None,
+                index: false,
+                handler: Some(CheckedHandler::Value(Box::new(fallback))),
+            },
+        };
+        let value = analysis.expr(&sliced, inner, Some(inner));
+        let outer = analysis.cell(0, HERE, Type::Text);
+        analysis.write(Place::Direct(outer), value, HERE);
+        assert_eq!(analysis.solve().unwrap_err().rule_id, "arena.store");
+    }
+}
+
+#[test]
+fn static_text_and_symbol_bytes_do_not_acquire_an_arena_lifetime() {
+    for ty in [Type::Text, Type::Symbol] {
+        let mut callee = body(1);
+        let bytes = CheckedExpression {
+            ty: Type::CPointer,
+            value: Value::CBytes(Box::new(CheckedExpression {
+                ty,
+                value: Value::Text {
+                    text: "static".into(),
+                },
+            })),
+        };
+        callee.return_region = Some(0);
+        let value = callee.expr(&bytes, 0, Some(0));
+        callee.return_value(Type::CPointer, value, HERE);
+        let summaries = infer(&BTreeMap::from([(1, Rc::new(callee))])).unwrap();
+        let mut caller = body(0);
+        let inner = caller.region(0, HERE);
+        let result = caller.node();
+        caller.direct_calls.push(call(1, vec![], result, inner));
+        let outer = caller.cell(0, HERE, Type::CPointer);
+        caller
+            .constraints
+            .push(Constraint::Store(Place::Direct(outer), result, HERE));
+        let mut checked = caller.with_summaries(&summaries).unwrap();
+        assert!(checked.targets[result].is_empty());
+        let constraints = checked.constraints.clone();
+        checked.validate(&constraints).unwrap();
+    }
+}

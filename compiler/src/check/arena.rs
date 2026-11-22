@@ -29,6 +29,26 @@ fn contains_in(ty: Type, structs: &super::type_parameters::structs::Structs) -> 
     }
 }
 
+// textとCのバイト列は、Suzから読み書きできる参照先の型を持たない。
+// 寿命グラフでは葉の実体として扱い、言語上のpointeeやポインタ禁止規則は変えない。
+fn reference_target(ty: Type) -> Option<Type> {
+    match ty {
+        Type::Text | Type::CPointer => Some(Type::Void),
+        _ => ty.pointee(),
+    }
+}
+
+fn contains_references(ty: Type, structs: &super::type_parameters::structs::Structs) -> bool {
+    match ty {
+        Type::Struct(id) => structs
+            .get(id)
+            .fields
+            .iter()
+            .any(|field| contains_references(field.ty, structs)),
+        _ => reference_target(ty).is_some(),
+    }
+}
+
 // ポインタの寿命と、関数候補の流れに必要な解析を別々に記録する。
 pub(super) fn callable_type(ty: Type, structs: &super::type_parameters::structs::Structs) -> bool {
     let mut pending = vec![ty];
@@ -49,18 +69,23 @@ pub(super) fn callable_type(ty: Type, structs: &super::type_parameters::structs:
 pub(super) fn observe_type(ty: Type, scope: &Scope) {
     if !matches!(
         ty,
-        Type::Pointer { .. } | Type::Struct(_) | Type::Function(_) | Type::StaticFunction(_)
+        Type::Pointer { .. }
+            | Type::Text
+            | Type::CPointer
+            | Type::Struct(_)
+            | Type::Function(_)
+            | Type::StaticFunction(_)
     ) {
         return;
     }
-    if !scope.program_pointers_used.get() && contains(ty, scope) {
-        scope.program_pointers_used.set(true);
+    if !scope.program_references_used.get() && contains_references(ty, &scope.structs) {
+        scope.program_references_used.set(true);
     }
     if !scope.callables_used.get() && callable_type(ty, &scope.structs) {
         scope.callables_used.set(true);
         scope.lifetime_used.set(true);
     }
-    if !scope.lifetime_used.get() && contains(ty, scope) {
+    if !scope.lifetime_used.get() && contains_references(ty, &scope.structs) {
         scope.lifetime_used.set(true);
     }
 }

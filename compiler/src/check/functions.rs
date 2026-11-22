@@ -225,8 +225,8 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
         }
     }
     // 関数型がスカラーだけでも、クロージャはポインタを捕捉できる。
-    // 型検査済みの全本体・捕捉・具体化でポインタがなければ、寿命解析自体が不要。
-    let arena_warnings = if globals.program_pointers_used.get() {
+    // 型検査済みの全本体・捕捉・具体化で参照を含む値がなければ、寿命解析自体が不要。
+    let arena_warnings = if globals.program_references_used.get() {
         super::arena::check_program(
             &mut functions,
             program.functions.len()..program.functions.len() + program.externs.len(),

@@ -1051,3 +1051,89 @@ fn main() -> u8 {
 | 設定 | 結果 | 終了コード | 警告数 |
 |---|---|---:|---:|
 | 通常 | 正常終了 | 0 | 0 |
+
+### text-037 関数から返るtextの利用期間を内側の作業領域から延ばさない
+
+主根拠：`[arena.return-lifetime]`。
+
+**ソース：**
+
+```suz
+fn identity(t: text) -> text { return t }
+fn invalid(t: text) -> text {
+    arena { return identity(t) }
+}
+fn main() -> u8 { return 0 }
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[arena.return-lifetime]` | 3 | 20 |
+
+### text-038 c_bytesへ変えても戻り値の利用期間は延びない
+
+主根拠：`[arena.return-lifetime]`。
+
+**ソース：**
+
+```suz
+fn bytes(t: text) -> *const void {
+    trusted { return c_bytes t }
+}
+fn invalid(t: text) -> *const void {
+    arena { return bytes(t) }
+}
+fn main() -> u8 { return 0 }
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[arena.return-lifetime]` | 5 | 20 |
+
+### text-039 静的な文字列の参照は内側の関数呼び出しで短命にならない
+
+主根拠：`[text.value]`。
+
+**ソース：**
+
+```suz
+struct Message { body: text }
+fn identity(t: text) -> text { return t }
+fn bytes(t: text) -> *const void {
+    trusted { return c_bytes t }
+}
+fn main() -> u8 {
+    var saved = Message { body: `` }
+    trusted {
+        var p = c_bytes ``
+        arena {
+            saved#body = identity(`static`)
+            p = bytes(saved.body)
+        }
+    }
+    if saved.body == `static` { return 0 }
+    return 1
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |

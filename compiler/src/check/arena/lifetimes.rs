@@ -1,7 +1,7 @@
 //! 実行順によらない候補の包含制約を解く。各保存場所は自身の寿命を持ち、
 //! 別名経由のメンバーも同じセルへ合流させる。安全でも候補を絞れない保存は拒否する。
 //!
-//! **[impl.lifetime-flow]** ポインタを含みうる値の流れは、すべて制約（Copy・Limit・Load・Store・Address）へ
+//! **[impl.lifetime-flow]** 参照を含みうる値の流れは、すべて制約（Copy・Limit・Load・Store・Address）へ
 //! 変換してから検査し、構文ごとに個別の寿命検査を書かない。式・文・失敗処理で分岐する
 //! match には `_` を使わず全種類を列挙する。
 mod accumulation;
@@ -32,7 +32,7 @@ impl Reference {
         }
     }
 }
-// 構造体の各ポインタ葉をフィールド番号列で区別する。ポインタ自身の値は空の列。
+// 構造体内の参照をフィールド番号列で区別する。ポインタ・text・Cのバイト列自身は空の列。
 type Shape = BTreeMap<Vec<usize>, Node>;
 // 型検査後の呼び出し境界では葉を追加・削除しないため、並びだけを保持する。
 type Leaves = Vec<(Vec<usize>, Node)>;
@@ -200,7 +200,7 @@ impl Analysis {
     fn paths(&self, ty: Type) -> Vec<Vec<usize>> {
         match ty {
             Type::Array(id) => self.paths(self.structs.arrays.borrow().get(id).element),
-            Type::Pointer { .. } => vec![vec![]],
+            Type::Pointer { .. } | Type::Text | Type::CPointer => vec![vec![]],
             Type::Struct(id) => self
                 .structs
                 .get(id)
@@ -379,7 +379,7 @@ impl Analysis {
                 BTreeMap::from([(vec![], n)])
             }
             Value::Local(id) => {
-                if contains_in(value.ty, &self.structs) {
+                if contains_references(value.ty, &self.structs) {
                     let cell = self.locals[id];
                     self.read(value.ty, Place::Direct(cell))
                 } else {
@@ -555,9 +555,13 @@ impl Analysis {
                 Shape::new()
             }
             Value::Receiver { target, .. } => self.expr(target, region, arena),
+            // 範囲やC向けの表現が変わっても、本文の由来と利用期間は同じ。
+            Value::CBytes(v) | Value::TextView(v) => {
+                let source = self.expr(v, region, arena);
+                self.alternatives(value.ty, vec![source])
+            }
             Value::Cast(v)
             | Value::NonNull(v)
-            | Value::CBytes(v)
             | Value::CByteLen { operand: v, .. }
             | Value::FunctionBorrow(v)
             | Value::ArrayLength { target: v, .. }
@@ -566,7 +570,6 @@ impl Analysis {
             | Value::Truncate(v)
             | Value::BitNot(v)
             | Value::Not(v)
-            | Value::TextView(v)
             | Value::Intern { operand: v, .. } => {
                 self.expr(v, region, arena);
                 Shape::new()
@@ -575,8 +578,9 @@ impl Analysis {
                 operand, fallback, ..
             } => {
                 self.expr(operand, region, arena);
-                self.expr(fallback, region, arena);
-                Shape::new()
+                let fallback = self.expr(fallback, region, arena);
+                // 解析成功時の文字列は生成元とは独立する。代替値は元の由来を保つ。
+                self.alternatives(value.ty, vec![fallback])
             }
             Value::ArrayDimensionGuard { left, right, .. }
             | Value::Binary { left, right, .. }
@@ -631,14 +635,24 @@ impl Analysis {
                 start,
                 end,
                 handler,
-                ..
+                index,
             } => {
-                self.expr(target, region, arena);
+                let source = self.expr(target, region, arena);
                 for v in [start, end].into_iter().flatten() {
                     self.expr(v, region, arena);
                 }
-                self.checked_handler(handler.as_ref(), region, arena);
-                Shape::new()
+                let mut alternatives = if *index { vec![] } else { vec![source] };
+                match handler {
+                    Some(CheckedHandler::Value(v)) => {
+                        alternatives.push(self.expr(v, region, arena))
+                    }
+                    Some(CheckedHandler::Return { value, location }) => {
+                        let returned = self.expr(value, region, arena);
+                        self.return_value(value.ty, returned, *location);
+                    }
+                    None => {}
+                }
+                self.alternatives(value.ty, alternatives)
             }
             Value::IntegerArithmetic { handler, .. } => {
                 value.value.visit_constant_children(&mut |child| {
@@ -836,9 +850,11 @@ impl Analysis {
                 CheckedStatement::Match {
                     id, target, arms, ..
                 } => {
-                    self.expr(target, region, arena);
-                    let cell = self.cell(region, self.regions[region].end, Type::Void);
+                    let value = self.expr(target, region, arena);
+                    let location = self.regions[region].end;
+                    let cell = self.cell(region, location, target.ty);
                     self.locals.insert(*id, cell);
+                    self.write(Place::Direct(cell), value, location);
                     for (p, b) in arms {
                         if let Some(p) = p {
                             self.expr(p, region, arena);
@@ -895,6 +911,7 @@ impl Analysis {
                 CheckedStatement::CastReturn {
                     return_location: location,
                     id,
+                    ty,
                     operand,
                     return_value,
                     ..
@@ -902,7 +919,7 @@ impl Analysis {
                     self.expr(operand, region, arena);
                     let returned = self.expr(return_value, region, arena);
                     self.return_value(return_value.ty, returned, *location);
-                    let cell = self.cell(region, self.regions[region].end, Type::Void);
+                    let cell = self.cell(region, self.regions[region].end, *ty);
                     self.locals.insert(*id, cell);
                 }
                 CheckedStatement::Break
