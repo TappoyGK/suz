@@ -225,6 +225,7 @@ impl Scope {
                 | Type::Application(_)
                 | Type::Struct(_)
                 | Type::Pointer { .. }
+                | Type::ReadOnlyArray(_)
                 | Type::StaticShape(_)
                 | Type::Shape(_)
                 | Type::StaticFunction(_)
@@ -265,7 +266,7 @@ impl Scope {
 
     pub fn type_name(&self, ty: Type) -> String {
         match ty {
-            Type::Array(id) => {
+            Type::Array(id) | Type::ReadOnlyArray(id) => {
                 let array = self.structs.arrays.borrow().get(id);
                 let element = self.type_name(array.element);
                 if array.rank == 1 {

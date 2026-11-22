@@ -310,3 +310,313 @@ fn main() -> u8 {
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
 | 通常 | `[array.access-handler]` | 4 | 35 |
+
+### array-010 静的な表を関数から読み、定数の要素と長さを使う
+
+主根拠：`[array.constant]`。
+
+**ソース：**
+
+```suz
+fix PALETTE: [i32] = [17, 18, 19]
+fix COUNT = len PALETTE
+fix FIRST = PALETTE[0]
+fn color(n: u32) -> i32 { return PALETTE[n % len PALETTE] or 16 }
+fn first[T](a: [T]) -> T { return a[0] or panic `empty array` }
+fnshape Reader([i32], u32) -> i32
+fn read(a: [i32; n], i: u32) -> i32 { return a[i] or -1 }
+fn main() -> u8 {
+    fix a: [i32; n] = PALETTE
+    var sum: i32 = 0
+    for i in 0..<n { sum += a[i] }
+    if COUNT != 3 || FIRST != 17 || sum != 54 { return 1 }
+    fix callback: static fn Reader = fn read
+    if first(a) != 17 || callback(a, 1) != 18 { return 4 }
+    if color(4) != 18 || read(a, 5) != -1 { return 2 }
+    var selected = [9 as i32]
+    selected = PALETTE
+    if read(selected, 2) != 19 { return 3 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### array-011 多次元の定数配列を切り出し、空配列と反復初期化を使う
+
+主根拠：`[array.readonly]`。
+
+**ソース：**
+
+```suz
+fix GRID: [i32; _, _] = [[1, 2], [3, 4], [5, 6]]
+fix LAST: [i32] = GRID[2]
+fix PART: [i32; _, _] = GRID[1:3]
+fn main() -> u8 {
+    fix empty: [i32] = []
+    fix repeated = [7; 2, 3]
+    if len empty != 0 || len repeated != 2 { return 1 }
+    if LAST[1] != 6 || PART[0][0] != 3 { return 2 }
+    var sum: i64 = 0
+    rev row in repeated { for x in row { sum += x } }
+    if sum != 42 { return 3 }
+    fix none = [9; 0, 3]
+    for row in none { return 4 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### array-012 静的な参照を含む構造体と配列を作業領域の外でも使う
+
+主根拠：`[array.constant]`。
+
+**ソース：**
+
+```suz
+struct Label { caption: text, entries: [i32] }
+fix NUMBERS: [i32] = [2, 4]
+fix LABELS: [Label] = [Label { caption: `開始`, entries: NUMBERS }, Label { caption: `終了`, entries: [6 as i32] }]
+fix SYMBOLS: [symbol] = [`alpha`, `beta`]
+fix FLOATS: [f64] = [inf; 2]
+fn labels() -> [Label] { return LABELS }
+fn read(a: [Label], i: u32) -> Label { return a[i] or LABELS[0] }
+fn main() -> u8 {
+    var caption: text = ``
+    arena { caption = read(labels(), 1).caption }
+    if caption != `終了` { return 1 }
+    fix values = labels()
+    var sum: i32 = 0
+    for row in values { for n in row.entries { sum += n } }
+    if sum != 12 { return 2 }
+    fix symbols = SYMBOLS
+    var count: i32 = 0
+    for item in symbols { if item == `beta` { count += 1 } }
+    if count != 1 { return 3 }
+    fix floats = FLOATS
+    for item in floats { if item != inf { return 4 } }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### array-013 読み取り専用の要素を書き換えない
+
+主根拠：`[array.readonly]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix a = [1, 2]
+    a#[0] = 9
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[array.readonly]` | 3 | 7 |
+
+### array-014 構造体の要素のフィールドを書き換えない
+
+主根拠：`[array.readonly]`。
+
+**ソース：**
+
+```suz
+struct Item { value: i32 }
+fn main() -> u8 {
+    fix a = [Item { value: 1 }]
+    a[0]#value = 2
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[array.readonly]` | 4 | 6 |
+
+### array-015 部分配列も読み取り専用になる
+
+主根拠：`[array.readonly]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix a = [[1, 2], [3, 4]]
+    fix row = a[1]
+    row#[0] = 9
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[array.readonly]` | 4 | 9 |
+
+### array-016 定数配列の要素にローカル変数を使わない
+
+主根拠：`[array.constant]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    var value = 3
+    fix a = [value]
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[array.constant]` | 3 | 13 |
+
+### array-017 定数配列の長さに実行時の値を使わない
+
+主根拠：`[array.constant]`。
+
+**ソース：**
+
+```suz
+fn make(n: u32) -> [i32] { return [0; n] }
+fn main() -> u8 { return 0 }
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[array.constant]` | 1 | 35 |
+
+### array-018 静的に範囲外と分かる定数添字を拒否する
+
+主根拠：`[array.constant-index]`。
+
+**ソース：**
+
+```suz
+fix TABLE = [1, 2]
+fn main() -> u8 {
+    fix a = TABLE[2] or 0
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[array.constant-index]` | 3 | 18 |
+
+### array-019 定数配列に関数値を含めない
+
+主根拠：`[array.constant]`。
+
+**ソース：**
+
+```suz
+fn value() -> i32 { return 1 }
+fn main() -> u8 {
+    fix a = [fn value]
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[array.constant]` | 3 | 13 |
+
+### array-020 読み取り専用の配列も比較しない
+
+主根拠：`[array.value]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix a = [1, 2]
+    if a == a { return 0 }
+    return 1
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[arena.ptr-operations]` | 3 | 10 |

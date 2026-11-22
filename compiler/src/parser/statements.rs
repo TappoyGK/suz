@@ -332,7 +332,7 @@ impl Parser<'_, '_> {
                 let mut dimensions = Vec::new();
                 let annotation = if self.token().kind == Kind::Symbol(":") {
                     self.cursor += 1;
-                    let (ty, names) = self.annotated_array_type(pointer && !mutable, false)?;
+                    let (ty, names) = self.annotated_array_type(!mutable, false)?;
                     dimensions = names;
                     if ty == Type::Void {
                         return Err(self.error(

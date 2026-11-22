@@ -708,3 +708,31 @@ fn main() -> u8 {
     );
     assert_eq!(output.status.code(), Some(0), "{output:?}");
 }
+
+#[test]
+fn constant_array_references_do_not_allocate_or_initialize_per_call() {
+    // 実行結果だけでは、呼び出すたびの再確保や要素のコピーを検出できない。
+    let c = suz::compile(
+        br#"
+fix TABLE: [i32] = [7; 1024]
+fn table() -> [i32] { return TABLE }
+fn main() -> u8 {
+    fix a = table()
+    fix b = table()
+    return ifexpr len a == len b { 0 } else { 1 }
+}
+"#,
+    )
+    .unwrap();
+    assert!(
+        !c.contains("suz_arena_alloc("),
+        "constant array uses arena allocation"
+    );
+    assert_eq!(
+        c.matches("static int32_t const suz_constant_array_")
+            .count(),
+        1,
+        "constant array storage is duplicated"
+    );
+    assert!(!c.contains("memcpy("), "constant array elements are copied");
+}

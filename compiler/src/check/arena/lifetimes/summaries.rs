@@ -8,7 +8,7 @@ use std::collections::VecDeque;
 /// 再帰型の無限な参照経路を列挙せず、同じ仮引数から同じ型へ届く候補を合流させる。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum Object {
-    Permanent,
+    Permanent(Type),
     Parameter(usize, Type),
     ReachableParameter(usize, Type),
     // 書き込みメソッドの受け手、または参照捕捉された変数の保存場所。
@@ -182,7 +182,7 @@ impl Summary {
                     Object::Allocation(..) | Object::RecursiveAllocation(..) => {
                         Object::RecursiveAllocation(component, info.ty)
                     }
-                    Object::Permanent
+                    Object::Permanent(_)
                     | Object::Parameter(..)
                     | Object::ReachableParameter(..)
                     | Object::Slot(..) => object,
@@ -505,8 +505,8 @@ impl Analysis {
             let node = self.node();
             mapped.insert(object, node);
             match object {
-                Object::Permanent => {
-                    let cell = self.permanent_cell();
+                Object::Permanent(ty) => {
+                    let cell = self.permanent_cell(ty);
                     self.targets[node].insert(Reference::object(cell));
                 }
                 Object::Parameter(..) | Object::ReachableParameter(..) => {}

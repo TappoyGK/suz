@@ -64,10 +64,15 @@ impl Structs {
                 .with_nullable(ty.is_nullable());
         }
         match ty {
-            Type::Array(id) => {
+            Type::Array(id) | Type::ReadOnlyArray(id) => {
                 let array = self.arrays.borrow().get(id);
                 let element = self.normalize(array.element);
-                self.arrays.borrow_mut().intern(element, array.rank)
+                let storage = self.arrays.borrow_mut().intern(element, array.rank);
+                if matches!(ty, Type::ReadOnlyArray(_)) {
+                    storage.array_reference(true)
+                } else {
+                    storage
+                }
             }
             Type::Struct(id) => Type::Struct(self.canonical_id(id)),
             _ => self.shapes.normalize(ty),
@@ -195,7 +200,9 @@ impl Structs {
     #[inline]
     pub fn symbolic(&self, ty: Type) -> bool {
         match ty.leaf() {
-            Type::Array(id) => self.symbolic(self.arrays.borrow().get(id).element),
+            Type::Array(id) | Type::ReadOnlyArray(id) => {
+                self.symbolic(self.arrays.borrow().get(id).element)
+            }
             Type::Parameter(_) => true,
             Type::Struct(id) => self.get(id).symbolic,
             Type::Application(id) | Type::StaticShape(id) | Type::Shape(id) => self.applications
@@ -211,7 +218,9 @@ impl Structs {
     }
     fn symbolic_inner(&self, ty: Type, seen: &mut BTreeSet<usize>) -> bool {
         match ty.leaf() {
-            Type::Array(id) => self.symbolic_inner(self.arrays.borrow().get(id).element, seen),
+            Type::Array(id) | Type::ReadOnlyArray(id) => {
+                self.symbolic_inner(self.arrays.borrow().get(id).element, seen)
+            }
             Type::Parameter(_) => true,
             Type::Struct(id) => self.get(id).symbolic,
             Type::StaticFunction(id) | Type::Function(id) => {
@@ -235,7 +244,7 @@ impl Structs {
     }
     /// コード生成前に解決する型。名前付き型引数と、既存のint・floatの両方を含む。
     pub fn unresolved(&self, ty: Type) -> bool {
-        if let Type::Array(id) = ty.leaf() {
+        if let Type::Array(id) | Type::ReadOnlyArray(id) = ty.leaf() {
             return self.unresolved(self.arrays.borrow().get(id).element);
         }
         ty.leaf().symbolic() || self.symbolic(ty)
@@ -313,7 +322,9 @@ impl Structs {
                 continue;
             }
             match ty {
-                Type::Array(id) => pending.push(self.arrays.borrow().get(id).element),
+                Type::Array(id) | Type::ReadOnlyArray(id) => {
+                    pending.push(self.arrays.borrow().get(id).element)
+                }
                 Type::Struct(id) => {
                     if let Some(app) = &self.get(id).application {
                         pending.extend(&app.arguments);
@@ -370,7 +381,11 @@ impl Structs {
             return Ok(ty);
         }
         match ty.leaf() {
-            Type::Array(_) | Type::Application(_) | Type::StaticShape(_) | Type::Shape(_) => {}
+            Type::Array(_)
+            | Type::ReadOnlyArray(_)
+            | Type::Application(_)
+            | Type::StaticShape(_)
+            | Type::Shape(_) => {}
             Type::Parameter(_) | Type::Struct(_) | Type::StaticFunction(_) | Type::Function(_) => {
                 // 既に解決した型へ置き換える型引数がなければ、展開表に触れない。
                 if arguments.is_empty() {
@@ -464,7 +479,7 @@ impl Structs {
         ) {
             return self.resolve_shape(ty, arguments, location, path, parameters);
         }
-        if let Type::Array(id) = ty {
+        if let Type::Array(id) | Type::ReadOnlyArray(id) = ty {
             let array = self.arrays.borrow().get(id);
             let element =
                 self.resolve_inner(array.element, arguments, location, path, parameters)?;
@@ -474,7 +489,12 @@ impl Structs {
                     crate::diagnostic!("array.type", "array elements require stored value types"),
                 ));
             }
-            return Ok(self.arrays.borrow_mut().intern(element, array.rank));
+            let storage = self.arrays.borrow_mut().intern(element, array.rank);
+            return Ok(if matches!(ty, Type::ReadOnlyArray(_)) {
+                storage.array_reference(true)
+            } else {
+                storage
+            });
         }
         let application = match ty {
             Type::Parameter(id) => return Ok(arguments.get(id).copied().unwrap_or(ty)),

@@ -43,6 +43,10 @@ pub(in crate::check) fn shape(v: &CheckedExpression, scope: &Scope) -> Vec<Optio
     };
     let unknown = || vec![None; scope.structs.arrays.borrow().get(id).rank];
     match &v.value {
+        Value::Array { lengths, .. } => lengths
+            .iter()
+            .map(|v| constant(v).map(Dimension::Constant))
+            .collect(),
         Value::Local(id) => scope
             .array_bounds
             .arrays
@@ -344,4 +348,22 @@ pub(in crate::check) fn captures(
         }
     }
     state
+}
+
+/// 静的な長さと定数添字の組だけを拒否判定に使う。実行時の値域は推測しない。
+pub(super) fn invalid_constant_index(
+    target: &CheckedExpression,
+    index: &CheckedExpression,
+    dimension: usize,
+    scope: &Scope,
+) -> bool {
+    constant(index)
+        .zip(
+            shape(target, scope)
+                .get(dimension)
+                .copied()
+                .flatten()
+                .and_then(Dimension::known),
+        )
+        .is_some_and(|(index, length)| !(0..length).contains(&index))
 }

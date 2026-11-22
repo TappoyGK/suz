@@ -37,6 +37,9 @@ struct ExpressionContext {
     report_function: String,
     report_sites: std::collections::BTreeMap<(usize, usize), (usize, String)>,
     arrays: crate::ast::arrays::Types,
+    constant_arrays: std::collections::BTreeMap<String, usize>,
+    constant_array_data: String,
+    constant_array_init: String,
     uses_c_byte_len: bool,
     uses_c_integer: bool,
     uses_c_pointer: bool,
@@ -180,6 +183,7 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
     for function in &program.functions {
         writeln!(c, "{};", functions::declaration(function)).unwrap();
     }
+    c.push_str(&context.constant_array_data);
     c.push_str(&context.functions);
     for body in bodies {
         c.push_str(&body);
@@ -213,6 +217,7 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
     for (value, id) in &context.text_literals {
         writeln!(text_init, "    suz_text_constant_{id} = suz_text_intern(suz_text_literal_{id}, UINT64_C({}), true, {});", value.len(), text::position(program.main_location, &context)).unwrap();
     }
+    text_init.push_str(&context.constant_array_init);
     let report = if arena_report.is_some() {
         "    suz_arena_report();\n"
     } else {

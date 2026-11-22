@@ -137,6 +137,13 @@ impl Parser<'_, '_> {
         names: bool,
         parameter: bool,
     ) -> Result<(Type, Vec<crate::ast::arrays::Dimension>), Diagnostic> {
+        if names && self.token().kind == Kind::Symbol("[") {
+            let (Type::Array(id), dimensions) = self.array_type_dimensions(true)? else {
+                unreachable!()
+            };
+            self.reject_error_spec()?;
+            return Ok((Type::ReadOnlyArray(id), dimensions));
+        }
         if names
             && self.token().kind == Kind::Keyword("ptr")
             && self
@@ -216,8 +223,15 @@ impl Parser<'_, '_> {
             }
             layers.push(nullable);
         }
-        let mut ty = if !layers.is_empty() && self.token().kind == Kind::Symbol("[") {
-            self.array_type()?
+        let mut ty = if self.token().kind == Kind::Symbol("[") {
+            let Type::Array(id) = self.array_type()? else {
+                unreachable!()
+            };
+            if layers.is_empty() {
+                Type::ReadOnlyArray(id)
+            } else {
+                Type::Array(id)
+            }
         } else {
             self.type_leaf()?
         };

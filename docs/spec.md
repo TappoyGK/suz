@@ -620,15 +620,17 @@ a <- ` A`
 
 ### 5.8 配列への参照
 
-**[array.type]** `ptr [T]`は1次元、`ptr [T; _, _]`は2次元の配列への非null参照である。セミコロンの後の寸法指定の個数が次元数を表し、1個以上とする。`ptr [T; _]`と`ptr [T]`は同じ型である。`ptr?`にするとnull許容の参照になる。各次元の長さは型の同一性に含めず、要素型と次元数で配列の型を区別する。要素型は不変とし、数値の幅や要素に含むポインタのnull許容性を変える暗黙変換は認めない。配列への参照自体の最外側のnull許容性には [arena.ptr-conversion] を適用する。
+**[array.type]** `[T]`は1次元、`[T; _, _]`は2次元の読み取り専用の配列への参照である。`[T; _]`と`[T]`は同じ型である。`ptr [T]`は1次元、`ptr [T; _, _]`は2次元の配列への非null参照である。セミコロンの後の寸法指定の個数が次元数を表し、1個以上とする。`ptr [T; _]`と`ptr [T]`は同じ型である。`ptr?`にするとnull許容の参照になる。各次元の長さは型の同一性に含めず、要素型と次元数で配列の型を区別する。要素型は不変とし、数値の幅や要素に含むポインタのnull許容性を変える暗黙変換は認めない。配列への参照自体の最外側のnull許容性には [arena.ptr-conversion] を適用する。
 
-要素型Tには [arena.new-value] の保存可能な型を使える。構造体・配列への参照・static fn・汎用型の具体化も含む。`[T]`単独は値型ではなく、ptrまたはptr?の直後だけに書く。配列への参照は変数、フィールド、仮引数、戻り値、型引数に使える。多次元の連続配列`ptr [T; _, _]`と、別々の配列への参照を要素に持つ`ptr [ptr [T]]`は異なる型である。
+要素型Tには [arena.new-value] の保存可能な型を使える。構造体・配列への参照・static fn・汎用型の具体化も含む。読み取り専用の参照も値として保存できる。配列への参照は変数、フィールド、仮引数、戻り値、型引数に使える。多次元の連続配列`ptr [T; _, _]`と、別々の配列への参照を要素に持つ`ptr [ptr [T]]`は異なる型である。
 
-**[array.value]** 配列への参照は、要素列の先頭位置と各次元の長さを持ち、書き換え可能な要素の実体を共有する。参照のコピーはこの情報だけをコピーし、要素を複製しない。fix ptrは参照の再代入を禁じ、要素への更新は禁じない。var ptrへの代入では先頭位置と全寸法を一緒に置き換える。別名、部分配列、切り出しからの更新は、同じ要素を指すほかの参照にも見える。
+**[array.value]** 配列への参照は、要素列の先頭位置と各次元の長さを持ち、要素の実体を共有する。参照のコピーはこの情報だけをコピーし、要素を複製しない。fix ptrは参照の再代入を禁じ、要素への更新は禁じない。var ptrへの代入では先頭位置と全寸法を一緒に置き換える。別名、部分配列、切り出しからの更新は、同じ要素を指すほかの参照にも見える。
 
 長さ0の配列も非nullの参照で表し、nullとは区別する。nullには寸法を与えない。null許容の参照は [arena.let] で確認してから、len・添字・切り出し・反復に使う。配列の実体全体を`.p`で読み出したり、`#p`で上書きしたりする操作は認めない。配列参照の比較、算術、文字列化、Cへのポインタ変換、要素のアドレスをptr Tとして取得する操作も認めない。
 
-**[array.dimension-bind]** 寸法指定の`_`を名前に置き換えると、対応する長さをlen_tの不変値として束縛する。1次元では`ptr [T; n]`と書く。名前を付けられるのは、関数・メソッド・クロージャの仮引数、およびfix ptrの型注釈の最外側の非null配列参照だけである。戻り値、フィールド、fnshape、var ptr、null許容参照、型引数内や要素型内の寸法指定には`_`を使う。
+**[array.readonly]** `[T]`からは要素を読み出せるが、要素全体や要素のフィールドへ書き込めない。部分配列・切り出し・多次元配列の反復で得る参照も読み取り専用になる。参照の束縛にはfix・varを使い、ptrは付けない。varの参照自体は再代入できる。len・添字・切り出し・for・revには、書き込み可能な配列と同じ規則を適用する。読み取り専用は、この参照を通した書き込みを禁じることを意味する。定数配列の内容は変化しない。読み取り専用の参照にnullはない。比較・算術・文字列化・Cへのポインタ変換は認めない。
+
+**[array.dimension-bind]** 寸法指定の`_`を名前に置き換えると、対応する長さをlen_tの不変値として束縛する。1次元では`ptr [T; n]`または`[T; n]`と書く。名前を付けられるのは、関数・メソッド・クロージャの仮引数、およびローカルのfix・fix ptrの型注釈の最外側の非null配列参照だけである。戻り値、フィールド、fnshape、var・var ptr、null許容参照、型引数内や要素型内の寸法指定には`_`を使う。
 
 寸法名は [name.value] に従う。仮引数の寸法名は関数本体、ローカル宣言の寸法名は初期化後からそのブロックの終わりまで有効である。自身の初期値には使えない。寸法名は長さの指定や型引数ではない。仮引数名・既存の名前との重複とシャドーイングは禁止する。[array.dimension-equality] の同じ仮引数リスト内での繰り返しだけは例外とする。
 
@@ -672,7 +674,35 @@ fn clear_optional(grid: ptr? [u8; _, _]) -> void {
 
 **[const.expression]** 関数の呼び出しは定数式に含めない。定数名はトップレベルの `fix` の名前を指し、ブロック内の `fix` とすべての `var` の名前は含めない。定数式は、数値・真偽値・文字のリテラル、定数名、列挙子、定数式同士の演算と型変換、定数式から作る構造体リテラル、そのフィールド参照、丸括弧で囲んだ定数式から構成する。型変換と整数演算の `or` による代替値にも定数式を使える。埋め込みのないテンプレート、すべての埋め込みが定数式であるテンプレート、定数式の `symbol` 同士の比較も定数式である。`text` の定数式には [text.const-view] を適用する。左の式と指定したフィールドの初期値がすべて定数式である `with` 式も、定数式である。構成要素にも再帰的に定数式の制限を適用する。
 
-`fn 関数名` も [fn.value-const] の定数式である。
+`fn 関数名` も [fn.value-const] の定数式である。定数配列、そのlen、および定数の添字・境界による読み出し・部分配列・切り出しも定数式に含める。
+
+**[array.constant]** newを付けない`[値, ...]`、`[[値, ...], ...]`、`[初期値; 長さ, ...]`は定数配列を表す。全要素と全長さに定数式を要求する。列挙の形状、要素型の推論、空配列、配置とサイズの検査には [array.enumeration]・[array.initializer-type]・[array.layout] を適用する。結果は読み取り専用の参照であり、実体はプログラム終了まで存在する静的な領域に置く。作業領域は不要で、参照を得る際に要素のコピーや動的確保を行わない。
+
+要素には数値・bool・char・symbol・列挙型・静的なtextと、これらを再帰的に含む構造体・定数配列を使える。ポインタ、関数値、作業領域の実体への参照は含められない。定数配列を含む構造体もトップレベルのfixに保存できる。
+
+```suz
+fix PALETTE: [i32] = [17, 18, 19, 21, 27, 33]
+fix LABELS: [text] = [`開始`, `終了`]
+
+fn color(n: u32) -> i32 {
+    return PALETTE[n % len PALETTE] or 16
+}
+```
+
+このnは実行時の値なので、添字は定数式ではない。orの要否は [array.bounds-proof] に従う。
+
+**処理量の上限を定める。**
+
+| 項目 | 規定 |
+|---|---|
+| 対象・条件 | 初期化済みの定数配列への参照の取得 |
+| 内部の計算量 | 次元数dに対してO(d+1)。先頭位置と寸法を取得し、要素の走査・コピー・動的確保をしない。型が同じならdは一定である |
+| 外部処理 | なし |
+| 利用者の制御 | 要素型・次元数・各次元の長さを指定できる。静的な実体の大きさは全要素の格納サイズに従う |
+
+静的領域の初期化は [runtime.constant-array]、symbolの起動時の登録は [runtime.symbol-init] に従う。
+
+**[array.constant-index]** 読み取り専用の配列の長さと添字が静的に分かる場合、範囲内ならorを付けずに読み出し、範囲外ならコンパイルエラーとする。部分配列の添字も同じである。実行時の添字と切り出しには [array.access-handler] を適用する。
 
 **[const.evaluation]** 定数式は、通常の式と同じ型、演算、評価順序、短絡評価の規則でコンパイル時に評価する。評価中にパニックの条件を満たし、その演算に対応する `or` による失敗処理がなければコンパイルエラーである。整数演算に対応する `or` がある場合は、演算に失敗したときだけ代替値を評価する。成功した場合は演算結果を使う。評価しない部分にも、定数式の構成と型の規則、および [const.cast-check] と [expr.cast-handler] と [symbol.cast-handler] の `or` を要求する規則を適用する。
 
@@ -1514,7 +1544,7 @@ fix narrow: u8 = a + b or 0 // 格納に失敗し、代替値0を使う
 
 1次元では各反復の開始時に要素の値をコピーし、2次元以上ではその部分配列への非null参照を束縛する。束縛は不変で、部分配列の要素の更新は認める。要素値に含まれる参照は同じ実体を指す。先の反復で書き換えた要素を後の反復が読む場合、書き換え後の値を読む。通常の添字ループも記述された順序で読み書きし、配列同士が重ならないとは仮定しない。
 
-**[array.lifetime]** 配列参照・部分配列参照・切り出しの利用期間と所属領域には、[arena.exit]・[arena.store] の規則を適用する。部分参照の取得で利用期間を延長しない。要素から読んだ参照にも、その由来と利用期間を引き継ぐ。参照を含む要素の初期化・全体更新・フィールド更新は、配列の実体を保存先として [arena.store] を検査する。別名の宣言位置を保存先の寿命としてはならない。
+**[array.lifetime]** 定数配列とその部分配列・切り出しはプログラム終了まで利用できる。作業領域に確保した配列については、配列参照・部分配列参照・切り出しの利用期間と所属領域には、[arena.exit]・[arena.store] の規則を適用する。部分参照の取得で利用期間を延長しない。要素から読んだ参照にも、その由来と利用期間を引き継ぐ。参照を含む要素の初期化・全体更新・フィールド更新は、配列の実体を保存先として [arena.store] を検査する。別名の宣言位置を保存先の寿命としてはならない。
 
 配列要素を通した保存・返却を [arena.summary] に含める。同じ配列実体の各要素に入る参照先候補は合わせて追い、添字の相関や上書きで候補を除かない。部分配列・切り出しからの更新も元の実体の候補へ反映する。関数から返す参照を含む値には [arena.return-origin]・[arena.return-lifetime] を適用する。関数内で開いて退出する作業領域の配列は返せない。反復中の確保には [arena.loop-allocation] を適用する。
 
@@ -3032,7 +3062,7 @@ ErrorSpecItem    ::= IDENT ( "." IDENT )?
 Variants         ::= IDENT ( "," NL* IDENT )* ","? NL*
 
 Type             ::= IntegerType | "len_t" | "f32" | "f64" | "bool" | "char" | "symbol" | "text" | "void"
-                   | "ptr" "?"? ( Type | ArrayType ) | "int" | "float" | IDENT TypeArguments?
+                   | ArrayType | "ptr" "?"? ( Type | ArrayType ) | "int" | "float" | IDENT TypeArguments?
                    | "static" "fn" IDENT TypeArguments? | "fn" IDENT TypeArguments? | CIntegerType | "*" "const" "void"
 ArrayType        ::= "[" Type ( ";" Dimensions )? "]"
 Dimensions       ::= Dimension ( "," Dimension )* ","?
@@ -3146,7 +3176,7 @@ ArrayItems       ::= ArrayItem ( "," ArrayItem )* ","?
 ArrayItem        ::= Expression | "[" ArrayItems "]"
 Index            ::= Expression | Expression? ":" Expression?
 IndexHandler     ::= "or" ( Expression | "return" Expression? | "panic" TEMPLATE )
-Primary          ::= "self" | Literal | IDENT | FunctionCall | StructLiteral | TEMPLATE
+Primary          ::= "self" | Literal | IDENT | FunctionCall | StructLiteral | TEMPLATE | ArrayInitializer
                    | "(" Expression ")" | IfExpression | MatchExpression | BlockExpression
 Literal          ::= INTEGER | FLOAT | CHAR | "true" | "false" | "nan" | "inf" | "null"
 
@@ -3167,7 +3197,7 @@ Initializer      ::= IDENT ":" Expression | IDENT
 
 `Index` と `IndexHandler` には、対象が文字列なら [text.slice]・[text.index]・[text.slice-handler]、配列参照なら [array.index]・[array.slice]・[array.access-handler] を適用する。連続する配列アクセスへの失敗処理の範囲は [array.access-handler] に従う。
 
-`ArrayInitializer`はnewの直後に限る。列挙の形状には [array.enumeration]、空の列挙には [array.initializer-type] を適用する。寸法・長さ・要素のリストには [src.trailing-comma] を適用する。配列初期化の各角括弧を入れ子1段として [src.nesting-depth] に数え、各初期値・長さの式をその下に置く。型のArrayTypeは型の入れ子として扱う。
+`ArrayInitializer`はnewの直後では領域確保の初期値、それ以外では [array.constant] の定数配列である。列挙の形状には [array.enumeration]、空の列挙には [array.initializer-type] を適用する。寸法・長さ・要素のリストには [src.trailing-comma] を適用する。配列初期化の各角括弧を入れ子1段として [src.nesting-depth] に数え、各初期値・長さの式をその下に置く。型のArrayTypeは型の入れ子として扱う。
 
 `"fn" IDENT TypeArguments?` には [generic.function-value]・[fn.value-from-name] と [fn.value-mark]、後置の呼び出しには [fn.value-call] を適用する。名前の直後の `(` は `FunctionCall` として読む。
 

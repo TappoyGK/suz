@@ -145,7 +145,8 @@ impl Constraints<'_, '_> {
             return self.apply(parameter, actual);
         }
         match (parameter, actual) {
-            (Type::Array(parameter), Type::Array(actual)) => {
+            (Type::Array(parameter), Type::Array(actual))
+            | (Type::ReadOnlyArray(parameter), Type::ReadOnlyArray(actual)) => {
                 let p = self.scope.structs.arrays.borrow().get(parameter);
                 let a = self.scope.structs.arrays.borrow().get(actual);
                 if p.rank == a.rank {

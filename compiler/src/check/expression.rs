@@ -55,7 +55,8 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
                     .structs
                     .arrays
                     .borrow_mut()
-                    .intern(element, lengths.len()),
+                    .intern(element, lengths.len())
+                    .array_reference(true),
             )
         }
         ExpressionKind::MethodCall {
@@ -99,10 +100,12 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
             Some(bindings.function_types.borrow()[id].result)
         }
         ExpressionKind::Slice { target, index, .. } => {
-            if let Some(id) = operand_type(target, bindings).and_then(Type::array_id) {
+            let target_type = operand_type(target, bindings);
+            if let Some(id) = target_type.and_then(Type::array_id) {
+                let readonly = matches!(target_type, Some(Type::ReadOnlyArray(_)));
                 let a = bindings.structs.arrays.borrow().get(id);
                 return Some(if !index {
-                    Type::Array(id).pointer()
+                    Type::Array(id).array_reference(readonly)
                 } else if a.rank == 1 {
                     a.element
                 } else {
@@ -111,12 +114,18 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
                         .arrays
                         .borrow_mut()
                         .intern(a.element, a.rank - 1)
-                        .pointer()
+                        .array_reference(readonly)
                 });
             }
             Some(if *index { Type::Char } else { Type::Text })
         }
-        ExpressionKind::New(value) => operand_type(value, bindings).map(Type::pointer),
+        ExpressionKind::New(value) => operand_type(value, bindings).map(|ty| {
+            if matches!(value.kind, ExpressionKind::ArrayInit { .. }) {
+                Type::Array(ty.array_id().unwrap()).pointer()
+            } else {
+                ty.pointer()
+            }
+        }),
         ExpressionKind::Deref(value) => operand_type(value, bindings).and_then(Type::pointee),
         ExpressionKind::Null => None,
         ExpressionKind::CBytes(_) => Some(Type::CPointer),
@@ -563,7 +572,7 @@ fn expression_checked(
     } else {
         match &expr.kind {
             ExpressionKind::ArrayInit { .. } => {
-                super::arrays::initializer(expr, required, bindings)?
+                super::arrays::constant_initializer(expr, required, bindings)?
             }
             ExpressionKind::MethodCall { .. } => {
                 super::methods::call(expr, inference_hint, bindings, None)?
@@ -648,7 +657,7 @@ fn expression_checked(
             ExpressionKind::Len(inner) => {
                 let operand = expression(inner, None, bindings)?;
                 if !operand.ty.is_text()
-                    && !(operand.ty.is_nonnull() && operand.ty.array_id().is_some())
+                    && !(!operand.ty.is_nullable() && operand.ty.array_id().is_some())
                 {
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
