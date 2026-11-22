@@ -51,6 +51,46 @@ fn integer_float_literals_require_exact_values_in_every_context() {
 }
 
 #[test]
+fn generic_integer_float_diagnostics_show_each_candidate_once() {
+    for sign in ["", "-"] {
+        // intとの組み合わせが増えても、同じfloat型の診断を繰り返さない。
+        let source = format!(
+            "fn h(n: int, x: float) -> float {{ return x * {sign}9007199254740993 }}\nfn main() -> u8 {{ return 0 }}"
+        );
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(error.rule(), "lit.integer-as-float");
+        assert!(error.message().contains(&format!("{sign}9007199254740993 cannot be represented exactly as float; write {sign}9007199254740993.0 or use as")), "{error:?}");
+        assert_eq!(error.related.len(), 2, "{error:?}");
+        for ty in ["f32", "f64"] {
+            assert!(error.related.iter().any(|cause| cause.message().contains(&format!("{sign}9007199254740993 cannot be represented exactly as {ty} (nearest is {sign}9007199254740992.0); write {sign}9007199254740993.0 or use as"))), "{error:?}");
+        }
+    }
+    // f32では範囲外、f64では精度不足となる場合も、両方の理由を示す。
+    let source = b"fn h(x: float) -> float { return x * 340282366920938463463374607431768211457 }\nfn main() -> u8 { return 0 }";
+    let error = suz::compile(source).unwrap_err();
+    assert_eq!(error.rule(), "lit.integer-as-float");
+    assert_eq!(error.related.len(), 2, "{error:?}");
+    assert!(
+        error
+            .related
+            .iter()
+            .any(|cause| cause.rule() == "lit.float-range"
+                && cause.message().contains("out of range for f32")),
+        "{error:?}"
+    );
+    assert!(
+        error
+            .related
+            .iter()
+            .any(|cause| cause.rule() == "lit.integer-as-float"
+                && cause
+                    .message()
+                    .contains("as f64 (nearest is 340282366920938463463374607431768211456.0)")),
+        "{error:?}"
+    );
+}
+
+#[test]
 fn integer_float_literals_accept_exact_values_beyond_integer_type_ranges() {
     for (ty, exact, inexact) in [
         ("f32", "16777218", "16777219"),

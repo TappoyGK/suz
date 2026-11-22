@@ -1012,7 +1012,7 @@ fn literal(
     let Some(representative) = representative else {
         // 宣言の診断に任意のスカラー型名を使わず、記号的な名前を保つ。
         // 値域の判定には通常のリテラル規則を使う。
-        return Err(location.error(
+        let mut diagnostic = location.error(
             ErrorKind::InvalidSource,
             if floating && !ty.is_float() {
                 crate::diagnostic!(
@@ -1025,14 +1025,18 @@ fn literal(
                     .to_owned()
             } else if !floating
                 && results.iter().flatten().any(|result| {
-                    result.as_ref().is_err_and(|error| {
-                        error.rule() == "lit.integer-as-float"
-                    })
+                    result
+                        .as_ref()
+                        .is_err_and(|error| error.rule() == "lit.integer-as-float")
                 })
             {
                 crate::diagnostic!(
                     "lit.integer-as-float",
-                    "integer literal cannot be represented exactly as any permitted float type; write a floating-point literal or use as"
+                    "{}{} cannot be represented exactly as float; write {}{}.0 or use as",
+                    if negative { "-" } else { "" },
+                    text,
+                    if negative { "-" } else { "" },
+                    text
                 )
                 .to_owned()
             } else {
@@ -1042,7 +1046,40 @@ fn literal(
                 )
                 .to_owned()
             },
-        ));
+        );
+        if diagnostic.rule() == "lit.integer-as-float" {
+            // 記号的なfloatを任意の具体型で代表させず、各候補の診断を示す。
+            // 他の数値型との組み合わせで同じfloat型が現れても、一度だけ示す。
+            let mut seen = Vec::new();
+            for (i, result) in results.iter().enumerate() {
+                let Some(Type::Float(concrete)) = domain::at(ty, i) else {
+                    continue;
+                };
+                if seen.contains(&concrete) {
+                    continue;
+                }
+                seen.push(concrete);
+                if let Some(Err(cause)) = result {
+                    diagnostic
+                        .related
+                        .push(if cause.rule() == "lit.float-range" {
+                            location.error(
+                                ErrorKind::InvalidSource,
+                                crate::diagnostic!(
+                                    "lit.float-range",
+                                    "{}{} is out of range for {}",
+                                    if negative { "-" } else { "" },
+                                    text,
+                                    concrete.name()
+                                ),
+                            )
+                        } else {
+                            cause.clone()
+                        });
+                }
+            }
+        }
+        return Err(diagnostic);
     };
     bindings.defer_rule(|i| results[i].as_ref()?.as_ref().err().cloned());
     Ok(CheckedExpression {
