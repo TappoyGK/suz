@@ -315,7 +315,7 @@ fn main() -> u8 {
 
 主根拠：`[array.constant]`。
 
-補助根拠：`[array.dimension-bind]`・`[const.expression]`・`[array.bounds-proof]`・`[fn.value-call]`。
+補助根拠：`[array.dimension-bind]`・`[const.expression]`・`[array.bounds-proof]`・`[fn.value-call]`・`[array.constant-index]`。
 
 **ソース：**
 
@@ -394,7 +394,7 @@ fn main() -> u8 {
 
 主根拠：`[array.constant]`。
 
-補助根拠：`[array.lifetime]`・`[const.expression]`・`[array.iteration]`。
+補助根拠：`[array.lifetime]`・`[const.expression]`・`[array.iteration]`・`[arena.recursive-struct]`・`[arena.new-value]`・`[runtime.constant-array]`。
 
 **ソース：**
 
@@ -778,7 +778,7 @@ fn main() -> u8 {
 
 主根拠：`[array.dimension-origin]`。
 
-補助根拠：`[array.bounds-proof]`。
+補助根拠：`[array.bounds-proof]`・`[array.access-handler]`。
 
 **ソース：**
 
