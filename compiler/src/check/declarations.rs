@@ -19,7 +19,9 @@ pub(super) fn dependencies(
     names: &mut Vec<(String, Location)>,
 ) -> Result<(), Diagnostic> {
     match &expr.kind {
-        ExpressionKind::MethodCall { .. } | ExpressionKind::Receiver { .. } => {
+        ExpressionKind::ArrayInit { .. }
+        | ExpressionKind::MethodCall { .. }
+        | ExpressionKind::Receiver { .. } => {
             return Err(expr.location.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(

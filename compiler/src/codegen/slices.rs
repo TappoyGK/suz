@@ -12,6 +12,12 @@ pub(super) fn parts(
     expr: &CheckedExpression,
     context: &mut ExpressionContext,
 ) -> (String, String, String) {
+    if matches!(
+        expr.value,
+        Value::ArrayRead { .. } | Value::ArrayView { .. }
+    ) {
+        return super::arrays::read_parts(expr, context);
+    }
     let Value::Slice {
         target,
         start,

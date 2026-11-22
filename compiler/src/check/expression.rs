@@ -9,7 +9,7 @@ pub(super) mod blocks;
 mod branches;
 pub(in crate::check) mod casts;
 mod operators;
-mod slices;
+pub(super) mod slices;
 pub(crate) mod structs;
 
 use super::ir::{CheckedExpression, Value};
@@ -44,6 +44,20 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
     #[cfg(test)]
     super::generic::work();
     match &expr.kind {
+        ExpressionKind::ArrayInit {
+            values, lengths, ..
+        } => {
+            let element = values
+                .first()
+                .map(|v| operand_type(v, bindings).unwrap_or_else(|| default_type(v, bindings)))?;
+            Some(
+                bindings
+                    .structs
+                    .arrays
+                    .borrow_mut()
+                    .intern(element, lengths.len()),
+            )
+        }
         ExpressionKind::MethodCall {
             target,
             name,
@@ -84,7 +98,24 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
             };
             Some(bindings.function_types.borrow()[id].result)
         }
-        ExpressionKind::Slice { index, .. } => Some(if *index { Type::Char } else { Type::Text }),
+        ExpressionKind::Slice { target, index, .. } => {
+            if let Some(id) = operand_type(target, bindings).and_then(Type::array_id) {
+                let a = bindings.structs.arrays.borrow().get(id);
+                return Some(if !index {
+                    Type::Array(id).pointer()
+                } else if a.rank == 1 {
+                    a.element
+                } else {
+                    bindings
+                        .structs
+                        .arrays
+                        .borrow_mut()
+                        .intern(a.element, a.rank - 1)
+                        .pointer()
+                });
+            }
+            Some(if *index { Type::Char } else { Type::Text })
+        }
         ExpressionKind::New(value) => operand_type(value, bindings).map(Type::pointer),
         ExpressionKind::Deref(value) => operand_type(value, bindings).and_then(Type::pointee),
         ExpressionKind::Null => None,
@@ -450,7 +481,27 @@ pub(super) fn floating_operand(
     Ok(checked)
 }
 
+// 型検査と同時に必要な解析を記録し、無関係な本体をもう一度走査しない。
 fn expression_inner(
+    expr: &Expression,
+    required: Option<Type>,
+    bindings: &Scope,
+    widen: Widening,
+    argument: Option<super::generic::Family>,
+) -> Result<CheckedExpression, Diagnostic> {
+    let checked = expression_checked(expr, required, bindings, widen, argument)?;
+    super::arena::observe_type(checked.ty, bindings);
+    if matches!(
+        &checked.value,
+        Value::Call { .. } | Value::Invoke { .. } | Value::HandledCall { .. }
+    ) || matches!(&checked.value, Value::Comparison { methods, .. } if methods.iter().any(Option::is_some))
+    {
+        bindings.calls_used.set(true);
+    }
+    Ok(checked)
+}
+
+fn expression_checked(
     expr: &Expression,
     required: Option<Type>,
     bindings: &Scope,
@@ -509,6 +560,9 @@ fn expression_inner(
         super::exact::check(expr, inference_hint, bindings, false)?
     } else {
         match &expr.kind {
+            ExpressionKind::ArrayInit { .. } => {
+                super::arrays::initializer(expr, required, bindings)?
+            }
             ExpressionKind::MethodCall { .. } => {
                 super::methods::call(expr, inference_hint, bindings, None)?
             }
@@ -537,7 +591,7 @@ fn expression_inner(
             ExpressionKind::Invoke { target, arguments } => {
                 super::function_values::invoke(expr, target, arguments, bindings, None)?
             }
-            ExpressionKind::Slice { .. } => slices::check(expr, bindings)?,
+            ExpressionKind::Slice { .. } => super::arrays::read_or_text(expr, bindings)?,
             ExpressionKind::Template(parts) => {
                 super::text::template(parts, expr.location, bindings)?
             }
@@ -591,7 +645,9 @@ fn expression_inner(
             }
             ExpressionKind::Len(inner) => {
                 let operand = expression(inner, None, bindings)?;
-                if !operand.ty.is_text() {
+                if !operand.ty.is_text()
+                    && !(operand.ty.is_nonnull() && operand.ty.array_id().is_some())
+                {
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
                         if matches!(operand.ty, Type::Struct(_) | Type::Enum(_)) {
@@ -956,7 +1012,7 @@ fn literal(
     let Some(representative) = representative else {
         // 宣言の診断に任意のスカラー型名を使わず、記号的な名前を保つ。
         // 値域の判定には通常のリテラル規則を使う。
-        return Err(location.error(
+        let mut diagnostic = location.error(
             ErrorKind::InvalidSource,
             if floating && !ty.is_float() {
                 crate::diagnostic!(
@@ -967,6 +1023,22 @@ fn literal(
             } else if ty.is_integer() {
                 crate::diagnostic!("lit.range", "integer literal is out of range for int")
                     .to_owned()
+            } else if !floating
+                && results.iter().flatten().any(|result| {
+                    result
+                        .as_ref()
+                        .is_err_and(|error| error.rule() == "lit.integer-as-float")
+                })
+            {
+                crate::diagnostic!(
+                    "lit.integer-as-float",
+                    "{}{} cannot be represented exactly as float; write {}{}.0 or use as",
+                    if negative { "-" } else { "" },
+                    text,
+                    if negative { "-" } else { "" },
+                    text
+                )
+                .to_owned()
             } else {
                 crate::diagnostic!(
                     "lit.float-range",
@@ -974,7 +1046,40 @@ fn literal(
                 )
                 .to_owned()
             },
-        ));
+        );
+        if diagnostic.rule() == "lit.integer-as-float" {
+            // 記号的なfloatを任意の具体型で代表させず、各候補の診断を示す。
+            // 他の数値型との組み合わせで同じfloat型が現れても、一度だけ示す。
+            let mut seen = Vec::new();
+            for (i, result) in results.iter().enumerate() {
+                let Some(Type::Float(concrete)) = domain::at(ty, i) else {
+                    continue;
+                };
+                if seen.contains(&concrete) {
+                    continue;
+                }
+                seen.push(concrete);
+                if let Some(Err(cause)) = result {
+                    diagnostic
+                        .related
+                        .push(if cause.rule() == "lit.float-range" {
+                            location.error(
+                                ErrorKind::InvalidSource,
+                                crate::diagnostic!(
+                                    "lit.float-range",
+                                    "{}{} is out of range for {}",
+                                    if negative { "-" } else { "" },
+                                    text,
+                                    concrete.name()
+                                ),
+                            )
+                        } else {
+                            cause.clone()
+                        });
+                }
+            }
+        }
+        return Err(diagnostic);
     };
     bindings.defer_rule(|i| results[i].as_ref()?.as_ref().err().cloned());
     Ok(CheckedExpression {
@@ -1002,11 +1107,41 @@ pub(in crate::check) fn scalar_literal(
     match ty {
         Type::Integer(ty) if !floating => integer_literal(text, negative, ty, location),
         Type::Float(ty) => {
-            if negative {
-                float_literal(&format!("-{text}"), ty, location)
+            let spelling = if negative {
+                format!("-{text}")
             } else {
-                float_literal(text, ty, location)
+                text.to_owned()
+            };
+            let checked = float_literal(&spelling, ty, location)?;
+            if !floating {
+                let Value::Float(bits) = checked.value else {
+                    unreachable!()
+                };
+                let value = match ty {
+                    FloatType::F32 => f64::from(f32::from_bits(bits as u32)),
+                    FloatType::F64 => f64::from_bits(bits),
+                };
+                // 整数型へのキャストは大きな値を飽和させるため使わない。
+                // 整数リテラルを丸めた値は整数なので、小数点以下0桁で
+                // 正確な十進表記を取り出し、元の桁列と比較できる。
+                let digits = text.replace('_', "");
+                if format!("{:.0}", value.abs()).trim_start_matches('0')
+                    != digits.trim_start_matches('0')
+                {
+                    return Err(location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "lit.integer-as-float",
+                            "{} cannot be represented exactly as {} (nearest is {:.1}); write {}.0 or use as",
+                            spelling,
+                            ty.name(),
+                            value,
+                            spelling
+                        ),
+                    ));
+                }
             }
+            Ok(checked)
         }
         _ => Err(location.error(
             ErrorKind::InvalidSource,

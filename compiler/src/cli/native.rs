@@ -196,6 +196,9 @@ _BitInt(128) suz_compiler_probe;
         ] {
             command.arg(root.join(path));
         }
+        if c.contains("#define SUZ_LOG_ARENA 1\n") {
+            command.arg(root.join("runtime/suz_arena_report.c"));
+        }
         let result = command
             .args(&options.foreign.args)
             .args(["-lm", "-o"])

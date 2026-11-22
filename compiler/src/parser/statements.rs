@@ -283,9 +283,14 @@ impl Parser<'_, '_> {
                 Ok(Statement::Objection(body))
             }
             Kind::Keyword("arena") => {
+                let location = self.location();
                 self.cursor += 1;
                 let (body, end) = self.block()?;
-                Ok(Statement::Arena { body, end })
+                Ok(Statement::Arena {
+                    location,
+                    body,
+                    end,
+                })
             }
             Kind::Symbol("#" | "." | "(") => self.indirect_statement(),
 
@@ -322,9 +327,11 @@ impl Parser<'_, '_> {
                 };
                 self.cursor += 1;
                 super::names::check(super::names::Shape::Value, &name, location)?;
+                let mut dimensions = Vec::new();
                 let annotation = if self.token().kind == Kind::Symbol(":") {
                     self.cursor += 1;
-                    let ty = self.stored_type()?;
+                    let (ty, names) = self.annotated_array_type(pointer && !mutable, false)?;
+                    dimensions = names;
                     if ty == Type::Void {
                         return Err(self.error(
                             ErrorKind::InvalidSource,
@@ -349,6 +356,7 @@ impl Parser<'_, '_> {
                     name,
                     location,
                     annotation,
+                    dimensions,
                     initializer: Box::new(initializer),
                 })
             }
@@ -449,7 +457,22 @@ impl Parser<'_, '_> {
                 if self.token().kind == Kind::Symbol("#") {
                     self.finish_indirect_statement(target, false)
                 } else {
-                    self.check_value_context()?;
+                    if let Err(error) = self.check_value_context() {
+                        let mut place = &target;
+                        while let ExpressionKind::Group(inner) = &place.kind {
+                            place = inner;
+                        }
+                        if matches!(place.kind, ExpressionKind::Slice { .. }) {
+                            return Err(self.error(
+                                ErrorKind::InvalidSource,
+                                crate::diagnostic!(
+                                    "array.write",
+                                    "use a#[i] = value to write an element; assigning to an index or slice without # is not allowed"
+                                ),
+                            ));
+                        }
+                        return Err(error);
+                    }
                     Ok(Statement::Expression(target))
                 }
             }

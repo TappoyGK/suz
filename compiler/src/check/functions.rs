@@ -90,7 +90,6 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
                 }),
                 needs: function.needs.clone(),
                 method,
-                arena: function.arena,
                 external: false,
                 id,
                 parameters: function
@@ -225,11 +224,28 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
             break;
         }
     }
+    // 関数型がスカラーだけでも、クロージャはポインタを捕捉できる。
+    // 型検査済みの全本体・捕捉・具体化でポインタがなければ、寿命解析自体が不要。
+    let arena_warnings = if globals.program_pointers_used.get() {
+        super::arena::check_program(
+            &mut functions,
+            program.functions.len()..program.functions.len() + program.externs.len(),
+            &program.externs,
+            globals.program_loops_used.get(),
+        )?
+    } else {
+        for function in &mut functions {
+            function.lifetime = None;
+        }
+        Vec::new()
+    };
     warnings.sort_by_key(|l| (l.line, l.column));
     // 整数演算の箇所は汎用検査と具体化の両方で集まるため、ソースの演算ごとに一度だけ報告する。
     // 比較・除算の候補は汎用検査からだけ集まる。
     warnings.dedup_by_key(|l| (l.line, l.column));
     Ok(CheckedProgram {
+        arrays: globals.structs.arrays.borrow().clone(),
+        arena_warnings,
         externs: program.externs.clone(),
         external_base: program.functions.len(),
         function_types: globals.function_types.borrow().clone(),
@@ -434,9 +450,10 @@ fn instance_error(
 
 pub(super) fn check_function(
     function: &crate::ast::Function,
-    scope: Scope,
+    mut scope: Scope,
     id: usize,
 ) -> Result<(CheckedFunction, Vec<crate::ast::Location>), Diagnostic> {
+    scope.array_bounds = Default::default();
     let mut references = BTreeMap::new();
     if let Some(method) = function.method.filter(|m| m.mutable) {
         references.insert(
@@ -457,22 +474,10 @@ pub(super) fn check_with_captures(
 ) -> Result<(CheckedFunction, Vec<crate::ast::Location>), Diagnostic> {
     control::validate_return_positions(&function.statements)?;
     scope.trusted_block = false;
-    scope.arena_depth = usize::from(function.arena);
-    scope.arena_used = Default::default();
-    if !function.arena
-        && super::arena::contains(
-            scope.resolve_type_at(function.result, function.location)?,
-            &scope,
-        )
-    {
-        return Err(function.location.error(
-            ErrorKind::InvalidSource,
-            crate::diagnostic!(
-                "arena.parameter",
-                "only arena fn can return values containing arena pointers"
-            ),
-        ));
-    }
+    scope.arena_depth = 1;
+    scope.lifetime_used = Default::default();
+    scope.calls_used = Default::default();
+    scope.callables_used = Default::default();
     scope.recovery = None;
     scope.loop_depth = 0;
     let mut warnings = Vec::new();
@@ -484,6 +489,7 @@ pub(super) fn check_with_captures(
     }
     scope.errors = Rc::new(function.errors.clone());
     scope.result = scope.resolve_type_at(function.result, function.location)?;
+    super::arena::observe_type(scope.result, &scope);
     let mut declared = Vec::new();
     for (parameter_id, parameter) in function.parameters.iter().enumerate() {
         if declared.contains(&parameter.name) {
@@ -502,6 +508,7 @@ pub(super) fn check_with_captures(
             ));
         }
         let parameter_type = scope.resolve_type_at(parameter.ty, parameter.location)?;
+        super::arena::observe_type(parameter_type, &scope);
         if let Some(binding) = references.get(&parameter.name) {
             let mut binding = binding.clone();
             binding.id = parameter_id;
@@ -524,24 +531,55 @@ pub(super) fn check_with_captures(
             },
         );
     }
+    for binding in scope.locals.values().cloned().collect::<Vec<_>>() {
+        super::arrays::bounds::register(
+            binding.id,
+            binding.ty,
+            binding.mutable,
+            scope
+                .array_bounds
+                .arrays
+                .get(&binding.id)
+                .cloned()
+                .unwrap_or_default(),
+            &mut scope,
+        );
+    }
     let mut next_id = function.parameters.len();
-    let statements = statements::block_with_bindings(
+    let mut statements = Vec::new();
+    let mut dimension_names = BTreeMap::new();
+    for (parameter_id, parameter) in function.parameters.iter().enumerate() {
+        let ty = scope.locals[&parameter.name].ty;
+        super::arrays::dimensions::bind(
+            &parameter.dimensions,
+            parameter_id,
+            ty,
+            &mut scope,
+            &mut next_id,
+            &mut declared,
+            &mut statements,
+            Some(&mut dimension_names),
+        )?;
+    }
+    statements.extend(statements::block_with_bindings(
         &function.statements,
         &mut scope,
         &mut next_id,
         0,
         declared,
-    )?;
+    )?);
     for (name, binding) in references {
         if scope.locals[name].assigned.get() {
             binding.assigned.set(true);
         }
     }
-    super::arena::check_lifetimes(&statements, &scope, function, references)?;
+    let lifetime = super::arena::check_lifetimes(&scope, function, references, id)?;
     control::check_return_shape(function)?;
     warnings.extend(diagnostics::unhandled_arithmetic(&statements));
     Ok((
         CheckedFunction {
+            name: function.name.clone(),
+            lifetime,
             mutable_receiver: function.method.is_some_and(|m| m.mutable),
             id,
             parameters: function
@@ -586,15 +624,7 @@ pub(super) fn call(
             },
         )
     })?;
-    if signature.arena && scope.arena_depth == 0 {
-        return Err(expr.location.error(
-            ErrorKind::InvalidSource,
-            crate::diagnostic!(
-                "arena.fn-call",
-                "arena fn requires an enclosing arena or arena fn"
-            ),
-        ));
-    }
+
     if signature.external && !scope.trusted_block {
         return Err(expr.location.error(
             ErrorKind::InvalidSource,
@@ -651,7 +681,6 @@ pub(super) fn call(
             value: Value::Call {
                 id,
                 arguments,
-                arena: signature.arena,
                 location: expr.location,
             },
         },

@@ -1,7 +1,6 @@
 #include "suz_env.h"
 
 #include <errno.h>
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -15,10 +14,6 @@ void suz_env_free(void *ptr) {
 
 void suz_env_log(suz_log_level level, const char *text, size_t len) {
     (void)level; /* この引数が意図的に未使用であることをコンパイラへ示す。 */
-#ifdef SIGPIPE
-    /* 閉じた出力パイプは出力の失敗として扱い、プロセスの異常終了にしない。 */
-    (void)signal(SIGPIPE, SIG_IGN);
-#endif
     while (len != 0) {
         errno = 0;
         size_t written = fwrite(text, 1, len, stderr);

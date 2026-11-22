@@ -64,21 +64,49 @@ impl Parser<'_, '_> {
         if !write_target && self.token().kind == Kind::Symbol("#") {
             let location = self.location();
             self.cursor += 1;
-            let Kind::Ident(name) = self.token().kind else {
-                return Err(self.error(
-                    ErrorKind::InvalidSource,
-                    crate::diagnostic!("assign.target", "expected a field name after #"),
-                ));
-            };
-            self.cursor += 1;
-            target = self.node(
-                ExpressionKind::Field {
-                    target: Box::new(target),
-                    name: name.into(),
-                },
-                location,
-            )?;
-            write_target = true;
+            if self.token().kind == Kind::Symbol("[") {
+                let location = self.location();
+                self.cursor += 1;
+                let index = if self.token().kind == Kind::Symbol(":") {
+                    None
+                } else {
+                    Some(self.expression()?)
+                };
+                if index.is_none() || self.token().kind == Kind::Symbol(":") {
+                    return Err(self.error(ErrorKind::InvalidSource, crate::diagnostic!(
+                        "array.write", "use a#[i] = value to write an element; assigning to a slice is not allowed"
+                    )));
+                }
+                let index = index.unwrap();
+                self.expect(FixedToken::Symbol("]"))?;
+                target = self.node(
+                    ExpressionKind::Slice {
+                        target: Box::new(target),
+                        start: Some(Box::new(index)),
+                        end: None,
+                        index: true,
+                        fallback: None,
+                    },
+                    location,
+                )?;
+                write_target = true;
+            } else {
+                let Kind::Ident(name) = self.token().kind else {
+                    return Err(self.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!("assign.target", "expected a field name after #"),
+                    ));
+                };
+                self.cursor += 1;
+                target = self.node(
+                    ExpressionKind::Field {
+                        target: Box::new(target),
+                        name: name.into(),
+                    },
+                    location,
+                )?;
+                write_target = true;
+            }
         }
         let location = self.location();
         let operator = match self.token().kind {

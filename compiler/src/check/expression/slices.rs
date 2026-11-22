@@ -13,7 +13,7 @@ use crate::{
     ast::{Expression, ExpressionKind, FailureHandler, Type},
 };
 
-pub(super) fn check(expr: &Expression, bindings: &Scope) -> Result<CheckedExpression, Diagnostic> {
+pub(crate) fn check(expr: &Expression, bindings: &Scope) -> Result<CheckedExpression, Diagnostic> {
     let ExpressionKind::Slice {
         target,
         start,

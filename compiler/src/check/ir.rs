@@ -8,11 +8,14 @@ use crate::ast::{BinaryOperator, ComparisonOperator, Location, LogicalOperator, 
 /// 型・名前を解決した関数、入口の関数番号、文字列定数と診断候補を保持する。
 /// 型宣言はASTの表現を共有し、関数は必要な汎用型の具体化も含めてC生成へ渡す。
 pub(crate) struct CheckedProgram {
+    pub arrays: crate::ast::arrays::Types,
     pub external_base: usize,
     pub externs: Vec<crate::ast::ExternFunction>,
     pub function_types: Vec<crate::ast::FunctionType>,
     /// 整数除算を含む浮動小数点演算の警告候補。
     pub division_warnings: Vec<Location>,
+    /// 反復の外へ残らず、外側のArenaへ蓄積する確保。
+    pub arena_warnings: Vec<(Location, String, Vec<crate::Diagnostic>)>,
     /// 定数として決まる比較の位置と結果。
     pub comparison_warnings: Vec<(Location, bool)>,
     /// 実行開始時に登録する文字列定数。
@@ -31,6 +34,10 @@ pub(crate) struct CheckedProgram {
 /// 名前を関数番号へ置き換え、仮引数と戻り値の型、本体のIRを保持する。
 #[derive(Clone)]
 pub(crate) struct CheckedFunction {
+    /// 計測結果に表示するソース上の関数名。
+    pub name: String,
+    /// 関数群がそろうまで保持する寿命制約。呼び出し要約の検査後に取り除く。
+    pub lifetime: Option<super::arena::LifetimeBody>,
     pub mutable_receiver: bool,
     pub id: usize,
     pub parameters: Vec<Type>,
@@ -46,6 +53,7 @@ pub(crate) struct CheckedFunction {
 #[derive(Clone)]
 pub(crate) enum CheckedStatement {
     Arena {
+        location: Location,
         body: Vec<CheckedStatement>,
         end: Location,
     },
@@ -85,7 +93,8 @@ pub(crate) enum CheckedStatement {
     },
     For {
         id: usize,
-        start: CheckedExpression,
+        variable_type: Type,
+        start: Box<CheckedExpression>,
         end: Option<Box<CheckedExpression>>,
         inclusive: bool,
         reverse: bool,
@@ -229,6 +238,42 @@ pub(crate) enum Value {
         target: Box<CheckedExpression>,
         mutable: bool,
     },
+    Array {
+        values: Vec<CheckedExpression>,
+        lengths: Vec<CheckedExpression>,
+        repeated: bool,
+        // 定数で決まる内側からの要素数。対象C環境のsizeofでもコンパイル時に検査する。
+        constant_counts: Vec<u64>,
+    },
+    /// 要素の住所。添字は書き込み先の確定時に一度だけ評価する。
+    ArrayElement {
+        target: Box<CheckedExpression>,
+        indices: Vec<(CheckedExpression, Location, bool)>,
+    },
+    /// 実体を複製しない部分配列・切り出し。途中の失敗は末尾のハンドラーへ渡す。
+    ArrayView {
+        target: Box<CheckedExpression>,
+        start: Option<Box<CheckedExpression>>,
+        end: Option<Box<CheckedExpression>>,
+        index: bool,
+        proven: bool,
+        location: Location,
+        handler: Option<CheckedHandler>,
+    },
+    ArrayLength {
+        target: Box<CheckedExpression>,
+        dimension: usize,
+    },
+    ArrayDimensionGuard {
+        name: String,
+        left: Box<CheckedExpression>,
+        right: Box<CheckedExpression>,
+        location: Location,
+    },
+    ArrayRead {
+        address: Box<CheckedExpression>,
+        handler: Option<CheckedHandler>,
+    },
     New {
         value: Box<CheckedExpression>,
         location: Location,
@@ -255,7 +300,10 @@ pub(crate) enum Value {
         call: Box<CheckedExpression>,
         handler: Box<CallHandler>,
     },
-    Function(usize),
+    Function {
+        id: usize,
+        location: Location,
+    },
     FunctionBorrow(Box<CheckedExpression>),
     Closure(Box<CheckedClosure>),
     Invoke {
@@ -305,7 +353,6 @@ pub(crate) enum Value {
     },
     Void,
     Call {
-        arena: bool,
         location: Location,
         id: usize,
         arguments: Vec<CheckedExpression>,
@@ -366,6 +413,8 @@ pub(crate) enum Value {
         right: Box<CheckedExpression>,
     },
     Comparison {
+        // 比較メソッドの呼び出しによる診断を、各演算子の位置へ対応させる。
+        locations: Vec<Location>,
         // 空なら全て組み込み比較。Some(id)は比較メソッドの具体化済み関数ID。
         methods: Vec<Option<usize>>,
         operators: Vec<ComparisonOperator>,
@@ -403,7 +452,7 @@ macro_rules! constant_children_visitor {
                     }
                     return handler(h, visit);
                 }
-                Self::Receiver { target: v, .. } | Self::New { value: v, .. } | Self::Deref(v) | Self::NonNull(v) | Self::CBytes(v) | Self::CByteLen { operand: v, .. } | Self::FunctionBorrow(v) | Self::Len(v) | Self::Cast(v) | Self::Negate(v) | Self::Truncate(v) | Self::BitNot(v)
+                Self::ArrayLength { target: v, .. } | Self::Receiver { target: v, .. } | Self::New { value: v, .. } | Self::Deref(v) | Self::NonNull(v) | Self::CBytes(v) | Self::CByteLen { operand: v, .. } | Self::FunctionBorrow(v) | Self::Len(v) | Self::Cast(v) | Self::Negate(v) | Self::Truncate(v) | Self::BitNot(v)
                 | Self::Not(v) | Self::TextView(v) | Self::Intern { operand: v, .. }
                 | Self::Field { target: v, .. } => visit(v),
                 // constant_structはオペランドの解析から得た具体的なキャッシュであり、ソースのオペランドではない。
@@ -440,7 +489,22 @@ macro_rules! constant_children_visitor {
                         visit(value);
                     }
                 }
-                Self::Slice { target, start, end, handler: h, .. } => {
+                Self::Array { values, lengths, .. } => {
+                    for v in values { visit(v); }
+                    for v in lengths { visit(v); }
+                    return true;
+                }
+                Self::ArrayDimensionGuard { left, right, .. } => { visit(left); visit(right); return true; }
+                Self::ArrayElement { target, indices } => {
+                    visit(target);
+                    for (v, _, _) in indices { visit(v); }
+                    return true;
+                }
+                Self::ArrayRead { address, handler: h } => {
+                    visit(address);
+                    return handler(h, visit);
+                }
+                Self::ArrayView { target, start, end, handler: h, .. } | Self::Slice { target, start, end, handler: h, .. } => {
                     visit(target);
                     for value in [start, end].into_iter().flatten() {
                         visit(value);
@@ -448,7 +512,7 @@ macro_rules! constant_children_visitor {
                     return handler(h, visit);
                 }
                 Self::Null | Self::CIntegerLiteral { .. } | Self::GenericNumericLiteral { .. } | Self::Integer { .. } | Self::Float(_)
-                | Self::Function(_) | Self::Bool(_) | Self::Text { .. } => {}
+                | Self::Function { .. } | Self::Bool(_) | Self::Text { .. } => {}
                 Self::Panic { .. } | Self::HandledCall { .. } | Self::Closure(_) | Self::Local(_) | Self::Void | Self::Invoke { .. } | Self::Call { .. } | Self::Block { .. }
                 | Self::Match { .. } | Self::If { .. } | Self::CastReturn { .. } => return false,
             }

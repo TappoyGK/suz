@@ -165,7 +165,6 @@ fn main() -> u8 {
         "fn main() -> u8 { fix f: fn Identity[i32] = fn identity[i32]\nreturn 0 }",
         "fn bad[T](f: fn Identity[T]) -> static fn Identity[T] { return f }\nfn main() -> u8 { return 0 }",
         "fn bad[T](f: fn Identity[T]) -> void { fix saved = f }\nfn main() -> u8 { return 0 }",
-        "arena fn allocate[T](x: T) -> ptr T { return new x }\nfn main() -> u8 { fix f = fn allocate[i32]\nreturn 0 }",
         "fn main() -> u8 { arena { var ptr saved: ptr? i32 = null\narena { fix ptr p = new (1 as i32)\nsaved = (fn identity[ptr i32])(p) } }\nreturn 0 }",
     ] {
         let source = format!("{prefix}{body}");

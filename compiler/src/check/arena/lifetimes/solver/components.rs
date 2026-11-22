@@ -1,7 +1,10 @@
 //! 無条件のコピーの閉路と、入力が1つだけの値は、伝播中に同じ代表ノードを使う。
 use super::*;
 
-pub(super) fn representatives(analysis: &Analysis<'_>, constraints: &[Constraint]) -> Vec<Node> {
+pub(in crate::check::arena::lifetimes) fn representatives(
+    analysis: &Analysis,
+    constraints: &[Constraint],
+) -> Vec<Node> {
     let count = analysis.targets.len();
     let mut outgoing = vec![Vec::new(); count];
     let mut incoming = vec![Vec::new(); count];
@@ -11,38 +14,40 @@ pub(super) fn representatives(analysis: &Analysis<'_>, constraints: &[Constraint
             Constraint::Copy(dst, src)
             | Constraint::Load(dst, Place::Direct(src))
             | Constraint::Store(Place::Direct(dst), src, _) => (*dst, *src),
-            Constraint::Load(dst, Place::Indirect(..)) | Constraint::Address(dst, _) => {
+            Constraint::Load(dst, Place::Indirect(..))
+            | Constraint::Address(dst, _)
+            | Constraint::Limit(dst, _, _) => {
                 dynamic[*dst] = true;
                 continue;
             }
             _ => continue,
         };
-        // 領域で候補を絞る辺は等値関係にならないので、閉路の判定から除く。
-        if !analysis.call_regions.contains_key(&dst) {
-            outgoing[src].push(dst);
-            incoming[dst].push(src);
-        }
+        outgoing[src].push(dst);
+        incoming[dst].push(src);
     }
     // 読み出しや一時値に入力が1つしかなければ、その値は入力と等しい。
     // 逆辺を足して同じ成分へまとめる。保存場所は間接書込みで変わるので対象外。
+    // 検査専用の返却先はソースからアドレスを取れず、間接書込みもないのでまとめられる。
     // これにより、同じ変数を何度読み出して保存しても、同じコピー辺を重複して作らない。
     for dst in 0..count {
         if !dynamic[dst]
-            && !analysis.cells.contains_key(&dst)
-            && !analysis.call_regions.contains_key(&dst)
+            && (!analysis.cells.contains_key(&dst)
+                || analysis.returned.values().any(|&node| node == dst))
             && analysis.targets[dst].is_empty()
             && incoming[dst].len() == 1
         {
             let src = incoming[dst][0];
-            if !analysis.call_regions.contains_key(&src) {
-                outgoing[dst].push(src);
-            }
+            outgoing[dst].push(src);
             // 逆辺を追加しながら入力数を判定すると順序依存になるので、ここではoutgoingだけを変える。
         }
     }
-    for edges in &mut incoming {
-        edges.clear();
-    }
+    partition(&outgoing)
+}
+
+/// 有向グラフの強連結成分。同じ成分には同じ代表ノードを返す。
+pub(in crate::check::arena::lifetimes) fn partition(outgoing: &[Vec<Node>]) -> Vec<Node> {
+    let count = outgoing.len();
+    let mut incoming = vec![Vec::new(); count];
     for (src, edges) in outgoing.iter().enumerate() {
         for &dst in edges {
             incoming[dst].push(src);

@@ -5,6 +5,7 @@
 
 mod allows;
 mod arena;
+mod arrays;
 mod branches;
 mod closures;
 mod enums;
@@ -251,32 +252,13 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
                     .end;
             }
             Kind::Keyword("arena") => {
-                let location = p.location();
-                p.cursor += 1;
-                if p.token().kind != Kind::Keyword("fn") {
-                    return Err(location.error(
-                        ErrorKind::InvalidSource,
-                        crate::diagnostic!("arena.fn", "expected arena fn at top level"),
-                    ));
-                }
-                let mut function = p.function(main)?;
-                if function.name == "main" {
-                    return Err(location.error(
-                        ErrorKind::InvalidSource,
-                        crate::diagnostic!("arena.fn", "main cannot be an arena fn"),
-                    ));
-                }
-                if function.method.is_some_and(|m| m.operator.is_some()) {
-                    return Err(location.error(
-                        ErrorKind::InvalidSource,
-                        crate::diagnostic!(
-                            "operator.method",
-                            "operator methods cannot be arena fn"
-                        ),
-                    ));
-                }
-                function.arena = true;
-                functions.push(function);
+                return Err(p.location().error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "arena.default",
+                        "arena fn has been removed; declare fn instead"
+                    ),
+                ));
             }
             Kind::Keyword("fn") => {
                 let function = p.function(main)?;
@@ -318,6 +300,7 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
     }
     Ok(Program {
         need_groups: groups,
+        arrays: applications.borrow().arrays.clone(),
         applications: applications.borrow().entries.clone(),
         externs,
         allows: p.allows,

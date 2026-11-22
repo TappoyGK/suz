@@ -2,14 +2,26 @@
 mod allows;
 #[path = "spec_cases/arena.rs"]
 mod arena;
+#[path = "spec_cases/arena_accumulation.rs"]
+mod arena_accumulation;
 #[path = "spec_cases/arena_functions.rs"]
 mod arena_functions;
 #[path = "spec_cases/arena_fuzz.rs"]
 mod arena_fuzz;
+#[path = "spec_cases/arena_report.rs"]
+mod arena_report;
+#[path = "spec_cases/arena_tree.rs"]
+mod arena_tree;
 #[path = "spec_cases/arithmetic.rs"]
 mod arithmetic;
 #[path = "spec_cases/arithmetic_handlers.rs"]
 mod arithmetic_handlers;
+#[path = "spec_cases/array_bounds.rs"]
+mod array_bounds;
+#[path = "spec_cases/array_fuzz.rs"]
+mod array_fuzz;
+#[path = "spec_cases/arrays.rs"]
+mod arrays;
 #[path = "spec_cases/batch.rs"]
 mod batch;
 #[path = "spec_cases/c_build.rs"]
@@ -92,6 +104,8 @@ mod panic;
 mod panics;
 #[path = "spec_cases/ranges.rs"]
 mod ranges;
+#[path = "spec_cases/readme.rs"]
+mod readme;
 #[path = "spec_cases/runtime.rs"]
 mod runtime;
 #[path = "spec_cases/shifts.rs"]

@@ -20,6 +20,53 @@ pub(super) fn c_string(text: &str) -> String {
     result
 }
 
+/// 両辺とも保存や呼び出し、失敗がなければ、Cの評価順でも読み取り結果は変わらない。
+/// それ以外は従来どおり一時変数へ左から保存する。
+fn unordered_read(expr: &CheckedExpression, context: &mut ExpressionContext) -> bool {
+    match &expr.value {
+        Value::Local(_) | Value::Float(_) | Value::Integer { .. } => true,
+        Value::Binary { left, right, .. } if expr.ty.is_float() => {
+            unordered_read(left, context) && unordered_read(right, context)
+        }
+        Value::Negate(value) => unordered_read(value, context),
+        Value::ArrayRead {
+            address,
+            handler: None,
+        } => {
+            let Value::ArrayElement { target, indices } = &address.value else {
+                return false;
+            };
+            matches!(target.value, Value::Local(id) if context.immutable_locals.contains(&id))
+                && indices.iter().all(|(index, _, proven)| {
+                    *proven && super::arrays::proven_index(index, context).is_some()
+                })
+        }
+        _ => false,
+    }
+}
+
+/// 有限のIEEE値は丸めを挟まない16進Cリテラルにする。NaNのペイロードは従来のビットコピーで保つ。
+fn float_literal(bits: u64, ty: crate::ast::FloatType) -> Option<String> {
+    use crate::ast::FloatType;
+    let (fraction_bits, exponent_bits, bias, suffix) = match ty {
+        FloatType::F32 => (23, 8, 127, "f"),
+        FloatType::F64 => (52, 11, 1023, ""),
+    };
+    let exponent = (bits >> fraction_bits) & ((1 << exponent_bits) - 1);
+    if exponent == (1 << exponent_bits) - 1 {
+        return None;
+    }
+    let sign = if bits >> (fraction_bits + exponent_bits) != 0 {
+        "-"
+    } else {
+        ""
+    };
+    let fraction = bits & ((1 << fraction_bits) - 1);
+    let significand = fraction | if exponent == 0 { 0 } else { 1 << fraction_bits };
+    let power = exponent.max(1) as i32 - bias - fraction_bits;
+    Some(format!("({sign}0x{significand:x}p{power}{suffix})"))
+}
+
 pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionContext) -> String {
     context.uses_c_pointer |= matches!(expr.ty, crate::ast::Type::CPointer);
     context.uses_c_integer |= matches!(expr.ty, crate::ast::Type::CInteger(_));
@@ -33,12 +80,31 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
         return super::exact::stored(expr, context);
     }
     match expr.value {
+        Value::Array { .. } => unreachable!("array initializer is emitted by new"),
+        Value::ArrayElement { .. } => super::arrays::address(expr, context),
+        Value::ArrayView { ref handler, .. } | Value::ArrayRead { ref handler, .. } => {
+            let (setup, condition, value) = super::arrays::read_parts(expr, context);
+            if handler.is_none() {
+                return format!("({setup}, (void)({condition}), {value})");
+            }
+            let Some(CheckedHandler::Value(fallback)) = handler else {
+                unreachable!("array return handlers are lowered")
+            };
+            format!(
+                "({setup}, {condition} ? {value} : ({}))",
+                expression(fallback, context)
+            )
+        }
         Value::Receiver { ref target, .. } => expression(target, context),
         Value::New {
             ref value,
             location,
         } => super::arena::allocate(value, expr.ty, location, context),
         Value::Deref(ref value) => format!("(*({}))", expression(value, context)),
+        Value::NonNull(ref value) if value.ty.array_id().is_some() => {
+            format!("(({}).data != NULL)", expression(value, context))
+        }
+        Value::Null if expr.ty.array_id().is_some() => format!("({}){{0}}", expr.ty.c_name()),
         Value::NonNull(ref value) => format!("({} != NULL)", expression(value, context)),
         Value::Null => "NULL".into(),
         Value::CBytes(ref operand) => super::ffi::bytes(operand, context),
@@ -58,7 +124,7 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             ref handler,
         } => super::errors::expression(call, handler, context),
         Value::Closure(ref closure) => super::closures::emit(closure, expr.ty, context),
-        Value::Function(id) => format!("suz_fn_{id}"),
+        Value::Function { id, .. } => format!("suz_fn_{id}"),
         Value::FunctionBorrow(ref value) => super::functions::borrow(value, context),
         Value::Invoke {
             ref target,
@@ -250,6 +316,9 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             format!("({setup}, {condition} ? {converted} : ({fallback}))")
         }
         Value::Cast(ref inner) => {
+            if expr.ty.array_id().is_some() {
+                return expression(inner, context);
+            }
             if inner.ty == crate::ast::Type::Exact {
                 let value = expression(inner, context);
                 return super::exact::converted(expr.ty, &value, context);
@@ -269,10 +338,35 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             format!("({})({})", expr.ty.c_name(), expression(inner, context))
         }
 
+        Value::ArrayLength {
+            ref target,
+            dimension,
+        } => {
+            format!("({}).lengths[{dimension}]", expression(target, context))
+        }
+        Value::ArrayDimensionGuard {
+            ref name,
+            ref left,
+            ref right,
+            location,
+        } => {
+            context.uses_arena = true;
+            let left = expression(left, context);
+            let right = expression(right, context);
+            format!(
+                "(({left}) == ({right}) ? (void)0 : suz_array_dimensions({}, {}, {}, {}, {left}, {right}))",
+                c_string(&context.source_name),
+                location.line,
+                location.column,
+                c_string(name)
+            )
+        }
         Value::Len(ref inner) => {
             let value = expression(inner, context);
             // 実体またはビューが保持する個数を読む。オペランドは一度だけ評価する。
-            if inner.ty == crate::ast::Type::Symbol {
+            if inner.ty.array_id().is_some() {
+                format!("({value}).lengths[0]")
+            } else if inner.ty == crate::ast::Type::Symbol {
                 format!("suz_text_count({value})")
             } else {
                 format!("((int32_t)({value}).scalars)")
@@ -283,8 +377,11 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             let crate::ast::Type::Float(ty) = expr.ty else {
                 unreachable!()
             };
-            context.float_helpers.insert(ty);
             context.float_types.insert(ty);
+            if let Some(literal) = float_literal(bits, ty) {
+                return literal;
+            }
+            context.float_helpers.insert(ty);
             format!("suz_{}(UINT64_C({bits}))", ty.name())
         }
         Value::Match {
@@ -361,6 +458,16 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             ref left,
             ref right,
         } => {
+            if expr.ty.is_float() && unordered_read(left, context) && unordered_read(right, context)
+            {
+                return format!(
+                    "({})(({}) {} ({}))",
+                    expr.ty.c_name(),
+                    expression(left, context),
+                    operator.c_symbol(),
+                    expression(right, context)
+                );
+            }
             let index = context.temporaries.len();
             context.temporaries.extend([left.ty, right.ty]);
             let left = expression(left, context);
@@ -404,6 +511,7 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             ref methods,
             ref operators,
             ref operands,
+            ..
         } => {
             use crate::ast::{IntegerType, Type};
             let operands: Vec<_> = operands

@@ -1,14 +1,16 @@
 # Suz 仕様例集
 
+文書の役割と編集時の判断基準は[仕様の執筆・レビュー基準](spec-writing.md)を参照すること。
+
 [言語仕様](spec.md)に対する受理・拒否・実行結果の確認例。期待結果は仕様から導いたものであり、Suzコンパイラでの実行結果ではない。
 
 ## 分類とID
 
 例は `spec-cases/` の分野別ファイルに分ける。書式と全体の件数はこのファイルで管理する。
 
-各例には、何を確かめる例なのかを示す主根拠を1つ付け、その規則が属する仕様の章に配置する。関連するほかの規則は補助根拠として記載する。
+各例には、何を確かめる例なのかを示す主根拠を1つ付け、対象の分野に配置する。関連するほかの規則は補助根拠として記載する。目次の「対応する仕様」には、その分野の例の主根拠が属する章をすべて記載する。
 
-章は仕様の順に並べ、章内は主根拠の掲載順を基本とする。同じ主根拠の例は、基本的な動作、境界条件、ほかの機能との組み合わせの順にまとめ、対応する受理例とエラー例を近くに置く。
+分野は仕様の順に並べ、分野内は主根拠の掲載順を基本とする。同じ主根拠の例は、基本的な動作、境界条件、ほかの機能との組み合わせの順にまとめ、対応する受理例とエラー例を近くに置く。
 
 IDは分野の接頭辞と番号で構成し、期待結果の種類を含めない。採番はリリース時に固定し、リリース済みのIDは振り直さない。リリース前は掲載順や欠番を整理して採番し直せる。その際は、文書内のファイル名や実行対象IDの参照も更新する。
 
@@ -113,31 +115,51 @@ IDは分野の接頭辞と番号で構成し、期待結果の種類を含めな
 
 | 分野 | ID接頭辞 | 対応する仕様 | 件数 |
 |---|---|---|---:|
-| [字句](spec-cases/lex.md) | `lex` | 第3章 | 35 |
+| [字句](spec-cases/lex.md) | `lex` | 第3章 | 38 |
 | [プログラムの構造](spec-cases/prog.md) | `prog` | 第4章 | 18 |
-| [型](spec-cases/type.md) | `type` | 第5章 | 37 |
-| [symbolとtext](spec-cases/text.md) | `text` | 第5・6・7・8・10章 | 36 |
-| [定数・変数・代入](spec-cases/bind.md) | `bind` | 第6章 | 31 |
-| [式](spec-cases/expr.md) | `expr` | 第7・8章 | 78 |
-| [関数と制御](spec-cases/flow.md) | `flow` | 第8章 | 91 |
+| [型](spec-cases/type.md) | `type` | 第3・5章 | 37 |
+| [symbolとtext](spec-cases/text.md) | `text` | 第5・6・7・8・14章 | 36 |
+| [配列](spec-cases/array.md) | `array` | 第5・7・13章 | 9 |
+| [定数・変数・代入](spec-cases/bind.md) | `bind` | 第4・6・9章 | 31 |
+| [式](spec-cases/expr.md) | `expr` | 第7・9章 | 78 |
+| [関数と制御](spec-cases/flow.md)・[メソッド](spec-cases/method.md)・[匿名汎用](spec-cases/generic.md) | `flow` | 第8・11・12章 | 122 |
 | [エラー型と失敗する関数](spec-cases/errors.md) | `err` | 第8章 | 10 |
-| [実行時の検査](spec-cases/runtime.md) | `runtime` | 第9章 | 18 |
-| [ログ](spec-cases/log.md) | `log` | 第10章 | 13 |
-| [警告と診断設定](spec-cases/diag.md) | `diag` | 第11章 | 14 |
-| 合計 | | | 381 |
+| [作業領域とポインタ](spec-cases/arena.md) | `arena` | 第9章 | 22 |
+| [C FFI](spec-cases/ffi.md) | `ffi` | 第10章 | 21 |
+| [メソッドと演算子メソッド](spec-cases/method.md) | `method` | 第11章 | 34 |
+| [汎用](spec-cases/generic.md) | `generic` | 第12章 | 22 |
+| [実行時の検査](spec-cases/runtime.md) | `runtime` | 第13章 | 18 |
+| [ログ](spec-cases/log.md) | `log` | 第7・14章 | 13 |
+| [警告と診断設定](spec-cases/diag.md) | `diag` | 第15章 | 14 |
+| 合計 | | | 523 |
+
+件数はID接頭辞ごとに数える。flow-090・flow-091はメソッドのファイルに、flow接頭辞の匿名汎用22例は汎用のファイルに掲載する。
 
 ### 結果別件数
 
 | 結果 | 件数 |
 |---|---:|
-| 受理 | 179 |
-| コンパイルエラー | 178 |
-| 実行時パニック | 13 |
+| 受理 | 228 |
+| コンパイルエラー | 269 |
+| 実行時パニック | 15 |
 | 診断設定の比較 | 11 |
-| 合計 | 381 |
+| 合計 | 523 |
 
 期待結果が複数の設定を持つ例は「診断設定の比較」に1例として数える。設定が1つの例は、その結果で分類する。バイト列を指定する例も同じように数える。
 
+## 例集の入出力だけでは検証できないこと
+
+次のテストは例集の件数には含めない。言語の受理・拒否・実行結果は各分野の例で示し、追加のCソースやビルド設定、生成Cの検査が必要な保証は以下で検証する。
+
+| 対象 | 検証テスト | 例集と分ける理由 |
+|---|---|---|
+| FFIのポインタ書き換え・keepによる保持 | [ffi_pointers.rs](../compiler/tests/spec_cases/ffi_pointers.rs) | 独自のCヘッダーと関数の実体が必要であり、例集はSuzソースだけを入力とする |
+| C構造体・関数型のヘッダー照合、リンク失敗 | [ffi_structs.rs](../compiler/tests/spec_cases/ffi_structs.rs)・[ffi_link.rs](../compiler/tests/spec_cases/ffi_link.rs) | 不一致のCヘッダーやリンク対象を用意する必要がある |
+| 作業領域の容量と計測 | [arena.rs](../compiler/tests/spec_cases/arena.rs)・[arena_report.rs](../compiler/tests/spec_cases/arena_report.rs) | 初期容量・追加容量・上限・計測の設定を切り替える必要があり、例集の設定欄では指定できない |
+| 関数値・クロージャの環境をヒープへ確保しない保証 | [closures.rs](../compiler/tests/spec_cases/closures.rs)・[function_values.rs](../compiler/tests/spec_cases/function_values.rs) | 正常終了するだけでは無確保を確認できない。生成Cの確保呼び出しを検査する |
+
+検証テストの実行方法と、通常検査・リリース検査の区別は[テスト基盤](../compiler/tests/README.md)を参照すること。
+
 ## 生成結果の検証
 
-`[num.monomorphize]` の関数生成数と共有は、プログラムの出力だけでは確認できない。`compiler/src/check/tests/generic.rs` の内部表現の検査で、使用する具体型の組み合わせだけを生成することと、同じ組み合わせを共有することを確認する。
+`[runtime.num-monomorphize]` の関数生成数と共有は、プログラムの出力だけでは確認できない。`compiler/src/check/tests/generic.rs` の内部表現の検査で、使用する具体型の組み合わせだけを生成することと、同じ組み合わせを共有することを確認する。

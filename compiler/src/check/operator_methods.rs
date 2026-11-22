@@ -414,6 +414,7 @@ pub(super) fn comparison(
     Ok(Some(CheckedExpression {
         ty: Type::Bool,
         value: Value::Comparison {
+            locations: locations.clone(),
             operators: operators.clone(),
             operands: checked,
             methods,

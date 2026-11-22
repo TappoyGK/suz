@@ -2,6 +2,17 @@
 
 利用者に関わる変更をバージョンごとに記載する。
 
+## v0.3.8
+
+- `arena fn`を廃止し、通常の関数・メソッド・クロージャから呼び出し時の作業領域へ確保できるようにした。mainには既定の作業領域を設けた。（[#129](https://github.com/TappoyGK/suz/issues/129)・[#134](https://github.com/TappoyGK/suz/pull/134)）
+- ループの各回で不要になる実体が、外側の作業領域に蓄積する場合の警告を追加した。（[#129](https://github.com/TappoyGK/suz/issues/129)・[#134](https://github.com/TappoyGK/suz/pull/134)）
+- 作業領域に確保する配列を追加し、多次元配列・部分配列の参照・切り出し・反復に対応した。（[#97](https://github.com/TappoyGK/suz/issues/97)・[#142](https://github.com/TappoyGK/suz/pull/142)）
+- 配列の寸法に名前を付け、引数同士の長さの一致を検査できるようにした。添字が範囲内と分かる場合は、境界検査と読み取り時の`or`を不要にした。（[#97](https://github.com/TappoyGK/suz/issues/97)・[#142](https://github.com/TappoyGK/suz/pull/142)）
+- 浮動小数点演算で不要な一時変数と、定数のビット変換関数の呼び出しを減らした。（[#142](https://github.com/TappoyGK/suz/pull/142)）
+- `--log-arena`で、作業領域ごとの最大使用量をツリー表示できるようにした。全体集計とCSV出力にも対応した。（[#147](https://github.com/TappoyGK/suz/issues/147)・[#151](https://github.com/TappoyGK/suz/pull/151)）
+- 浮動小数点型で正確に表せない整数リテラルを、暗黙に丸めずコンパイルエラーにした。（[#126](https://github.com/TappoyGK/suz/issues/126)・[#164](https://github.com/TappoyGK/suz/pull/164)）
+- READMEに作業領域によるメモリ管理の説明を加え、仕様書に操作ごとの処理量・資源消費の上限と条件を明記した。仕様例集も拡充した。（[#146](https://github.com/TappoyGK/suz/issues/146)・[#150](https://github.com/TappoyGK/suz/pull/150)・[#152](https://github.com/TappoyGK/suz/issues/152)・[#153](https://github.com/TappoyGK/suz/pull/153)）
+
 ## v0.3.7
 
 - 関数・構造体・`fnshape`に型引数を指定できるようにし、関数呼び出しでは実引数から型引数を推論できるようにした。（[#118](https://github.com/TappoyGK/suz/issues/118)・[#119](https://github.com/TappoyGK/suz/pull/119)）

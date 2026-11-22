@@ -42,15 +42,6 @@ pub(super) fn value(
         .get(name)
         .filter(|_| name != "main")
         .ok_or_else(error)?;
-    if signature.arena {
-        return Err(expr.location.error(
-            ErrorKind::InvalidSource,
-            crate::diagnostic!(
-                "arena.fn-value",
-                "arena fn cannot be used as a function value"
-            ),
-        ));
-    }
     if signature.external {
         return Err(expr.location.error(
             ErrorKind::InvalidSource,
@@ -76,7 +67,10 @@ pub(super) fn value(
         {
             return Ok(CheckedExpression {
                 ty: Type::StaticFunction(id),
-                value: Value::Function(signature.id),
+                value: Value::Function {
+                    id: signature.id,
+                    location: expr.location,
+                },
             });
         }
     }
@@ -175,7 +169,10 @@ pub(super) fn value(
     };
     Ok(CheckedExpression {
         ty,
-        value: Value::Function(id),
+        value: Value::Function {
+            id,
+            location: expr.location,
+        },
     })
 }
 
@@ -194,15 +191,6 @@ pub(super) fn invoke(
         ));
     };
     let signature = scope.function_types.borrow()[id].clone();
-    if super::arena::contains(signature.result, scope) {
-        return Err(expr.location.error(
-            ErrorKind::InvalidSource,
-            crate::diagnostic!(
-                "arena.parameter",
-                "ordinary function values cannot return arena pointers"
-            ),
-        ));
-    }
     if arguments.len() != signature.parameters.len() {
         return Err(expr.location.error(
             ErrorKind::InvalidSource,

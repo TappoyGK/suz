@@ -116,14 +116,46 @@ impl Parser<'_, '_> {
             ));
         }
         let (name, location) = self.parameter_name()?;
-        let ty = self.function_parameter_type()?;
+        let (ty, dimensions) = self.annotated_array_type(true, true)?;
         if ty == Type::Void {
             return Err(location.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!("type.void", "parameters cannot have type void"),
             ));
         }
-        Ok(Parameter { name, ty, location })
+        Ok(Parameter {
+            name,
+            ty,
+            location,
+            dimensions,
+        })
+    }
+
+    /// 名前付き寸法は宣言の最外側だけで受け付ける。入れ子の型は通常の型解析へ任せる。
+    pub(super) fn annotated_array_type(
+        &mut self,
+        names: bool,
+        parameter: bool,
+    ) -> Result<(Type, Vec<crate::ast::arrays::Dimension>), Diagnostic> {
+        if names
+            && self.token().kind == Kind::Keyword("ptr")
+            && self
+                .tokens
+                .get(self.cursor + 1)
+                .is_some_and(|t| t.kind == Kind::Symbol("["))
+        {
+            self.cursor += 1;
+            let (ty, dimensions) = self.array_type_dimensions(true)?;
+            self.reject_error_spec()?;
+            Ok((ty.pointer(), dimensions))
+        } else {
+            let ty = if parameter {
+                self.function_parameter_type()?
+            } else {
+                self.stored_type()?
+            };
+            Ok((ty, Vec::new()))
+        }
     }
 
     pub(super) fn parse_type(&mut self) -> Result<Type, Diagnostic> {
@@ -184,7 +216,11 @@ impl Parser<'_, '_> {
             }
             layers.push(nullable);
         }
-        let mut ty = self.type_leaf()?;
+        let mut ty = if !layers.is_empty() && self.token().kind == Kind::Symbol("[") {
+            self.array_type()?
+        } else {
+            self.type_leaf()?
+        };
         if !self.type_parameters.is_empty() && ty.generic() {
             return Err(self.error(
                 ErrorKind::InvalidSource,
@@ -570,6 +606,7 @@ impl Parser<'_, '_> {
             parameters.insert(
                 0,
                 Parameter {
+                    dimensions: Vec::new(),
                     name: "self".into(),
                     ty: method.owner,
                     location,
@@ -594,7 +631,6 @@ impl Parser<'_, '_> {
             type_parameters: std::mem::take(&mut self.type_parameters),
             needs,
             method,
-            arena: false,
             keyword_location,
             name,
             location,

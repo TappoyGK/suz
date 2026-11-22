@@ -11,8 +11,7 @@ fn cli(directory: &Path) -> Command {
 }
 
 #[cfg(unix)]
-#[test]
-fn extra_flags_match_between_cli_and_emitted_script() {
+fn extra_flags_match(route: &str, allowed: bool) {
     use std::os::unix::fs::PermissionsExt;
     let directory = TemporaryDirectory::new();
     fs::write(
@@ -92,74 +91,109 @@ done
         "-g *",
         "-g -Wno-error",
     ];
-    for (allowed, flags) in accepted
-        .iter()
-        .map(|f| (true, f))
-        .chain(rejected.iter().map(|f| (false, f)))
-    {
-        for route in ["build", "run", "script"] {
-            let output = directory.0.join("output");
-            let log = directory.0.join("flags.log");
-            let _ = fs::remove_file(&output);
-            let _ = fs::remove_file(&log);
-            let mut command = if route == "script" {
-                let mut c = Command::new(directory.0.join("generated/scripts/build-c.sh"));
-                c.arg(directory.0.join("generated/program.c"))
-                    .arg("-o")
-                    .arg(&output)
-                    .env("CC", &compiler);
-                for name in ["CFLAGS", "CPPFLAGS", "LDFLAGS"] {
-                    c.env_remove(name);
-                }
-                c
-            } else {
-                let mut c = cli(&directory.0);
-                c.args([route, "input.suz", "--cc"]).arg(&compiler);
-                if route == "build" {
-                    c.arg("-o").arg(&output);
-                }
-                c
-            };
-            let result = command
-                .env("SUZ_CFLAGS", flags)
-                .env("FLAG_LOG", &log)
-                .output()
-                .unwrap();
-            assert_eq!(
-                result.status.code(),
-                Some(if allowed { 0 } else { 2 }),
-                "{route} {flags}: {result:?}"
-            );
-            if allowed {
-                let recorded = fs::read_to_string(&log).unwrap();
-                let expected = flags
-                    .split([' ', '\t', '\n', '\r', '\u{b}', '\u{c}'])
-                    .filter(|f| !f.is_empty())
-                    .collect::<Vec<_>>();
-                for invocation in recorded.split("BEGIN\n").skip(1) {
-                    let args = invocation.lines().collect::<Vec<_>>();
-                    // CLIの能力確認では追加フラグを使わず、本ビルドでだけ渡す。
-                    let expected =
-                        if route != "script" && !args.iter().any(|a| a.ends_with("/program.c")) {
-                            &[][..]
-                        } else {
-                            &expected[..]
-                        };
-                    assert_eq!(&args[..expected.len()], expected, "{route} {flags}");
-                    assert!(args[expected.len()..].contains(&"-ffp-contract=off"));
-                    assert!(args.contains(&"-fhonor-nans") && args.contains(&"-fhonor-infinities"));
-                    assert!(!args.contains(&"-ffp-model=strict"));
-                }
-            } else {
-                assert!(!log.exists(), "compiler was invoked: {route} {flags}");
-                assert!(
-                    String::from_utf8_lossy(&result.stderr).contains("[tool.extra-flags]"),
-                    "{result:?}"
-                );
-                assert!(!output.exists());
+    // 経路と受理・拒否を分け、Rustのテストランナーだけで並列に実行する。
+    for flags in if allowed {
+        &accepted[..]
+    } else {
+        &rejected[..]
+    } {
+        let output = directory.0.join("output");
+        let log = directory.0.join("flags.log");
+        let _ = fs::remove_file(&output);
+        let _ = fs::remove_file(&log);
+        let mut command = if route == "script" {
+            let mut c = Command::new(directory.0.join("generated/scripts/build-c.sh"));
+            c.arg(directory.0.join("generated/program.c"))
+                .arg("-o")
+                .arg(&output)
+                .env("CC", &compiler);
+            for name in ["CFLAGS", "CPPFLAGS", "LDFLAGS"] {
+                c.env_remove(name);
             }
+            c
+        } else {
+            let mut c = cli(&directory.0);
+            c.args([route, "input.suz", "--cc"]).arg(&compiler);
+            if route == "build" {
+                c.arg("-o").arg(&output);
+            }
+            c
+        };
+        let result = command
+            .env("SUZ_CFLAGS", flags)
+            .env("FLAG_LOG", &log)
+            .output()
+            .unwrap();
+        assert_eq!(
+            result.status.code(),
+            Some(if allowed { 0 } else { 2 }),
+            "{route} {flags}: {result:?}"
+        );
+        if allowed {
+            let recorded = fs::read_to_string(&log).unwrap();
+            let expected = flags
+                .split([' ', '\t', '\n', '\r', '\u{b}', '\u{c}'])
+                .filter(|f| !f.is_empty())
+                .collect::<Vec<_>>();
+            for invocation in recorded.split("BEGIN\n").skip(1) {
+                let args = invocation.lines().collect::<Vec<_>>();
+                // CLIの能力確認では追加フラグを使わず、本ビルドでだけ渡す。
+                let expected =
+                    if route != "script" && !args.iter().any(|a| a.ends_with("/program.c")) {
+                        &[][..]
+                    } else {
+                        &expected[..]
+                    };
+                assert_eq!(&args[..expected.len()], expected, "{route} {flags}");
+                assert!(args[expected.len()..].contains(&"-ffp-contract=off"));
+                assert!(args.contains(&"-fhonor-nans") && args.contains(&"-fhonor-infinities"));
+                assert!(!args.contains(&"-ffp-model=strict"));
+            }
+        } else {
+            assert!(!log.exists(), "compiler was invoked: {route} {flags}");
+            assert!(
+                String::from_utf8_lossy(&result.stderr).contains("[tool.extra-flags]"),
+                "{result:?}"
+            );
+            assert!(!output.exists());
         }
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn extra_flags_accepted_through_build() {
+    extra_flags_match("build", true);
+}
+
+#[cfg(unix)]
+#[test]
+fn extra_flags_rejected_through_build() {
+    extra_flags_match("build", false);
+}
+
+#[cfg(unix)]
+#[test]
+fn extra_flags_accepted_through_run() {
+    extra_flags_match("run", true);
+}
+
+#[cfg(unix)]
+#[test]
+fn extra_flags_rejected_through_run() {
+    extra_flags_match("run", false);
+}
+
+#[cfg(unix)]
+#[test]
+fn extra_flags_accepted_through_script() {
+    extra_flags_match("script", true);
+}
+
+#[cfg(unix)]
+#[test]
+fn extra_flags_rejected_through_script() {
+    extra_flags_match("script", false);
 }
 
 #[test]

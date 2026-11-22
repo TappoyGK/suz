@@ -36,7 +36,6 @@ pub(super) fn signatures(
                 type_parameter_names: None,
                 needs: Vec::new(),
                 method: None,
-                arena: false,
                 external: true,
                 id: program.functions.len() + index,
                 parameters: function.parameters.iter().map(|p| p.ty).collect(),

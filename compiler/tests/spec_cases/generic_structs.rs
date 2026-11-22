@@ -29,7 +29,7 @@ fn generic_recursive_structs_use_the_existing_arena_rules() {
     let output = compile_and_run_c23(
         r#"
 struct Node[T] { value: T, next: ptr? Node[T] }
-arena fn node[T](value: T) -> ptr Node[T] { return new Node[T] { value: value, next: null } }
+fn node[T](value: T) -> ptr Node[T] { return new Node[T] { value: value, next: null } }
 fn main() -> u8 {
     arena {
         fix ptr first = node[i32](3)
@@ -170,7 +170,7 @@ fn main() -> u8 {{
         );
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert!(
-            error.to_string().contains("arena.parameter"),
+            error.to_string().contains("arena.store"),
             "{invoke}: {error:?}"
         );
     }

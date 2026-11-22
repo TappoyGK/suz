@@ -18,11 +18,25 @@ pub(super) fn emit_block(
     let indent = "    ".repeat(depth);
     for statement in statements {
         match statement {
-            CheckedStatement::Arena { body, .. } => {
+            CheckedStatement::Arena { body, location, .. } => {
                 context.uses_arena = true;
                 let id = *next_assignment;
                 *next_assignment += 1;
                 writeln!(c, "{indent}{{\n{indent}    suz_arena_mark suz_arena_mark_{id} __attribute__((cleanup(suz_arena_restore))) = suz_arena_save();").unwrap();
+                if let Some(report) = context.arena_report {
+                    if report.format == crate::ArenaReportFormat::Summary {
+                        writeln!(c, "{indent}    size_t suz_arena_report_mark_{id} __attribute__((cleanup(suz_arena_report_restore))) = suz_arena_report_position;").unwrap();
+                    } else {
+                        writeln!(c, "{indent}    suz_arena_report_frame suz_arena_report_mark_{id} __attribute__((cleanup(suz_arena_report_leave)));").unwrap();
+                        // 同じソース位置の具体化は同じ識別子とアクティブ状態を使う。
+                        let next = context.report_sites.len();
+                        let (site, _) = context
+                            .report_sites
+                            .entry((location.line, location.column))
+                            .or_insert_with(|| (next, context.report_function.clone()));
+                        writeln!(c, "{indent}    suz_arena_tree_enter(&suz_arena_report_tree, &suz_arena_report_mark_{id}, suz_arena_report_position, &suz_arena_report_site_{site});").unwrap();
+                    }
+                }
                 emit_block(c, body, depth + 1, next_assignment, context);
                 writeln!(c, "{indent}}}").unwrap();
             }
@@ -132,6 +146,7 @@ pub(super) fn emit_block(
             }
             CheckedStatement::For {
                 id,
+                variable_type,
                 start,
                 end,
                 inclusive,
@@ -139,6 +154,20 @@ pub(super) fn emit_block(
                 body,
             } => {
                 let Some(end) = end else {
+                    if start.ty.array_id().is_some() {
+                        super::arrays::emit_loop(
+                            c,
+                            *id,
+                            *variable_type,
+                            start,
+                            *reverse,
+                            body,
+                            depth,
+                            next_assignment,
+                            context,
+                        );
+                        continue;
+                    }
                     super::characters::emit_text_loop(
                         c,
                         *id,
@@ -196,6 +225,7 @@ pub(super) fn emit_block(
                 )
                 .unwrap();
                 writeln!(c, "{indent}        (void)suz_local_{id};").unwrap();
+                context.immutable_locals.insert(*id);
                 emit_block(c, body, depth + 2, next_assignment, context);
                 writeln!(c, "{indent}    }}\n{indent}}}").unwrap();
             }
@@ -295,6 +325,12 @@ pub(super) fn emit_block(
                     expression(initializer, context)
                 )
                 .unwrap();
+                if !mutable {
+                    context.immutable_locals.insert(*id);
+                    if ty.array_id().is_some() {
+                        super::arrays::cache(c, *id, *ty, &indent, context);
+                    }
+                }
                 // Suzは全束縛の読み取りを要求しないため、Cの未使用警告を抑える。
                 writeln!(c, "{indent}(void)suz_local_{id};").unwrap();
             }

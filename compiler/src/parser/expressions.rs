@@ -466,6 +466,15 @@ impl Parser<'_, '_> {
                 }
                 ExpressionKind::Deref(Box::new(operand))
             }
+            Kind::Keyword("new")
+                if self
+                    .tokens
+                    .get(self.cursor + 1)
+                    .is_some_and(|t| t.kind == Kind::Symbol("[")) =>
+            {
+                self.cursor += 1;
+                ExpressionKind::New(Box::new(self.array_initializer()?))
+            }
             Kind::Symbol("~") | Kind::Keyword("len" | "not" | "c_bytes" | "c_byte_len" | "new") => {
                 let constructor: fn(Box<Expression>) -> ExpressionKind = match self.token().kind {
                     Kind::Keyword("new") => ExpressionKind::New,

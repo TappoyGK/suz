@@ -77,10 +77,6 @@ pub(super) fn parse(text: &str, target: Type, wrap: bool) -> Option<CheckedExpre
     Some(CheckedExpression { ty: target, value })
 }
 
-#[cfg(test)]
-#[path = "text_parse_tests.rs"]
-mod tests;
-
 pub(super) fn integer_value(bits: u64, ty: IntegerType) -> Value {
     let mut value = i128::from(bits);
     if ty.bounds().0 < 0 && bits & (1_u64 << (ty.bits() - 1)) != 0 {
@@ -88,3 +84,7 @@ pub(super) fn integer_value(bits: u64, ty: IntegerType) -> Value {
     }
     Value::Integer { value, minus: None }
 }
+
+#[cfg(test)]
+#[path = "text_parse_tests.rs"]
+mod tests;

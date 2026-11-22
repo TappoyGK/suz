@@ -96,6 +96,13 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
     }
     fn visit(expr: &Expression, allowed: bool, in_value: bool) -> Result<(), Diagnostic> {
         match &expr.kind {
+            ExpressionKind::ArrayInit {
+                values, lengths, ..
+            } => {
+                for v in values.iter().chain(lengths) {
+                    visit(v, false, in_value)?;
+                }
+            }
             ExpressionKind::Slice {
                 target,
                 start,
@@ -298,6 +305,14 @@ fn has_return_handler(expr: &CheckedExpression) -> bool {
                 | super::ir::CallHandler::Branches(_)
         ),
         Value::CastReturn { .. }
+        | Value::ArrayView {
+            handler: Some(CheckedHandler::Return { .. }),
+            ..
+        }
+        | Value::ArrayRead {
+            handler: Some(CheckedHandler::Return { .. }),
+            ..
+        }
         | Value::Slice {
             handler: Some(CheckedHandler::Return { .. }),
             ..
@@ -338,7 +353,13 @@ pub(super) fn lower_return_handler(
     }
     if matches!(
         &expr.value,
-        Value::Slice {
+        Value::ArrayView {
+            handler: Some(CheckedHandler::Return { .. }),
+            ..
+        } | Value::ArrayRead {
+            handler: Some(CheckedHandler::Return { .. }),
+            ..
+        } | Value::Slice {
             handler: Some(CheckedHandler::Return { .. }),
             ..
         } | Value::IntegerArithmetic {
@@ -351,7 +372,9 @@ pub(super) fn lower_return_handler(
         let value = std::mem::replace(&mut expr.value, Value::Local(id));
         let mut operation = CheckedExpression { ty: expr.ty, value };
         let (handler, slice) = match &mut operation.value {
-            Value::Slice { handler, .. } => (handler, true),
+            Value::ArrayView { handler, .. }
+            | Value::Slice { handler, .. }
+            | Value::ArrayRead { handler, .. } => (handler, true),
             Value::IntegerArithmetic { handler, .. } => (handler, false),
             _ => unreachable!(),
         };
