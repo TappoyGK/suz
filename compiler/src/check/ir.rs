@@ -274,6 +274,11 @@ pub(crate) enum Value {
         address: Box<CheckedExpression>,
         handler: Option<CheckedHandler>,
     },
+    TextAppend {
+        left: Box<CheckedExpression>,
+        right: Box<CheckedExpression>,
+        location: Location,
+    },
     TextBuffer {
         capacity: Option<Box<CheckedExpression>>,
         value: Box<CheckedExpression>,
@@ -475,6 +480,9 @@ macro_rules! constant_children_visitor {
                         visit(value);
                     }
                     return !methods.iter().any(Option::is_some);
+                }
+                Self::TextAppend { left, right, .. } => {
+                    visit(left); visit(right); return false;
                 }
                 Self::TextBuffer { capacity, value, .. } => {
                     if let Some(capacity) = capacity { visit(capacity); }

@@ -644,7 +644,7 @@ pub(crate) enum Statement {
     Store {
         target: Box<Expression>,
         value: Box<Expression>,
-        operator: Option<BinaryOperator>,
+        operator: Option<AssignmentOperator>,
         location: Location,
     },
 
@@ -703,6 +703,28 @@ pub(crate) enum Statement {
     Fail(Expression),
     Recover(Expression),
     Ignore(Box<Ignore>),
+}
+
+/// 代入文の読み出しと右辺を、算術またはtext追記として組み立てる。
+#[derive(Clone, Copy)]
+pub(crate) enum AssignmentOperator {
+    Binary(BinaryOperator),
+    Append,
+}
+impl AssignmentOperator {
+    pub fn expression(self, left: Expression, right: Expression) -> ExpressionKind {
+        match self {
+            Self::Binary(operator) => ExpressionKind::Binary {
+                operator,
+                left: Box::new(left),
+                right: Box::new(right),
+            },
+            Self::Append => ExpressionKind::TextAppend {
+                left: Box::new(left),
+                right: Box::new(right),
+            },
+        }
+    }
 }
 
 /// 構文解析済みの式とソース位置。型は意味検査で決定する。
@@ -926,6 +948,11 @@ pub(crate) enum ExpressionKind {
         repeated: bool,
     },
     New(Box<Expression>),
+    /// 追記文の型検査用。ソースから値式として書くことはできない。
+    TextAppend {
+        left: Box<Expression>,
+        right: Box<Expression>,
+    },
     TextBuffer {
         capacity: Option<Box<Expression>>,
         value: Box<Expression>,

@@ -66,6 +66,24 @@ pub(super) fn expression(
         crate::ast::ExpressionKind::TextBuffer { capacity, value } => {
             buffer(capacity.as_deref(), value, expr.location, scope)
         }
+        crate::ast::ExpressionKind::TextAppend { left, right } => {
+            let left = super::expression::expression(left, None, scope)?;
+            if left.ty != Type::Text {
+                return Err(expr.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("text.append", "append requires a text destination"),
+                ));
+            }
+            let right = content(right, scope)?;
+            Ok(CheckedExpression {
+                ty: Type::Text,
+                value: Value::TextAppend {
+                    left: Box::new(left),
+                    right: Box::new(right),
+                    location: expr.location,
+                },
+            })
+        }
         _ => unreachable!(),
     }
 }
@@ -127,6 +145,18 @@ pub(super) fn buffer(
                 .map(Box::new)
         })
         .transpose()?;
+    let value = content(value, scope)?;
+    Ok(CheckedExpression {
+        ty: Type::Text,
+        value: Value::TextBuffer {
+            capacity,
+            value: Box::new(value),
+            location,
+        },
+    })
+}
+
+fn content(value: &Expression, scope: &Scope) -> Result<CheckedExpression, Diagnostic> {
     let mut value = value;
     while let crate::ast::ExpressionKind::Group(inner) = &value.kind {
         value = inner;
@@ -136,14 +166,7 @@ pub(super) fn buffer(
     } else {
         super::expression::coerced(value, Some(Type::Text), scope)?
     };
-    Ok(CheckedExpression {
-        ty: Type::Text,
-        value: Value::TextBuffer {
-            capacity,
-            value: Box::new(value),
-            location,
-        },
-    })
+    Ok(value)
 }
 
 pub(super) fn constant_parts(

@@ -20,6 +20,10 @@ pub(super) fn collect(expr: &CheckedExpression, locations: &mut Vec<Location>) {
             }
             e.leaves(&mut |v| collect(v, locations));
         }
+        Value::TextAppend { left, right, .. } => {
+            collect(left, locations);
+            collect(right, locations);
+        }
         Value::TextBuffer {
             capacity, value, ..
         } => {

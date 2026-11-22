@@ -137,6 +137,26 @@ pub(super) fn buffer(
     location: Location,
     context: &mut ExpressionContext,
 ) -> String {
+    compose(capacity, None, value, location, context)
+}
+
+pub(super) fn append(
+    left: &CheckedExpression,
+    right: &CheckedExpression,
+    location: Location,
+    context: &mut ExpressionContext,
+) -> String {
+    compose(None, Some(left), right, location, context)
+}
+
+// 追記では旧値を右辺より先に保存する。整形と断片の直接コピーはtextbufと共通。
+fn compose(
+    capacity: Option<&CheckedExpression>,
+    left: Option<&CheckedExpression>,
+    value: &CheckedExpression,
+    location: Location,
+    context: &mut ExpressionContext,
+) -> String {
     use crate::check::Value;
     context.uses_arena = true;
     context.uses_text = true;
@@ -144,8 +164,15 @@ pub(super) fn buffer(
     context.next_block += 1;
     let mut setup = Vec::new();
     let mut arguments = Vec::new();
-    let mut parameters = vec!["uint64_t capacity".to_string()];
-    if let Some(capacity) = capacity {
+    let mut parameters = vec![
+        if left.is_some() {
+            "suz_text_view left"
+        } else {
+            "uint64_t capacity"
+        }
+        .to_string(),
+    ];
+    if let Some(capacity) = left.or(capacity) {
         let temp = context.temporaries.len();
         context.temporaries.push(capacity.ty);
         setup.push(format!(
@@ -223,8 +250,13 @@ pub(super) fn buffer(
     if fragments.is_empty() {
         fragments.push(static_view(""));
     }
+    let build = if left.is_some() {
+        "suz_textbuf_append(left"
+    } else {
+        "suz_textbuf_build(capacity"
+    };
     let helper = format!(
-        "static inline suz_text_view suz_textbuf_{id}({}) {{\n{body}    const suz_text_view parts[] = {{{}}};\n    return suz_textbuf_build(capacity, parts, {count}, {});\n}}\n\n",
+        "static inline suz_text_view suz_textbuf_{id}({}) {{\n{body}    const suz_text_view parts[] = {{{}}};\n    return {build}, parts, {count}, {});\n}}\n\n",
         parameters.join(", "),
         fragments.join(", "),
         position(location, context)

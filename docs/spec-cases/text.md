@@ -1492,3 +1492,400 @@ fn main() -> u8 {
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
 | 通常 | `[arena.loop-allocation]` | 2 | 30 |
+
+### text-053 追記しても取得済みの別名と切り出しの内容を変えない
+
+主根拠：`[text.append-storage]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    var a = textbuf[32] `あb`
+    var b = a
+    fix old = a
+    b <- ` B`
+    a <- ` A`
+    if a != `あb A` || b != `あb B` || old != `あb` { return 1 }
+    var suffix = b[1:] or b
+    suffix <- suffix
+    if suffix != `b Bb B` || b != `あb B` { return 2 }
+    var empty = textbuf ``
+    empty <- `x`
+    empty <- empty
+    empty <- ``
+    if empty != `xx` { return 3 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### text-054 関数を通る現在の作業領域の前提を実引数で満たす
+
+主根拠：`[text.append-arena]`。
+
+**ソース：**
+
+```suz
+struct Message { body: text }
+fn append(t: text) -> text {
+    var result = t
+    result <- `!`
+    return result
+}
+fn forward(t: text) -> text { return append(t) }
+fnshape Transform(text) -> text
+fn apply(f: fn Transform, t: text) -> text { return f(t) }
+fn repeat(t: text, n: i32) -> text {
+    if n == 0 { return t }
+    return repeat(append(t), n - 1)
+}
+fn change(p: ptr Message) -> void { p#body <- `?` }
+fn main() -> u8 {
+    fix t = textbuf `Hello`
+    fix ptr p = new Message { body: forward(t) }
+    change(p)
+    if apply(fn forward, t) != `Hello!` || repeat(t, 2) != `Hello!!` { return 3 }
+    if p.body != `Hello!?` || t != `Hello` { return 1 }
+    arena {
+        var copied = textbuf t
+        copied <- ` inner`
+        if copied != `Hello inner` { return 2 }
+    }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### text-055 追記先を一度評価し旧値を保存してから埋め込みを評価する
+
+主根拠：`[text.append]`。
+
+**ソース：**
+
+```suz
+struct Message { body: text, n: i32 }
+fn target(p: ptr Message) -> ptr Message {
+    p#n += 1
+    return p
+}
+fn part(p: ptr Message) -> i32 {
+    p#n += 1
+    p#body <- `x`
+    return p.n
+}
+fn main() -> u8 {
+    fix ptr p = new Message { body: textbuf[32] `A`, n: 0 }
+    target(p)#body <- (`${part(p)}:${part(p)}`)
+    if p.n != 3 || p.body != `A2:3` { return 1 }
+    var item = Message { body: textbuf `B`, n: 0 }
+    item#body <- `C`
+    fix ptr value = new textbuf `D`
+    #value <- `E`
+    if item.body != `BC` || .value != `DE` { return 2 }
+    fix ptr texts = new [textbuf `F`]
+    texts#[0] <- `G`
+    if texts[0] != `FG` { return 3 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### text-056 静的なtextには空文字列も追記できない
+
+主根拠：`[text.append-arena]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    var t = `static`
+    t <- ``
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[text.append-arena]` | 3 | 7 |
+
+### text-057 外側の実体は内側で宣言した変数にコピーしても追記できない
+
+主根拠：`[text.append-arena]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix t = textbuf `outer`
+    arena {
+        var local = t
+        local <- `x`
+    }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[text.append-arena]` | 5 | 15 |
+
+### text-058 追記する関数へ静的なtextを渡せない
+
+主根拠：`[text.append-arena]`。
+
+**ソース：**
+
+```suz
+fn append(t: text) -> text {
+    var result = t
+    result <- `!`
+    return result
+}
+fn forward(t: text) -> text { return append(t) }
+fn main() -> u8 {
+    fix result = forward(`static`)
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[text.append-arena]` | 8 | 18 |
+
+### text-059 symbolから借りたtextには追記できない
+
+主根拠：`[text.append-arena]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix s: symbol = `symbol`
+    var t: text = s
+    t <- `x`
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[text.append-arena]` | 4 | 7 |
+
+### text-060 分岐の一方が静的textなら現在の作業領域にあると判定しない
+
+主根拠：`[text.append-arena]`。
+
+**ソース：**
+
+```suz
+fn choose(t: text, yes: bool) -> text {
+    if yes { return t }
+    return `static`
+}
+fn main() -> u8 {
+    var t = choose(textbuf `arena`, true)
+    t <- `x`
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[text.append-arena]` | 7 | 7 |
+
+### text-061 symbolを追記先にできない
+
+主根拠：`[text.append]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    var s: symbol = `symbol`
+    s <- `x`
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[text.append]` | 3 | 7 |
+
+### text-062 追記の左辺は書き込み可能でなければならない
+
+主根拠：`[var.fix-assign]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix t = textbuf `fixed`
+    t <- `x`
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[var.fix-assign]` | 3 | 5 |
+
+### text-063 追記の右辺の失敗時は更新せず関数から戻る
+
+主根拠：`[text.append]`。
+
+**ソース：**
+
+```suz
+struct Message { body: text }
+fn update(p: ptr Message, t: text, end: i32) -> i32 {
+    p#body <- t[:end] or return 7
+    return 0
+}
+fn main() -> u8 {
+    fix ptr p = new Message { body: textbuf `A` }
+    if update(p, `BC`, 9) != 7 || p.body != `A` { return 1 }
+    if update(p, `BC`, 1) != 0 || p.body != `AB` { return 2 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### text-064 反復の外へ残らない追記による確保を警告する
+
+主根拠：`[arena.loop-allocation]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix base = textbuf `A`
+    for i in 0..<2 {
+        var t = base
+        t <- `${i}`
+    }
+    for i in 0..<2 {
+        arena {
+            var t = textbuf `A`
+            t <- `${i}`
+        }
+    }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 1 |
+
+**警告：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[arena.loop-allocation]` | 5 | 11 |
+
+### text-065 内側の作業領域で呼ぶ関数へ外側のtextを渡して追記できない
+
+主根拠：`[text.append-arena]`。
+
+**ソース：**
+
+```suz
+struct Message { body: text }
+fn append(p: ptr Message) -> void { p#body <- `!` }
+fn main() -> u8 {
+    fix ptr p = new Message { body: textbuf `outer` }
+    arena { append(p) }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[text.append-arena]` | 5 | 13 |

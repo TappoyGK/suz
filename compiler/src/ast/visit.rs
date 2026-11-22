@@ -132,7 +132,8 @@ pub(crate) fn walk_expression<V: Visitor + ?Sized>(
         | ExpressionKind::Len(inner)
         | ExpressionKind::Not(inner)
         | ExpressionKind::BitNot(inner) => visitor.expression(inner)?,
-        ExpressionKind::Binary { left, right, .. }
+        ExpressionKind::TextAppend { left, right }
+        | ExpressionKind::Binary { left, right, .. }
         | ExpressionKind::Logical { left, right, .. } => {
             visitor.expression(left)?;
             visitor.expression(right)?;

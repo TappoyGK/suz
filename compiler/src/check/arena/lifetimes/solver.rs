@@ -60,6 +60,14 @@ impl Worklist {
         };
         let mut limited = Vec::with_capacity(values.len());
         for &value in values {
+            // 静的textは関数を通ってもプログラム終了まで有効。
+            if matches!(
+                analysis.cells[&value.target].origin,
+                super::Origin::Permanent
+            ) {
+                limited.push(value);
+                continue;
+            }
             // 実体と同じ期間でも制限は残す。その実体のフィールドから長命な参照を
             // 読み出したときにも、戻り値から引き継いだ利用期間を適用するため。
             if let Some(previous) = value.limit {

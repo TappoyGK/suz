@@ -130,7 +130,9 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
                 Some(Type::Integer(IntegerType::Len))
             }
         }
-        ExpressionKind::Template(_) | ExpressionKind::TextBuffer { .. } => Some(Type::Text),
+        ExpressionKind::TextAppend { .. }
+        | ExpressionKind::Template(_)
+        | ExpressionKind::TextBuffer { .. } => Some(Type::Text),
         ExpressionKind::Struct { ty, .. } => bindings.resolve_type_at(*ty, expr.location).ok(),
         ExpressionKind::With { target, .. } => operand_type(target, bindings),
         ExpressionKind::Field { target, name } => {
@@ -592,9 +594,9 @@ fn expression_checked(
                 super::function_values::invoke(expr, target, arguments, bindings, None)?
             }
             ExpressionKind::Slice { .. } => super::arrays::read_or_text(expr, bindings)?,
-            ExpressionKind::TextBuffer { .. } | ExpressionKind::Template(_) => {
-                super::text::expression(expr, required, bindings)?
-            }
+            ExpressionKind::TextAppend { .. }
+            | ExpressionKind::TextBuffer { .. }
+            | ExpressionKind::Template(_) => super::text::expression(expr, required, bindings)?,
             ExpressionKind::Struct { .. }
             | ExpressionKind::With { .. }
             | ExpressionKind::Field { .. } => structs::check(expr, bindings)?,

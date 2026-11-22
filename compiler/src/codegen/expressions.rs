@@ -96,6 +96,11 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             )
         }
         Value::Receiver { ref target, .. } => expression(target, context),
+        Value::TextAppend {
+            ref left,
+            ref right,
+            location,
+        } => super::text::append(left, right, location, context),
         Value::TextBuffer {
             ref capacity,
             ref value,

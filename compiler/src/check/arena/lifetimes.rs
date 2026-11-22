@@ -59,6 +59,7 @@ struct Cell {
 #[derive(Clone, Copy)]
 enum Origin {
     Allocation,
+    Permanent,
     Parameter,
     Call,
 }
@@ -94,6 +95,9 @@ pub(crate) struct Analysis {
     active_loop: Option<usize>,
     discarded_calls: Vec<accumulation::Discarded>,
     kept: Vec<Node>,
+    // 追記先の実体が現在のArenaに属するという前提。呼び出し先の前提もここへ合流する。
+    append_requirements: Vec<(Node, usize, Location)>,
+    permanent: Option<Node>,
     returned: Shape,
     direct_calls: Vec<summaries::Call>,
     effect_calls: BTreeMap<usize, Location>,
@@ -133,6 +137,8 @@ impl Analysis {
             active_loop: None,
             discarded_calls: Vec::new(),
             kept: Vec::new(),
+            append_requirements: Vec::new(),
+            permanent: None,
             returned: Shape::new(),
             direct_calls: Vec::new(),
             effect_calls: BTreeMap::new(),
@@ -353,6 +359,21 @@ impl Analysis {
             Value::Null => self.shape(value.ty),
             // 最外側の暗黙変換は実体と、保存直前の非nullの証明を変えない。
             Value::Cast(inner) if value.ty.pointee().is_some() => self.expr(inner, region, arena),
+            Value::TextAppend {
+                left,
+                right,
+                location,
+            } => {
+                let source = self.expr(left, region, arena);
+                self.append_requirements.push((
+                    source[&vec![]],
+                    arena.expect("current arena"),
+                    *location,
+                ));
+                self.expr(right, region, arena);
+                let allocated = self.text_allocations(Type::Text, arena, *location);
+                self.alternatives(Type::Text, vec![source, allocated])
+            }
             Value::TextBuffer {
                 capacity,
                 value,
@@ -558,7 +579,11 @@ impl Analysis {
             // 範囲やC向けの表現が変わっても、本文の由来と利用期間は同じ。
             Value::CBytes(v) | Value::TextView(v) => {
                 let source = self.expr(v, region, arena);
-                self.alternatives(value.ty, vec![source])
+                if v.ty == Type::Symbol {
+                    self.permanent_text(value.ty)
+                } else {
+                    self.alternatives(value.ty, vec![source])
+                }
             }
             Value::Cast(v)
             | Value::NonNull(v)
@@ -584,8 +609,8 @@ impl Analysis {
                 self.expr(operand, region, arena);
                 let fallback = self.expr(fallback, region, arena);
                 // 解析成功時の文字列は生成元とは独立する。代替値は元の由来を保つ。
-                let success = if constant_struct.is_some() {
-                    Shape::new()
+                let success = if let Some(constant) = constant_struct {
+                    self.expr(constant, region, arena)
                 } else {
                     self.text_allocations(value.ty, arena, *location)
                 };
@@ -637,7 +662,7 @@ impl Analysis {
                         self.expr(v, region, arena);
                     }
                 }
-                Shape::new()
+                self.permanent_text(value.ty)
             }
             Value::Slice {
                 target,
@@ -676,13 +701,13 @@ impl Analysis {
                 });
                 Shape::new()
             }
+            Value::Text { .. } => self.permanent_text(value.ty),
             Value::CIntegerLiteral { .. }
             | Value::GenericNumericLiteral { .. }
             | Value::Integer { .. }
             | Value::Float(_)
             | Value::Function { .. }
             | Value::Bool(_)
-            | Value::Text { .. }
             | Value::Void => Shape::new(),
         }
     }
@@ -969,6 +994,42 @@ impl Analysis {
         }
         cell
     }
+    // 静的textも候補として残す。空集合にすると、分岐でArenaのtextと合流した際に
+    // 「必ず現在のArenaに属する」と誤判定してしまう。
+    fn permanent_cell(&mut self) -> Node {
+        if let Some(cell) = self.permanent {
+            return cell;
+        }
+        let cell = self.cell(0, self.regions[0].end, Type::Void);
+        self.cells.get_mut(&cell).unwrap().origin = Origin::Permanent;
+        self.objects.insert(cell, summaries::Object::Permanent);
+        self.permanent = Some(cell);
+        cell
+    }
+    fn permanent_text(&mut self, ty: Type) -> Shape {
+        if reference_target(ty).is_none() {
+            return Shape::new();
+        }
+        let cell = self.permanent_cell();
+        let node = self.node();
+        self.targets[node].insert(Reference::object(cell));
+        BTreeMap::from([(vec![], node)])
+    }
+    fn validate_appends(&self) -> Result<(), Diagnostic> {
+        for &(source, region, location) in &self.append_requirements {
+            if self.targets[source].is_empty()
+                || self.targets[source].iter().any(|r| {
+                    let cell = &self.cells[&r.target];
+                    matches!(cell.origin, Origin::Permanent) || cell.region != region
+                })
+            {
+                return Err(location.error(ErrorKind::InvalidSource, crate::diagnostic!(
+                    "text.append-arena", "append destination must belong to the current arena; use textbuf to copy it"
+                )));
+            }
+        }
+        Ok(())
+    }
     fn text_allocations(&mut self, ty: Type, arena: Option<usize>, location: Location) -> Shape {
         match ty {
             Type::Text => {
@@ -1027,10 +1088,11 @@ impl Analysis {
         }
     }
     fn reference_outlives(&self, source: Reference, destination: usize) -> bool {
-        self.outlives(self.cells[&source.target].region, destination)
-            && source
-                .limit
-                .is_none_or(|limit| self.outlives(limit, destination))
+        matches!(self.cells[&source.target].origin, Origin::Permanent)
+            || (self.outlives(self.cells[&source.target].region, destination)
+                && source
+                    .limit
+                    .is_none_or(|limit| self.outlives(limit, destination)))
     }
     fn solve(&mut self) -> Result<(), Diagnostic> {
         // 制約は固定し、候補集合と保存場所だけを更新する。列全体の複製は不要。
@@ -1077,6 +1139,7 @@ impl Analysis {
     }
 
     fn validate(&mut self, constraints: &[Constraint]) -> Result<(), Diagnostic> {
+        self.validate_appends()?;
         if self.root_references_only() {
             return Ok(());
         }
@@ -1158,6 +1221,8 @@ impl Analysis {
                                 "arena.lifetime",
                                 "{}",
                                 match source.origin {
+                                    Origin::Permanent =>
+                                        unreachable!("permanent text always outlives storage"),
                                     Origin::Allocation => "referenced object is allocated here",
                                     Origin::Call => "this call may allocate the referenced object",
                                     Origin::Parameter =>

@@ -109,7 +109,8 @@ pub(super) fn dependencies(
         | ExpressionKind::Len(inner)
         | ExpressionKind::Not(inner)
         | ExpressionKind::BitNot(inner) => dependencies(inner, names)?,
-        ExpressionKind::Binary { left, right, .. }
+        ExpressionKind::TextAppend { left, right }
+        | ExpressionKind::Binary { left, right, .. }
         | ExpressionKind::Logical { left, right, .. } => {
             dependencies(left, names)?;
             dependencies(right, names)?;

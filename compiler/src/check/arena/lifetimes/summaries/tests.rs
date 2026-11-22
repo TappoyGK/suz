@@ -803,7 +803,13 @@ fn static_text_and_symbol_bytes_do_not_acquire_an_arena_lifetime() {
             .constraints
             .push(Constraint::Store(Place::Direct(outer), result, HERE));
         let mut checked = caller.with_summaries(&summaries).unwrap();
-        assert!(checked.targets[result].is_empty());
+        assert_eq!(checked.targets[result].len(), 1);
+        let reference = checked.targets[result].first().unwrap();
+        assert!(matches!(
+            checked.cells[&reference.target].origin,
+            Origin::Permanent
+        ));
+        assert_eq!(reference.limit, None);
         let constraints = checked.constraints.clone();
         checked.validate(&constraints).unwrap();
     }

@@ -188,7 +188,8 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
             | ExpressionKind::Len(inner)
             | ExpressionKind::BitNot(inner)
             | ExpressionKind::Not(inner) => visit(inner, false, in_value)?,
-            ExpressionKind::Binary { left, right, .. }
+            ExpressionKind::TextAppend { left, right }
+            | ExpressionKind::Binary { left, right, .. }
             | ExpressionKind::Logical { left, right, .. } => {
                 visit(left, false, in_value)?;
                 visit(right, false, in_value)?;
@@ -236,7 +237,9 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
                 value, compound, ..
             } => {
                 if *compound {
-                    let ExpressionKind::Binary { left, right, .. } = &value.kind else {
+                    let (ExpressionKind::TextAppend { left, right }
+                    | ExpressionKind::Binary { left, right, .. }) = &value.kind
+                    else {
                         unreachable!()
                     };
                     visit(left, false, in_value)?;
@@ -442,7 +445,8 @@ pub(super) fn lower_return_handler(
         return lower_return_handler(rhs, statements, next_id, location);
     }
     let operands = match &mut expr.value {
-        Value::Binary { left, right, .. }
+        Value::TextAppend { left, right, .. }
+        | Value::Binary { left, right, .. }
         | Value::IntegerArithmetic {
             operation: IntegerOperation::Binary { left, right, .. },
             ..

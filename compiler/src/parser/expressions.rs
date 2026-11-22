@@ -54,7 +54,8 @@ impl Parser<'_, '_> {
         if matches!(
             self.token().kind,
             Kind::Symbol(
-                "=" | "+="
+                "=" | "<-"
+                    | "+="
                     | "-="
                     | "*="
                     | "/="

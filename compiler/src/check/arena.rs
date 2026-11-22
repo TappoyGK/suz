@@ -328,24 +328,34 @@ pub(super) fn named_store(
             location: *location,
         };
     }
+    let operation_location = if matches!(value.kind, ExpressionKind::TextAppend { .. }) {
+        value.location
+    } else {
+        *location
+    };
     let (operator, value) = if *compound {
-        let ExpressionKind::Binary {
-            operator, right, ..
-        } = &value.kind
-        else {
-            unreachable!()
-        };
-        (Some(*operator), right.as_ref())
+        match &value.kind {
+            ExpressionKind::Binary {
+                operator, right, ..
+            } => (
+                Some(crate::ast::AssignmentOperator::Binary(*operator)),
+                right.as_ref(),
+            ),
+            ExpressionKind::TextAppend { right, .. } => {
+                (Some(crate::ast::AssignmentOperator::Append), right.as_ref())
+            }
+            _ => unreachable!(),
+        }
     } else {
         (None, value)
     };
-    store(&target, value, operator, *location, context)
+    store(&target, value, operator, operation_location, context)
 }
 
 fn store(
     target: &Expression,
     value: &Expression,
-    operator: Option<crate::ast::BinaryOperator>,
+    operator: Option<crate::ast::AssignmentOperator>,
     location: Location,
     context: &mut StatementContext<'_>,
 ) -> Result<(), Diagnostic> {
@@ -369,7 +379,7 @@ fn store(
     }
     let id = *context.next_id;
     *context.next_id += 1;
-    // 複合代入は保存済みの代入先から一度だけ読み、通常の算術検査を使う。
+    // 複合代入と追記は、保存済みの代入先から一度だけ読んで演算する。
     let name = format!("$arena{id}");
     context.bindings.locals.insert(
         name.clone(),
@@ -378,9 +388,8 @@ fn store(
     let compound = operator.map(|operator| Expression {
         height: value.height + 2,
         location,
-        kind: ExpressionKind::Binary {
-            operator,
-            left: Box::new(Expression {
+        kind: operator.expression(
+            Expression {
                 location,
                 height: 2,
                 kind: ExpressionKind::Deref(Box::new(Expression {
@@ -388,9 +397,9 @@ fn store(
                     height: 1,
                     kind: ExpressionKind::Name(name.clone()),
                 })),
-            }),
-            right: Box::new(value.clone()),
-        },
+            },
+            value.clone(),
+        ),
     });
     let result = if let Some(compound) = &compound {
         super::operator_methods::compound(compound, target.ty, context.bindings)
