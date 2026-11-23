@@ -542,6 +542,7 @@ fn main() -> u8 {
 ### arena-023 refポインタは読み取りと内側の可変参照を通した書き込みを許す
 
 主根拠：`[arena.ptr-type]`。
+
 補助根拠：`[arena.ptr-operations]`。
 
 **ソース：**
@@ -664,6 +665,7 @@ fn main() -> u8 {
 ### arena-027 refポインタからmutポインタへ暗黙変換できない
 
 主根拠：`[arena.ptr-conversion]`。
+
 補助根拠：`[type.expected]`。
 
 **ソース：**

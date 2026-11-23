@@ -1085,6 +1085,7 @@ fn main() -> u8 {
 ### array-035 mut? #[T] と mut #[T]? を区別する
 
 主根拠：`[array.type]`。
+
 補助根拠：`[arena.let]`。
 
 **ソース：**
@@ -1121,6 +1122,7 @@ fn main() -> u8 {
 ### array-036 実行時の値から読み取り専用配列をarenaへ確保する
 
 主根拠：`[array.new]`。
+
 補助根拠：`[array.readonly]`。
 
 **ソース：**
@@ -1147,6 +1149,7 @@ fn main() -> u8 {
 ### array-037 new .[...] で確保した読み取り専用配列をarenaの外へ持ち出せない
 
 主根拠：`[array.lifetime]`。
+
 補助根拠：`[arena.store]`。
 
 **ソース：**
@@ -1177,6 +1180,7 @@ fn main() -> u8 {
 ### array-038 null許容の読み取り専用配列をnullとletで扱う
 
 主根拠：`[array.type]`。
+
 補助根拠：`[arena.null]`・`[arena.let]`。
 
 **ソース：**
@@ -1233,6 +1237,7 @@ fn main() -> u8 {
 ### array-040 要素として書いた定数配列は行ではなく値として扱う
 
 主根拠：`[array.enumeration]`。
+
 補助根拠：`[array.constant]`。
 
 **ソース：**
@@ -1242,7 +1247,7 @@ fix JAGGED: .[.[i32]] = .[.[1, 2], .[3]]
 fn main() -> u8 {
     arena {
         fix a: #[.[i32]] = new #[.[1, 2], .[3, 4]]
-        if (a.[0].[1] or 0) != 2 || (JAGGED.[1].[0] or 0) != 3 { return 1 }
+        if (a.[0].[1] or 0) != 2 || len JAGGED.[0] != 2 || len JAGGED.[1] != 1 { return 1 }
     }
     return 0
 }
@@ -1307,6 +1312,7 @@ fn main() -> u8 {
 ### array-043 #[T]と#[T]?を.[T]?へ暗黙変換する
 
 主根拠：`[array.readonly-conversion]`。
+
 補助根拠：`[arena.let]`。
 
 **ソース：**
@@ -1337,6 +1343,7 @@ fn main() -> u8 {
 ### array-044 #[T]?と.[T]の分岐を.[T]?へ揃える
 
 主根拠：`[arena.ptr-join]`。
+
 補助根拠：`[array.readonly-conversion]`。
 
 **ソース：**

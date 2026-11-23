@@ -521,6 +521,7 @@ fn main() -> u8 {
 ### ffi-022 書き込み可能なCポインタ仮引数にrefポインタを渡せない
 
 主根拠：`[ffi.arena-pointer]`。
+
 補助根拠：`[type.expected]`。
 
 **ソース：**
