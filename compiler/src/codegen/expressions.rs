@@ -80,7 +80,7 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
         return super::exact::stored(expr, context);
     }
     match expr.value {
-        Value::Array { .. } => unreachable!("array initializer is emitted by new"),
+        Value::Array { .. } => super::arrays::constant(expr, context),
         Value::ArrayElement { .. } => super::arrays::address(expr, context),
         Value::ArrayView { ref handler, .. } | Value::ArrayRead { ref handler, .. } => {
             let (setup, condition, value) = super::arrays::read_parts(expr, context);
@@ -327,6 +327,9 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             format!("({setup}, {condition} ? {converted} : ({fallback}))")
         }
         Value::Cast(ref inner) => {
+            if matches!(expr.ty, crate::ast::Type::ReadOnlyArray(_)) && inner.ty.is_nonnull() {
+                return super::arrays::readonly(inner, context);
+            }
             if expr.ty.array_id().is_some() {
                 return expression(inner, context);
             }

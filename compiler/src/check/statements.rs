@@ -341,7 +341,7 @@ fn check_for(statement: &Statement, context: &mut StatementContext<'_>) -> Resul
     } else {
         super::ranges::check_references(start, context.bindings)?;
         let value = expression(start, None, context.bindings)?;
-        let ty = if let Some(id) = value.ty.array_id().filter(|_| value.ty.is_nonnull()) {
+        let ty = if let Some(id) = value.ty.array_id().filter(|_| !value.ty.is_nullable()) {
             let array = context.bindings.structs.arrays.borrow().get(id);
             if array.rank == 1 {
                 array.element
@@ -352,7 +352,7 @@ fn check_for(statement: &Statement, context: &mut StatementContext<'_>) -> Resul
                     .arrays
                     .borrow_mut()
                     .intern(array.element, array.rank - 1)
-                    .pointer()
+                    .array_reference(matches!(value.ty, Type::ReadOnlyArray(_)))
             }
         } else if value.ty.is_text() {
             Type::Char

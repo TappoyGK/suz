@@ -133,7 +133,7 @@ pub(in crate::check) fn check(
                 if !valid
                     || bindings.contains_function(target)
                     || crate::check::ffi::contains_c_type(target, bindings)
-                    || crate::check::arena::contains(target, bindings)
+                    || crate::check::ffi::contains_pointer(target, bindings)
                 {
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,

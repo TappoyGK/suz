@@ -398,7 +398,7 @@ pub(crate) fn validate_layout_range<'a>(
                                         return None;
                                     }
                                     ty = inner;
-                                } else if let Type::Array(id) = ty {
+                                } else if let Type::Array(id) | Type::ReadOnlyArray(id) = ty {
                                     let array = arrays.get(id);
                                     // 一次元はnew []で初期化を打ち切れる。多次元は初期値が必要。
                                     if array.rank == 1 {

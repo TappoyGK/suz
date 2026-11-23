@@ -33,6 +33,7 @@ fn contains_in(ty: Type, structs: &super::type_parameters::structs::Structs) -> 
 // 寿命グラフでは葉の実体として扱い、言語上のpointeeやポインタ禁止規則は変えない。
 fn reference_target(ty: Type) -> Option<Type> {
     match ty {
+        Type::ReadOnlyArray(id) => Some(Type::Array(id)),
         Type::Text | Type::CPointer => Some(Type::Void),
         _ => ty.pointee(),
     }
@@ -56,7 +57,9 @@ pub(super) fn callable_type(ty: Type, structs: &super::type_parameters::structs:
     while let Some(ty) = pending.pop() {
         match ty {
             Type::Function(_) | Type::StaticFunction(_) => return true,
-            Type::Array(id) => pending.push(structs.arrays.borrow().get(id).element),
+            Type::Array(id) | Type::ReadOnlyArray(id) => {
+                pending.push(structs.arrays.borrow().get(id).element)
+            }
             Type::Pointer { .. } => pending.push(ty.pointee().unwrap()),
             Type::Struct(id) if seen.insert(id) => {
                 pending.extend(structs.get(id).fields.iter().map(|f| f.ty))
@@ -70,6 +73,7 @@ pub(super) fn observe_type(ty: Type, scope: &Scope) {
     if !matches!(
         ty,
         Type::Pointer { .. }
+            | Type::ReadOnlyArray(_)
             | Type::Text
             | Type::CPointer
             | Type::Struct(_)
@@ -158,7 +162,31 @@ pub(super) fn expression(
                     ),
                 ));
             }
-            let value = expression::coerced(inner, expected.and_then(Type::pointee), scope)?;
+            let value = if matches!(inner.kind, ExpressionKind::ArrayInit { .. }) {
+                let array_type = expected.and_then(|ty| match ty {
+                    Type::ReadOnlyArray(_) => Some(ty),
+                    _ => ty.pointee(),
+                });
+                super::arrays::initializer(inner, array_type, scope)?
+            } else {
+                if matches!(
+                    expression::operand_type(inner, scope),
+                    Some(Type::ReadOnlyArray(_))
+                ) {
+                    return Err(expr.location.error(ErrorKind::InvalidSource,
+                        crate::diagnostic!("arena.new-value", "new cannot allocate a readonly array reference; store it in a struct field")));
+                }
+                expression::coerced(inner, expected.and_then(Type::pointee), scope)?
+            };
+            if matches!(value.ty, Type::ReadOnlyArray(_)) {
+                return Err(expr.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "arena.new-value",
+                        "new cannot allocate a readonly array reference; store it in a struct field"
+                    ),
+                ));
+            }
             if value.ty == Type::Void || matches!(value.ty, Type::Function(_)) {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,

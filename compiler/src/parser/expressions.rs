@@ -14,6 +14,12 @@ use crate::{
 };
 
 impl Parser<'_, '_> {
+    // 再帰するunaryのフレームに配列の構築用一時値を置かない。
+    fn constant_array(&mut self) -> Result<Expression, Diagnostic> {
+        let value = self.array_initializer()?;
+        self.postfix(value)
+    }
+
     fn text_buffer(&mut self) -> Result<Expression, Diagnostic> {
         let location = self.location();
         self.cursor += 1;
@@ -494,6 +500,7 @@ impl Parser<'_, '_> {
                 }
                 ExpressionKind::Deref(Box::new(operand))
             }
+            Kind::Symbol("[") => return self.constant_array(),
             Kind::Keyword("textbuf") => return self.text_buffer(),
             Kind::Keyword("new")
                 if self

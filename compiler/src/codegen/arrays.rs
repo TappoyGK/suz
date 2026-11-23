@@ -16,6 +16,12 @@ pub(super) fn declarations(c: &mut String, context: &ExpressionContext) {
     for (id, array) in context.arrays.entries.iter().enumerate() {
         writeln!(
             c,
+            "typedef struct {{ const void *data; int32_t lengths[{}]; }} suz_readonly_array_{id};",
+            array.rank
+        )
+        .unwrap();
+        writeln!(
+            c,
             "typedef struct {{ void *data; int32_t lengths[{}]; }} suz_array_{id};",
             array.rank
         )
@@ -36,7 +42,7 @@ pub(super) fn cache(
     writeln!(
         c,
         "{indent}{} *const suz_array_data_{id} = ({source}).data;\n{indent}(void)suz_array_data_{id};",
-        array.element.c_name()
+        element_type(array.element, ty)
     )
     .unwrap();
     for dimension in 0..array.rank {
@@ -48,6 +54,35 @@ fn temporary(ty: Type, context: &mut ExpressionContext) -> String {
     let id = context.temporaries.len();
     context.temporaries.push(ty);
     format!("suz_cmp_{id}")
+}
+
+/// 呼び出しや添字の検査を含まない参照は、先頭位置と寸法を直接読み出せる。
+fn direct_reference(value: &CheckedExpression) -> bool {
+    match &value.value {
+        Value::Local(_) => true,
+        Value::Field { target, .. } | Value::Deref(target) => direct_reference(target),
+        _ => false,
+    }
+}
+
+/// 先頭位置と寸法だけを移す。副作用を持ち得る変換元は一時変数で評価を1回に保つ。
+pub(super) fn readonly(value: &CheckedExpression, context: &mut ExpressionContext) -> String {
+    let id = value.ty.array_id().unwrap();
+    let rank = context.arrays.get(id).rank;
+    let (setup, source) = if direct_reference(value) {
+        (String::new(), format!("({})", expression(value, context)))
+    } else {
+        let source = temporary(value.ty, context);
+        let value = expression(value, context);
+        (format!("{source} = {value}, "), source)
+    };
+    let lengths = (0..rank)
+        .map(|axis| format!("{source}.lengths[{axis}]"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "({setup}(suz_readonly_array_{id}){{ .data = {source}.data, .lengths = {{ {lengths} }} }})"
+    )
 }
 
 /// 保証済みの不変の添字は、評価順を保存する一時変数を必要としない。
@@ -121,7 +156,7 @@ pub(super) fn allocate(
         values,
         lengths,
         repeated,
-        constant_counts,
+        metadata,
     } = &value.value
     else {
         unreachable!()
@@ -129,7 +164,7 @@ pub(super) fn allocate(
     context.uses_arena = true;
     let element = context.arrays.get(ty.array_id().unwrap()).element.c_name();
     let mut c = String::from("({ ");
-    for count in constant_counts {
+    for count in &metadata.constant_counts {
         write!(c, r#"_Static_assert(UINT64_C({count}) <= SIZE_MAX / sizeof({element}), "array byte size overflows size_t [array.layout]"); "#).unwrap();
     }
     for (i, value) in values.iter().enumerate() {
@@ -276,7 +311,12 @@ fn parts(
         };
     }
     let data = cached.map_or_else(
-        || format!("({} *){source}.data", expr.ty.pointee().unwrap().c_name()),
+        || {
+            format!(
+                "({} *){source}.data",
+                element_type(expr.ty.pointee().unwrap(), target.ty)
+            )
+        },
         |id| format!("suz_array_data_{id}"),
     );
     let pointer = format!("({data} + {offset})");
@@ -422,7 +462,7 @@ fn access_parts(
     let value = format!(
         "({}){{ .data = ({} *){source}.data + (size_t){first} * ({stride}), .lengths = {{ {lengths} }} }}",
         expr.ty.c_name(),
-        array.element.c_name()
+        element_type(array.element, target.ty)
     );
     (setup, condition, value)
 }
@@ -452,6 +492,7 @@ pub(super) fn emit_loop(
 ) {
     let indent = "    ".repeat(depth);
     let array = context.arrays.get(source.ty.array_id().unwrap());
+    let element = element_type(array.element, source.ty);
     let ty = source.ty.c_name();
     let source = expression(source, context);
     writeln!(
@@ -463,7 +504,7 @@ pub(super) fn emit_loop(
     writeln!(
         c,
         "{indent}    {} *const suz_iter_data_{id} = suz_iter_{id}.data;",
-        array.element.c_name()
+        element
     )
     .unwrap();
     for dimension in 0..array.rank {
@@ -512,4 +553,152 @@ pub(super) fn emit_loop(
     }
     super::statements::emit_block(c, body, depth + 2, next_assignment, context);
     writeln!(c, "{indent}    }}\n{indent}}}").unwrap();
+}
+
+fn element_type(element: Type, reference: Type) -> String {
+    if matches!(reference, Type::ReadOnlyArray(_)) {
+        format!("{} const", element.c_name())
+    } else {
+        element.c_name()
+    }
+}
+
+/// 配列本体は関数の外に一度だけ置く。参照を得る場所では先頭と寸法だけを返す。
+/// symbolの登録と非有限floatのビット復元は起動時に行い、静的領域へ保存する。
+pub(super) fn constant(value: &CheckedExpression, context: &mut ExpressionContext) -> String {
+    let Value::Array {
+        values,
+        lengths,
+        repeated,
+        metadata,
+    } = &value.value
+    else {
+        unreachable!()
+    };
+    let array = context.arrays.get(value.ty.array_id().unwrap());
+    let initial = values
+        .iter()
+        .map(|v| constant_element(v, context))
+        .collect::<Vec<_>>();
+    let static_initial = initial.iter().all(|(_, literal)| *literal);
+    let lengths = lengths
+        .iter()
+        .map(|v| match v.value {
+            Value::Integer { value, .. } => value.to_string(),
+            _ => unreachable!("constant array dimension"),
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let count = *metadata.constant_counts.last().unwrap();
+    let key = format!(
+        "{:?}:{lengths}:{repeated}:{}",
+        value.ty,
+        initial
+            .iter()
+            .map(|(text, _)| text.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    let id = if let Some(id) = context.constant_arrays.get(&key) {
+        *id
+    } else {
+        let id = context.constant_arrays.len();
+        context.constant_arrays.insert(key, id);
+        let element = array.element.c_name();
+        let name = format!("suz_constant_array_{id}");
+        let size = count.max(1);
+        for count in &metadata.constant_counts {
+            writeln!(context.constant_array_data, r#"_Static_assert(UINT64_C({count}) <= SIZE_MAX / sizeof({element}), "array byte size overflows size_t [array.layout]");"#).unwrap();
+        }
+        if static_initial {
+            let initial = if count == 0 {
+                "0".into()
+            } else if *repeated {
+                format!("[0 ... {}] = {}", count - 1, initial[0].0)
+            } else {
+                initial
+                    .iter()
+                    .map(|(text, _)| text.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            writeln!(
+                context.constant_array_data,
+                "static {element} const {name}[{size}] = {{ {initial} }};"
+            )
+            .unwrap();
+        } else {
+            // 起動時の代入が必要な要素と、Cの静的初期値で表せる要素を分ける。
+            let static_values = initial
+                .iter()
+                .enumerate()
+                .filter(|(_, (_, literal))| *literal)
+                .map(|(i, (text, _))| format!("[{i}] = {text}"))
+                .collect::<Vec<_>>();
+            let initializer = if static_values.is_empty() {
+                "0".into()
+            } else {
+                static_values.join(", ")
+            };
+            writeln!(
+                context.constant_array_data,
+                "static {element} {name}[{size}] = {{ {initializer} }};"
+            )
+            .unwrap();
+            if *repeated && count != 0 {
+                writeln!(
+                    context.constant_array_init,
+                    "    for (size_t i = 0; i < UINT64_C({count}); ++i) {name}[i] = {};",
+                    initial[0].0
+                )
+                .unwrap();
+            } else if !repeated {
+                for (index, (initial, literal)) in initial.iter().enumerate() {
+                    if *literal {
+                        continue;
+                    }
+                    writeln!(
+                        context.constant_array_init,
+                        "    {name}[{index}] = {initial};"
+                    )
+                    .unwrap();
+                }
+            }
+        }
+        id
+    };
+    format!(
+        "({}){{ .data = suz_constant_array_{id}, .lengths = {{ {lengths} }} }}",
+        value.ty.c_name()
+    )
+}
+
+fn constant_element(value: &CheckedExpression, context: &mut ExpressionContext) -> (String, bool) {
+    match &value.value {
+        Value::Struct { fields } => {
+            let mut literal = true;
+            let fields = fields
+                .iter()
+                .map(|(index, field)| {
+                    let (text, constant) = constant_element(field, context);
+                    literal &= constant;
+                    format!(
+                        ".{} = {text}",
+                        super::structs::field_name(value.ty, *index, context)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            (format!("({}){{ {fields} }}", value.ty.c_name()), literal)
+        }
+        Value::Text { .. } => (expression(value, context), value.ty != Type::Symbol),
+        Value::Float(bits) => {
+            let finite = match value.ty {
+                Type::Float(crate::ast::FloatType::F32) => f32::from_bits(*bits as u32).is_finite(),
+                _ => f64::from_bits(*bits).is_finite(),
+            };
+            (expression(value, context), finite)
+        }
+        _ => (expression(value, context), true),
+    }
 }

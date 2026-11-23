@@ -147,12 +147,11 @@ fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
                 Some(wrap(constant_integer_raw(inner)?))
             }
         }
-        Value::Len(inner) => {
-            let Value::Text { text } = evaluate_raw(inner)?.value else {
-                return None;
-            };
-            Some(text.chars().count() as i128)
-        }
+        Value::Len(inner) => match evaluate_raw(inner)?.value {
+            Value::Text { text } => Some(text.chars().count() as i128),
+            Value::Array { lengths, .. } => constant_integer_raw(&lengths[0]),
+            _ => None,
+        },
         Value::BitNot(inner) => Some(wrap(!constant_integer_raw(inner)?)),
         Value::Binary {
             operator,
@@ -340,7 +339,8 @@ fn constant_bool_raw(expr: &CheckedExpression) -> Option<bool> {
                 } else {
                     match left.ty {
                         Type::StaticFunction(_) | Type::Function(_) => return None,
-                        Type::Array(_)
+                        Type::ReadOnlyArray(_)
+                        | Type::Array(_)
                         | Type::Pointer { .. }
                         | Type::CPointer
                         | Type::CInteger(_)
@@ -437,7 +437,128 @@ fn equal_structs(left: &CheckedExpression, right: &CheckedExpression) -> Option<
     Some(true)
 }
 
+// 定数配列の部分参照を求める。反復初期化は展開せず、一つの初期値と寸法を保つ。
+fn array_access(expr: &CheckedExpression) -> Option<CheckedExpression> {
+    if let Value::ArrayView {
+        target,
+        start,
+        end,
+        index,
+        handler,
+        location,
+        ..
+    } = &expr.value
+    {
+        let Value::Array {
+            metadata,
+            values,
+            mut lengths,
+            repeated,
+            ..
+        } = evaluate_raw(target)?.value
+        else {
+            return None;
+        };
+        let mut origins = metadata.origins;
+        let length = constant_integer_raw(&lengths[0])?;
+        let first = start
+            .as_ref()
+            .map_or(Some(0), |v| constant_integer_raw(v))?;
+        let last = if *index {
+            first.checked_add(1)?
+        } else {
+            end.as_ref()
+                .map_or(Some(length), |v| constant_integer_raw(v))?
+        };
+        if first < 0 || last < first || last > length {
+            return match handler {
+                Some(CheckedHandler::Value(v)) => evaluate_raw(v),
+                _ => None,
+            };
+        }
+        let stride = lengths[1..].iter().try_fold(1usize, |n, v| {
+            n.checked_mul(constant_integer_raw(v)? as usize)
+        })?;
+        let values = if repeated {
+            values
+        } else {
+            values
+                .get(first as usize * stride..last as usize * stride)?
+                .to_vec()
+        };
+        if *index {
+            origins.remove(0);
+            lengths.remove(0);
+        } else {
+            if start.is_some() || end.is_some() {
+                origins[0] = (*location, 0);
+            }
+            lengths[0] = CheckedExpression {
+                ty: Type::Integer(IntegerType::Len),
+                value: Value::Integer {
+                    value: last - first,
+                    minus: None,
+                },
+            };
+        }
+        let mut count = 1u64;
+        let mut constant_counts = Vec::new();
+        for length in lengths.iter().rev() {
+            count = count.checked_mul(constant_integer_raw(length)? as u64)?;
+            constant_counts.push(count);
+        }
+        return Some(CheckedExpression {
+            ty: expr.ty,
+            value: Value::Array {
+                metadata: Box::new(super::ir::ArrayMetadata {
+                    origins,
+                    constant_counts,
+                }),
+                values,
+                lengths,
+                repeated,
+            },
+        });
+    }
+    if let Value::ArrayRead { address, handler } = &expr.value {
+        let Value::ArrayElement { target, indices } = &address.value else {
+            return None;
+        };
+        let Value::Array {
+            values,
+            lengths,
+            repeated,
+            ..
+        } = evaluate_raw(target)?.value
+        else {
+            return None;
+        };
+        let mut offset = 0usize;
+        for ((index, _, _), length) in indices.iter().zip(&lengths) {
+            let index = constant_integer_raw(index)?;
+            let length = constant_integer_raw(length)?;
+            if !(0..length).contains(&index) {
+                return match handler {
+                    Some(CheckedHandler::Value(v)) => evaluate_raw(v),
+                    _ => None,
+                };
+            }
+            offset = offset
+                .checked_mul(length as usize)?
+                .checked_add(index as usize)?;
+        }
+        return values.get(if repeated { 0 } else { offset }).cloned();
+    }
+    None
+}
+
 fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
+    if matches!(
+        expr.value,
+        Value::ArrayRead { .. } | Value::ArrayView { .. }
+    ) {
+        return array_access(expr);
+    }
     if let Value::With { target, fields } = &expr.value {
         let mut result = evaluate_raw(target)?;
         let Value::Struct { fields: saved } = &mut result.value else {
@@ -466,6 +587,23 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
             Value::Function { .. } => expr.value.clone(),
             _ => return None,
         },
+        Type::ReadOnlyArray(_) => {
+            let Value::Array {
+                metadata,
+                values,
+                lengths,
+                repeated,
+            } = &expr.value
+            else {
+                return None;
+            };
+            Value::Array {
+                metadata: metadata.clone(),
+                values: values.iter().map(evaluate_raw).collect::<Option<_>>()?,
+                lengths: lengths.iter().map(evaluate_raw).collect::<Option<_>>()?,
+                repeated: *repeated,
+            }
+        }
         Type::Array(_)
         | Type::Pointer { .. }
         | Type::CPointer

@@ -163,7 +163,8 @@ pub(crate) const NUMERIC_COMBINATIONS: usize = 18;
 /// Structの番号は構造体宣言、Functionの番号は共通化した関数値の型を参照する。汎用の型はC生成までに具体化する。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Type {
-    Array(usize), // ポインタの参照先専用。配列値は単独では保存しない。
+    ReadOnlyArray(usize), // 静的な配列や読み取り専用の部分参照。格納先のArrayとは区別する。
+    Array(usize),         // ポインタの参照先専用。配列値は単独では保存しない。
     Pointer {
         leaf: PointerLeaf,
         shape: PointerShape,
@@ -194,6 +195,7 @@ pub(crate) enum Type {
 /// ポインタの末端の値型。各段のnull許容性はPointerShapeで別に持つ。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum PointerLeaf {
+    ReadOnlyArray(usize),
     Array(usize),
     CPointer,
     CInteger(CIntegerType),
@@ -219,9 +221,23 @@ pub(crate) enum PointerLeaf {
 }
 impl Type {
     pub fn array_id(self) -> Option<usize> {
+        if let Self::ReadOnlyArray(id) = self {
+            return Some(id);
+        }
         match self.pointee() {
             Some(Self::Array(id)) => Some(id),
             _ => None,
+        }
+    }
+    /// 部分配列でも、元の参照の書き込み可否を引き継ぐ。
+    pub fn array_reference(self, readonly: bool) -> Self {
+        let Self::Array(id) = self else {
+            unreachable!("array storage type")
+        };
+        if readonly {
+            Self::ReadOnlyArray(id)
+        } else {
+            self.pointer()
         }
     }
     pub fn pointer(self) -> Self {
@@ -232,6 +248,7 @@ impl Type {
                     shape: shape.push(),
                 };
             }
+            Self::ReadOnlyArray(id) => PointerLeaf::ReadOnlyArray(id),
             Self::Array(id) => PointerLeaf::Array(id),
             Self::CPointer => PointerLeaf::CPointer,
             Self::CInteger(v) => PointerLeaf::CInteger(v),
@@ -275,9 +292,11 @@ impl Type {
             _ => self,
         }
     }
-    /// 外側のnull許容性だけを広げる。参照先の型は変更しない。
+    /// 最外側のnull許容性を広げるか、配列を読み取り専用の参照にする。要素型と実体は保つ。
     pub fn lifts_to(self, to: Self) -> bool {
-        self.is_nonnull() && to.is_nullable() && self.pointee() == to.pointee()
+        self.is_nonnull()
+            && ((to.is_nullable() && self.pointee() == to.pointee())
+                || matches!(to, Self::ReadOnlyArray(id) if self.pointee() == Some(Self::Array(id))))
     }
     pub fn pointee(self) -> Option<Self> {
         let Self::Pointer { leaf, shape } = self else {
@@ -290,6 +309,7 @@ impl Type {
             });
         }
         Some(match leaf {
+            PointerLeaf::ReadOnlyArray(id) => Self::ReadOnlyArray(id),
             PointerLeaf::Array(id) => Self::Array(id),
             PointerLeaf::CPointer => Self::CPointer,
             PointerLeaf::CInteger(v) => Self::CInteger(v),
@@ -409,6 +429,7 @@ impl Type {
                     "ptr"
                 }
             }
+            Self::ReadOnlyArray(_) => "readonly array",
             Self::Array(_) => "array",
             Self::CPointer => "*const void",
             Self::CInteger(ty) => ty.name(),
@@ -443,6 +464,7 @@ impl Type {
             Self::Pointer { .. } if self.array_id().is_some() => {
                 format!("suz_array_{}", self.array_id().unwrap())
             }
+            Self::ReadOnlyArray(id) => format!("suz_readonly_array_{id}"),
             Self::Array(_) => unreachable!("array storage has no standalone C value type"),
             Self::Pointer { .. } => format!("typeof({} *)", self.pointee().unwrap().c_name()),
             Self::CPointer => "suz_ffi_bytes".into(),

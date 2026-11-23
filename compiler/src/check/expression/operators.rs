@@ -412,10 +412,21 @@ pub(super) fn check(
                     ),
                 ));
             }
+            if crate::check::arrays::contains_reference(ty, bindings) {
+                return Err(expr.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "array.value",
+                        "array references and structs containing them cannot be compared"
+                    ),
+                ));
+            }
             if crate::check::ffi::contains_pointer(ty, bindings) {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
-                    if crate::check::arena::contains(ty, bindings) {
+                    if crate::check::arena::contains(ty, bindings)
+                        || matches!(ty, Type::ReadOnlyArray(_))
+                    {
                         crate::diagnostic!(
                             "arena.ptr-operations",
                             "pointer values cannot be compared"

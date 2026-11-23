@@ -708,3 +708,126 @@ fn main() -> u8 {
     );
     assert_eq!(output.status.code(), Some(0), "{output:?}");
 }
+
+#[test]
+fn constant_array_references_do_not_allocate_or_initialize_per_call() {
+    // 実行結果だけでは、呼び出すたびの再確保や要素のコピーを検出できない。
+    let c = suz::compile(
+        br#"
+fix TABLE: [i32] = [7; 1024]
+fn table() -> [i32] { return TABLE }
+fn main() -> u8 {
+    fix a = table()
+    fix b = table()
+    return ifexpr len a == len b { 0 } else { 1 }
+}
+"#,
+    )
+    .unwrap();
+    assert!(
+        !c.contains("suz_arena_alloc("),
+        "constant array uses arena allocation"
+    );
+    assert_eq!(
+        c.matches("static int32_t const suz_constant_array_")
+            .count(),
+        1,
+        "constant array storage is duplicated"
+    );
+    assert!(!c.contains("memcpy("), "constant array elements are copied");
+}
+
+#[test]
+fn mixed_constant_arrays_initialize_only_nonliteral_elements_at_startup() {
+    // 値が同じでも、静的に置ける要素を起動時に代入し直すと起動の処理量が増える。
+    let c = suz::compile(
+        br#"
+fix VALUES: [f64] = [1.0, nan, inf]
+fn values() -> [f64] { return VALUES }
+fn main() -> u8 { fix a = values()
+    return ifexpr len a == 3 { 0 } else { 1 }
+}
+"#,
+    )
+    .unwrap();
+    let main = c.split("int main(void)").nth(1).unwrap();
+    assert_eq!(
+        main.matches("] = suz_f64(").count(),
+        2,
+        "nonfinite elements must be restored once"
+    );
+    assert!(
+        !main.contains("[0] ="),
+        "finite element is assigned at startup"
+    );
+    assert!(
+        c.contains("[0] = (0x10000000000000p-52)"),
+        "finite element has no static initializer"
+    );
+}
+
+#[test]
+fn readonly_conversion_evaluates_once_without_allocating_or_copying_elements() {
+    // 実行結果だけでは変換時の余計な確保を検出できないので、生成Cも確認する。
+    let source = r#"
+struct Counter { calls: i32 }
+struct Hold { values: ptr [i32] }
+fn get(c: ptr Counter, a: ptr [i32]) -> ptr [i32] {
+    c#calls += 1
+    return a
+}
+fn holder(c: ptr Counter, a: ptr [i32]) -> Hold {
+    c#calls += 1
+    return Hold { values: a }
+}
+fn main() -> u8 {
+    fix ptr c = new Counter { calls: 0 }
+    fix ptr a: ptr [i32] = new [7; 1024]
+    fix read: [i32] = get(c, a)
+    a#[0] = 9
+    if c.calls != 1 { return 1 }
+    if (read[0] or 0) != 9 { return 2 }
+    fix field: [i32] = holder(c, a).values
+    if c.calls != 2 { return 3 }
+    if (field[0] or 0) != 9 { return 4 }
+    return 0
+}
+"#;
+    let c = suz::compile(source.as_bytes()).unwrap();
+    assert_eq!(
+        c.matches("suz_arena_alloc(").count(),
+        2,
+        "conversion allocates storage"
+    );
+    assert!(!c.contains("memcpy("), "conversion copies elements");
+    let output = compile_and_run_c23(source, "readonly-conversion.suz");
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+}
+
+#[test]
+fn readonly_conversion_reads_local_and_field_descriptors_directly() {
+    // 最適化なしでも、単純な参照の変換にディスクリプター全体の一時コピーを入れない。
+    let c = suz::compile(
+        br#"
+struct Hold { values: ptr [i32] }
+struct Nested { hold: Hold }
+fn parameter(a: ptr [i32; _, _]) -> [i32; _, _] { return a }
+fn local(a: ptr [i32]) -> [i32] {
+    var ptr current = a
+    var result: [i32] = current
+    current = a
+    result = current
+    return result
+}
+fn field(h: Nested) -> [i32] { return h.hold.values }
+fn indirect(h: ptr Nested) -> [i32] { return h.hold.values }
+fn main() -> u8 { return 0 }
+"#,
+    )
+    .unwrap();
+    assert!(
+        !c.contains("suz_cmp_"),
+        "simple conversion creates a temporary"
+    );
+    assert!(c.contains("(suz_readonly_array_"), "conversion is missing");
+}

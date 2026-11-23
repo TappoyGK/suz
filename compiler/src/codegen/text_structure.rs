@@ -160,7 +160,8 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
                     slots,
                 )
             }
-            Type::Array(_)
+            Type::ReadOnlyArray(_)
+            | Type::Array(_)
             | Type::Pointer { .. }
             | Type::CPointer
             | Type::CInteger(_)

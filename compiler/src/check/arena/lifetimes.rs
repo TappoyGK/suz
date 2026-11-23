@@ -97,7 +97,7 @@ pub(crate) struct Analysis {
     kept: Vec<Node>,
     // 追記先の実体が現在のArenaに属するという前提。呼び出し先の前提もここへ合流する。
     append_requirements: Vec<(Node, usize, Location)>,
-    permanent: Option<Node>,
+    permanent: BTreeMap<Type, Node>,
     returned: Shape,
     direct_calls: Vec<summaries::Call>,
     effect_calls: BTreeMap<usize, Location>,
@@ -138,7 +138,7 @@ impl Analysis {
             discarded_calls: Vec::new(),
             kept: Vec::new(),
             append_requirements: Vec::new(),
-            permanent: None,
+            permanent: BTreeMap::new(),
             returned: Shape::new(),
             direct_calls: Vec::new(),
             effect_calls: BTreeMap::new(),
@@ -206,7 +206,9 @@ impl Analysis {
     fn paths(&self, ty: Type) -> Vec<Vec<usize>> {
         match ty {
             Type::Array(id) => self.paths(self.structs.arrays.borrow().get(id).element),
-            Type::Pointer { .. } | Type::Text | Type::CPointer => vec![vec![]],
+            Type::ReadOnlyArray(_) | Type::Pointer { .. } | Type::Text | Type::CPointer => {
+                vec![vec![]]
+            }
             Type::Struct(id) => self
                 .structs
                 .get(id)
@@ -306,6 +308,16 @@ impl Analysis {
                 for length in lengths {
                     self.expr(length, region, arena);
                 }
+                if let Type::ReadOnlyArray(id) = value.ty {
+                    let cell = self.permanent_cell(Type::Array(id));
+                    for initial in values {
+                        let shape = self.expr(initial, region, arena);
+                        self.write(Place::Direct(cell), shape, self.regions[0].end);
+                    }
+                    let node = self.node();
+                    self.targets[node].insert(Reference::object(cell));
+                    return BTreeMap::from([(vec![], node)]);
+                }
                 let result = self.shape(value.ty);
                 for initial in values {
                     let shape = self.expr(initial, region, arena);
@@ -358,7 +370,9 @@ impl Analysis {
             }
             Value::Null => self.shape(value.ty),
             // 最外側の暗黙変換は実体と、保存直前の非nullの証明を変えない。
-            Value::Cast(inner) if value.ty.pointee().is_some() => self.expr(inner, region, arena),
+            Value::Cast(inner) if super::reference_target(value.ty).is_some() => {
+                self.expr(inner, region, arena)
+            }
             Value::TextAppend {
                 left,
                 right,
@@ -994,23 +1008,23 @@ impl Analysis {
         }
         cell
     }
-    // 静的textも候補として残す。空集合にすると、分岐でArenaのtextと合流した際に
+    // 静的な実体も型ごとの候補として残す。空集合にすると、分岐でArenaのtextと合流した際に
     // 「必ず現在のArenaに属する」と誤判定してしまう。
-    fn permanent_cell(&mut self) -> Node {
-        if let Some(cell) = self.permanent {
-            return cell;
+    fn permanent_cell(&mut self, ty: Type) -> Node {
+        if let Some(cell) = self.permanent.get(&ty) {
+            return *cell;
         }
-        let cell = self.cell(0, self.regions[0].end, Type::Void);
+        let cell = self.cell(0, self.regions[0].end, ty);
         self.cells.get_mut(&cell).unwrap().origin = Origin::Permanent;
-        self.objects.insert(cell, summaries::Object::Permanent);
-        self.permanent = Some(cell);
+        self.objects.insert(cell, summaries::Object::Permanent(ty));
+        self.permanent.insert(ty, cell);
         cell
     }
     fn permanent_text(&mut self, ty: Type) -> Shape {
         if reference_target(ty).is_none() {
             return Shape::new();
         }
-        let cell = self.permanent_cell();
+        let cell = self.permanent_cell(Type::Void);
         let node = self.node();
         self.targets[node].insert(Reference::object(cell));
         BTreeMap::from([(vec![], node)])

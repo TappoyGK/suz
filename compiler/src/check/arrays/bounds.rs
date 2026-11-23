@@ -4,18 +4,20 @@ use super::super::{
     ir::{CheckedExpression, CheckedHandler, IntegerOperation, Value},
     scope::Scope,
 };
-use crate::ast::{BinaryOperator, Type};
+use crate::ast::{BinaryOperator, Location, Type};
 use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(in crate::check) enum Dimension {
     Constant(i128),
+    // 定数式は利用箇所へ複製されるので、元の寸法をソース位置で区別する。
+    Static(Location, usize, i128),
     Source(usize, usize, Option<i128>),
 }
 impl Dimension {
     fn known(self) -> Option<i128> {
         match self {
-            Self::Constant(n) => Some(n),
+            Self::Constant(n) | Self::Static(_, _, n) => Some(n),
             Self::Source(_, _, n) => n,
         }
     }
@@ -43,6 +45,17 @@ pub(in crate::check) fn shape(v: &CheckedExpression, scope: &Scope) -> Vec<Optio
     };
     let unknown = || vec![None; scope.structs.arrays.borrow().get(id).rank];
     match &v.value {
+        Value::Array {
+            metadata, lengths, ..
+        } => lengths
+            .iter()
+            .enumerate()
+            .map(|(axis, v)| {
+                constant(v).map(|n| {
+                    Dimension::Static(metadata.origins[axis].0, metadata.origins[axis].1, n)
+                })
+            })
+            .collect(),
         Value::Local(id) => scope
             .array_bounds
             .arrays
@@ -110,7 +123,7 @@ pub(in crate::check) fn register(
     dimensions.resize(scope.structs.arrays.borrow().get(array).rank, None);
     for (axis, dimension) in dimensions.iter_mut().enumerate() {
         *dimension = Some(match *dimension {
-            Some(Dimension::Source(..)) => dimension.unwrap(),
+            Some(Dimension::Source(..) | Dimension::Static(..)) => dimension.unwrap(),
             value => Dimension::Source(id, axis, value.and_then(Dimension::known)),
         });
     }
@@ -181,7 +194,7 @@ pub(in crate::check) fn loop_bound(
     let Some((end, offset)) = offset(end).filter(|(_, n)| *n <= 0) else {
         return;
     };
-    let Some(length @ Dimension::Source(..)) = length(end, scope) else {
+    let Some(length @ (Dimension::Source(..) | Dimension::Static(..))) = length(end, scope) else {
         return;
     };
     let Some(margin) = offset.checked_neg() else {
@@ -307,6 +320,7 @@ pub(in crate::check) fn captures(
     let mut origins = BTreeMap::new();
     let mut rename = |dimension| match dimension {
         Dimension::Constant(n) => Dimension::Constant(n),
+        Dimension::Static(..) => dimension,
         Dimension::Source(id, axis, known) => {
             let next = origins.len();
             let number = *origins.entry((id, axis)).or_insert(next);
@@ -344,4 +358,22 @@ pub(in crate::check) fn captures(
         }
     }
     state
+}
+
+/// 静的な長さと定数添字の組だけを拒否判定に使う。実行時の値域は推測しない。
+pub(super) fn invalid_constant_index(
+    target: &CheckedExpression,
+    index: &CheckedExpression,
+    dimension: usize,
+    scope: &Scope,
+) -> bool {
+    constant(index)
+        .zip(
+            shape(target, scope)
+                .get(dimension)
+                .copied()
+                .flatten()
+                .and_then(Dimension::known),
+        )
+        .is_some_and(|(index, length)| !(0..length).contains(&index))
 }

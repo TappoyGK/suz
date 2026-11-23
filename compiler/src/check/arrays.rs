@@ -1,4 +1,5 @@
 //! 配列の初期化と要素へのアクセスを検査する。要素の保存先は寿命解析でも元の配列へ結ぶ。
+//! 利用元: 式・代入の意味検査。定数配列は[array.constant]、書き込み可否は[array.readonly]に従う。
 pub(super) mod bounds;
 pub(super) mod dimensions;
 
@@ -26,7 +27,7 @@ pub(super) fn initializer(
         unreachable!()
     };
     let required = match expected {
-        Some(Type::Array(id)) => {
+        Some(Type::Array(id) | Type::ReadOnlyArray(id)) => {
             let array = scope.structs.arrays.borrow().get(id);
             if array.rank != lengths.len() {
                 return Err(expr.location.error(
@@ -120,7 +121,12 @@ pub(super) fn initializer(
             values: initial,
             lengths: checked_lengths,
             repeated: *repeated,
-            constant_counts,
+            metadata: Box::new(super::ir::ArrayMetadata {
+                origins: (0..lengths.len())
+                    .map(|axis| (expr.location, axis))
+                    .collect(),
+                constant_counts,
+            }),
         },
     })
 }
@@ -154,6 +160,13 @@ fn bound(expr: &Expression, scope: &Scope) -> Result<CheckedExpression, Diagnost
 fn access(expr: &Expression, scope: &Scope) -> Result<(CheckedExpression, bool), Diagnostic> {
     let mut steps = Vec::new();
     let root = chain(expr, &mut steps, true);
+    let has_handler = matches!(
+        expr.kind,
+        ExpressionKind::Slice {
+            fallback: Some(_),
+            ..
+        }
+    );
     let mut target = expression::expression(root, None, scope)?;
     let mut position = 0;
     let mut fallible = false;
@@ -164,7 +177,7 @@ fn access(expr: &Expression, scope: &Scope) -> Result<(CheckedExpression, bool),
                 crate::diagnostic!("array.index", "array indexing requires an array reference"),
             )
         })?;
-        if !target.ty.is_nonnull() {
+        if target.ty.is_nullable() {
             return Err(expr.location.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!("array.value", "use let before accessing a nullable array"),
@@ -182,6 +195,18 @@ fn access(expr: &Expression, scope: &Scope) -> Result<(CheckedExpression, bool),
                     unreachable!()
                 };
                 let mut value = bound(i, scope)?;
+                if !has_handler
+                    && matches!(target.ty, Type::ReadOnlyArray(_))
+                    && bounds::invalid_constant_index(&target, &value, checked.len(), scope)
+                {
+                    return Err(step.location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "array.constant-index",
+                            "constant array index is out of bounds"
+                        ),
+                    ));
+                }
                 let proven = bounds::index(&target, &value, checked.len(), scope);
                 if proven {
                     bounds::narrow(&mut value, scope);
@@ -218,7 +243,7 @@ fn access(expr: &Expression, scope: &Scope) -> Result<(CheckedExpression, bool),
                     .arrays
                     .borrow_mut()
                     .intern(array.element, array.rank - 1)
-                    .pointer()
+                    .array_reference(matches!(target.ty, Type::ReadOnlyArray(_)))
             } else {
                 target.ty
             };
@@ -230,6 +255,19 @@ fn access(expr: &Expression, scope: &Scope) -> Result<(CheckedExpression, bool),
                 .as_ref()
                 .map(|v| bound(v, scope).map(Box::new))
                 .transpose()?;
+            if *index
+                && !has_handler
+                && matches!(target.ty, Type::ReadOnlyArray(_))
+                && bounds::invalid_constant_index(&target, start.as_ref().unwrap(), 0, scope)
+            {
+                return Err(step.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "array.constant-index",
+                        "constant array index is out of bounds"
+                    ),
+                ));
+            }
             let proven = if *index {
                 bounds::index(&target, start.as_ref().unwrap(), 0, scope)
             } else {
@@ -261,6 +299,17 @@ fn address(expr: &Expression, scope: &Scope) -> Result<CheckedExpression, Diagno
         handler: None,
     } = value.value
     {
+        if let Value::ArrayElement { target, .. } = &address.value
+            && matches!(target.ty, Type::ReadOnlyArray(_))
+        {
+            return Err(expr.location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "array.readonly",
+                    "readonly array elements cannot be assigned"
+                ),
+            ));
+        }
         Ok(*address)
     } else {
         Err(expr.location.error(
@@ -302,7 +351,7 @@ pub(super) fn read_or_text(
                 ),
             ));
         }
-        return Ok(result);
+        return Ok(constants::evaluate(&result)?.unwrap_or(result));
     }
     let handler = match fallback {
         Some(FailureHandler::Value(v)) => {
@@ -400,5 +449,81 @@ fn minimum_size(ty: Type, scope: &Scope) -> u64 {
             .map(|f| minimum_size(f.ty, scope))
             .sum(),
         _ => 1,
+    }
+}
+
+/// 定数配列の要素と寸法はコンパイル時に確定させる。newの初期値はこの制限を受けない。
+pub(super) fn constant_initializer(
+    expr: &Expression,
+    expected: Option<Type>,
+    scope: &Scope,
+) -> Result<CheckedExpression, Diagnostic> {
+    let mut value = initializer(expr, expected, scope)?;
+    let Type::Array(id) = value.ty else {
+        unreachable!()
+    };
+    if !constant_element_type(
+        scope.structs.arrays.borrow().get(id).element,
+        scope,
+        &mut std::collections::BTreeSet::new(),
+    ) {
+        return Err(expr.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "array.constant",
+                "constant arrays cannot contain pointer or function values"
+            ),
+        ));
+    }
+    value.ty = Type::ReadOnlyArray(id);
+    constants::evaluate(&value)?.ok_or_else(|| {
+        expr.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "array.constant",
+                "array elements and dimensions must be constant expressions"
+            ),
+        )
+    })
+}
+
+fn constant_element_type(
+    ty: Type,
+    scope: &Scope,
+    seen: &mut std::collections::BTreeSet<Type>,
+) -> bool {
+    if !seen.insert(ty) {
+        return true;
+    }
+    match ty {
+        Type::Pointer { .. } | Type::CPointer | Type::Function(_) | Type::StaticFunction(_) => {
+            false
+        }
+        Type::Struct(id) => scope
+            .structs
+            .get(id)
+            .fields
+            .iter()
+            .all(|f| constant_element_type(f.ty, scope, seen)),
+        Type::ReadOnlyArray(id) => {
+            constant_element_type(scope.structs.arrays.borrow().get(id).element, scope, seen)
+        }
+        _ => true,
+    }
+}
+
+/// 配列への参照を含む値にも比較を認めない。フィールドを通した比較も同じ規則で診断する。
+pub(super) fn contains_reference(ty: Type, scope: &Scope) -> bool {
+    if ty.array_id().is_some() {
+        return true;
+    }
+    match ty {
+        Type::Struct(id) => scope
+            .structs
+            .get(id)
+            .fields
+            .iter()
+            .any(|f| contains_reference(f.ty, scope)),
+        _ => false,
     }
 }
