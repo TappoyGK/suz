@@ -275,6 +275,33 @@ impl Structs {
             );
         }
         match ty {
+            Type::Array(id) => {
+                let array = self.arrays.borrow().get(id);
+                let element = self.name(array.element);
+                if array.rank == 1 {
+                    format!("[{element}]")
+                } else {
+                    format!("[{element}; {}]", vec!["_"; array.rank].join(", "))
+                }
+            }
+            Type::ArrayRef {
+                id,
+                mutable,
+                nullable,
+            } => {
+                let array = self.arrays.borrow().get(id);
+                let element = self.name(array.element);
+                let prefix = if mutable { "#" } else { "." };
+                let suffix = if nullable { "?" } else { "" };
+                if array.rank == 1 {
+                    format!("{prefix}[{element}]{suffix}")
+                } else {
+                    format!(
+                        "{prefix}[{element}; {}]{suffix}",
+                        vec!["_"; array.rank].join(", ")
+                    )
+                }
+            }
             Type::Struct(id) => self.get(id).name.clone(),
             Type::Enum(ty) => self.enums[ty.id].name.clone(),
             Type::Parameter(id) => format!("T{}", id + 1),
@@ -307,6 +334,33 @@ impl Structs {
             );
         }
         match ty {
+            Type::Array(id) => {
+                let array = self.arrays.borrow().get(id);
+                let element = self.name_with_parameters(array.element, parameters);
+                if array.rank == 1 {
+                    format!("[{element}]")
+                } else {
+                    format!("[{element}; {}]", vec!["_"; array.rank].join(", "))
+                }
+            }
+            Type::ArrayRef {
+                id,
+                mutable,
+                nullable,
+            } => {
+                let array = self.arrays.borrow().get(id);
+                let element = self.name_with_parameters(array.element, parameters);
+                let prefix = if mutable { "#" } else { "." };
+                let suffix = if nullable { "?" } else { "" };
+                if array.rank == 1 {
+                    format!("{prefix}[{element}]{suffix}")
+                } else {
+                    format!(
+                        "{prefix}[{element}; {}]{suffix}",
+                        vec!["_"; array.rank].join(", ")
+                    )
+                }
+            }
             Type::Parameter(id) => parameters
                 .get(id)
                 .map_or_else(|| self.name(ty), |p| p.name.clone()),

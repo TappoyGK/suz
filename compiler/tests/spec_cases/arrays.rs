@@ -1055,3 +1055,59 @@ fn main() -> u8 {
     .unwrap_err();
     assert_eq!(escape.rule(), "arena.store", "{escape}");
 }
+
+#[test]
+fn constant_array_elements_stay_distinct_from_rows_and_diagnostics_are_specific() {
+    let source = r#"
+fix JAGGED: .[.[i32]] = .[.[1, 2], .[3]]
+fn main() -> u8 {
+    arena {
+        fix a: #[.[i32]] = new #[.[1, 2], .[3, 4]]
+        if (a.[0].[1] or 0) != 2 || (a.[1].[0] or 0) != 3 { return 1 }
+        fix b = new #[.[10, 20], .[30]]
+        if (b.[0].[1] or 0) != 20 || (b.[1].[0] or 0) != 30 { return 2 }
+        fix rep: #[.[i32]] = new #[.[7, 8]; 2]
+        if (rep.[1].[0] or 0) != 7 { return 3 }
+        if (JAGGED.[0].[1] or 0) != 2 || (JAGGED.[1].[0] or 0) != 3 { return 4 }
+    }
+    return 0
+}
+"#;
+    let output = compile_and_run_c23(source, "const-array-elements.suz");
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+
+    // 行 [...] と定数配列要素 .[...] の混在は拒否する。
+    for mixed in [
+        "fn main() -> u8 {\n    fix a = new #[.[1, 2], [3, 4]]\n    return 0\n}",
+        "fn main() -> u8 {\n    fix a = new #[[1, 2], .[3, 4]]\n    return 0\n}",
+    ] {
+        let err = suz::compile(mixed.as_bytes()).unwrap_err();
+        assert_eq!(err.rule(), "array.enumeration", "{mixed}\n{err}");
+    }
+
+    // 裸の #[...] には new #[...] を案内する。
+    let bare =
+        suz::compile(b"fn main() -> u8 {\n    fix a = #[1, 2]\n    return 0\n}").unwrap_err();
+    assert_eq!(bare.rule(), "array.new", "{bare}");
+    assert!(bare.message().contains("new #[...]"), "{bare}");
+
+    // ポインタへの直接添字 (.pa.[0]) には (.p).[i] を案内する。
+    let ptr_index = suz::compile(
+        b"fn main() -> u8 {\n    arena {\n        fix pa: mut #[i64] = new (new #[5, 6])\n        fix x = .pa.[0]\n    }\n    return 0\n}",
+    )
+    .unwrap_err();
+    assert_eq!(ptr_index.rule(), "type.expected", "{ptr_index}");
+    assert!(ptr_index.message().contains("(.p).[i]"), "{ptr_index}");
+
+    // ジェネリック構造体の型引数に含まれる配列参照は #[T] / .[T] で表示する。
+    let generic_diag = suz::compile(
+        b"struct Boxed[T] { v: T }\nfn main() -> u8 {\n    arena {\n        fix rw: #[i32] = new #[1]\n        fix b = Boxed[.[i32]] { v: rw }\n        fix c: Boxed[#[i32]] = b\n    }\n    return 0\n}",
+    )
+    .unwrap_err();
+    assert_eq!(generic_diag.rule(), "type.expected", "{generic_diag}");
+    assert!(
+        generic_diag.message().contains("Boxed[#[i32]]")
+            && generic_diag.message().contains("Boxed[.[i32]]"),
+        "{generic_diag}"
+    );
+}

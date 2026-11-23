@@ -465,6 +465,20 @@ impl Parser<'_, '_> {
                     ),
                 ));
             }
+            Kind::Symbol("#")
+                if self
+                    .tokens
+                    .get(self.cursor + 1)
+                    .is_some_and(|t| t.kind == Kind::Symbol("[")) =>
+            {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "array.new",
+                        "mutable array initializer requires new #[...]"
+                    ),
+                ));
+            }
             Kind::Symbol("#") => {
                 return Err(self.error(
                     ErrorKind::InvalidSource,

@@ -24,17 +24,17 @@ fn main() -> u8 {
 
 | 前提・ソース | 期待結果・主根拠 |
 |---|---|
-| `fix ptr a: ptr [i32] = new []` | 受理。長さ0の非null配列。[array.initializer-type] |
-| `fix ptr a = new []` | 拒否。要素型を決定できない。[array.initializer-type] |
-| `new [[1, 2], [3]]` | 拒否。行の長さが不一致。[array.enumeration] |
-| `new [0; -1]` | 拒否。定数の長さが負。[array.layout] |
-| `a: ptr? [i32]`に対する`len a` | 拒否。非null確認が必要。[array.value] |
-| 仮引数`a: ptr [i32; n]`に対する`a[0] or 7` | 受理。nは0かもしれないため失敗処理が必要。[array.access-handler] |
-| 同じ仮引数に対する`a[0]` | 拒否。範囲保証がない。[array.access-handler] |
-| `fix ptr a = new [1, 2]`の後の`a[0] or 7` | 拒否。既知の長さに対する成功保証あり。[array.bounds-proof] |
-| `a: ptr [i32; n]`の`for i in 0..<n`内で`a[i] or 0` | 拒否。仕様上成功する添字へのor。[array.bounds-proof] |
-| 同じループで、別寸法mを持つ`b: ptr [i32; m]`の`b[i]` | 拒否。寸法の一致条件がない。[array.dimension-origin] |
-| 既知の長さ2のaに対する`a[2] or 7` | 受理。結果は7。範囲外の読取りは失敗処理へ進む。[array.access-handler] |
+| `fix a: #[i32] = new #[]` | 受理。長さ0の非null配列。[array.initializer-type] |
+| `fix a = new #[]` | 拒否。要素型を決定できない。[array.initializer-type] |
+| `new #[[1, 2], [3]]` | 拒否。行の長さが不一致。[array.enumeration] |
+| `new #[0; -1]` | 拒否。定数の長さが負。[array.layout] |
+| `a: #[i32]?`に対する`len a` | 拒否。非null確認が必要。[array.value] |
+| 仮引数`a: #[i32; n]`に対する`a.[0] or 7` | 受理。nは0かもしれないため失敗処理が必要。[array.access-handler] |
+| 同じ仮引数に対する`a.[0]` | 拒否。範囲保証がない。[array.access-handler] |
+| `fix a = new #[1, 2]`の後の`a.[0] or 7` | 拒否。既知の長さに対する成功保証あり。[array.bounds-proof] |
+| `a: #[i32; n]`の`for i in 0..<n`内で`a.[i] or 0` | 拒否。仕様上成功する添字へのor。[array.bounds-proof] |
+| 同じループで、別寸法mを持つ`b: #[i32; m]`の`b.[i]` | 拒否。寸法の一致条件がない。[array.dimension-origin] |
+| 既知の長さ2のaに対する`a.[2] or 7` | 受理。結果は7。範囲外の読取りは失敗処理へ進む。[array.access-handler] |
 | 長さ0のaに対する`a#[0] = 1` | 実行時パニック。書き込み先の範囲外。[rt.array-bounds] |
 | 長さ2と3の配列を上記diffへ渡す | 本体実行前にパニック。[rt.array-dimensions] |
 
@@ -1081,3 +1081,151 @@ fn main() -> u8 {
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
 | 通常 | `[type.expected]` | 4 | 24 |
+
+### array-035 mut? #[T] と mut #[T]? を区別する
+
+主根拠：`[array.type]`。
+補助根拠：`[arena.let]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    arena {
+        fix arr: #[i32] = new #[10, 20]
+        fix outer_null: mut? #[i32] = new arr
+        let p = outer_null {
+            (.p)#[0] = 30
+        } else {
+            return 1
+        }
+        fix opt: #[i32]? = null
+        fix inner_null: mut #[i32]? = new opt
+        #inner_null = arr
+        let q = .inner_null {
+            if (q.[0] or 0) != 30 { return 2 }
+        } else {
+            return 3
+        }
+    }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### array-036 実行時の値から読み取り専用配列をarenaへ確保する
+
+主根拠：`[array.new]`。
+補助根拠：`[array.readonly]`。
+
+**ソース：**
+
+```suz
+fn build(x: i32) -> i32 {
+    arena {
+        fix a: .[i32] = new .[x, x + 1, x + 2]
+        return a.[2]
+    }
+}
+fn main() -> u8 {
+    if build(5) != 7 { return 1 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### array-037 new .[...] で確保した読み取り専用配列をarenaの外へ持ち出せない
+
+主根拠：`[array.lifetime]`。
+補助根拠：`[arena.store]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    var escaped: .[i32]? = null
+    arena {
+        fix x: i32 = 3
+        escaped = new .[x, 4]
+    }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[arena.store]` | 5 | 9 |
+
+### array-038 null許容の読み取り専用配列をnullとletで扱う
+
+主根拠：`[array.type]`。
+補助根拠：`[arena.null]`・`[arena.let]`。
+
+**ソース：**
+
+```suz
+fn first_or_zero(a: .[i32]?) -> i32 {
+    let v = a {
+        return v.[0] or 0
+    } else {
+        return 0
+    }
+}
+fn main() -> u8 {
+    fix empty: .[i32]? = null
+    fix nums: .[i32]? = .[9, 10]
+    if first_or_zero(empty) != 0 { return 1 }
+    if first_or_zero(nums) != 9 { return 2 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### array-039 未確認のnull許容読み取り専用配列へ直接アクセスできない
+
+主根拠：`[array.value]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix a: .[i32]? = .[1, 2]
+    fix x = a.[0] or 0
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[array.value]` | 3 | 14 |

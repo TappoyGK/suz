@@ -517,3 +517,33 @@ fn main() -> u8 {
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
 | 通常 | `[ffi.keep]` | 1 | 30 |
+
+### ffi-022 書き込み可能なCポインタ仮引数にrefポインタを渡せない
+
+主根拠：`[ffi.arena-pointer]`。
+補助根拠：`[type.expected]`。
+
+**ソース：**
+
+```suz
+extern "example.h" { fn set_value(p: *i32) -> void }
+fn main() -> u8 {
+    arena {
+        fix r: ref i32 = new (1 as i32)
+        trusted { set_value(r) }
+    }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[type.expected]` | 5 | 29 |

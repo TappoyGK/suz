@@ -43,7 +43,7 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | 正常終了 | 0 | 0 |
 
-### arena-003 旧ptr型は受け付けない
+### arena-003 ptrは型名ではない
 
 主根拠：`[type.name]`。
 
@@ -538,3 +538,185 @@ fn main() -> u8 {
 | 設定 | 結果 | 終了コード | 警告数 |
 |---|---|---:|---:|
 | 通常 | 正常終了 | 0 | 0 |
+
+### arena-023 refポインタは読み取りと内側の可変参照を通した書き込みを許す
+
+主根拠：`[arena.ptr-type]`。
+補助根拠：`[arena.ptr-operations]`。
+
+**ソース：**
+
+```suz
+struct Node { value: i32 }
+struct Holder { target: mut Node, items: #[i32] }
+fn Node#bump() -> void { self#value += 1 }
+fn main() -> u8 {
+    arena {
+        fix node = new Node { value: 10 }
+        fix r: ref Node = new Node { value: 1 }
+        if r.value != 1 { return 1 }
+        fix items: #[i32] = new #[2, 3]
+        fix ref_arr: ref #[i32] = new items
+        (.ref_arr)#[0] = 20
+        fix holder: ref Holder = new Holder { target: node, items: items }
+        holder.target#bump()
+        holder.items#[1] = 30
+        if node.value != 11 || items.[0] != 20 || items.[1] != 30 { return 2 }
+    }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### arena-024 refポインタの参照先全体を上書きできない
+
+主根拠：`[arena.ptr-operations]`。
+
+**ソース：**
+
+```suz
+struct Node { value: i32 }
+fn main() -> u8 {
+    arena {
+        fix p: ref Node = new Node { value: 1 }
+        #p = Node { value: 2 }
+    }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[arena.ptr-operations]` | 5 | 12 |
+
+### arena-025 refポインタ経由でフィールドを書き換えられない
+
+主根拠：`[arena.ptr-operations]`。
+
+**ソース：**
+
+```suz
+struct Node { value: i32 }
+fn main() -> u8 {
+    arena {
+        fix p: ref Node = new Node { value: 1 }
+        p#value = 2
+    }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[arena.ptr-operations]` | 5 | 9 |
+
+### arena-026 refポインタ経由で書き換えメソッドを呼べない
+
+主根拠：`[method.write-target]`。
+
+**ソース：**
+
+```suz
+struct Node { value: i32 }
+fn Node#bump() -> void { self#value += 1 }
+fn main() -> u8 {
+    arena {
+        fix p: ref Node = new Node { value: 1 }
+        p#bump()
+    }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[method.write-target]` | 6 | 9 |
+
+### arena-027 refポインタからmutポインタへ暗黙変換できない
+
+主根拠：`[arena.ptr-conversion]`。
+補助根拠：`[type.expected]`。
+
+**ソース：**
+
+```suz
+struct Node { value: i32 }
+fn main() -> u8 {
+    arena {
+        fix r: ref Node = new Node { value: 1 }
+        fix m: mut Node = r
+    }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[type.expected]` | 5 | 27 |
+
+### arena-028 mut #[T]からmut .[T]へ暗黙変換できない
+
+主根拠：`[array.readonly-conversion]`。
+補助根拠：`[arena.ptr-conversion]`・`[type.expected]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    arena {
+        fix a: #[i32] = new #[1, 2]
+        fix p: mut #[i32] = new a
+        fix q: mut .[i32] = p
+    }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[type.expected]` | 5 | 29 |
