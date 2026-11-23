@@ -953,3 +953,105 @@ fn a_sub(v: .[i32]) -> .[i32] { return v }
     .unwrap_err();
     assert_eq!(bare_err.rule(), "array.constant", "{bare_err}");
 }
+
+#[test]
+fn nullable_readonly_arrays_support_let_conversions_branches_generics_and_nested_pointers() {
+    let source = r#"
+fn first_or[T](a: .[T]?, fallback: T) -> T {
+    let items = a {
+        return items.[0] or fallback
+    }
+    return fallback
+}
+fn maybe_view(flag: bool, rw: #[i32], opt_rw: #[i32]?) -> .[i32]? {
+    if flag { return rw }
+    return opt_rw
+}
+fn main() -> u8 {
+    // 空配列とnullを区別する。
+    fix empty_opt: .[i32]? = .[]
+    let e = empty_opt {
+        if len e != 0 { return 1 }
+    } else { return 2 }
+
+    fix absent: .[i32]? = null
+    let found = absent { return 3 }
+
+    // .[T] -> .[T]?, #[T] -> .[T]?, #[T]? -> .[T]? を初期化・代入・引数・戻り値・分岐・型推論で揃える。
+    fix ro: .[i32] = .[11, 22]
+    fix rw: #[i32] = new #[33, 44]
+    fix rw_opt: #[i32]? = rw
+    fix rw_null: #[i32]? = null
+
+    var cur: .[i32]? = ro
+    if first_or(cur, 0) != 11 { return 4 }
+    cur = rw
+    if first_or(cur, 0) != 33 { return 5 }
+    cur = rw_opt
+    if first_or(cur, 0) != 33 { return 6 }
+    cur = rw_null
+    if first_or(cur, 99) != 99 { return 7 }
+
+    if first_or(maybe_view(true, rw, rw_null), 0) != 33 { return 8 }
+    if first_or(maybe_view(false, rw, rw_null), 88) != 88 { return 9 }
+
+    // 分岐の型合わせ: .[i32] と null -> .[i32]?、#[i32]? と .[i32] -> .[i32]?
+    fix b1 = ifexpr true { ro } else { null }
+    if first_or(b1, 0) != 11 { return 10 }
+    fix b2 = ifexpr false { rw_opt } else { ro }
+    if first_or(b2, 0) != 11 { return 11 }
+    fix b3 = ifexpr true { rw_null } else { ro }
+    if first_or(b3, 77) != 77 { return 12 }
+
+    // mut? .[T], mut .[T]?, mut? .[T]? の区別と、letが最外側だけを外すことの確認。
+    fix slot_opt_inner: mut .[i32]? = new absent
+    #slot_opt_inner = ro
+    let v1 = .slot_opt_inner {
+        if (v1.[1] or 0) != 22 { return 13 }
+    } else { return 14 }
+
+    fix both_opt: mut? .[i32]? = slot_opt_inner
+    let nonnull_slot = both_opt {
+        #nonnull_slot = null
+        let inner_val = .nonnull_slot { return 15 }
+    } else { return 16 }
+
+    return 0
+}
+"#;
+    let output = compile_and_run_c23(source, "nullable-readonly-array.suz");
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+
+    // 未確認の .[T]? への直接アクセスは拒否する。
+    for (bad, rule) in [
+        (
+            "fn main() -> u8 {\n    fix a: .[i32]? = null\n    fix n = len a\n    return 0\n}",
+            "len.targets",
+        ),
+        (
+            "fn main() -> u8 {\n    fix a: .[i32]? = null\n    fix n = a.[0] or 0\n    return 0\n}",
+            "array.value",
+        ),
+    ] {
+        let err = suz::compile(bad.as_bytes()).unwrap_err();
+        assert_eq!(err.rule(), rule, "{bad}\n{err}");
+    }
+
+    // mut? .[i32]? をletで確認しても内側の ? は外れない。
+    let inner_still_null = suz::compile(
+        b"fn main() -> u8 {\n    fix a: .[i32]? = null\n    fix p: mut? .[i32]? = new a\n    let q = p {\n        fix x: .[i32] = .q\n    }\n    return 0\n}",
+    )
+    .unwrap_err();
+    assert_eq!(
+        inner_still_null.rule(),
+        "type.expected",
+        "{inner_still_null}"
+    );
+
+    // 寿命検査: 内側arenaの .[T]? を外側へ保存できない。
+    let escape = suz::compile(
+        b"fn main() -> u8 {\n    var saved: .[i32]? = null\n    arena {\n        fix inner: #[i32] = new #[1]\n        saved = inner\n    }\n    return 0\n}",
+    )
+    .unwrap_err();
+    assert_eq!(escape.rule(), "arena.store", "{escape}");
+}

@@ -918,7 +918,7 @@ fn branch_type<'a>(
         }
         result
     })?;
-    if ty.pointee().is_some() && values.clone().any(has_null_branch) {
+    if ty.is_reference() && values.clone().any(has_null_branch) {
         if matches!(ty, Type::Pointer { shape, .. } if shape.depth() > 256) {
             return None;
         }
@@ -937,6 +937,26 @@ pub(super) fn joined_type(types: impl Iterator<Item = Option<Type>>) -> Option<T
 fn joined_or_first(a: Type, b: Type) -> Type {
     if a.is_text() && b.is_text() && a != b {
         return Type::Text;
+    }
+    if let (
+        Type::ArrayRef {
+            id: a_id,
+            mutable: a_mut,
+            nullable: a_null,
+        },
+        Type::ArrayRef {
+            id: b_id,
+            mutable: b_mut,
+            nullable: b_null,
+        },
+    ) = (a, b)
+        && a_id == b_id
+    {
+        return Type::ArrayRef {
+            id: a_id,
+            mutable: a_mut && b_mut,
+            nullable: a_null || b_null,
+        };
     }
     if a.lifts_to(b) {
         return b;

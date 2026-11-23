@@ -94,15 +94,6 @@ impl Parser<'_, '_> {
                         ),
                     ));
                 }
-                if !mutable {
-                    return Err(parser.error(
-                        ErrorKind::InvalidSource,
-                        crate::diagnostic!(
-                            "array.readonly",
-                            "nullable readonly arrays (.[T]?) are not supported yet"
-                        ),
-                    ));
-                }
                 parser.cursor += 1;
             }
             let Type::Array(id) = parser.applications.borrow_mut().arrays.intern(element, rank)
