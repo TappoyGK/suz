@@ -1,4 +1,4 @@
-<!-- 記入内容と規則は docs/pr.md に従う。リリース固有の内容は docs/releasing.md に従う。 -->
+<!-- 作業PRは docs/pr.md に従って記入する。リリース準備PR・リリースPRでは、以下の本文を docs/releasing.md「PR本文」の項目に置き換える。 -->
 
 ## 対応イシュー
 
