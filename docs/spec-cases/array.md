@@ -944,7 +944,7 @@ fn main() -> u8 {
 
 主根拠：`[array.readonly-conversion]`。
 
-補助根拠：`[array.type]`。
+補助根拠：`[type.expected]`・`[array.type]`。
 
 **ソース：**
 
@@ -972,7 +972,7 @@ fn main() -> u8 {
 
 主根拠：`[array.readonly-conversion]`。
 
-補助根拠：`[array.type]`。
+補助根拠：`[type.expected]`・`[array.type]`。
 
 **ソース：**
 
@@ -1000,7 +1000,7 @@ fn main() -> u8 {
 
 主根拠：`[array.readonly-conversion]`。
 
-補助根拠：`[array.type]`。
+補助根拠：`[type.expected]`・`[array.type]`。
 
 **ソース：**
 
@@ -1028,7 +1028,7 @@ fn main() -> u8 {
 
 主根拠：`[array.readonly-conversion]`。
 
-補助根拠：`[array.type]`・`[arena.let]`。
+補助根拠：`[type.expected]`・`[array.type]`・`[arena.let]`。
 
 **ソース：**
 
@@ -1056,7 +1056,7 @@ fn main() -> u8 {
 
 主根拠：`[array.readonly-conversion]`。
 
-補助根拠：`[array.type]`。
+補助根拠：`[type.expected]`・`[array.type]`。
 
 **ソース：**
 

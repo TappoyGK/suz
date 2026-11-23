@@ -771,9 +771,14 @@ fn readonly_conversion_evaluates_once_without_allocating_or_copying_elements() {
     // 実行結果だけでは変換時の余計な確保を検出できないので、生成Cも確認する。
     let source = r#"
 struct Counter { calls: i32 }
+struct Hold { values: ptr [i32] }
 fn get(c: ptr Counter, a: ptr [i32]) -> ptr [i32] {
     c#calls += 1
     return a
+}
+fn holder(c: ptr Counter, a: ptr [i32]) -> Hold {
+    c#calls += 1
+    return Hold { values: a }
 }
 fn main() -> u8 {
     fix ptr c = new Counter { calls: 0 }
@@ -782,6 +787,9 @@ fn main() -> u8 {
     a#[0] = 9
     if c.calls != 1 { return 1 }
     if (read[0] or 0) != 9 { return 2 }
+    fix field: [i32] = holder(c, a).values
+    if c.calls != 2 { return 3 }
+    if (field[0] or 0) != 9 { return 4 }
     return 0
 }
 "#;
@@ -794,4 +802,32 @@ fn main() -> u8 {
     assert!(!c.contains("memcpy("), "conversion copies elements");
     let output = compile_and_run_c23(source, "readonly-conversion.suz");
     assert_eq!(output.status.code(), Some(0), "{output:?}");
+}
+
+#[test]
+fn readonly_conversion_reads_local_and_field_descriptors_directly() {
+    // 最適化なしでも、単純な参照の変換にディスクリプター全体の一時コピーを入れない。
+    let c = suz::compile(
+        br#"
+struct Hold { values: ptr [i32] }
+struct Nested { hold: Hold }
+fn parameter(a: ptr [i32; _, _]) -> [i32; _, _] { return a }
+fn local(a: ptr [i32]) -> [i32] {
+    var ptr current = a
+    var result: [i32] = current
+    current = a
+    result = current
+    return result
+}
+fn field(h: Nested) -> [i32] { return h.hold.values }
+fn indirect(h: ptr Nested) -> [i32] { return h.hold.values }
+fn main() -> u8 { return 0 }
+"#,
+    )
+    .unwrap();
+    assert!(
+        !c.contains("suz_cmp_"),
+        "simple conversion creates a temporary"
+    );
+    assert!(c.contains("(suz_readonly_array_"), "conversion is missing");
 }

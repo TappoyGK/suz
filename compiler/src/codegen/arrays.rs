@@ -56,18 +56,32 @@ fn temporary(ty: Type, context: &mut ExpressionContext) -> String {
     format!("suz_cmp_{id}")
 }
 
-/// 元の式を一度だけ評価し、先頭位置と寸法だけを読み取り専用の参照へ移す。
+/// 呼び出しや添字の検査を含まない参照は、先頭位置と寸法を直接読み出せる。
+fn direct_reference(value: &CheckedExpression) -> bool {
+    match &value.value {
+        Value::Local(_) => true,
+        Value::Field { target, .. } | Value::Deref(target) => direct_reference(target),
+        _ => false,
+    }
+}
+
+/// 先頭位置と寸法だけを移す。副作用を持ち得る変換元は一時変数で評価を1回に保つ。
 pub(super) fn readonly(value: &CheckedExpression, context: &mut ExpressionContext) -> String {
     let id = value.ty.array_id().unwrap();
     let rank = context.arrays.get(id).rank;
-    let source = temporary(value.ty, context);
-    let value = expression(value, context);
+    let (setup, source) = if direct_reference(value) {
+        (String::new(), format!("({})", expression(value, context)))
+    } else {
+        let source = temporary(value.ty, context);
+        let value = expression(value, context);
+        (format!("{source} = {value}, "), source)
+    };
     let lengths = (0..rank)
         .map(|axis| format!("{source}.lengths[{axis}]"))
         .collect::<Vec<_>>()
         .join(", ");
     format!(
-        "({source} = {value}, (suz_readonly_array_{id}){{ .data = {source}.data, .lengths = {{ {lengths} }} }})"
+        "({setup}(suz_readonly_array_{id}){{ .data = {source}.data, .lengths = {{ {lengths} }} }})"
     )
 }
 
