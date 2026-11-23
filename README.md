@@ -140,6 +140,8 @@ suz emit-c hello.suz -o generated
 
 ## 開発
 
+イシューの書き方と更新方法は[開発への参加](CONTRIBUTING.md)を参照する。
+
 Rustのツールチェーンは `rust-toolchain.toml` で指定する。リポジトリのルートでビルドと通常テストを実行する。
 
 ```sh

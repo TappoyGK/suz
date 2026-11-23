@@ -181,7 +181,7 @@ SUZ_TIMINGS=1 ./scripts/test-spec-cases.sh
 
 ## CI
 
-GitHub Actionsの `CI` ワークフローは、`release/*` 向けの作業PRでは `work checks` として書式・Clippy・通常テストを実行し、リリースブランチへのpushでは通常テストを実行する。main向けのリリースPRとmainへのpushでは `release checks` として全検査・配布検査を実行する。手動実行でも選択したブランチの全検査を行う。起動条件とマージ手順は[リリース手順](../../docs/releasing.md)に従う。
+GitHub Actionsの `CI` ワークフローは、`release/*` 向けの作業PRでは `work checks` として書式・Clippy・通常テストを実行し、リリースブランチへのpushでは通常テストを実行する。main向けのリリースPRとmainへのpushでは `release checks` として全検査・配布検査を実行する。手動実行でも選択したブランチの全検査を行う。作業PRのマージ手順は[PRの作業手順](../../docs/pr.md)、リリース側の起動条件は[リリース手順](../../docs/releasing.md#ciの実行条件)に従う。
 
 `main` の検査が成功すると、検証済みバイナリ・SHA-256・コミットIDを含むアーカイブをActionsの成果物として30日間保存する。公開には、[リリース手順](../../docs/releasing.md)に従って対象コミットの成果物を使う。
 
@@ -189,7 +189,7 @@ GitHub Actionsの `CI` ワークフローは、`release/*` 向けの作業PRで�
 
 ワークフローは [.github/workflows/ci.yml](../../.github/workflows/ci.yml) で定義する。CIで使う各コマンドは、ローカルでも実行できる。
 
-CIは、ビルドや検証の入力にならないMarkdown文書だけの変更では、変更ファイルの判定のみを行う。対象と例外は[リリース手順](../../docs/releasing.md#ciの実行条件)に従う。判定の回帰テストは `python3 scripts/test-ci-changes.py` で実行する。
+CIは、ビルドや検証の入力にならないMarkdown文書だけの変更では、変更ファイルの判定のみを行う。対象と例外は[判定スクリプト](../../scripts/ci-changes.py)を参照する。判定の回帰テストは `python3 scripts/test-ci-changes.py` で実行する。
 
 ## 例の追加・変更
 
