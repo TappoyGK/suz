@@ -201,15 +201,7 @@ impl Parser<'_, '_> {
     pub(super) fn type_atom(&mut self) -> Result<Type, Diagnostic> {
         let mut layers = Vec::new();
         while matches!(self.token().kind, Kind::Keyword("mut" | "ref")) {
-            if self.token().kind == Kind::Keyword("ref") {
-                return Err(self.error(
-                    ErrorKind::InvalidSource,
-                    crate::diagnostic!(
-                        "arena.ptr-type",
-                        "readonly pointers (ref T) are not supported yet"
-                    ),
-                ));
-            }
+            let readonly = self.token().kind == Kind::Keyword("ref");
             if layers.len() == 256 {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
@@ -221,7 +213,7 @@ impl Parser<'_, '_> {
             if nullable {
                 self.cursor += 1;
             }
-            layers.push(nullable);
+            layers.push((readonly, nullable));
         }
         let mut ty = if matches!(self.token().kind, Kind::Symbol("." | "#"))
             && self
@@ -250,8 +242,8 @@ impl Parser<'_, '_> {
                 crate::diagnostic!("arena.ptr-type", "pointer requires a stored value type"),
             ));
         }
-        for nullable in layers.into_iter().rev() {
-            ty = ty.pointer().with_nullable(nullable);
+        for (readonly, nullable) in layers.into_iter().rev() {
+            ty = ty.pointer().with_readonly(readonly).with_nullable(nullable);
         }
         Ok(ty)
     }

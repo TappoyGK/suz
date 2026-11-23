@@ -310,6 +310,7 @@ impl Parser<'_, '_> {
             return self
                 .replace_need_type(inner, arguments)
                 .pointer()
+                .with_readonly(ty.is_readonly_pointer())
                 .with_nullable(ty.is_nullable());
         }
         match ty {

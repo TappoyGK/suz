@@ -299,7 +299,12 @@ impl Scope {
                 .get(id)
                 .map_or_else(|| "type parameter".into(), |p| p.name.clone()),
             Type::Pointer { .. } => format!(
-                "ptr{} {}",
+                "{}{} {}",
+                if ty.is_readonly_pointer() {
+                    "ref"
+                } else {
+                    "mut"
+                },
                 if ty.is_nullable() { "?" } else { "" },
                 self.type_name(ty.pointee().unwrap())
             ),

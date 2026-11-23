@@ -379,21 +379,33 @@ fn store(
 ) -> Result<(), Diagnostic> {
     super::writes::array(value, target)?;
     let target = super::arrays::write_target(target, context.bindings)?;
-    fn indirect(value: &Value) -> bool {
+    fn deref_pointer(value: &Value) -> Option<Type> {
         match value {
-            Value::Deref(_) => true,
-            Value::Field { target, .. } => indirect(&target.value),
-            _ => false,
+            Value::Deref(pointer) => Some(pointer.ty),
+            Value::Field { target, .. } => deref_pointer(&target.value),
+            _ => None,
         }
     }
-    if !indirect(&target.value) {
-        return Err(location.error(
-            ErrorKind::InvalidSource,
-            crate::diagnostic!(
-                "arena.ptr-operations",
-                "pointer assignment requires a dereferenced destination"
-            ),
-        ));
+    match deref_pointer(&target.value) {
+        None => {
+            return Err(location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "arena.ptr-operations",
+                    "pointer assignment requires a dereferenced destination"
+                ),
+            ));
+        }
+        Some(ty) if ty.is_readonly_pointer() => {
+            return Err(location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "arena.ptr-operations",
+                    "cannot write through a readonly pointer"
+                ),
+            ));
+        }
+        Some(_) => {}
     }
     let id = *context.next_id;
     *context.next_id += 1;

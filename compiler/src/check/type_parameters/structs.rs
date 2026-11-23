@@ -61,6 +61,7 @@ impl Structs {
             return self
                 .normalize(inner)
                 .pointer()
+                .with_readonly(ty.is_readonly_pointer())
                 .with_nullable(ty.is_nullable());
         }
         match ty {
@@ -263,7 +264,12 @@ impl Structs {
     pub fn name(&self, ty: Type) -> String {
         if let Some(inner) = ty.pointee() {
             return format!(
-                "mut{} {}",
+                "{}{} {}",
+                if ty.is_readonly_pointer() {
+                    "ref"
+                } else {
+                    "mut"
+                },
                 if ty.is_nullable() { "?" } else { "" },
                 self.name(inner)
             );
@@ -290,7 +296,12 @@ impl Structs {
     pub fn name_with_parameters(&self, ty: Type, parameters: &[TypeParameter]) -> String {
         if let Some(inner) = ty.pointee() {
             return format!(
-                "mut{} {}",
+                "{}{} {}",
+                if ty.is_readonly_pointer() {
+                    "ref"
+                } else {
+                    "mut"
+                },
                 if ty.is_nullable() { "?" } else { "" },
                 self.name_with_parameters(inner, parameters)
             );
@@ -482,7 +493,10 @@ impl Structs {
                     crate::diagnostic!("arena.ptr-type", "pointer requires a stored value type"),
                 ));
             }
-            return Ok(inner.pointer().with_nullable(ty.is_nullable()));
+            return Ok(inner
+                .pointer()
+                .with_readonly(ty.is_readonly_pointer())
+                .with_nullable(ty.is_nullable()));
         }
         if matches!(
             ty,

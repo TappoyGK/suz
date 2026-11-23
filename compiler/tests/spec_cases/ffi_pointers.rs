@@ -335,3 +335,69 @@ fn keep_preserves_call_type_trusted_and_suz_lifetime_checks() {
         assert_eq!(error.rule(), rule, "{body}: {error}");
     }
 }
+
+#[test]
+fn c_const_pointer_accepts_ref_and_mut_while_mutable_c_pointer_rejects_ref() {
+    let directory = TemporaryDirectory::new();
+    fs::write(
+        directory.0.join("fixture.h"),
+        r#"
+#include <stdint.h>
+struct sample { int32_t value; };
+static inline int32_t read_sample(const struct sample *p) { return p->value; }
+static inline void set_sample(struct sample *p, int32_t value) { p->value = value; }
+"#,
+    )
+    .unwrap();
+    fs::write(
+        directory.0.join("main.suz"),
+        r#"
+extern "fixture.h" {
+    struct sample as Sample { value: i32 }
+    fn read_sample(p: *const Sample) -> i32
+    fn set_sample(p: *Sample, value: i32) -> void
+}
+fn main() -> u8 {
+    arena {
+        fix m = new Sample { value: 5 }
+        fix r: ref Sample = m
+        fix ro: ref? Sample = r
+        trusted {
+            set_sample(m, 9)
+            if read_sample(m) != 9 || read_sample(r) != 9 { return 1 }
+            let q = ro {
+                if read_sample(q) != 9 { return 2 }
+            } else {
+                return 3
+            }
+        }
+    }
+    return 0
+}
+"#,
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_suz"))
+        .current_dir(&directory.0)
+        .args(["run", "main.suz", "--include-dir", "."])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+
+    for (body, rule) in [
+        (
+            "fix r: ref Sample = new Sample { value: 1 }\ntrusted { set_sample(r, 2) }",
+            "type.expected",
+        ),
+        (
+            "fix r: ref? Sample = new Sample { value: 1 }\ntrusted { fix n = read_sample(r) }",
+            "type.expected",
+        ),
+    ] {
+        let source = format!(
+            "extern \"fixture.h\" {{\nstruct sample as Sample {{ value: i32 }}\nfn read_sample(p: *const Sample) -> i32\nfn set_sample(p: *Sample, value: i32) -> void\n}}\nfn main() -> u8 {{ arena {{ {body} }}\nreturn 0 }}"
+        );
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(error.rule(), rule, "{body}: {error}");
+    }
+}

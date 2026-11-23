@@ -301,6 +301,9 @@ impl Type {
         matches!(self, Self::Pointer { shape, .. } if shape.is_nullable())
             || matches!(self, Self::ArrayRef { nullable: true, .. })
     }
+    pub fn is_readonly_pointer(self) -> bool {
+        matches!(self, Self::Pointer { shape, .. } if shape.is_readonly())
+    }
     pub fn is_nonnull(self) -> bool {
         self.is_reference() && !self.is_nullable()
     }
@@ -318,11 +321,27 @@ impl Type {
             _ => self,
         }
     }
-    /// 最外側のnull許容性を広げるか、配列を読み取り専用の参照にする。要素型と実体は保つ。
+    pub fn with_readonly(self, enabled: bool) -> Self {
+        match self {
+            Self::Pointer { leaf, shape } => Self::Pointer {
+                leaf,
+                shape: shape.with_readonly(enabled),
+            },
+            _ => self,
+        }
+    }
+    /// 最外側のnull許容性・読み取り専用性を広げる。要素型と実体は保つ。
     pub fn lifts_to(self, to: Self) -> bool {
         match (self, to) {
             (Self::Pointer { .. }, Self::Pointer { .. }) => {
-                self.is_nonnull() && to.is_nullable() && self.pointee() == to.pointee()
+                let from_ro = self.is_readonly_pointer();
+                let to_ro = to.is_readonly_pointer();
+                let from_null = self.is_nullable();
+                let to_null = to.is_nullable();
+                self.pointee() == to.pointee()
+                    && (!from_ro || to_ro)
+                    && (!from_null || to_null)
+                    && (from_ro != to_ro || from_null != to_null)
             }
             (
                 Self::ArrayRef {
@@ -476,13 +495,12 @@ impl Type {
     }
     pub fn name(self) -> &'static str {
         match self {
-            Self::Pointer { .. } => {
-                if self.is_nullable() {
-                    "mut?"
-                } else {
-                    "mut"
-                }
-            }
+            Self::Pointer { .. } => match (self.is_readonly_pointer(), self.is_nullable()) {
+                (false, false) => "mut",
+                (false, true) => "mut?",
+                (true, false) => "ref",
+                (true, true) => "ref?",
+            },
             Self::ArrayRef {
                 mutable: false,
                 nullable: false,

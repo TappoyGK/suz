@@ -938,6 +938,13 @@ fn joined_or_first(a: Type, b: Type) -> Type {
     if a.is_text() && b.is_text() && a != b {
         return Type::Text;
     }
+    if let (Type::Pointer { .. }, Type::Pointer { .. }) = (a, b)
+        && a.pointee() == b.pointee()
+    {
+        return a
+            .with_readonly(a.is_readonly_pointer() || b.is_readonly_pointer())
+            .with_nullable(a.is_nullable() || b.is_nullable());
+    }
     if let (
         Type::ArrayRef {
             id: a_id,

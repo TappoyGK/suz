@@ -242,3 +242,129 @@ fn deep_pointer_assignments_cannot_change_inner_nullability() {
         }
     }
 }
+
+#[test]
+fn readonly_pointers_support_shallow_readonly_conversions_joins_generics_and_reject_writes() {
+    let output = compile_and_run_c23(
+        r#"
+struct Inner { x: i32 }
+struct Node { value: i32, inner: Inner }
+struct Holder { target: mut Node, items: #[i32] }
+
+fn Node.get() -> i32 { return self.value }
+fn Node#bump() -> void { self#value += 1 }
+fn read_node(p: ref Node) -> i32 { return p.get() + p.inner.x }
+fn read_opt(p: ref? Node) -> i32 {
+    let q = p { return q.value } else { return -1 }
+}
+fn generic_read[T](p: ref T) -> T { return .p }
+
+fn main() -> u8 {
+    arena {
+        fix m = new Node { value: 10, inner: Inner { x: 2 } }
+        fix r: ref Node = m
+        if read_node(m) != 12 { return 1 }
+        if read_node(r) != 12 { return 2 }
+        if (.r).value != 10 { return 3 }
+
+        // 暗黙変換: mut -> ref, mut -> ref?, mut? -> ref?, ref -> ref?
+        fix ro1: ref? Node = m
+        fix mo: mut? Node = m
+        fix ro2: ref? Node = mo
+        fix ro3: ref? Node = r
+        fix ro_null: ref? Node = null
+        if read_opt(ro1) != 10 || read_opt(ro2) != 10 || read_opt(ro3) != 10 { return 4 }
+        if read_opt(ro_null) != -1 { return 5 }
+
+        // 分岐合流: mut? + ref -> ref?, mut + ref -> ref, ref + null -> ref?
+        fix j1 = ifexpr true { mo } else { r }
+        fix j2 = ifexpr false { r } else { mo }
+        fix j3 = ifexpr true { m } else { r }
+        fix j4 = ifexpr false { r } else { null }
+        let p = j1 { if p.value != 10 { return 6 } } else { return 7 }
+        let p = j2 { if p.value != 10 { return 8 } } else { return 9 }
+        if j3.value != 10 { return 10 }
+        let p = j4 { return 11 }
+
+        // 浅い読み取り専用性: ref経由でも内側のmutポインタ・#[T]への書き込みは許可
+        fix items: #[i32] = new #[1, 2]
+        fix ref_arr: ref #[i32] = new items
+        (.ref_arr)#[0] = 99
+        if items.[0] != 99 { return 12 }
+        fix holder: ref Holder = new Holder { target: m, items: items }
+        holder.target#bump()
+        holder.items#[1] = 42
+        if m.value != 11 || items.[1] != 42 { return 13 }
+
+        // 8通りの組み合わせ (fix/var × ref/mut × .[T]/#[T])
+        fix ro_a: .[i32] = .[1, 2]
+        fix ro_b: .[i32] = .[3, 4]
+        var v_ref_ro: ref .[i32] = new ro_a
+        v_ref_ro = new ro_b
+        if ((.v_ref_ro).[0] or 0) != 3 { return 14 }
+        fix ro_c: .[i32] = .[5]
+        fix f_mut_ro: mut .[i32] = new ro_c
+        #f_mut_ro = .[6 as i32]
+        if ((.f_mut_ro).[0] or 0) != 6 { return 15 }
+
+        // ジェネリクス推論: mut T を ref T 仮引数へ渡す
+        if generic_read(m).value != 11 { return 16 }
+        if generic_read(r).value != 11 { return 17 }
+    }
+    return 0
+}
+"#,
+        "readonly-pointers.suz",
+    );
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+
+    let prefix = r#"
+struct Inner { x: i32 }
+struct Node { value: i32, inner: Inner }
+fn Node#bump() -> void { self#value += 1 }
+fn take_mut(p: mut Node) -> void { p#value += 1 }
+fn take_mut_opt(p: mut? Node) -> void { let q = p { q#value += 1 } }
+"#;
+    for (body, rule) in [
+        (
+            "fix p: ref Node = new Node { value: 1, inner: Inner { x: 2 } }\n#p = Node { value: 3, inner: Inner { x: 4 } }",
+            "arena.ptr-operations",
+        ),
+        (
+            "fix p: ref Node = new Node { value: 1, inner: Inner { x: 2 } }\np#value = 3",
+            "arena.ptr-operations",
+        ),
+        (
+            "fix p: ref Node = new Node { value: 1, inner: Inner { x: 2 } }\np.inner#x = 3",
+            "arena.ptr-operations",
+        ),
+        (
+            "fix p: ref Node = new Node { value: 1, inner: Inner { x: 2 } }\np#bump()",
+            "method.write-target",
+        ),
+        (
+            "fix p: ref Node = new Node { value: 1, inner: Inner { x: 2 } }\ntake_mut(p)",
+            "type.expected",
+        ),
+        (
+            "fix p: ref? Node = new Node { value: 1, inner: Inner { x: 2 } }\ntake_mut_opt(p)",
+            "type.expected",
+        ),
+        (
+            "fix p: ref? Node = new Node { value: 1, inner: Inner { x: 2 } }\nfix n = p.value",
+            "arena.null-deref",
+        ),
+        (
+            "fix a = new Node { value: 1, inner: Inner { x: 2 } }\nfix b = new a\nfix c: mut ref Node = b",
+            "type.expected",
+        ),
+        (
+            "fix p: ref #[i32] = new (new #[1 as i32])\n#p = new #[2 as i32]",
+            "arena.ptr-operations",
+        ),
+    ] {
+        let source = format!("{prefix}fn main() -> u8 {{ arena {{ {body} }}\nreturn 0 }}");
+        let error = suz::check_source(source.as_bytes(), suz::ArithmeticMode::Default).unwrap_err();
+        assert_eq!(error.rule(), rule, "{body}: {error}");
+    }
+}
