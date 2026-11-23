@@ -120,7 +120,7 @@ impl Parser<'_, '_> {
         })
     }
 
-    pub(super) fn array_initializer(&mut self) -> Result<Expression, Diagnostic> {
+    pub(super) fn array_initializer(&mut self, readonly: bool) -> Result<Expression, Diagnostic> {
         let location = self.location();
         self.nested(location, |parser| {
             let open = parser.location();
@@ -196,6 +196,7 @@ impl Parser<'_, '_> {
                             values,
                             lengths,
                             repeated: false,
+                            ..
                         } if nested && !values.is_empty() => {
                             if let Some(previous) = &shape {
                                 if previous
@@ -252,6 +253,7 @@ impl Parser<'_, '_> {
                     values,
                     lengths,
                     repeated,
+                    readonly,
                 },
                 location,
                 height,
@@ -260,7 +262,7 @@ impl Parser<'_, '_> {
     }
     fn array_item(&mut self) -> Result<Expression, Diagnostic> {
         if self.token().kind == Kind::Symbol("[") {
-            self.array_initializer()
+            self.array_initializer(false)
         } else {
             self.expression()
         }

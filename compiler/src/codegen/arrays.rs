@@ -210,21 +210,17 @@ pub(super) fn allocate(
     for i in (0..lengths.len()).rev() {
         write!(c, "if (suz_length_{i} != 0 && suz_count > SIZE_MAX / (size_t)suz_length_{i}) {overflow}; suz_count *= (size_t)suz_length_{i}; if (suz_count > SIZE_MAX / sizeof({element})) {overflow}; ").unwrap();
     }
-    write!(c, "size_t suz_bytes = suz_count * sizeof({element}); suz_array_value.data = suz_arena_alloc(suz_bytes ? suz_bytes : 1, alignof({element}), {}, {}, {}); ", c_string(&context.source_name), location.line, location.column).unwrap();
+    write!(c, "size_t suz_bytes = suz_count * sizeof({element}); void *suz_data = suz_arena_alloc(suz_bytes ? suz_bytes : 1, alignof({element}), {}, {}, {}); ", c_string(&context.source_name), location.line, location.column).unwrap();
     if *repeated && zero_bits(&values[0]) {
-        c.push_str("(void)suz_initial_0; memset(suz_array_value.data, 0, suz_bytes); ");
+        c.push_str("(void)suz_initial_0; memset(suz_data, 0, suz_bytes); ");
     } else if *repeated {
-        write!(c, "for (size_t suz_i = 0; suz_i < suz_count; ++suz_i) (({element} *)suz_array_value.data)[suz_i] = suz_initial_0; ").unwrap();
+        write!(c, "for (size_t suz_i = 0; suz_i < suz_count; ++suz_i) (({element} *)suz_data)[suz_i] = suz_initial_0; ").unwrap();
     } else {
         for i in 0..values.len() {
-            write!(
-                c,
-                "(({element} *)suz_array_value.data)[{i}] = suz_initial_{i}; "
-            )
-            .unwrap();
+            write!(c, "(({element} *)suz_data)[{i}] = suz_initial_{i}; ").unwrap();
         }
     }
-    c.push_str("suz_array_value; })");
+    c.push_str("suz_array_value.data = suz_data; suz_array_value; })");
     c
 }
 

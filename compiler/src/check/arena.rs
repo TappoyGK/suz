@@ -165,11 +165,11 @@ pub(super) fn expression(
                     ),
                 ));
             }
-            if matches!(inner.kind, ExpressionKind::ArrayInit { .. }) {
+            if let ExpressionKind::ArrayInit { readonly, .. } = &inner.kind {
                 let array_type = expected.and_then(|ty| ty.array_id().map(Type::Array));
                 let value = super::arrays::initializer(inner, array_type, scope)?;
                 return Ok(CheckedExpression {
-                    ty: value.ty.array_reference(false),
+                    ty: value.ty.array_reference(*readonly),
                     value: Value::New {
                         value: Box::new(value),
                         location: expr.location,

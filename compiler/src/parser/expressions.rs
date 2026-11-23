@@ -16,7 +16,7 @@ use crate::{
 impl Parser<'_, '_> {
     // 再帰するunaryのフレームに配列の構築用一時値を置かない。
     fn constant_array(&mut self) -> Result<Expression, Diagnostic> {
-        let value = self.array_initializer()?;
+        let value = self.array_initializer(true)?;
         self.postfix(value)
     }
 
@@ -514,32 +514,15 @@ impl Parser<'_, '_> {
                 if self
                     .tokens
                     .get(self.cursor + 1)
-                    .is_some_and(|t| t.kind == Kind::Symbol("#"))
+                    .is_some_and(|t| matches!(t.kind, Kind::Symbol("#" | ".")))
                     && self
                         .tokens
                         .get(self.cursor + 2)
                         .is_some_and(|t| t.kind == Kind::Symbol("[")) =>
             {
+                let readonly = self.tokens[self.cursor + 1].kind == Kind::Symbol(".");
                 self.cursor += 2;
-                ExpressionKind::New(Box::new(self.array_initializer()?))
-            }
-            Kind::Keyword("new")
-                if self
-                    .tokens
-                    .get(self.cursor + 1)
-                    .is_some_and(|t| t.kind == Kind::Symbol("."))
-                    && self
-                        .tokens
-                        .get(self.cursor + 2)
-                        .is_some_and(|t| t.kind == Kind::Symbol("[")) =>
-            {
-                return Err(location.error(
-                    ErrorKind::InvalidSource,
-                    crate::diagnostic!(
-                        "array.readonly",
-                        "arena allocation for readonly arrays (new .[]) is not supported yet"
-                    ),
-                ));
+                ExpressionKind::New(Box::new(self.array_initializer(readonly)?))
             }
             Kind::Symbol("~") | Kind::Keyword("len" | "not" | "c_bytes" | "c_byte_len" | "new") => {
                 let constructor: fn(Box<Expression>) -> ExpressionKind = match self.token().kind {

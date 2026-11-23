@@ -1042,6 +1042,7 @@ pub(crate) enum ExpressionKind {
         values: Vec<Expression>,
         lengths: Vec<Expression>,
         repeated: bool,
+        readonly: bool,
     },
     New(Box<Expression>),
     /// 追記文の型検査用。ソースから値式として書くことはできない。

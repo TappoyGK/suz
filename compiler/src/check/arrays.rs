@@ -22,6 +22,7 @@ pub(super) fn initializer(
         values,
         lengths,
         repeated,
+        ..
     } = &expr.kind
     else {
         unreachable!()

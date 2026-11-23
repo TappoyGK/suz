@@ -120,8 +120,8 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
             Some(if *index { Type::Char } else { Type::Text })
         }
         ExpressionKind::New(value) => operand_type(value, bindings).map(|ty| {
-            if matches!(value.kind, ExpressionKind::ArrayInit { .. }) {
-                Type::Array(ty.array_id().unwrap()).array_reference(false)
+            if let ExpressionKind::ArrayInit { readonly, .. } = &value.kind {
+                Type::Array(ty.array_id().unwrap()).array_reference(*readonly)
             } else {
                 ty.pointer()
             }

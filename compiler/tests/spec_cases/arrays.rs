@@ -878,3 +878,78 @@ fn main() -> u8 {
         assert_eq!(err.rule(), "arena.store", "{escape}\n{err}");
     }
 }
+
+#[test]
+fn readonly_array_arena_allocation_supports_runtime_values_and_enforces_lifetimes() {
+    let source = r#"
+struct Counter { v: i64 }
+fn tick(c: mut Counter, x: i64) -> i64 {
+    c#v = c.v * 10 + x
+    return x
+}
+fn build(x: i32, n: len_t) -> .[i32] {
+    return new .[x; n]
+}
+fn main() -> u8 {
+    fix c = new Counter { v: 0 }
+    fix a = new .[tick(c, 1), tick(c, 2), tick(c, 3)]
+    if c.v != 123 || a.[0] != 1 || a.[2] != 3 { return 1 }
+
+    fix rep = build(7, 4)
+    if len rep != 4 || (rep.[3] or 0) != 7 { return 2 }
+
+    fix zero = new .[0 as i32; 3]
+    if zero.[0] != 0 || zero.[2] != 0 { return 3 }
+
+    fix empty: .[i32] = new .[]
+    if len empty != 0 { return 4 }
+
+    fix x: i32 = 5
+    fix grid = new .[[x, x + 1], [x + 2, x + 3]]
+    if grid.[1].[1] != 8 { return 5 }
+
+    // 静的な定数配列とarenaの読み取り専用配列を同じ変数で切り替えられる。
+    var cur: .[i32] = .[10, 20]
+    if (cur.[0] or 0) != 10 { return 6 }
+    cur = a_sub(rep)
+    if (cur.[0] or 0) != 7 { return 7 }
+    return 0
+}
+fn a_sub(v: .[i32]) -> .[i32] { return v }
+"#;
+    let c = suz::compile(source.as_bytes()).unwrap();
+    assert!(
+        !c.contains("memcpy("),
+        "readonly arena allocation copies elements"
+    );
+    let output = compile_and_run_c23(source, "readonly-arena-alloc.suz");
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+
+    // 要素への書き込みは拒否する。
+    let write_err = suz::compile(
+        b"fn main() -> u8 {\n    fix x: i64 = 1\n    fix a = new .[x, 2]\n    a#[0] = 3\n    return 0\n}",
+    )
+    .unwrap_err();
+    assert_eq!(write_err.rule(), "array.readonly", "{write_err}");
+
+    // arena外への不正な持ち出しは寿命検査で拒否する。
+    let escape_err = suz::compile(
+        b"fn main() -> u8 {\n    var saved: .[i64] = .[]\n    fix x: i64 = 1\n    arena {\n        saved = new .[x, 2]\n    }\n    return 0\n}",
+    )
+    .unwrap_err();
+    assert_eq!(escape_err.rule(), "arena.store", "{escape_err}");
+
+    // 要素に含まれる内側arena参照の持ち出しも拒否する。
+    let elem_escape = suz::compile(
+        b"struct Boxed { v: i32 }\nfn main() -> u8 {\n    var saved: .[mut Boxed] = new .[]\n    arena {\n        fix b = new Boxed { v: 1 }\n        saved = new .[b]\n    }\n    return 0\n}",
+    )
+    .unwrap_err();
+    assert_eq!(elem_escape.rule(), "arena.store", "{elem_escape}");
+
+    // 裸の .[...] に実行時の値を含めると定数配列の規則で拒否する。
+    let bare_err = suz::compile(
+        b"fn main() -> u8 {\n    fix x: i64 = 1\n    fix a = .[x, 2]\n    return 0\n}",
+    )
+    .unwrap_err();
+    assert_eq!(bare_err.rule(), "array.constant", "{bare_err}");
+}

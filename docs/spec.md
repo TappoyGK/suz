@@ -1470,7 +1470,7 @@ fix narrow: u8 = a + b or 0 // 格納に失敗し、代替値0を使う
 
 ### 7.19 配列の確保と操作
 
-**[array.new]** `new #[初期値; 長さ, ...]`は現在の最も内側の作業領域に配列を確保し、非nullの配列参照を返す。各次元の長さは確保後に変化しない。初期値、外側から内側の各長さの順に1回ずつ評価し、サイズを検査してから確保・初期化する。要素数0でも初期値は1回評価する。全要素は評価済みの初期値のコピーとし、参照を含む初期値の参照先の実体は複製しない。
+**[array.new]** `new #[初期値; 長さ, ...]`は現在の最も内側の作業領域に書き込み可能な配列を確保し、`#[T]`を返す。`new .[初期値; 長さ, ...]`および`new .[値, ...]`は同様に現在の作業領域へ確保し、読み取り専用の参照`.[T]`を返す。各次元の長さは確保後に変化しない。初期値、外側から内側の各長さの順に1回ずつ評価し、サイズを検査してから確保・初期化する。要素数0でも初期値は1回評価する。全要素は評価済みの初期値のコピーとし、参照を含む初期値の参照先の実体は複製しない。
 
 アラインメントの余白を含む配列の要求が現在のブロックに収まる場合：
 
@@ -3191,7 +3191,7 @@ Sum              ::= Product ( ( "+" | "-" | "+%" | "-%" ) Product )*
 Product          ::= Cast ( ( "*" | "/" | "%" | "*%" ) Cast )*
 Cast             ::= Unary ( "as%" Type CastHandler? | "as" Type CastHandler? )*
 CastHandler      ::= "or" ( Expression | "return" Expression? | "panic" TEMPLATE )
-Unary            ::= ( "-" | "not" | "~" | "len" | "c_bytes" | "c_byte_len" | "new" | "." ) Unary | "new" "#" ArrayInitializer | "textbuf" ( "[" Expression "]" )? Unary | "fn" IDENT TypeArguments? | Postfix
+Unary            ::= ( "-" | "not" | "~" | "len" | "c_bytes" | "c_byte_len" | "new" | "." ) Unary | "new" ( "#" | "." ) ArrayInitializer | "textbuf" ( "[" Expression "]" )? Unary | "fn" IDENT TypeArguments? | Postfix
 Postfix          ::= Primary ( "." IDENT | "#" IDENT "(" Arguments? ")" | "." "[" Index "]" IndexHandler?
                              | "(" Arguments? ")"
                              | "with" "{" NL* Initializers "}" )*
