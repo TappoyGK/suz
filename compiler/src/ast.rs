@@ -163,7 +163,7 @@ pub(crate) const NUMERIC_COMBINATIONS: usize = 18;
 /// Structの番号は構造体宣言、Functionの番号は共通化した関数値の型を参照する。汎用の型はC生成までに具体化する。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Type {
-    /// 配列への参照値。mutable=true は #[T]、false は .[T]。nullable=true は ? 付き。
+    /// 配列への参照値。`mutable=true` は `#[T]`、`false` は `.[T]`。`nullable=true` は `?` 付き。
     ArrayRef {
         id: usize,
         mutable: bool,
