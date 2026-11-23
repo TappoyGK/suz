@@ -169,6 +169,7 @@ fn access(expr: &Expression, scope: &Scope) -> Result<(CheckedExpression, bool),
         }
     );
     let mut target = expression::expression(root, None, scope)?;
+    target = constants::evaluate(&target)?.unwrap_or(target);
     let mut position = 0;
     let mut fallible = false;
     while position < steps.len() {
@@ -229,6 +230,9 @@ fn access(expr: &Expression, scope: &Scope) -> Result<(CheckedExpression, bool),
                     handler: None,
                 },
             };
+            if !fallible {
+                target = constants::evaluate(&target)?.unwrap_or(target);
+            }
             position += array.rank;
         } else {
             let step = steps[position];
@@ -287,6 +291,9 @@ fn access(expr: &Expression, scope: &Scope) -> Result<(CheckedExpression, bool),
                     handler: None,
                 },
             };
+            if !fallible {
+                target = constants::evaluate(&target)?.unwrap_or(target);
+            }
             position += 1;
         }
     }

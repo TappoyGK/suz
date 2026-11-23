@@ -1368,3 +1368,148 @@ fn main() -> u8 {
 | 設定 | 結果 | 終了コード | 警告数 |
 |---|---|---:|---:|
 | 通常 | 正常終了 | 0 | 0 |
+
+### array-045 定数式である配列参照は連鎖添字・構造体フィールド・反復でも長さを既知とする
+
+主根拠：`[array.bounds-proof]`。
+
+補助根拠：`[const.expression]`・`[array.constant-index]`。
+
+**ソース：**
+
+```suz
+struct Cfg { xs: .[i32] }
+fix JAGGED: .[.[i32]] = .[.[1, 2], .[3]]
+fix CFG = Cfg { xs: .[10, 20] }
+fix XS: .[i32] = CFG.xs
+fix DEEP: .[.[.[i32]]] = .[.[.[1], .[2, 3]], .[.[4]]]
+fix V: i32 = JAGGED.[1].[0]
+
+fn main() -> u8 {
+    if JAGGED.[1].[0] != 3 || V != 3 { return 1 }
+    fix r = JAGGED.[1]
+    if r.[0] != 3 { return 2 }
+    if CFG.xs.[1] != 20 || XS.[1] != 20 { return 3 }
+    if DEEP.[0].[1].[1] != 3 { return 4 }
+    var total: i32 = 0
+    for i in 0..<len JAGGED.[0] {
+        total += JAGGED.[0].[i]
+    }
+    if total != 3 { return 5 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### array-046 定数配列の要素に対する定数範囲外添字はorなしを拒否する
+
+主根拠：`[array.constant-index]`。
+
+補助根拠：`[array.bounds-proof]`。
+
+**ソース：**
+
+```suz
+fix JAGGED: .[.[i32]] = .[.[1, 2], .[3]]
+fn main() -> u8 {
+    fix x: i32 = JAGGED.[1].[5]
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[array.constant-index]` | 3 | 28 |
+
+### array-047 定数配列の要素に対する定数範囲外添字はorで代替値を使う
+
+主根拠：`[array.constant-index]`。
+
+**ソース：**
+
+```suz
+fix JAGGED: .[.[i32]] = .[.[1, 2], .[3]]
+fn main() -> u8 {
+    fix x: i32 = JAGGED.[1].[5] or 9
+    if x != 9 { return 1 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### array-048 作業領域の配列の要素に対する添字はorを要求する
+
+主根拠：`[array.access-handler]`。
+
+補助根拠：`[array.bounds-proof]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    arena {
+        fix a: #[.[i32]] = new #[.[1, 2], .[3]]
+        fix x: i32 = a.[1].[0]
+    }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[array.access-handler]` | 4 | 27 |
+
+### array-049 ブロック内のfixを経由した定数配列の要素に対する添字はorを要求する
+
+主根拠：`[array.access-handler]`。
+
+補助根拠：`[array.bounds-proof]`・`[const.expression]`。
+
+**ソース：**
+
+```suz
+fix JAGGED: .[.[i32]] = .[.[1, 2], .[3]]
+fn main() -> u8 {
+    fix t = JAGGED
+    fix x: i32 = t.[1].[0]
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[array.access-handler]` | 4 | 23 |

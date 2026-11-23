@@ -104,7 +104,24 @@ pub(in crate::check) fn shape(v: &CheckedExpression, scope: &Scope) -> Vec<Optio
             }
             result
         }
-        _ => unknown(),
+        _ => {
+            if let Ok(Some(evaluated)) = super::super::constants::evaluate(v)
+                && let Value::Array {
+                    metadata, lengths, ..
+                } = &evaluated.value
+            {
+                return lengths
+                    .iter()
+                    .enumerate()
+                    .map(|(axis, v)| {
+                        constant(v).map(|n| {
+                            Dimension::Static(metadata.origins[axis].0, metadata.origins[axis].1, n)
+                        })
+                    })
+                    .collect();
+            }
+            unknown()
+        }
     }
 }
 
