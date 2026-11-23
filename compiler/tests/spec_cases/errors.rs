@@ -98,8 +98,8 @@ fn panic_handlers_work_for_existing_operations_and_calls() {
         "`bad` as i32",
         "`bad` as% i32",
         "(127 as i8 + 1 as i8)",
-        "`a`[2]",
-        "`a`[0:2]",
+        "`a`.[2]",
+        "`a`.[0:2]",
         "300 as u8",
     ];
     let sources = cases.iter().map(|operation| {
@@ -176,7 +176,7 @@ fnshape Once() -> void
 fn run(f: fn Once) -> i32 { f()
     return 7 }
 fn main() -> u8 {
-    fix message: symbol = `${run(fn []() -> void { send() or ignore [// ` ${x} } { [ ' \] })}`
+    fix message: symbol = `${run(fn []() -> void { send() or ignore [// ` ${x} } { .[ ' \] })}`
     log info `${message}`
     return 0
 }

@@ -352,7 +352,7 @@ fn check_for(statement: &Statement, context: &mut StatementContext<'_>) -> Resul
                     .arrays
                     .borrow_mut()
                     .intern(array.element, array.rank - 1)
-                    .array_reference(matches!(value.ty, Type::ReadOnlyArray(_)))
+                    .array_reference(value.ty.is_readonly_array())
             }
         } else if value.ty.is_text() {
             Type::Char
@@ -421,7 +421,6 @@ fn check_binding(
     context: &mut StatementContext<'_>,
 ) -> Result<(), Diagnostic> {
     let Statement::Binding {
-        pointer,
         mutable,
         name,
         location,
@@ -465,15 +464,6 @@ fn check_binding(
             .transpose()?,
         context.bindings,
     )?;
-    if initializer.ty.pointee().is_some() != *pointer {
-        return Err(location.error(
-            ErrorKind::InvalidSource,
-            crate::diagnostic!(
-                "arena.ptr-decl",
-                "pointer bindings require fix ptr or var ptr"
-            ),
-        ));
-    }
     if matches!(initializer.ty, Type::Function(_)) {
         return Err(location.error(
             ErrorKind::InvalidSource,

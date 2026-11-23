@@ -33,20 +33,20 @@ fn text_buffers_omit_empty_literal_fragments() {
 fn text_buffers_build_directly_and_preserve_evaluation_order_and_views() {
     // 環境層の確保回数で、完成した一時文字列やインターンが混入しないことを検証する。
     let source = r#"struct Counter { n: len_t }
-fn next(p: ptr Counter) -> len_t {
+fn next(p: mut Counter) -> len_t {
     p#n = p.n + 1 or 0
     return p.n
 }
 fn copy(t: text) -> text { return textbuf t }
 fn main() -> u8 {
-    fix ptr p = new Counter { n: 0 }
+    fix p = new Counter { n: 0 }
     fix message = textbuf[next(p)] (`あ${next(p)}😀\0${next(p)}`)
     if message != `あ2😀\03` { return 1 }
     if p.n != 3 { return 2 }
-    fix view = message[1:4] or ``
+    fix view = message.[1:4] or ``
     fix copied = copy(view)
     if copied != `2😀\0` { return 3 }
-    fix ptr descriptor = new message
+    fix descriptor = new message
     if .descriptor != message { return 4 }
     fix empty = textbuf[0] ``
     if len empty != 0 { return 5 }

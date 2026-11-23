@@ -206,7 +206,7 @@ impl Analysis {
     fn paths(&self, ty: Type) -> Vec<Vec<usize>> {
         match ty {
             Type::Array(id) => self.paths(self.structs.arrays.borrow().get(id).element),
-            Type::ReadOnlyArray(_) | Type::Pointer { .. } | Type::Text | Type::CPointer => {
+            Type::ArrayRef { .. } | Type::Pointer { .. } | Type::Text | Type::CPointer => {
                 vec![vec![]]
             }
             Type::Struct(id) => self
@@ -308,7 +308,10 @@ impl Analysis {
                 for length in lengths {
                     self.expr(length, region, arena);
                 }
-                if let Type::ReadOnlyArray(id) = value.ty {
+                if let Type::ArrayRef {
+                    id, mutable: false, ..
+                } = value.ty
+                {
                     let cell = self.permanent_cell(Type::Array(id));
                     for initial in values {
                         let shape = self.expr(initial, region, arena);

@@ -46,13 +46,13 @@ fn Number.+(n: Number) -> Number { return Number { v: self.v + n.v } }
 fn Number.-(n: Number) -> Number { return Number { v: self.v - n.v } }
 fn Number.<(n: Number) -> bool { return self.v < n.v }
 fn Number.<=(n: Number) -> bool { return self.v <= n.v }
-fn make(counter: ptr i32, v: i32) -> Number {
+fn make(counter: mut i32, v: i32) -> Number {
     #counter = .counter * 10 + v
     return Number { v: v }
 }
 fn main() -> u8 {
     arena {
-        fix ptr counter = new (0 as i32)
+        fix counter = new (0 as i32)
         fix result = make(counter, 1) + make(counter, 2) - make(counter, 3)
         if .counter != 123 || result.v != 0 { return 1 }
         #counter = 0
@@ -61,7 +61,7 @@ fn main() -> u8 {
         #counter = 0
         if make(counter, 3) < make(counter, 2) <= make(counter, 1) { return 4 }
         if .counter != 32 { return 5 }
-        fix ptr p = new Number { v: 2 }
+        fix p = new Number { v: 2 }
         if (.p + .p).v != 4 { return 6 }
     }
     return 0
@@ -132,14 +132,14 @@ fn operator_methods_reject_invalid_definitions_and_calls() {
             "operator.overload",
         ),
         (
-            "fn Num.<(p: ptr? Num) -> bool { return true }",
-            "arena { fix ptr p = new n\nif n < p { return 1 } }",
+            "fn Num.<(p: mut? Num) -> bool { return true }",
+            "arena { fix p = new n\nif n < p { return 1 } }",
             "operator.overload",
         ),
         ("", "fix a = n % n", "operator.overload"),
         (
             "fn Num.+(n: Num) -> Num { return n }",
-            "arena { fix ptr p = new n\nfix a = p + n }",
+            "arena { fix p = new n\nfix a = p + n }",
             "expr.operator-types",
         ),
     ] {
@@ -194,16 +194,16 @@ enum Step: u8 { Low, High }
 fn Step.+(n: Step) -> Step { return n }
 fn Step.<(n: Step) -> bool { return self as u8 < n as u8 }
 struct Num { v: i32 }
-fn Num.+(p: ptr Num) -> i32 { return p.v }
-fn Num.+(p: ptr? Num) -> i32 { let q = p { return q.v + 1 }
+fn Num.+(p: mut Num) -> i32 { return p.v }
+fn Num.+(p: mut? Num) -> i32 { let q = p { return q.v + 1 }
 return 0 }
 fn main() -> u8 {
     if Step.Low + Step.High != Step.High { return 1 }
     if not (Step.Low < Step.High) { return 2 }
     arena {
         fix n = Num { v: 4 }
-        fix ptr p = new n
-        fix ptr q: ptr? Num = p
+        fix p = new n
+        fix q: mut? Num = p
         if n + p != 4 || n + q != 5 { return 3 }
     }
     return 0
@@ -324,7 +324,7 @@ fn unary_minus_methods_preserve_precedence_evaluation_and_result_types() {
 struct Num { v: i32 }
 fn Num.-() -> Num { return Num { v: -self.v } }
 fn Num.-(n: Num) -> Num { return Num { v: self.v - n.v } }
-fn make(counter: ptr i32, v: i32) -> Num {
+fn make(counter: mut i32, v: i32) -> Num {
     #counter = .counter * 10 + v
     return Num { v: v }
 }
@@ -338,12 +338,12 @@ fn Direction.-() -> Direction {
 }
 fn main() -> u8 {
     arena {
-        fix ptr counter = new (0 as i32)
+        fix counter = new (0 as i32)
         fix n = -make(counter, 1) - make(counter, 2)
         if n.v != -3 || .counter != 12 { return 1 }
         #counter = 0
         if (-(-make(counter, 3))).v != 3 || .counter != 3 { return 2 }
-        fix ptr p = new Num { v: 4 }
+        fix p = new Num { v: 4 }
         if (-(.p)).v != -4 { return 3 }
     }
     fix s = Scalar { v: 3 }
@@ -405,7 +405,7 @@ fn unary_minus_methods_reject_invalid_definitions_and_call_contexts() {
         ),
         (
             "fn Num.-() -> Num { return self }",
-            "arena { fix ptr p = new n\nfix a = -p }",
+            "arena { fix p = new n\nfix a = -p }",
             "expr.operator-types",
         ),
     ] {
@@ -420,7 +420,7 @@ fn unary_minus_methods_reject_invalid_definitions_and_call_contexts() {
         );
         assert_eq!(error.rule(), rule, "{source}\n{error}");
     }
-    suz::compile(b"struct Ref { p: ptr i32 }\nfn Ref.-() -> ptr i32 { return self.p }\nfn main() -> u8 { return 0 }").unwrap();
+    suz::compile(b"struct Ref { p: mut i32 }\nfn Ref.-() -> mut i32 { return self.p }\nfn main() -> u8 { return 0 }").unwrap();
 }
 
 #[test]
@@ -471,10 +471,10 @@ fn main() -> u8 {
     step += Step.High
     if step != Step.High { return 4 }
     arena {
-        fix ptr p = new Body { pos: Num { v: 5 } }
+        fix p = new Body { pos: Num { v: 5 } }
         p#pos *= 3
         if p.pos.v != 15 { return 5 }
-        fix ptr q = new Num { v: 8 }
+        fix q = new Num { v: 8 }
         #q /= 2
         if q.v != 4 { return 6 }
     }
@@ -493,16 +493,16 @@ fn compound_operator_methods_save_destination_and_read_before_rhs() {
 struct Num { v: i32 }
 struct Body { pos: Num }
 fn Num.+(n: Num) -> Num { return Num { v: self.v + n.v } }
-fn select(p: ptr Body, count: ptr i32) -> ptr Body {
+fn select(p: mut Body, count: mut i32) -> mut Body {
     #count = .count * 10 + 1
     return p
 }
 fn main() -> u8 {
     arena {
-        fix ptr count = new (0 as i32)
-        fix ptr first = new Body { pos: Num { v: 10 } }
-        fix ptr second = new Body { pos: Num { v: 20 } }
-        var ptr p = first
+        fix count = new (0 as i32)
+        fix first = new Body { pos: Num { v: 10 } }
+        fix second = new Body { pos: Num { v: 20 } }
+        var p = first
         select(p, count)#pos += expr {
             p = second
             first#pos = Num { v: 99 }
@@ -516,7 +516,7 @@ fn main() -> u8 {
             Num { v: 4 }
         }
         if second.pos.v != 24 || p.pos.v != 13 { return 2 }
-        fix ptr n = new Num { v: 7 }
+        fix n = new Num { v: 7 }
         #n += expr { #n = Num { v: 77 }
             Num { v: 2 } }
         if n.v != 9 { return 3 }
@@ -564,12 +564,12 @@ fn compound_operator_methods_require_same_result_type_and_mutable_target() {
         ),
         (
             "fn Num.+(n: Num) -> i32 { return 1 }",
-            "arena { fix ptr p = new Num { v: 1 }\n#p += .p }",
+            "arena { fix p = new Num { v: 1 }\n#p += .p }",
             "operator.compound",
         ),
         (
             "fn Num.+(n: Num) -> i32 { return 1 }",
-            "arena { fix ptr p = new Body { pos: Num { v: 1 } }\np#pos += p.pos }",
+            "arena { fix p = new Body { pos: Num { v: 1 } }\np#pos += p.pos }",
             "operator.compound",
         ),
         (
@@ -602,7 +602,7 @@ fn amount(d: i32) -> i32 or Err {
     if d == 0 { fail Err.Bad }
     return 6 / d
 }
-fn update(p: ptr Num, d: i32) -> u8 {
+fn update(p: mut Num, d: i32) -> u8 {
     #p *= (expr { #p = Num { v: 99 }
         6 } / d or return 7)
     return 0
@@ -614,7 +614,7 @@ fn local(d: i32) -> i32 {
 }
 fn main() -> u8 {
     arena {
-        fix ptr p = new Num { v: 7 }
+        fix p = new Num { v: 7 }
         if update(p, 2) != 0 || p.v != 21 { return 1 }
         #p = Num { v: 7 }
         if update(p, 0) != 7 || p.v != 99 { return 2 }
@@ -643,7 +643,7 @@ fn Bits.<<(n: Bits) -> Bits { return Bits { v: self.v << n.v } }
 fn Bits.~() -> Bits { return Bits { v: ~self.v } }
 fn Bits.not() -> bool { return self.v == 0 }
 fn Bits.len() -> len_t { return self.v as len_t or 0 }
-fn make(p: ptr i32, n: u32) -> Bits { #p += 1
+fn make(p: mut i32, n: u32) -> Bits { #p += 1
 return Bits { v: n } }
 fn main() -> u8 {
     var b = Bits { v: 31 }
@@ -662,11 +662,11 @@ fn main() -> u8 {
     fix size: len_t = len b + 1
     if size != 25 { return 7 }
     arena {
-        fix ptr count = new (0 as i32)
+        fix count = new (0 as i32)
         if (len make(count, 3)) != 3 || .count != 1 { return 8 }
         if not make(count, 1) || .count != 2 { return 9 }
         if (~make(count, 0)).v != 4294967295 || .count != 3 { return 10 }
-        fix ptr p = new b
+        fix p = new b
         #p %= 5
         #p <<= 1
         #p |= 1
@@ -816,7 +816,7 @@ fn missing_unary_operator_diagnostics_distinguish_user_types_from_builtins() {
         ("len", "p", "len.targets"),
     ] {
         let source = format!(
-            "fn main() -> u8 {{ arena {{ fix ptr p = new (1 as i32)\nfix b = {op} {value} }}\nreturn 0 }}"
+            "fn main() -> u8 {{ arena {{ fix p = new (1 as i32)\nfix b = {op} {value} }}\nreturn 0 }}"
         );
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.rule(), rule, "{source}\n{error}");

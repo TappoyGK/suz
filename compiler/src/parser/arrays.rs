@@ -16,6 +16,17 @@ impl Parser<'_, '_> {
         names: bool,
     ) -> Result<(Type, Vec<crate::ast::arrays::Dimension>), Diagnostic> {
         let location = self.location();
+        let mutable = match self.token().kind {
+            Kind::Symbol("#") => true,
+            Kind::Symbol(".") => false,
+            _ => {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("array.type", "expected .[T] or #[T] array type"),
+                ));
+            }
+        };
+        self.cursor += 1;
         self.nested(location, |parser| {
             parser.expect(FixedToken::Symbol("["))?;
             let element = parser.parse_type()?;
@@ -42,7 +53,7 @@ impl Parser<'_, '_> {
                             dimensions.push(crate::ast::arrays::Dimension { name: name.into(), index: rank, location });
                         }
                         _ => return Err(parser.error(ErrorKind::InvalidSource, crate::diagnostic!(
-                            "array.dimension-bind", "dimension names require a nonnull array parameter or fix ptr annotation; use _ here"
+                            "array.dimension-bind", "dimension names require a nonnull array parameter or fix annotation; use _ here"
                         ))),
                     }
                     parser.cursor += 1;
@@ -72,8 +83,40 @@ impl Parser<'_, '_> {
                 }
             }
             parser.expect(FixedToken::Symbol("]"))?;
-            let ty = parser.applications.borrow_mut().arrays.intern(element, rank);
-            Ok((ty, dimensions))
+            let nullable = parser.token().kind == Kind::Symbol("?");
+            if nullable {
+                if !dimensions.is_empty() {
+                    return Err(parser.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "array.dimension-bind",
+                            "dimension names require a nonnull array type; use _ here"
+                        ),
+                    ));
+                }
+                if !mutable {
+                    return Err(parser.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "array.readonly",
+                            "nullable readonly arrays (.[T]?) are not supported yet"
+                        ),
+                    ));
+                }
+                parser.cursor += 1;
+            }
+            let Type::Array(id) = parser.applications.borrow_mut().arrays.intern(element, rank)
+            else {
+                unreachable!()
+            };
+            Ok((
+                Type::ArrayRef {
+                    id,
+                    mutable,
+                    nullable,
+                },
+                dimensions,
+            ))
         })
     }
 

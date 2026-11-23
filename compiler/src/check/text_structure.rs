@@ -115,7 +115,7 @@ impl Schema {
                 entry.count = fields.len();
                 self.fields.push(fields);
             }
-            Type::ReadOnlyArray(_)
+            Type::ArrayRef { .. }
             | Type::Array(_)
             | Type::Pointer { .. }
             | Type::CPointer

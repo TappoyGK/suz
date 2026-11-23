@@ -137,32 +137,23 @@ impl Parser<'_, '_> {
         names: bool,
         parameter: bool,
     ) -> Result<(Type, Vec<crate::ast::arrays::Dimension>), Diagnostic> {
-        if names && self.token().kind == Kind::Symbol("[") {
-            let (Type::Array(id), dimensions) = self.array_type_dimensions(true)? else {
-                unreachable!()
-            };
-            self.reject_error_spec()?;
-            return Ok((Type::ReadOnlyArray(id), dimensions));
-        }
         if names
-            && self.token().kind == Kind::Keyword("ptr")
+            && matches!(self.token().kind, Kind::Symbol("." | "#"))
             && self
                 .tokens
                 .get(self.cursor + 1)
                 .is_some_and(|t| t.kind == Kind::Symbol("["))
         {
-            self.cursor += 1;
             let (ty, dimensions) = self.array_type_dimensions(true)?;
             self.reject_error_spec()?;
-            Ok((ty.pointer(), dimensions))
-        } else {
-            let ty = if parameter {
-                self.function_parameter_type()?
-            } else {
-                self.stored_type()?
-            };
-            Ok((ty, Vec::new()))
+            return Ok((ty, dimensions));
         }
+        let ty = if parameter {
+            self.function_parameter_type()?
+        } else {
+            self.stored_type()?
+        };
+        Ok((ty, Vec::new()))
     }
 
     pub(super) fn parse_type(&mut self) -> Result<Type, Diagnostic> {
@@ -209,7 +200,16 @@ impl Parser<'_, '_> {
     // 戻り値に続くエラー指定と、変換に続くorハンドラーは呼び出し側で解析する。
     pub(super) fn type_atom(&mut self) -> Result<Type, Diagnostic> {
         let mut layers = Vec::new();
-        while self.token().kind == Kind::Keyword("ptr") {
+        while matches!(self.token().kind, Kind::Keyword("mut" | "ref")) {
+            if self.token().kind == Kind::Keyword("ref") {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "arena.ptr-type",
+                        "readonly pointers (ref T) are not supported yet"
+                    ),
+                ));
+            }
             if layers.len() == 256 {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
@@ -223,15 +223,13 @@ impl Parser<'_, '_> {
             }
             layers.push(nullable);
         }
-        let mut ty = if self.token().kind == Kind::Symbol("[") {
-            let Type::Array(id) = self.array_type()? else {
-                unreachable!()
-            };
-            if layers.is_empty() {
-                Type::ReadOnlyArray(id)
-            } else {
-                Type::Array(id)
-            }
+        let mut ty = if matches!(self.token().kind, Kind::Symbol("." | "#"))
+            && self
+                .tokens
+                .get(self.cursor + 1)
+                .is_some_and(|t| t.kind == Kind::Symbol("["))
+        {
+            self.array_type()?
         } else {
             self.type_leaf()?
         };
@@ -264,14 +262,14 @@ impl Parser<'_, '_> {
             if self.token().kind != Kind::Ident("const") {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
-                    crate::diagnostic!("ffi.pointer-type", "typed C pointers are only allowed on extern parameters; use ptr T for Suz pointers"),
+                    crate::diagnostic!("ffi.pointer-type", "typed C pointers are only allowed on extern parameters; use mut T for Suz pointers"),
                 ));
             }
             self.cursor += 1;
             if self.token().kind != Kind::TypeName("void") {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
-                    crate::diagnostic!("ffi.pointer-type", "typed C pointers are only allowed on extern parameters; use ptr T for Suz pointers"),
+                    crate::diagnostic!("ffi.pointer-type", "typed C pointers are only allowed on extern parameters; use mut T for Suz pointers"),
                 ));
             }
             self.cursor += 1;

@@ -474,6 +474,15 @@ impl Parser<'_, '_> {
                     ),
                 ));
             }
+            Kind::Symbol(".")
+                if self
+                    .tokens
+                    .get(self.cursor + 1)
+                    .is_some_and(|t| t.kind == Kind::Symbol("[")) =>
+            {
+                self.cursor += 1;
+                return self.constant_array();
+            }
             Kind::Symbol(".") => {
                 self.cursor += 1;
                 let operand = self.unary()?;
@@ -500,16 +509,37 @@ impl Parser<'_, '_> {
                 }
                 ExpressionKind::Deref(Box::new(operand))
             }
-            Kind::Symbol("[") => return self.constant_array(),
             Kind::Keyword("textbuf") => return self.text_buffer(),
             Kind::Keyword("new")
                 if self
                     .tokens
                     .get(self.cursor + 1)
-                    .is_some_and(|t| t.kind == Kind::Symbol("[")) =>
+                    .is_some_and(|t| t.kind == Kind::Symbol("#"))
+                    && self
+                        .tokens
+                        .get(self.cursor + 2)
+                        .is_some_and(|t| t.kind == Kind::Symbol("[")) =>
             {
-                self.cursor += 1;
+                self.cursor += 2;
                 ExpressionKind::New(Box::new(self.array_initializer()?))
+            }
+            Kind::Keyword("new")
+                if self
+                    .tokens
+                    .get(self.cursor + 1)
+                    .is_some_and(|t| t.kind == Kind::Symbol("."))
+                    && self
+                        .tokens
+                        .get(self.cursor + 2)
+                        .is_some_and(|t| t.kind == Kind::Symbol("[")) =>
+            {
+                return Err(location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "array.readonly",
+                        "arena allocation for readonly arrays (new .[]) is not supported yet"
+                    ),
+                ));
             }
             Kind::Symbol("~") | Kind::Keyword("len" | "not" | "c_bytes" | "c_byte_len" | "new") => {
                 let constructor: fn(Box<Expression>) -> ExpressionKind = match self.token().kind {
@@ -649,7 +679,7 @@ impl Parser<'_, '_> {
     fn postfix(&mut self, mut result: Expression) -> Result<Expression, Diagnostic> {
         while matches!(
             self.token().kind,
-            Kind::Symbol("." | "[" | "(") | Kind::Keyword("with")
+            Kind::Symbol("." | "(") | Kind::Keyword("with")
         ) || (self.token().kind == Kind::Symbol("#")
             && self
                 .tokens
@@ -686,11 +716,16 @@ impl Parser<'_, '_> {
                 result = self.with_expression(result)?;
                 continue;
             }
-            if self.token().kind == Kind::Symbol("[") {
+            if self.token().kind == Kind::Symbol(".")
+                && self
+                    .tokens
+                    .get(self.cursor + 1)
+                    .is_some_and(|t| t.kind == Kind::Symbol("["))
+            {
                 let location = self.location();
                 self.check_height(result.height, location)?;
                 let previous_limit = self.limit_location.replace(location);
-                self.cursor += 1;
+                self.cursor += 2;
                 let start = if self.token().kind == Kind::Symbol(":") {
                     None
                 } else {

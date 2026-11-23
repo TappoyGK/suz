@@ -29,15 +29,15 @@ fn omitted_array_bounds_are_detected_by_asan() {
     }
     let _cleanup = Cleanup(directory.clone());
     for (index, (ty, init, access)) in [
-        ("ptr [i64]", "new [1]", "a[i]"),
-        ("ptr [i64]", "new [1]", "a[0:end][i]"),
-        ("ptr [i64; _, _]", "new [1; 1, 1]", "a[i][:][0]"),
+        ("#[i64]", "new #[1]", "a.[i]"),
+        ("#[i64]", "new #[1]", "a.[0:end].[i]"),
+        ("#[i64; _, _]", "new #[1; 1, 1]", "a.[i].[:].[0]"),
     ]
     .into_iter()
     .enumerate()
     {
         let source = format!(
-            "fn read(a: {ty}, i: i64, end: i64) -> i64 {{ return {access} or 0 }}\nfn main() -> u8 {{ fix ptr a = {init}\nfix value = read(a, 8, 9)\nreturn ifexpr value == 0 {{ 0 }} else {{ 1 }} }}"
+            "fn read(a: {ty}, i: i64, end: i64) -> i64 {{ return {access} or 0 }}\nfn main() -> u8 {{ fix a = {init}\nfix value = read(a, 8, 9)\nreturn ifexpr value == 0 {{ 0 }} else {{ 1 }} }}"
         );
         let (mut program, _) =
             crate::analyze(source.as_bytes(), &crate::CompilationOptions::default()).unwrap();

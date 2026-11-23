@@ -55,7 +55,7 @@ fn methods_reject_invalid_receivers_names_and_writes() {
         ("", "fix n = self", "method.self-keyword"),
         (
             "",
-            "arena { fix ptr p: ptr? Counter = new Counter { value: 1 }\np#add(1) }",
+            "arena { fix p: mut? Counter = new Counter { value: 1 }\np#add(1) }",
             "arena.null-deref",
         ),
         (
@@ -87,7 +87,7 @@ fn method_receivers_keep_lifetimes_capture_and_range_restrictions() {
             "accept",
         ),
         (
-            "fn Node.bad() -> ptr? Node { return self.next }",
+            "fn Node.bad() -> mut? Node { return self.next }",
             "",
             "accept",
         ),
@@ -124,13 +124,13 @@ fn method_receivers_keep_lifetimes_capture_and_range_restrictions() {
         ),
         (
             "",
-            "arena { fix ptr outer = new Node { value: 1, next: null }\narena { outer#append() } }",
+            "arena { fix outer = new Node { value: 1, next: null }\narena { outer#append() } }",
             "arena.store",
         ),
         ("fn Node .bad() -> void {}", "", "method.decl"),
     ] {
         let source = format!(
-            "struct Node {{ value: i32, next: ptr? Node }}\nfnshape Read() -> i32\nfn invoke(f: fn Read) -> i32 {{ return f() }}\nfn Node.count() -> i32 {{ return self.value }}\nfn Node#bump() -> i32 {{ self#value += 1\nreturn self.value }}\nfn Node#append() -> void {{ self#next = new Node {{ value: 2, next: null }} }}\n{declarations}\nfn main() -> u8 {{ {body}\nreturn 0 }}"
+            "struct Node {{ value: i32, next: mut? Node }}\nfnshape Read() -> i32\nfn invoke(f: fn Read) -> i32 {{ return f() }}\nfn Node.count() -> i32 {{ return self.value }}\nfn Node#bump() -> i32 {{ self#value += 1\nreturn self.value }}\nfn Node#append() -> void {{ self#next = new Node {{ value: 2, next: null }} }}\n{declarations}\nfn main() -> u8 {{ {body}\nreturn 0 }}"
         );
         if rule == "accept" {
             suz::compile(source.as_bytes()).unwrap();

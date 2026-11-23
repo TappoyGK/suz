@@ -27,7 +27,7 @@ pub(super) fn initializer(
         unreachable!()
     };
     let required = match expected {
-        Some(Type::Array(id) | Type::ReadOnlyArray(id)) => {
+        Some(Type::Array(id) | Type::ArrayRef { id, .. }) => {
             let array = scope.structs.arrays.borrow().get(id);
             if array.rank != lengths.len() {
                 return Err(expr.location.error(
@@ -196,7 +196,7 @@ fn access(expr: &Expression, scope: &Scope) -> Result<(CheckedExpression, bool),
                 };
                 let mut value = bound(i, scope)?;
                 if !has_handler
-                    && matches!(target.ty, Type::ReadOnlyArray(_))
+                    && target.ty.is_readonly_array()
                     && bounds::invalid_constant_index(&target, &value, checked.len(), scope)
                 {
                     return Err(step.location.error(
@@ -243,7 +243,7 @@ fn access(expr: &Expression, scope: &Scope) -> Result<(CheckedExpression, bool),
                     .arrays
                     .borrow_mut()
                     .intern(array.element, array.rank - 1)
-                    .array_reference(matches!(target.ty, Type::ReadOnlyArray(_)))
+                    .array_reference(target.ty.is_readonly_array())
             } else {
                 target.ty
             };
@@ -257,7 +257,7 @@ fn access(expr: &Expression, scope: &Scope) -> Result<(CheckedExpression, bool),
                 .transpose()?;
             if *index
                 && !has_handler
-                && matches!(target.ty, Type::ReadOnlyArray(_))
+                && target.ty.is_readonly_array()
                 && bounds::invalid_constant_index(&target, start.as_ref().unwrap(), 0, scope)
             {
                 return Err(step.location.error(
@@ -300,7 +300,7 @@ fn address(expr: &Expression, scope: &Scope) -> Result<CheckedExpression, Diagno
     } = value.value
     {
         if let Value::ArrayElement { target, .. } = &address.value
-            && matches!(target.ty, Type::ReadOnlyArray(_))
+            && target.ty.is_readonly_array()
         {
             return Err(expr.location.error(
                 ErrorKind::InvalidSource,
@@ -475,7 +475,11 @@ pub(super) fn constant_initializer(
             ),
         ));
     }
-    value.ty = Type::ReadOnlyArray(id);
+    value.ty = Type::ArrayRef {
+        id,
+        mutable: false,
+        nullable: false,
+    };
     constants::evaluate(&value)?.ok_or_else(|| {
         expr.location.error(
             ErrorKind::InvalidSource,
@@ -505,9 +509,12 @@ fn constant_element_type(
             .fields
             .iter()
             .all(|f| constant_element_type(f.ty, scope, seen)),
-        Type::ReadOnlyArray(id) => {
-            constant_element_type(scope.structs.arrays.borrow().get(id).element, scope, seen)
-        }
+        Type::ArrayRef {
+            id,
+            mutable: false,
+            nullable: false,
+        } => constant_element_type(scope.structs.arrays.borrow().get(id).element, scope, seen),
+        Type::ArrayRef { .. } => false,
         _ => true,
     }
 }

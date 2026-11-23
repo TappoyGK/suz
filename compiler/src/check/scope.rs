@@ -225,7 +225,7 @@ impl Scope {
                 | Type::Application(_)
                 | Type::Struct(_)
                 | Type::Pointer { .. }
-                | Type::ReadOnlyArray(_)
+                | Type::ArrayRef { .. }
                 | Type::StaticShape(_)
                 | Type::Shape(_)
                 | Type::StaticFunction(_)
@@ -266,13 +266,31 @@ impl Scope {
 
     pub fn type_name(&self, ty: Type) -> String {
         match ty {
-            Type::Array(id) | Type::ReadOnlyArray(id) => {
+            Type::Array(id) => {
                 let array = self.structs.arrays.borrow().get(id);
                 let element = self.type_name(array.element);
                 if array.rank == 1 {
                     format!("[{element}]")
                 } else {
                     format!("[{element}; {}]", vec!["_"; array.rank].join(", "))
+                }
+            }
+            Type::ArrayRef {
+                id,
+                mutable,
+                nullable,
+            } => {
+                let array = self.structs.arrays.borrow().get(id);
+                let element = self.type_name(array.element);
+                let prefix = if mutable { "#" } else { "." };
+                let suffix = if nullable { "?" } else { "" };
+                if array.rank == 1 {
+                    format!("{prefix}[{element}]{suffix}")
+                } else {
+                    format!(
+                        "{prefix}[{element}; {}]{suffix}",
+                        vec!["_"; array.rank].join(", ")
+                    )
                 }
             }
             Type::Parameter(id) => self

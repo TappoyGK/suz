@@ -102,7 +102,7 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
         ExpressionKind::Slice { target, index, .. } => {
             let target_type = operand_type(target, bindings);
             if let Some(id) = target_type.and_then(Type::array_id) {
-                let readonly = matches!(target_type, Some(Type::ReadOnlyArray(_)));
+                let readonly = target_type.is_some_and(Type::is_readonly_array);
                 let a = bindings.structs.arrays.borrow().get(id);
                 return Some(if !index {
                     Type::Array(id).array_reference(readonly)
@@ -121,7 +121,7 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
         }
         ExpressionKind::New(value) => operand_type(value, bindings).map(|ty| {
             if matches!(value.kind, ExpressionKind::ArrayInit { .. }) {
-                Type::Array(ty.array_id().unwrap()).pointer()
+                Type::Array(ty.array_id().unwrap()).array_reference(false)
             } else {
                 ty.pointer()
             }

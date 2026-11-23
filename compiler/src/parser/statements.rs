@@ -307,10 +307,6 @@ impl Parser<'_, '_> {
             Kind::Keyword("fix" | "var") => {
                 let mutable = self.token().kind == Kind::Keyword("var");
                 self.cursor += 1;
-                let pointer = self.token().kind == Kind::Keyword("ptr");
-                if pointer {
-                    self.cursor += 1;
-                }
                 let location = self.location();
                 let name = match self.token().kind {
                     Kind::Ident(name) => name.to_owned(),
@@ -353,7 +349,6 @@ impl Parser<'_, '_> {
                 self.cursor += 1;
                 let initializer = self.expression()?;
                 Ok(Statement::Binding {
-                    pointer,
                     mutable,
                     name,
                     location,

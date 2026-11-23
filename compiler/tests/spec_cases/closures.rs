@@ -156,13 +156,7 @@ fn captured_function_parameters_remain_call_only() {
     // キャプチャー後も保存やstatic fnへの変換を許さず、環境が呼び出しの外へ逃げるのを防ぐ。
     for misuse in ["fix g = f", "save(f)"] {
         let source = format!(
-            "fnshape Calc(i32) -> i32\n\
-             fn apply(f: fn Calc) -> i32 {{ return f(1) }}\n\
-             fn save(f: static fn Calc) -> void {{}}\n\
-             fn wrap(f: fn Calc) -> i32 {{\n\
-                 return apply(fn [f](x: i32) -> i32 {{ {misuse}\nreturn x }})\n\
-             }}\n\
-             fn main() -> u8 {{ return 0 }}"
+            "fnshape Calc(i32) -> i32\n             fn apply(f: fn Calc) -> i32 {{ return f(1) }}\n             fn save(f: static fn Calc) -> void {{}}\n             fn wrap(f: fn Calc) -> i32 {{\n                 return apply(fn [f](x: i32) -> i32 {{ {misuse}\nreturn x }})\n             }}\n             fn main() -> u8 {{ return 0 }}"
         );
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert!(

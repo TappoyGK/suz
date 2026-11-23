@@ -8,7 +8,7 @@ struct Size { count: len_t }
 fix PARSED = `2147483647` as len_t or 0
 fix REJECTED = `2147483648` as len_t or 7
 fix COUNT = len `あ😀x`
-fix VIEW = len (`あ😀x`[1:] or ``)
+fix VIEW = len (`あ😀x`.[1:] or ``)
 fn identity(x: int) -> int { return x }
 fn size(t: text) -> len_t { return len t }
 fn parse(t: text) -> len_t { return t as len_t or 7 }
@@ -39,15 +39,15 @@ fn main() -> u8 {
     if identity(n) != 3 || l + m != 3 { return 3 }
     fix start: u8 = 1
     fix end: i64 = 3
-    if (text_value[start:end] or ``) != `😀x` { return 4 }
+    if (text_value.[start:end] or ``) != `😀x` { return 4 }
     fix max: u64 = 18446744073709551615
-    if (text_value[start:max] or `bad`) != `bad` { return 5 }
+    if (text_value.[start:max] or `bad`) != `bad` { return 5 }
     fix wide_start: u64 = 0
-    if (text_value[wide_start:max] or `bad`) != `bad` { return 24 }
+    if (text_value.[wide_start:max] or `bad`) != `bad` { return 24 }
     fix tiny_end: i8 = 2
-    if (text_value[300:tiny_end] or `bad`) != `bad` { return 25 }
-    if (text_value[-1:end] or `bad`) != `bad` { return 6 }
-    if len text_value - 1 != 2 || (len text_value[1:] or ``) != 2 { return 7 }
+    if (text_value.[300:tiny_end] or `bad`) != `bad` { return 25 }
+    if (text_value.[-1:end] or `bad`) != `bad` { return 6 }
+    if len text_value - 1 != 2 || (len text_value.[1:] or ``) != 2 { return 7 }
     if len `` != 0 || len `é` != 2 { return 8 }
     fix hi: len_t = 2147483647
     fix zero: len_t = 0

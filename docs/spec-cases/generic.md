@@ -1110,10 +1110,10 @@ fn main() -> u8 {
 
 ```suz
 struct Box[T] { value: T }
-fn use(b: Box[ptr? i32]) -> void {}
+fn use(b: Box[mut? i32]) -> void {}
 fn main() -> u8 {
-    fix ptr p = new (1 as i32)
-    fix b = Box[ptr i32] { value: p }
+    fix p = new (1 as i32)
+    fix b = Box[mut i32] { value: p }
     use(b)
     return 0
 }

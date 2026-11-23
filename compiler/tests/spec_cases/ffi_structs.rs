@@ -25,7 +25,7 @@ fn main() -> u8 {
     fix parsed = `Sample { x: 5, y: 6.0 }` as Sample or return 2
     if parsed.x != 5 || parsed.y != 6.0 { return 3 }
     arena {
-        fix ptr p = new copied
+        fix p = new copied
         p#x = 8
         if p.x != 8 { return 4 }
     }
@@ -70,7 +70,7 @@ fn c_struct_headers_check_unused_layout_types_and_qualifiers() {
         ("struct sample { volatile int32_t x; double y; };", false),
         ("struct sample { _Atomic(int32_t) x; double y; };", false),
         ("struct sample { int32_t x: 8; double y; };", false),
-        ("struct sample { int32_t x[1]; double y; };", false),
+        ("struct sample { int32_t x.[1]; double y; };", false),
         ("struct sample { int32_t *x; double y; };", false),
         ("struct sample;", false),
         ("typedef struct { int32_t x; double y; } sample;", false),
@@ -146,7 +146,7 @@ fn c_struct_declarations_reject_unsupported_fields_and_conflicts() {
         "char",
         "text",
         "symbol",
-        "ptr i32",
+        "mut i32",
         "*const void",
         "Item",
     ] {

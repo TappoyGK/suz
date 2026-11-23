@@ -272,7 +272,7 @@ fn main() -> u8 {
     var value: u16 = 255
     value += 1 as u8 or return 8
     var view: text = `a`
-    view = `abc`[0:1] or return 7
+    view = `abc`.[0:1] or return 7
     return ifexpr good == 1 && bad == 9 && value == 256 && view == `a` { 0 } else { 6 }
 }"#;
     let output = compile_and_run_c23(source, "widen-return.suz");

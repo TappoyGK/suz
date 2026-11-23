@@ -556,7 +556,7 @@ pub(super) fn emit_loop(
 }
 
 fn element_type(element: Type, reference: Type) -> String {
-    if matches!(reference, Type::ReadOnlyArray(_)) {
+    if reference.is_readonly_array() {
         format!("{} const", element.c_name())
     } else {
         element.c_name()

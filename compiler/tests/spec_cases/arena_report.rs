@@ -8,49 +8,49 @@ error Err { Bad }
 fnshape Read() -> i64
 fn call(f: fn Read) -> i64 { return f() }
 fn failed() -> i64 or Err {
-    arena { fix ptr p = new (5 as i64)
+    arena { fix p = new (5 as i64)
         fail Err.Bad
     }
 }
 fn returned() -> i64 {
-    arena { fix ptr p = new (6 as i64)
-        arena { fix ptr q = new (7 as i64)
+    arena { fix p = new (6 as i64)
+        arena { fix q = new (7 as i64)
             return .p + .q
         }
     }
 }
 fn recursive(n: i64) -> void {
-    arena { fix ptr p = new n
-        fix ptr small = new (1 as u8)
+    arena { fix p = new n
+        fix small = new (1 as u8)
         if n != 0 { recursive(n -% 1) }
     }
 }
 fn main() -> u8 {
-    fix ptr byte = new (1 as u8)
+    fix byte = new (1 as u8)
     for i in 0..<4 {
         arena {
-            fix ptr a = new [2 as i64; 3]
-            if a[0] != 2 { return 1 }
+            fix a = new #[2 as i64; 3]
+            if a.[0] != 2 { return 1 }
             if returned() != 13 { return 2 }
             fix result = failed() or error {
-                _ => { arena { fix ptr r = new (8 as i64)
+                _ => { arena { fix r = new (8 as i64)
                     recover .r
                 } }
             }
             if result != 8 { return 3 }
             if call(fn []() -> i64 {
-                arena { fix ptr c = new (9 as i64)
+                arena { fix c = new (9 as i64)
                     return .c
                 }
             }) != 9 { return 4 }
             recursive(2)
-            loop { arena { fix ptr b = new (10 as i64)
+            loop { arena { fix b = new (10 as i64)
                 break
             } }
             if i < 3 { continue }
         }
     }
-    fix ptr last = new (11 as i64)
+    fix last = new (11 as i64)
     if .byte != 1 { return 5 }
     if .last != 11 { return 6 }
     return 0
@@ -141,9 +141,9 @@ fn arena_report_counts_growth_reuse_and_suppresses_empty_runs() {
     let sources = [
         "fn main() -> u8 { return 0 }",
         "fn main() -> u8 { arena {}\nreturn 0 }",
-        "fn main() -> u8 { if false { fix ptr p = new 1 }\nreturn 0 }",
-        "fn main() -> u8 { for i in 0..<3 { arena { fix ptr p = new (1 as u8)\nfix ptr q = new (2 as i64) } }\nreturn 0 }",
-        "fn main() -> u8 { fix ptr p = new 1\npanic `stop` }",
+        "fn main() -> u8 { if false { fix p = new 1 }\nreturn 0 }",
+        "fn main() -> u8 { for i in 0..<3 { arena { fix p = new (1 as u8)\nfix q = new (2 as i64) } }\nreturn 0 }",
+        "fn main() -> u8 { fix p = new 1\npanic `stop` }",
     ];
     let mut files = Vec::new();
     for (id, source) in sources.iter().enumerate() {
@@ -205,7 +205,7 @@ fn arena_report_cli_validates_options_and_exports_instrumentation() {
     let source = directory.0.join("main.suz");
     fs::write(
         &source,
-        "fn main() -> u8 { fix ptr p = new (1 as u8)\nreturn 0 }",
+        "fn main() -> u8 { fix p = new (1 as u8)\nreturn 0 }",
     )
     .unwrap();
     let export = directory.0.join("export");
@@ -251,7 +251,7 @@ fn arena_report_output_uses_info_without_allocating_or_interning() {
     let source = directory.0.join("main.suz");
     fs::write(
         &source,
-        "fn main() -> u8 { fix ptr p = new (1 as u8)\nreturn 0 }",
+        "fn main() -> u8 { fix p = new (1 as u8)\nreturn 0 }",
     )
     .unwrap();
     let environment = directory.0.join("environment.c");

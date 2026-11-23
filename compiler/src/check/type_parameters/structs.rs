@@ -64,14 +64,25 @@ impl Structs {
                 .with_nullable(ty.is_nullable());
         }
         match ty {
-            Type::Array(id) | Type::ReadOnlyArray(id) => {
+            Type::Array(id) => {
                 let array = self.arrays.borrow().get(id);
                 let element = self.normalize(array.element);
-                let storage = self.arrays.borrow_mut().intern(element, array.rank);
-                if matches!(ty, Type::ReadOnlyArray(_)) {
-                    storage.array_reference(true)
-                } else {
-                    storage
+                self.arrays.borrow_mut().intern(element, array.rank)
+            }
+            Type::ArrayRef {
+                id,
+                mutable,
+                nullable,
+            } => {
+                let array = self.arrays.borrow().get(id);
+                let element = self.normalize(array.element);
+                let Type::Array(id) = self.arrays.borrow_mut().intern(element, array.rank) else {
+                    unreachable!()
+                };
+                Type::ArrayRef {
+                    id,
+                    mutable,
+                    nullable,
                 }
             }
             Type::Struct(id) => Type::Struct(self.canonical_id(id)),
@@ -200,7 +211,7 @@ impl Structs {
     #[inline]
     pub fn symbolic(&self, ty: Type) -> bool {
         match ty.leaf() {
-            Type::Array(id) | Type::ReadOnlyArray(id) => {
+            Type::Array(id) | Type::ArrayRef { id, .. } => {
                 self.symbolic(self.arrays.borrow().get(id).element)
             }
             Type::Parameter(_) => true,
@@ -218,7 +229,7 @@ impl Structs {
     }
     fn symbolic_inner(&self, ty: Type, seen: &mut BTreeSet<usize>) -> bool {
         match ty.leaf() {
-            Type::Array(id) | Type::ReadOnlyArray(id) => {
+            Type::Array(id) | Type::ArrayRef { id, .. } => {
                 self.symbolic_inner(self.arrays.borrow().get(id).element, seen)
             }
             Type::Parameter(_) => true,
@@ -244,7 +255,7 @@ impl Structs {
     }
     /// コード生成前に解決する型。名前付き型引数と、既存のint・floatの両方を含む。
     pub fn unresolved(&self, ty: Type) -> bool {
-        if let Type::Array(id) | Type::ReadOnlyArray(id) = ty.leaf() {
+        if let Type::Array(id) | Type::ArrayRef { id, .. } = ty.leaf() {
             return self.unresolved(self.arrays.borrow().get(id).element);
         }
         ty.leaf().symbolic() || self.symbolic(ty)
@@ -252,7 +263,7 @@ impl Structs {
     pub fn name(&self, ty: Type) -> String {
         if let Some(inner) = ty.pointee() {
             return format!(
-                "ptr{} {}",
+                "mut{} {}",
                 if ty.is_nullable() { "?" } else { "" },
                 self.name(inner)
             );
@@ -279,7 +290,7 @@ impl Structs {
     pub fn name_with_parameters(&self, ty: Type, parameters: &[TypeParameter]) -> String {
         if let Some(inner) = ty.pointee() {
             return format!(
-                "ptr{} {}",
+                "mut{} {}",
                 if ty.is_nullable() { "?" } else { "" },
                 self.name_with_parameters(inner, parameters)
             );
@@ -322,7 +333,7 @@ impl Structs {
                 continue;
             }
             match ty {
-                Type::Array(id) | Type::ReadOnlyArray(id) => {
+                Type::Array(id) | Type::ArrayRef { id, .. } => {
                     pending.push(self.arrays.borrow().get(id).element)
                 }
                 Type::Struct(id) => {
@@ -382,7 +393,7 @@ impl Structs {
         }
         match ty.leaf() {
             Type::Array(_)
-            | Type::ReadOnlyArray(_)
+            | Type::ArrayRef { .. }
             | Type::Application(_)
             | Type::StaticShape(_)
             | Type::Shape(_) => {}
@@ -479,7 +490,7 @@ impl Structs {
         ) {
             return self.resolve_shape(ty, arguments, location, path, parameters);
         }
-        if let Type::Array(id) | Type::ReadOnlyArray(id) = ty {
+        if let Type::Array(id) = ty {
             let array = self.arrays.borrow().get(id);
             let element =
                 self.resolve_inner(array.element, arguments, location, path, parameters)?;
@@ -489,11 +500,30 @@ impl Structs {
                     crate::diagnostic!("array.type", "array elements require stored value types"),
                 ));
             }
-            let storage = self.arrays.borrow_mut().intern(element, array.rank);
-            return Ok(if matches!(ty, Type::ReadOnlyArray(_)) {
-                storage.array_reference(true)
-            } else {
-                storage
+            return Ok(self.arrays.borrow_mut().intern(element, array.rank));
+        }
+        if let Type::ArrayRef {
+            id,
+            mutable,
+            nullable,
+        } = ty
+        {
+            let array = self.arrays.borrow().get(id);
+            let element =
+                self.resolve_inner(array.element, arguments, location, path, parameters)?;
+            if element == Type::Void || matches!(element, Type::Function(_)) {
+                return Err(location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("array.type", "array elements require stored value types"),
+                ));
+            }
+            let Type::Array(id) = self.arrays.borrow_mut().intern(element, array.rank) else {
+                unreachable!()
+            };
+            return Ok(Type::ArrayRef {
+                id,
+                mutable,
+                nullable,
             });
         }
         let application = match ty {
