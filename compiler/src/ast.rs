@@ -292,9 +292,11 @@ impl Type {
             _ => self,
         }
     }
-    /// 外側のnull許容性だけを広げる。参照先の型は変更しない。
+    /// 最外側のnull許容性を広げるか、配列を読み取り専用の参照にする。要素型と実体は保つ。
     pub fn lifts_to(self, to: Self) -> bool {
-        self.is_nonnull() && to.is_nullable() && self.pointee() == to.pointee()
+        self.is_nonnull()
+            && ((to.is_nullable() && self.pointee() == to.pointee())
+                || matches!(to, Self::ReadOnlyArray(id) if self.pointee() == Some(Self::Array(id))))
     }
     pub fn pointee(self) -> Option<Self> {
         let Self::Pointer { leaf, shape } = self else {

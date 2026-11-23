@@ -144,6 +144,16 @@ impl Constraints<'_, '_> {
         if let (Some(parameter), Some(actual)) = (parameter.pointee(), actual.pointee()) {
             return self.apply(parameter, actual);
         }
+        // 読み取り専用の仮引数には、書き込み可能な参照の要素型からも推論する。
+        // 変換の可否（最外側だけ・非null・同じ次元数）は具体化後の型検査で確認する。
+        let actual = if matches!(parameter, Type::ReadOnlyArray(_)) && actual.is_nonnull() {
+            match actual.pointee() {
+                Some(Type::Array(id)) => Type::ReadOnlyArray(id),
+                _ => actual,
+            }
+        } else {
+            actual
+        };
         match (parameter, actual) {
             (Type::Array(parameter), Type::Array(actual))
             | (Type::ReadOnlyArray(parameter), Type::ReadOnlyArray(actual)) => {

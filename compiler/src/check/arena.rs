@@ -163,7 +163,11 @@ pub(super) fn expression(
                 ));
             }
             let value = if matches!(inner.kind, ExpressionKind::ArrayInit { .. }) {
-                super::arrays::initializer(inner, expected.and_then(Type::pointee), scope)?
+                let array_type = expected.and_then(|ty| match ty {
+                    Type::ReadOnlyArray(_) => Some(ty),
+                    _ => ty.pointee(),
+                });
+                super::arrays::initializer(inner, array_type, scope)?
             } else {
                 if matches!(
                     expression::operand_type(inner, scope),

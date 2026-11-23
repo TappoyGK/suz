@@ -56,6 +56,21 @@ fn temporary(ty: Type, context: &mut ExpressionContext) -> String {
     format!("suz_cmp_{id}")
 }
 
+/// 元の式を一度だけ評価し、先頭位置と寸法だけを読み取り専用の参照へ移す。
+pub(super) fn readonly(value: &CheckedExpression, context: &mut ExpressionContext) -> String {
+    let id = value.ty.array_id().unwrap();
+    let rank = context.arrays.get(id).rank;
+    let source = temporary(value.ty, context);
+    let value = expression(value, context);
+    let lengths = (0..rank)
+        .map(|axis| format!("{source}.lengths[{axis}]"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "({source} = {value}, (suz_readonly_array_{id}){{ .data = {source}.data, .lengths = {{ {lengths} }} }})"
+    )
+}
+
 /// 保証済みの不変の添字は、評価順を保存する一時変数を必要としない。
 /// 加減算は非負かつlen_t内と証明された形だけをsize_tで計算する。
 pub(super) fn proven_index(

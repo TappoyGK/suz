@@ -370,7 +370,9 @@ impl Analysis {
             }
             Value::Null => self.shape(value.ty),
             // 最外側の暗黙変換は実体と、保存直前の非nullの証明を変えない。
-            Value::Cast(inner) if value.ty.pointee().is_some() => self.expr(inner, region, arena),
+            Value::Cast(inner) if super::reference_target(value.ty).is_some() => {
+                self.expr(inner, region, arena)
+            }
             Value::TextAppend {
                 left,
                 right,

@@ -802,3 +802,281 @@ fn main() -> u8 {
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
 | 通常 | `[array.access-handler]` | 4 | 35 |
+
+### array-026 書き込み可能な配列を読み取り専用の参照として使う
+
+主根拠：`[array.readonly-conversion]`。
+
+補助根拠：`[array.type]`・`[array.readonly]`・`[array.constant]`・`[array.index]`・`[array.dimension-bind]`・`[array.bounds-proof]`・`[arena.let]`・`[branch.expression]`・`[generic.inference]`・`[struct.field]`・`[array.new]`。
+
+**ソース：**
+
+```suz
+struct Hold { values: [i32] }
+fn first[T](a: [T]) -> T { return a[0] or panic `empty` }
+fn view(a: ptr [i32]) -> [i32] { return a }
+fn sum(a: [i32; n]) -> i32 {
+    var total: i32 = 0
+    for i in 0..<n { total += a[i] }
+    return total
+}
+fn main() -> u8 {
+    fix ptr a: ptr [i32] = new [2, 4]
+    var read: [i32] = a
+    fix holder = Hold { values: a }
+    if sum([2 as i32, 4]) != sum(a) { return 1 }
+    if first(a) != 2 { return 2 }
+    a#[0] = 8
+    if first(read) != 8 || first(holder.values) != 8 { return 3 }
+    read = new [3, 5]
+    if sum(read) != 8 { return 4 }
+    fix selected = ifexpr true { a } else { [1 as i32] }
+    if sum(selected) != 12 { return 5 }
+    if sum(view(a)) != 12 { return 6 }
+    fix ptr maybe: ptr? [i32] = a
+    let present = maybe { if sum(present) != 12 { return 7 } }
+    fix empty: [i32] = new []
+    if len empty != 0 { return 8 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### array-027 多次元配列の変換と切り出しで実体を共有する
+
+主根拠：`[array.readonly-conversion]`。
+
+補助根拠：`[array.type]`・`[array.index]`・`[array.slice]`・`[array.iteration]`・`[array.access-handler]`。
+
+**ソース：**
+
+```suz
+fn view(a: ptr [i32; _, _]) -> [i32; _, _] { return a }
+fn main() -> u8 {
+    fix ptr a: ptr [i32; _, _] = new [[1, 2], [3, 4]]
+    fix read = view(a)
+    fix row = read[1] or panic `row`
+    fix sliced = row[0:2] or panic `slice`
+    a[1]#[0] = 9
+    var total: i32 = 0
+    rev value in sliced { total += value }
+    if total != 13 { return 1 }
+    fix direct: [i32; _, _] = new [[5, 6]]
+    if direct[0][1] != 6 { return 2 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### array-028 読み取り専用の参照を作業領域の外へ残さない
+
+主根拠：`[array.lifetime]`。
+
+補助根拠：`[array.readonly-conversion]`・`[arena.store]`。
+
+**ソース：**
+
+```suz
+fn view(a: ptr [i32]) -> [i32] { return a }
+fn main() -> u8 {
+    var saved: [i32] = []
+    arena { saved = view(new [1]) }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[arena.store]` | 4 | 13 |
+
+### array-029 変換後に読んだ要素の参照も作業領域の外へ残さない
+
+主根拠：`[array.lifetime]`。
+
+補助根拠：`[array.readonly-conversion]`・`[arena.store]`・`[array.index]`。
+
+**ソース：**
+
+```suz
+struct Item { value: i32 }
+fn first(a: [ptr Item]) -> ptr Item { return a[0] or panic `empty` }
+fn main() -> u8 {
+    var ptr saved: ptr? Item = null
+    arena {
+        fix ptr a = new [new Item { value: 1 }]
+        saved = first(a)
+    }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[arena.store]` | 7 | 9 |
+
+### array-030 読み取り専用の配列を書き込み可能に戻さない
+
+主根拠：`[array.readonly-conversion]`。
+
+補助根拠：`[array.type]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix a: [i32] = [1]
+    fix ptr b: ptr [i32] = a
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[type.expected]` | 3 | 28 |
+
+### array-031 配列の要素の数値型を暗黙に変えない
+
+主根拠：`[array.readonly-conversion]`。
+
+補助根拠：`[array.type]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix ptr a: ptr [i32] = new [1]
+    fix b: [i64] = a
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[type.expected]` | 3 | 20 |
+
+### array-032 配列の次元数を暗黙に変えない
+
+主根拠：`[array.readonly-conversion]`。
+
+補助根拠：`[array.type]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix ptr a: ptr [i32; _, _] = new [[1]]
+    fix b: [i32] = a
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[type.expected]` | 3 | 20 |
+
+### array-033 null許容の配列参照を直接読み取り専用にしない
+
+主根拠：`[array.readonly-conversion]`。
+
+補助根拠：`[array.type]`・`[arena.let]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix ptr a: ptr? [i32] = new [1]
+    fix b: [i32] = a
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[type.expected]` | 3 | 20 |
+
+### array-034 配列要素の参照型を再帰的に変換しない
+
+主根拠：`[array.readonly-conversion]`。
+
+補助根拠：`[array.type]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix ptr inner: ptr [i32] = new [1]
+    fix ptr outer = new [inner]
+    fix a: [[i32]] = outer
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[type.expected]` | 4 | 22 |
