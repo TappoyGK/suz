@@ -139,7 +139,7 @@ fn main() -> u8 {
 
 #[test]
 fn generic_shapes_reject_growing_instantiation_through_struct_arguments() {
-    let source = "struct Box[T] { value: T }\nfnshape Grow[T](Box[static fn Grow[ptr T]]) -> void\nfn main() -> u8 { return 0 }";
+    let source = "struct Box[T] { value: T }\nfnshape Grow[T](Box[static fn Grow[mut T]]) -> void\nfn main() -> u8 { return 0 }";
     let error = suz::compile(source.as_bytes()).unwrap_err();
     assert!(error.to_string().contains("generic.recursion"), "{error}");
 }
@@ -165,7 +165,7 @@ fn main() -> u8 {
         "fn main() -> u8 { fix f: fn Identity[i32] = fn identity[i32]\nreturn 0 }",
         "fn bad[T](f: fn Identity[T]) -> static fn Identity[T] { return f }\nfn main() -> u8 { return 0 }",
         "fn bad[T](f: fn Identity[T]) -> void { fix saved = f }\nfn main() -> u8 { return 0 }",
-        "fn main() -> u8 { arena { var ptr saved: ptr? i32 = null\narena { fix ptr p = new (1 as i32)\nsaved = (fn identity[ptr i32])(p) } }\nreturn 0 }",
+        "fn main() -> u8 { arena { var saved: mut? i32 = null\narena { fix p = new (1 as i32)\nsaved = (fn identity[mut i32])(p) } }\nreturn 0 }",
     ] {
         let source = format!("{prefix}{body}");
         assert!(suz::compile(source.as_bytes()).is_err(), "{source}");

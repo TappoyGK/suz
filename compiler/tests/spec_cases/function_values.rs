@@ -56,23 +56,23 @@ fn main() -> u8 {
 #[test]
 fn function_values_capture_the_target_before_evaluating_arguments() {
     let source = r#"
-fnshape Pair(ptr State, i32, i32) -> i32
+fnshape Pair(mut State, i32, i32) -> i32
 struct Holder { action: static fn Pair }
 struct State { current: static fn Pair, holder: Holder, trace: i32 }
-fn first(state: ptr State, a: i32, b: i32) -> i32 { state#trace = state.trace * 10 + 4
+fn first(state: mut State, a: i32, b: i32) -> i32 { state#trace = state.trace * 10 + 4
 return a * 10 + b }
-fn second(state: ptr State, a: i32, b: i32) -> i32 { return 99 }
-fn pick(state: ptr State) -> static fn Pair { state#trace = state.trace * 10 + 1
+fn second(state: mut State, a: i32, b: i32) -> i32 { return 99 }
+fn pick(state: mut State) -> static fn Pair { state#trace = state.trace * 10 + 1
 return state.current }
-fn change(state: ptr State) -> i32 { state#trace = state.trace * 10 + 2
+fn change(state: mut State) -> i32 { state#trace = state.trace * 10 + 2
 state#current = fn second
 state.holder#action = fn second
 return 2 }
-fn next(state: ptr State) -> i32 { state#trace = state.trace * 10 + 3
+fn next(state: mut State) -> i32 { state#trace = state.trace * 10 + 3
 return 3 }
 fn main() -> u8 {
     arena {
-    fix ptr state = new State { current: fn first, holder: Holder { action: fn first }, trace: 0 }
+    fix state = new State { current: fn first, holder: Holder { action: fn first }, trace: 0 }
     if pick(state)(state, change(state), next(state)) != 23 || state.trace != 1234 { return 1 }
     state#trace = 0
     state.holder#action = fn first

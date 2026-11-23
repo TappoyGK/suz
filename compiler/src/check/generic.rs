@@ -32,6 +32,7 @@ impl GenericTypes {
             Type::Pointer { .. } => self
                 .resolve(ty.pointee().unwrap())
                 .pointer()
+                .with_readonly(ty.is_readonly_pointer())
                 .with_nullable(ty.is_nullable()),
             Type::GenericInt => Type::Integer(self.int.expect("int declared in signature")),
             Type::GenericFloat => Type::Float(self.float.expect("float declared in signature")),
@@ -152,6 +153,7 @@ impl ResolvedTypes {
             Type::Pointer { .. } => self
                 .resolve(ty.pointee().unwrap())
                 .pointer()
+                .with_readonly(ty.is_readonly_pointer())
                 .with_nullable(ty.is_nullable()),
             Type::GenericInt => self.int.unwrap(),
             Type::GenericFloat => self.float.unwrap(),

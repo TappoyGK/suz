@@ -327,7 +327,7 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             format!("({setup}, {condition} ? {converted} : ({fallback}))")
         }
         Value::Cast(ref inner) => {
-            if matches!(expr.ty, crate::ast::Type::ReadOnlyArray(_)) && inner.ty.is_nonnull() {
+            if expr.ty.is_readonly_array() && !inner.ty.is_readonly_array() {
                 return super::arrays::readonly(inner, context);
             }
             if expr.ty.array_id().is_some() {

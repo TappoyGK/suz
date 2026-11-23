@@ -7,19 +7,19 @@ struct Player { pos: Point, name: symbol, view: text }
 struct Wide { x: i64 }
 fix RIGHT = ORIGIN with { x: 1 }
 fix ORIGIN = Point { x: 0, y: 2 }
-fix PLAYER = Player { pos: RIGHT, name: `old`, view: `abc`[:] }
+fix PLAYER = Player { pos: RIGHT, name: `old`, view: `abc`.[:] }
 fix UPDATED = PLAYER with { pos: RIGHT with { y: 3 }, name: `new` }
 struct State { point: Point, trace: i32 }
-fn base(state: ptr State) -> Point { state#trace = state.trace * 10 + 1
+fn base(state: mut State) -> Point { state#trace = state.trace * 10 + 1
     return state.point }
-fn mark(state: ptr State, n: i32) -> i32 { state#trace = state.trace * 10 + n
+fn mark(state: mut State, n: i32) -> i32 { state#trace = state.trace * 10 + n
     state.point#y = 99
     return n }
 fn generic(n: int) -> Point { return ORIGIN with { x: n as i32 or 0 } }
 fn accepts(p: Point) -> bool { return p.x == 8 }
 fn main() -> u8 {
     arena {
-    fix ptr state = new State { point: ORIGIN with { x: 5 }, trace: 0 }
+    fix state = new State { point: ORIGIN with { x: 5 }, trace: 0 }
     fix snapshot = base(state) with { x: mark(state, 2) }
     if state.trace != 12 || snapshot.x != 2 || snapshot.y != 2 || state.point.y != 99 { return 1 }
     state#trace = 0
@@ -36,7 +36,7 @@ fn main() -> u8 {
     if not accepts(ORIGIN with { x }) || (ORIGIN with { x }).x != 8 { return 6 }
     fix direct = ORIGIN with { x: 9 }.x
     if generic(7).x != 7 || direct != 9 { return 7 }
-    fix sliced = PLAYER with { name: `xyz` }.name[1:] or ``
+    fix sliced = PLAYER with { name: `xyz` }.name.[1:] or ``
     if sliced != `yz` || nested.view != `abc` { return 8 }
     fix block = expr { ORIGIN with { x } }
     fix branch = ifexpr x == 8 { block with { y: 7 } } else { ORIGIN }
@@ -172,7 +172,7 @@ fn main() -> u8 {
     fix input = `Pair { x, y }`
     fix fallback = make(9, 9)
     if (input as Pair or fallback) != fallback { return 5 }
-    fix view = input[:]
+    fix view = input.[:]
     if (view as Pair or fallback) != fallback { return 6 }
     return 0
 }

@@ -424,9 +424,7 @@ pub(super) fn check(
             if crate::check::ffi::contains_pointer(ty, bindings) {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
-                    if crate::check::arena::contains(ty, bindings)
-                        || matches!(ty, Type::ReadOnlyArray(_))
-                    {
+                    if crate::check::arena::contains(ty, bindings) || ty.array_id().is_some() {
                         crate::diagnostic!(
                             "arena.ptr-operations",
                             "pointer values cannot be compared"

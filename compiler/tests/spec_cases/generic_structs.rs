@@ -28,12 +28,12 @@ fn main() -> u8 {
 fn generic_recursive_structs_use_the_existing_arena_rules() {
     let output = compile_and_run_c23(
         r#"
-struct Node[T] { value: T, next: ptr? Node[T] }
-fn node[T](value: T) -> ptr Node[T] { return new Node[T] { value: value, next: null } }
+struct Node[T] { value: T, next: mut? Node[T] }
+fn node[T](value: T) -> mut Node[T] { return new Node[T] { value: value, next: null } }
 fn main() -> u8 {
     arena {
-        fix ptr first = node[i32](3)
-        fix ptr second = node[i32](4)
+        fix first = node[i32](3)
+        fix second = node[i32](4)
         first#next = second
         let n = first.next { if n.value != 4 { return 1 } }
     }
@@ -83,10 +83,10 @@ fn main() -> u8 {
 fn generic_structs_reject_invalid_layouts_receiver_parameters_and_variance() {
     for source in [
         "struct Bad[T] { value: Bad[T] }\nfn main() -> u8 { return 0 }",
-        "struct Bad[T] { next: ptr Bad[T] }\nfn main() -> u8 { return 0 }",
-        "struct Grow[T] { next: ptr? Grow[ptr T] }\nfn main() -> u8 { return 0 }",
+        "struct Bad[T] { next: mut Bad[T] }\nfn main() -> u8 { return 0 }",
+        "struct Grow[T] { next: mut? Grow[mut T] }\nfn main() -> u8 { return 0 }",
         "struct Box[T] { value: T }\nfn Box[U].get() -> U { return self.value }\nfn main() -> u8 { return 0 }",
-        "struct Box[T] { value: T }\nfn read(box: Box[ptr? i32]) -> void {}\nfn main() -> u8 { arena { fix ptr p = new (1 as i32)\nread(Box[ptr i32] { value: p }) }\nreturn 0 }",
+        "struct Box[T] { value: T }\nfn read(box: Box[mut? i32]) -> void {}\nfn main() -> u8 { arena { fix p = new (1 as i32)\nread(Box[mut i32] { value: p }) }\nreturn 0 }",
         "struct Box[T] { value: T }\nfn main() -> u8 { fix box = Box { value: 1 }\nreturn 0 }",
     ] {
         assert!(suz::compile(source.as_bytes()).is_err(), "{source}");
@@ -99,9 +99,9 @@ fn generic_struct_field_stores_reject_shorter_arena_lifetimes() {
 struct Box[T] { value: T }
 fn main() -> u8 {
     arena {
-        var saved = Box[ptr? i32] { value: null }
+        var saved = Box[mut? i32] { value: null }
         arena {
-            fix ptr p = new (1 as i32)
+            fix p = new (1 as i32)
             saved#value = p
         }
     }
@@ -148,19 +148,19 @@ fn main() -> u8 {
 fn generic_struct_methods_and_callbacks_preserve_pointer_lifetimes() {
     for invoke in [
         "saved#replace(p)",
-        "apply(fn [var saved](p: ptr? i32) -> void { saved#replace(p) }, p)",
+        "apply(fn [var saved](p: mut? i32) -> void { saved#replace(p) }, p)",
     ] {
         let source = format!(
             r#"
 struct Box[T] {{ value: T }}
 fn Box[T]#replace(value: T) -> void {{ self#value = value }}
-fnshape Update(ptr? i32) -> void
-fn apply(f: fn Update, p: ptr? i32) -> void {{ f(p) }}
+fnshape Update(mut? i32) -> void
+fn apply(f: fn Update, p: mut? i32) -> void {{ f(p) }}
 fn main() -> u8 {{
     arena {{
-        var saved = Box[ptr? i32] {{ value: null }}
+        var saved = Box[mut? i32] {{ value: null }}
         arena {{
-            fix ptr p = new (1 as i32)
+            fix p = new (1 as i32)
             {invoke}
         }}
     }}
@@ -280,13 +280,13 @@ fn main() -> u8 {
 
 #[test]
 fn generic_struct_recursion_checks_concrete_transitions() {
-    for ty in ["i32", "ptr i32"] {
+    for ty in ["i32", "mut i32"] {
         let source = format!(
-            "struct Down[T] {{ next: ptr? Down[i32] }}\nfn main() -> u8 {{ fix d = Down[{ty}] {{ next: null }}\nreturn 0 }}"
+            "struct Down[T] {{ next: mut? Down[i32] }}\nfn main() -> u8 {{ fix d = Down[{ty}] {{ next: null }}\nreturn 0 }}"
         );
         suz::compile(source.as_bytes()).unwrap();
     }
-    let source = "struct Down[T] { next: ptr? Down[i32] }\nfn main() -> u8 { fix d = Down[u8] { next: null }\nreturn 0 }";
+    let source = "struct Down[T] { next: mut? Down[i32] }\nfn main() -> u8 { fix d = Down[u8] { next: null }\nreturn 0 }";
     let error = suz::compile(source.as_bytes()).unwrap_err().to_string();
     assert!(error.contains("generic.recursion"), "{error}");
     assert!(error.contains("[u8] to [i32]"), "{error}");
@@ -296,20 +296,20 @@ fn generic_struct_recursion_checks_concrete_transitions() {
 fn generic_struct_recursion_reports_declared_parameter_names() {
     for (source, expected) in [
         (
-            "struct Grow[Item] { next: ptr? Grow[ptr Item] }",
-            "[Item] to [ptr Item]",
+            "struct Grow[Item] { next: mut? Grow[mut Item] }",
+            "[Item] to [mut Item]",
         ),
         (
-            "struct Grow[Item] { next: ptr? Grow[ptr Item] }\nfn unused[Other, Value](v: Grow[Value]) -> void {}",
-            "[Value] to [ptr Value]",
+            "struct Grow[Item] { next: mut? Grow[mut Item] }\nfn unused[Other, Value](v: Grow[Value]) -> void {}",
+            "[Value] to [mut Value]",
         ),
         (
-            "struct Box[T] { value: T }\nstruct Wrap[Item] { next: ptr? Wrap[Box[Item]] }",
+            "struct Box[T] { value: T }\nstruct Wrap[Item] { next: mut? Wrap[Box[Item]] }",
             "[Item] to [Box[Item]]",
         ),
         (
-            "struct First[Item] { next: ptr? Second[Item] }\nstruct Second[Other] { next: ptr? First[ptr Other] }",
-            "[Item] to [ptr Item]",
+            "struct First[Item] { next: mut? Second[Item] }\nstruct Second[Other] { next: mut? First[mut Other] }",
+            "[Item] to [mut Item]",
         ),
     ] {
         let source = format!("{source}\nfn main() -> u8 {{ return 0 }}");
@@ -343,7 +343,7 @@ fn generic_struct_recursion_reports_use_and_definition_locations() {
             9,
         ),
     ] {
-        let source = format!("struct Down[T] {{\n    next: ptr? Down[i32],\n}}\n{usage}");
+        let source = format!("struct Down[T] {{\n    next: mut? Down[i32],\n}}\n{usage}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.rule(), "generic.check", "{error}");
         assert_eq!((error.line, error.column), (line, column), "{error}");

@@ -102,7 +102,7 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
         ExpressionKind::Slice { target, index, .. } => {
             let target_type = operand_type(target, bindings);
             if let Some(id) = target_type.and_then(Type::array_id) {
-                let readonly = matches!(target_type, Some(Type::ReadOnlyArray(_)));
+                let readonly = target_type.is_some_and(Type::is_readonly_array);
                 let a = bindings.structs.arrays.borrow().get(id);
                 return Some(if !index {
                     Type::Array(id).array_reference(readonly)
@@ -120,8 +120,8 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
             Some(if *index { Type::Char } else { Type::Text })
         }
         ExpressionKind::New(value) => operand_type(value, bindings).map(|ty| {
-            if matches!(value.kind, ExpressionKind::ArrayInit { .. }) {
-                Type::Array(ty.array_id().unwrap()).pointer()
+            if let ExpressionKind::ArrayInit { readonly, .. } = &value.kind {
+                Type::Array(ty.array_id().unwrap()).array_reference(*readonly)
             } else {
                 ty.pointer()
             }
@@ -918,7 +918,7 @@ fn branch_type<'a>(
         }
         result
     })?;
-    if ty.pointee().is_some() && values.clone().any(has_null_branch) {
+    if ty.is_reference() && values.clone().any(has_null_branch) {
         if matches!(ty, Type::Pointer { shape, .. } if shape.depth() > 256) {
             return None;
         }
@@ -937,6 +937,33 @@ pub(super) fn joined_type(types: impl Iterator<Item = Option<Type>>) -> Option<T
 fn joined_or_first(a: Type, b: Type) -> Type {
     if a.is_text() && b.is_text() && a != b {
         return Type::Text;
+    }
+    if let (Type::Pointer { .. }, Type::Pointer { .. }) = (a, b)
+        && a.pointee() == b.pointee()
+    {
+        return a
+            .with_readonly(a.is_readonly_pointer() || b.is_readonly_pointer())
+            .with_nullable(a.is_nullable() || b.is_nullable());
+    }
+    if let (
+        Type::ArrayRef {
+            id: a_id,
+            mutable: a_mut,
+            nullable: a_null,
+        },
+        Type::ArrayRef {
+            id: b_id,
+            mutable: b_mut,
+            nullable: b_null,
+        },
+    ) = (a, b)
+        && a_id == b_id
+    {
+        return Type::ArrayRef {
+            id: a_id,
+            mutable: a_mut && b_mut,
+            nullable: a_null || b_null,
+        };
     }
     if a.lifts_to(b) {
         return b;

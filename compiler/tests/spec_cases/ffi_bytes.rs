@@ -59,7 +59,7 @@ fn main() -> u8 {
     var calls: i32 = 0
     fix original = message(fn [var calls]() -> symbol { calls += 1
 return `Aあ\0B` })
-    fix part = original[1:3] or return 1
+    fix part = original.[1:3] or return 1
     if c_byte_len original != 6 || c_byte_len part != 4 || len original != 4 { return 2 }
     trusted {
         if identity(c_bytes original, c_byte_len original) != 1 { return 3 }
@@ -75,7 +75,7 @@ return `Aあ\0B` })) != 1 || calls != 3 { return 5 }
     }
     for i in 0..<100 { fix churn: symbol = `new${i}` }
     trusted { if retained() != 1 { return 6 } }
-    fix empty = original[4:4] or return 7
+    fix empty = original.[4:4] or return 7
     if c_byte_len empty != 0 || c_byte_len `` != 0 { return 8 }
     fix empty_symbol: symbol = ``
     trusted { if identity(c_bytes empty_symbol, c_byte_len empty_symbol) != 1 { return 9 } }
@@ -218,18 +218,13 @@ fn ffi_constant_initializers_are_source_errors() {
     // CLIの終了コードまで検査し、内部エラーに戻らないことを確認する。
     for declaration in [
         "fix N: _size_t = c_byte_len `ab`",
-        "fix T: text = `ab`
-fix N: _size_t = c_byte_len T",
+        "fix T: text = `ab`\nfix N: _size_t = c_byte_len T",
         "fix N: _int = 5",
         "fix N = (5 as _int or 0) as i32 or 0",
         "fix N = (5 as _int or 0) == 5",
-        "struct Item { n: _int }
-fix N = Item { n: 5 }",
+        "struct Item { n: _int }\nfix N = Item { n: 5 }",
     ] {
-        let source = format!(
-            "{declaration}
-fn main() -> u8 {{ return 0 }}"
-        );
+        let source = format!("{declaration}\nfn main() -> u8 {{ return 0 }}");
         fs::write(&path, source).unwrap();
         let output = Command::new(env!("CARGO_BIN_EXE_suz"))
             .arg("check")
@@ -247,13 +242,9 @@ fn main() -> u8 {{ return 0 }}"
 #[test]
 fn ffi_const_qualifier_preserves_identifiers() {
     for source in [
-        "fn main() -> u8 { fix const: u8 = 0
-return const }",
-        "struct Item { const: u8 }
-fn main() -> u8 { fix item = Item { const: 0 }
-return item.const }",
-        "fn const() -> u8 { return 0 }
-fn main() -> u8 { return const() }",
+        "fn main() -> u8 { fix const: u8 = 0\nreturn const }",
+        "struct Item { const: u8 }\nfn main() -> u8 { fix item = Item { const: 0 }\nreturn item.const }",
+        "fn const() -> u8 { return 0 }\nfn main() -> u8 { return const() }",
     ] {
         suz::compile(source.as_bytes()).unwrap();
     }
@@ -262,11 +253,8 @@ fn main() -> u8 { return const() }",
 #[test]
 fn ffi_byte_length_needs_no_call_when_size_t_can_hold_length() {
     let directory = TemporaryDirectory::new();
-    let source = suz::compile(
-        b"fn main() -> u8 { fix n = c_byte_len `abc`
-return n as u8 or 0 }",
-    )
-    .unwrap();
+    let source =
+        suz::compile(b"fn main() -> u8 { fix n = c_byte_len `abc`\nreturn n as u8 or 0 }").unwrap();
     // 最適化器に頼らず、Cの前処理だけで呼び出しが消えることを確認する。
     // size_tが狭いホストでも、ここでは検査不要な分岐を選ぶ。
     let source = source.replace(

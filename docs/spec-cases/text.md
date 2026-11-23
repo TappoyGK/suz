@@ -151,7 +151,7 @@ fn main() -> u8 {
 
 ```suz
 fn main() -> u8 {
-    fix value: symbol = `abc`[:]
+    fix value: symbol = `abc`.[:]
     return 0
 }
 ```
@@ -644,13 +644,13 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
-fn tail(value: text) -> text { return value[1:] or `` }
+fn tail(value: text) -> text { return value.[1:] or `` }
 fn main() -> u8 {
     fix source = `xあ😀\0z`
     fix body = tail(source)
-    if (body[:2] or ``) != `あ😀` { return 1 }
-    if (body[2] or '?') != '\0' { return 2 }
-    if ((body[1:] or ``)[0] or '?') != '😀' { return 3 }
+    if (body.[:2] or ``) != `あ😀` { return 1 }
+    if (body.[2] or '?') != '\0' { return 2 }
+    if ((body.[1:] or ``).[0] or '?') != '😀' { return 3 }
     var count: u8 = 0
     for ch in body { count += 1 }
     rev ch in body {
@@ -688,8 +688,8 @@ fn fallback() -> text {
     return ``
 }
 fn main() -> u8 {
-    fix first = source()[bound(0):bound(1)] or fallback()
-    fix second = source()[bound(2):bound(1)] or fallback()
+    fix first = source().[bound(0):bound(1)] or fallback()
+    fix second = source().[bound(2):bound(1)] or fallback()
     if first != `a` { return 1 }
     if second != `` { return 2 }
     return 0
@@ -722,14 +722,14 @@ info text-031.suz:10: fallback
 ```suz
 fn main() -> u8 {
     fix source = `abc`
-    if (source[3:] or `bad`) != `` { return 1 }
-    if (source[-1:] or `bad`) != `bad` { return 2 }
-    if (source[2:1] or `bad`) != `bad` { return 3 }
-    if (source[:4] or `bad`) != `bad` { return 4 }
-    if (source[3] or '?') != '?' { return 5 }
-    fix empty = ``[:]
-    if (empty[0] or '?') != '?' { return 6 }
-    fix result = source[4:] or return 0
+    if (source.[3:] or `bad`) != `` { return 1 }
+    if (source.[-1:] or `bad`) != `bad` { return 2 }
+    if (source.[2:1] or `bad`) != `bad` { return 3 }
+    if (source.[:4] or `bad`) != `bad` { return 4 }
+    if (source.[3] or '?') != '?' { return 5 }
+    fix empty = ``.[:]
+    if (empty.[0] or '?') != '?' { return 6 }
+    fix result = source.[4:] or return 0
     return 7
 }
 ```
@@ -748,7 +748,7 @@ fn main() -> u8 {
 
 ```suz
 fn main() -> u8 {
-    fix value = `abc`[:1]
+    fix value = `abc`.[:1]
     return 0
 }
 ```
@@ -777,11 +777,11 @@ fn number(value: text) -> u8 { return value as u8 or 99 }
 fn item(value: text) -> Item { return value as Item or Item { name: `bad` } }
 fn main() -> u8 {
     fix source = `x42y`
-    if number(source[1:3] or ``) != 42 { return 1 }
-    if ((`xtruey`[1:5] or ``) as bool or false) != true { return 2 }
-    if ((`x😀y`[1:2] or ``) as char or '?') != '😀' { return 3 }
-    if ((`x256y`[1:4] or ``) as% u8 or 7) != 0 { return 4 }
-    fix parsed = item(`Item { name: \`Suz\` }`[:])
+    if number(source.[1:3] or ``) != 42 { return 1 }
+    if ((`xtruey`.[1:5] or ``) as bool or false) != true { return 2 }
+    if ((`x😀y`.[1:2] or ``) as char or '?') != '😀' { return 3 }
+    if ((`x256y`.[1:4] or ``) as% u8 or 7) != 0 { return 4 }
+    fix parsed = item(`Item { name: \`Suz\` }`.[:])
     if parsed.name != `Suz` { return 5 }
     if (parsed.name as symbol) != `Suz` { return 6 }
     return 0
@@ -802,9 +802,9 @@ fn main() -> u8 {
 
 ```suz
 fix SOURCE = `xnamey`
-fix KEY = SOURCE[1:5] or ``
-fix FIRST = KEY[0] or '?'
-fix FALLBACK = SOURCE[-1:] or `bad`
+fix KEY = SOURCE.[1:5] or ``
+fix FIRST = KEY.[0] or '?'
+fix FALLBACK = SOURCE.[-1:] or `bad`
 fix INTERNED = KEY as symbol
 fn classify(value: symbol) -> u8 {
     return matchexpr value {
@@ -817,7 +817,7 @@ fn main() -> u8 {
     if FALLBACK != `bad` { return 2 }
     if INTERNED != `name` { return 3 }
     if classify(`name`) != 1 { return 4 }
-    fix view = SOURCE[1:5] or return 5
+    fix view = SOURCE.[1:5] or return 5
     return matchexpr view {
         `name` => 0
         _ => 6
@@ -961,7 +961,7 @@ info text-025.suz:5: count: 1
 
 ```suz
 fix COUNT = len `あ😀x`
-fix TAIL = len `あ😀x`[1:] or ``
+fix TAIL = len `あ😀x`.[1:] or ``
 fn message() -> symbol {
     log info `called`
     return `あ😀x`
@@ -1003,14 +1003,14 @@ fn main() -> u8 {
     fix start: u8 = 1
     fix end: len_t = len value
     fix huge: u64 = 18446744073709551615
-    if (value[start:end] or ``) != `😀x` { return 1 }
+    if (value.[start:end] or ``) != `😀x` { return 1 }
     fix negative: i64 = -1
-    if (value[negative:end] or `bad`) != `bad` { return 2 }
-    if (value[start:huge] or `bad`) != `bad` { return 3 }
-    if (value[end] or '?') != '?' { return 4 }
+    if (value.[negative:end] or `bad`) != `bad` { return 2 }
+    if (value.[start:huge] or `bad`) != `bad` { return 3 }
+    if (value.[end] or '?') != '?' { return 4 }
     fix tiny_end: i8 = 2
-    if (value[300:tiny_end] or `bad`) != `bad` { return 5 }
-    if (value[tiny_end:300] or `bad`) != `bad` { return 6 }
+    if (value.[300:tiny_end] or `bad`) != `bad` { return 5 }
+    if (value.[tiny_end:300] or `bad`) != `bad` { return 6 }
     return 0
 }
 ```
@@ -1154,11 +1154,11 @@ fn main() -> u8 {
     s = `${n}x`
     fix item = Label { name: `${n}` }
     fix changed = item with { name: `${n}x` }
-    fix ptr items: ptr [symbol] = new [`${n}`, `${n}x`]
+    fix items: #[symbol] = new #[`${n}`, `${n}x`]
     fix choice: symbol = ifexpr true { `${n}` } else { `${n}x` }
     fix selected: symbol = matchexpr true { true => `${n}`
 false => `${n}x` }
-    if s != `3x` || changed.name != s || items[1] != s { return 1 }
+    if s != `3x` || changed.name != s || items.[1] != s { return 1 }
     if choice != echo(`${n}`) || selected != make(n) { return 2 }
     fix joined = ifexpr true { `static` } else { s }
     if joined != `static` { return 3 }
@@ -1367,7 +1367,7 @@ fn main() -> u8 {
 ```suz
 fn main() -> u8 {
     var saved: text = ``
-    arena { saved = (textbuf `inner`)[1:] or `` }
+    arena { saved = (textbuf `inner`).[1:] or `` }
     return 0
 }
 ```
@@ -1507,7 +1507,7 @@ fn main() -> u8 {
     b <- ` B`
     a <- ` A`
     if a != `あb A` || b != `あb B` || old != `あb` { return 1 }
-    var suffix = b[1:] or b
+    var suffix = b.[1:] or b
     suffix <- suffix
     if suffix != `b Bb B` || b != `あb B` { return 2 }
     var empty = textbuf ``
@@ -1545,10 +1545,10 @@ fn repeat(t: text, n: i32) -> text {
     if n == 0 { return t }
     return repeat(append(t), n - 1)
 }
-fn change(p: ptr Message) -> void { p#body <- `?` }
+fn change(p: mut Message) -> void { p#body <- `?` }
 fn main() -> u8 {
     fix t = textbuf `Hello`
-    fix ptr p = new Message { body: forward(t) }
+    fix p = new Message { body: forward(t) }
     change(p)
     if apply(fn forward, t) != `Hello!` || repeat(t, 2) != `Hello!!` { return 3 }
     if p.body != `Hello!?` || t != `Hello` { return 1 }
@@ -1575,27 +1575,27 @@ fn main() -> u8 {
 
 ```suz
 struct Message { body: text, n: i32 }
-fn target(p: ptr Message) -> ptr Message {
+fn target(p: mut Message) -> mut Message {
     p#n += 1
     return p
 }
-fn part(p: ptr Message) -> i32 {
+fn part(p: mut Message) -> i32 {
     p#n += 1
     p#body <- `x`
     return p.n
 }
 fn main() -> u8 {
-    fix ptr p = new Message { body: textbuf[32] `A`, n: 0 }
+    fix p = new Message { body: textbuf[32] `A`, n: 0 }
     target(p)#body <- (`${part(p)}:${part(p)}`)
     if p.n != 3 || p.body != `A2:3` { return 1 }
     var item = Message { body: textbuf `B`, n: 0 }
     item#body <- `C`
-    fix ptr value = new textbuf `D`
+    fix value = new textbuf `D`
     #value <- `E`
     if item.body != `BC` || .value != `DE` { return 2 }
-    fix ptr texts = new [textbuf `F`]
+    fix texts = new #[textbuf `F`]
     texts#[0] <- `G`
-    if texts[0] != `FG` { return 3 }
+    if texts.[0] != `FG` { return 3 }
     return 0
 }
 ```
@@ -1809,12 +1809,12 @@ fn main() -> u8 {
 
 ```suz
 struct Message { body: text }
-fn update(p: ptr Message, t: text, end: i32) -> i32 {
-    p#body <- t[:end] or return 7
+fn update(p: mut Message, t: text, end: i32) -> i32 {
+    p#body <- t.[:end] or return 7
     return 0
 }
 fn main() -> u8 {
-    fix ptr p = new Message { body: textbuf `A` }
+    fix p = new Message { body: textbuf `A` }
     if update(p, `BC`, 9) != 7 || p.body != `A` { return 1 }
     if update(p, `BC`, 1) != 0 || p.body != `AB` { return 2 }
     return 0
@@ -1870,9 +1870,9 @@ fn main() -> u8 {
 
 ```suz
 struct Message { body: text }
-fn append(p: ptr Message) -> void { p#body <- `!` }
+fn append(p: mut Message) -> void { p#body <- `!` }
 fn main() -> u8 {
-    fix ptr p = new Message { body: textbuf `outer` }
+    fix p = new Message { body: textbuf `outer` }
     arena { append(p) }
     return 0
 }

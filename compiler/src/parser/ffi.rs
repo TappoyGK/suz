@@ -32,7 +32,7 @@ impl Parser<'_, '_> {
             } else if numeric_type(target)
                 || matches!(target, Type::Struct(id) if self.structs[id].external.is_some())
             {
-                target.pointer()
+                target.pointer().with_readonly(read_only)
             } else {
                 return Err(location.error(
                     ErrorKind::InvalidSource,
@@ -49,7 +49,7 @@ impl Parser<'_, '_> {
                     ErrorKind::InvalidSource,
                     crate::diagnostic!(
                         "ffi.pointer-type",
-                        "use *const T or *T for an extern pointer parameter, not ptr T"
+                        "use *const T or *T for an extern pointer parameter, not mut T or ref T"
                     ),
                 ));
             }

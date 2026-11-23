@@ -339,7 +339,7 @@ fn constant_bool_raw(expr: &CheckedExpression) -> Option<bool> {
                 } else {
                     match left.ty {
                         Type::StaticFunction(_) | Type::Function(_) => return None,
-                        Type::ReadOnlyArray(_)
+                        Type::ArrayRef { .. }
                         | Type::Array(_)
                         | Type::Pointer { .. }
                         | Type::CPointer
@@ -587,7 +587,11 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
             Value::Function { .. } => expr.value.clone(),
             _ => return None,
         },
-        Type::ReadOnlyArray(_) => {
+        Type::ArrayRef {
+            mutable: false,
+            nullable: false,
+            ..
+        } => {
             let Value::Array {
                 metadata,
                 values,
@@ -604,7 +608,8 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
                 repeated: *repeated,
             }
         }
-        Type::Array(_)
+        Type::ArrayRef { .. }
+        | Type::Array(_)
         | Type::Pointer { .. }
         | Type::CPointer
         | Type::CInteger(_)

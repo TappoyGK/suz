@@ -833,10 +833,10 @@ fn main() -> u8 {
 ```suz
 fix INITIAL: u8 = 1
 struct State { count: u8 }
-fn update(state: ptr State) -> void { state#count += 1 }
+fn update(state: mut State) -> void { state#count += 1 }
 fn main() -> u8 {
     arena {
-        fix ptr state = new State { count: INITIAL }
+        fix state = new State { count: INITIAL }
         fix before = state.count
         update(state)
         if before != 1 || state.count != 2 { return 1 }
@@ -886,7 +886,7 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
-fix PALETTE: ptr [i32] = new [1, 2, 3]
+fix PALETTE: #[i32] = new #[1, 2, 3]
 fn main() -> u8 { return 0 }
 ```
 
@@ -900,7 +900,7 @@ fn main() -> u8 { return 0 }
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[const.expression]` | 1 | 26 |
+| 通常 | `[const.expression]` | 1 | 23 |
 
 ### bind-033 トップレベルでは反復初期化による配列の確保を拒否する
 
@@ -909,7 +909,7 @@ fn main() -> u8 { return 0 }
 **ソース：**
 
 ```suz
-fix B = new [0; 3]
+fix B = new #[0; 3]
 fn main() -> u8 { return 0 }
 ```
 

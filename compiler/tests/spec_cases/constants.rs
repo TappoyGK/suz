@@ -182,12 +182,12 @@ fn constant_arithmetic_diagnostics_are_reported_once_at_the_declaration() {
 fn constant_allocations_report_the_operation_instead_of_methods_or_arena_context() {
     for (source, column, message) in [
         (
-            "fix PALETTE: ptr [i32] = new [1, 2, 3]",
-            26,
+            "fix PALETTE: #[i32] = new #[1, 2, 3]",
+            23,
             "array allocation is not a constant expression",
         ),
         (
-            "fix B = new [0; 3]",
+            "fix B = new #[0; 3]",
             9,
             "array allocation is not a constant expression",
         ),

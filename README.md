@@ -30,9 +30,9 @@ Suzは、`new`で確保する実体を作業領域（arena）に置き、その�
 
 ```suz
 fn main() -> u8 {
-    fix ptr saved = new 10 // mainの終了まで保持する実体
+    fix saved = new 10 // mainの終了まで保持する実体
     arena {
-        fix ptr temporary = new 20
+        fix temporary = new 20
         fix total = .saved + .temporary
         log info `${total}`
     } // temporaryが指す実体を回収する

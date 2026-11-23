@@ -2218,21 +2218,21 @@ fn main() -> u8 {
 
 ```suz
 struct Point { x: i32 }
-struct Holder { value: ptr i32 }
-fn select(holder: ptr Holder, calls: ptr i32) -> ptr i32 {
+struct Holder { value: mut i32 }
+fn select(holder: mut Holder, calls: mut i32) -> mut i32 {
     #calls += 1
     return holder.value
 }
-fn select_point(point: ptr Point, calls: ptr i32) -> ptr Point {
+fn select_point(point: mut Point, calls: mut i32) -> mut Point {
     #calls += 1
     return point
 }
 fn main() -> u8 {
     arena {
-        fix ptr first = new (7 as i32)
-        fix ptr second = new (20 as i32)
-        fix ptr holder = new Holder { value: first }
-        fix ptr calls = new (0 as i32)
+        fix first = new (7 as i32)
+        fix second = new (20 as i32)
+        fix holder = new Holder { value: first }
+        fix calls = new (0 as i32)
         // 対象は1回だけ評価し、右辺がポインタを付け替えても元の実体を更新する。
         #select(holder, calls) = expr { holder#value = second
             9 }
@@ -2243,11 +2243,11 @@ fn main() -> u8 {
             2 }
         if .calls != 2 || .second != 22 { return 2 }
         if .select(holder, calls) != 9 || .calls != 3 { return 3 }
-        fix ptr pp = new first
+        fix pp = new first
         #.pp += 1
         if ..pp != 10 || .(.pp) != 10 { return 4 }
         if .(holder.value) != 10 { return 5 }
-        fix ptr point = new Point { x: 1 }
+        fix point = new Point { x: 1 }
         fix copy = .point
         (.point)#x = 2
         point#x += 1

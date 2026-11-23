@@ -163,8 +163,13 @@ pub(crate) const NUMERIC_COMBINATIONS: usize = 18;
 /// Structの番号は構造体宣言、Functionの番号は共通化した関数値の型を参照する。汎用の型はC生成までに具体化する。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Type {
-    ReadOnlyArray(usize), // 静的な配列や読み取り専用の部分参照。格納先のArrayとは区別する。
-    Array(usize),         // ポインタの参照先専用。配列値は単独では保存しない。
+    /// 配列への参照値。`mutable=true` は `#[T]`、`false` は `.[T]`。`nullable=true` は `?` 付き。
+    ArrayRef {
+        id: usize,
+        mutable: bool,
+        nullable: bool,
+    },
+    Array(usize), // 寿命グラフ内部の配列本体専用。単独の値型としては使わない。
     Pointer {
         leaf: PointerLeaf,
         shape: PointerShape,
@@ -195,7 +200,11 @@ pub(crate) enum Type {
 /// ポインタの末端の値型。各段のnull許容性はPointerShapeで別に持つ。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum PointerLeaf {
-    ReadOnlyArray(usize),
+    ArrayRef {
+        id: usize,
+        mutable: bool,
+        nullable: bool,
+    },
     Array(usize),
     CPointer,
     CInteger(CIntegerType),
@@ -221,23 +230,23 @@ pub(crate) enum PointerLeaf {
 }
 impl Type {
     pub fn array_id(self) -> Option<usize> {
-        if let Self::ReadOnlyArray(id) = self {
-            return Some(id);
-        }
-        match self.pointee() {
-            Some(Self::Array(id)) => Some(id),
+        match self {
+            Self::ArrayRef { id, .. } => Some(id),
             _ => None,
         }
+    }
+    pub fn is_readonly_array(self) -> bool {
+        matches!(self, Self::ArrayRef { mutable: false, .. })
     }
     /// 部分配列でも、元の参照の書き込み可否を引き継ぐ。
     pub fn array_reference(self, readonly: bool) -> Self {
         let Self::Array(id) = self else {
             unreachable!("array storage type")
         };
-        if readonly {
-            Self::ReadOnlyArray(id)
-        } else {
-            self.pointer()
+        Self::ArrayRef {
+            id,
+            mutable: !readonly,
+            nullable: false,
         }
     }
     pub fn pointer(self) -> Self {
@@ -248,7 +257,15 @@ impl Type {
                     shape: shape.push(),
                 };
             }
-            Self::ReadOnlyArray(id) => PointerLeaf::ReadOnlyArray(id),
+            Self::ArrayRef {
+                id,
+                mutable,
+                nullable,
+            } => PointerLeaf::ArrayRef {
+                id,
+                mutable,
+                nullable,
+            },
             Self::Array(id) => PointerLeaf::Array(id),
             Self::CPointer => PointerLeaf::CPointer,
             Self::CInteger(v) => PointerLeaf::CInteger(v),
@@ -277,11 +294,18 @@ impl Type {
             shape: PointerShape::new(),
         }
     }
+    pub fn is_reference(self) -> bool {
+        matches!(self, Self::Pointer { .. } | Self::ArrayRef { .. })
+    }
     pub fn is_nullable(self) -> bool {
         matches!(self, Self::Pointer { shape, .. } if shape.is_nullable())
+            || matches!(self, Self::ArrayRef { nullable: true, .. })
+    }
+    pub fn is_readonly_pointer(self) -> bool {
+        matches!(self, Self::Pointer { shape, .. } if shape.is_readonly())
     }
     pub fn is_nonnull(self) -> bool {
-        matches!(self, Self::Pointer { .. }) && !self.is_nullable()
+        self.is_reference() && !self.is_nullable()
     }
     pub fn with_nullable(self, enabled: bool) -> Self {
         match self {
@@ -289,14 +313,55 @@ impl Type {
                 leaf,
                 shape: shape.with_nullable(enabled),
             },
+            Self::ArrayRef { id, mutable, .. } => Self::ArrayRef {
+                id,
+                mutable,
+                nullable: enabled,
+            },
             _ => self,
         }
     }
-    /// 最外側のnull許容性を広げるか、配列を読み取り専用の参照にする。要素型と実体は保つ。
+    pub fn with_readonly(self, enabled: bool) -> Self {
+        match self {
+            Self::Pointer { leaf, shape } => Self::Pointer {
+                leaf,
+                shape: shape.with_readonly(enabled),
+            },
+            _ => self,
+        }
+    }
+    /// 最外側のnull許容性・読み取り専用性を広げる。要素型と実体は保つ。
     pub fn lifts_to(self, to: Self) -> bool {
-        self.is_nonnull()
-            && ((to.is_nullable() && self.pointee() == to.pointee())
-                || matches!(to, Self::ReadOnlyArray(id) if self.pointee() == Some(Self::Array(id))))
+        match (self, to) {
+            (Self::Pointer { .. }, Self::Pointer { .. }) => {
+                let from_ro = self.is_readonly_pointer();
+                let to_ro = to.is_readonly_pointer();
+                let from_null = self.is_nullable();
+                let to_null = to.is_nullable();
+                self.pointee() == to.pointee()
+                    && (!from_ro || to_ro)
+                    && (!from_null || to_null)
+                    && (from_ro != to_ro || from_null != to_null)
+            }
+            (
+                Self::ArrayRef {
+                    id: from_id,
+                    mutable: from_mut,
+                    nullable: from_null,
+                },
+                Self::ArrayRef {
+                    id: to_id,
+                    mutable: to_mut,
+                    nullable: to_null,
+                },
+            ) => {
+                from_id == to_id
+                    && (from_mut || !to_mut)
+                    && (!from_null || to_null)
+                    && (from_mut != to_mut || from_null != to_null)
+            }
+            _ => false,
+        }
     }
     pub fn pointee(self) -> Option<Self> {
         let Self::Pointer { leaf, shape } = self else {
@@ -309,7 +374,15 @@ impl Type {
             });
         }
         Some(match leaf {
-            PointerLeaf::ReadOnlyArray(id) => Self::ReadOnlyArray(id),
+            PointerLeaf::ArrayRef {
+                id,
+                mutable,
+                nullable,
+            } => Self::ArrayRef {
+                id,
+                mutable,
+                nullable,
+            },
             PointerLeaf::Array(id) => Self::Array(id),
             PointerLeaf::CPointer => Self::CPointer,
             PointerLeaf::CInteger(v) => Self::CInteger(v),
@@ -422,14 +495,32 @@ impl Type {
     }
     pub fn name(self) -> &'static str {
         match self {
-            Self::Pointer { .. } => {
-                if self.is_nullable() {
-                    "ptr?"
-                } else {
-                    "ptr"
-                }
-            }
-            Self::ReadOnlyArray(_) => "readonly array",
+            Self::Pointer { .. } => match (self.is_readonly_pointer(), self.is_nullable()) {
+                (false, false) => "mut",
+                (false, true) => "mut?",
+                (true, false) => "ref",
+                (true, true) => "ref?",
+            },
+            Self::ArrayRef {
+                mutable: false,
+                nullable: false,
+                ..
+            } => "readonly array",
+            Self::ArrayRef {
+                mutable: false,
+                nullable: true,
+                ..
+            } => "nullable readonly array",
+            Self::ArrayRef {
+                mutable: true,
+                nullable: false,
+                ..
+            } => "array",
+            Self::ArrayRef {
+                mutable: true,
+                nullable: true,
+                ..
+            } => "nullable array",
             Self::Array(_) => "array",
             Self::CPointer => "*const void",
             Self::CInteger(ty) => ty.name(),
@@ -461,10 +552,12 @@ impl Type {
     }
     pub fn c_name(self) -> String {
         match self {
-            Self::Pointer { .. } if self.array_id().is_some() => {
-                format!("suz_array_{}", self.array_id().unwrap())
-            }
-            Self::ReadOnlyArray(id) => format!("suz_readonly_array_{id}"),
+            Self::ArrayRef {
+                id, mutable: true, ..
+            } => format!("suz_array_{id}"),
+            Self::ArrayRef {
+                id, mutable: false, ..
+            } => format!("suz_readonly_array_{id}"),
             Self::Array(_) => unreachable!("array storage has no standalone C value type"),
             Self::Pointer { .. } => format!("typeof({} *)", self.pointee().unwrap().c_name()),
             Self::CPointer => "suz_ffi_bytes".into(),
@@ -705,7 +798,6 @@ pub(crate) enum Statement {
     },
     Block(Vec<Statement>),
     Binding {
-        pointer: bool,
         mutable: bool,
         name: String,
         location: Location,
@@ -968,6 +1060,7 @@ pub(crate) enum ExpressionKind {
         values: Vec<Expression>,
         lengths: Vec<Expression>,
         repeated: bool,
+        readonly: bool,
     },
     New(Box<Expression>),
     /// 追記文の型検査用。ソースから値式として書くことはできない。

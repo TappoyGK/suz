@@ -31,7 +31,7 @@ pub(super) fn parts(
                             | Type::Void
                             | Type::Parameter(_)
                             | Type::Struct(_)
-                            | Type::ReadOnlyArray(_)
+                            | Type::ArrayRef { .. }
                             | Type::Pointer { .. }
                             | Type::CPointer
                             | Type::CInteger(_)

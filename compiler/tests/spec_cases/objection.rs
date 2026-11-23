@@ -3,14 +3,14 @@ use crate::test_util::compile_and_run_c23;
 #[test]
 fn objection_handles_correlated_source_and_destination_choices() {
     let source = r#"
-struct Node { next: ptr? Node }
+struct Node { next: mut? Node }
 fn connect(flag: bool) -> void {
     arena {
-        fix ptr outer = new Node { next: null }
+        fix outer = new Node { next: null }
         arena {
-            fix ptr inner = new Node { next: null }
-            fix ptr destination = ifexpr flag { outer } else { inner }
-            fix ptr source = ifexpr flag { outer } else { inner }
+            fix inner = new Node { next: null }
+            fix destination = ifexpr flag { outer } else { inner }
+            fix source = ifexpr flag { outer } else { inner }
             objection [both choices use the same flag and therefore the same object] {
                 let p = destination { p#next = source }
             }
@@ -30,13 +30,13 @@ fn main() -> u8 { connect(true)
 #[test]
 fn objection_accepts_a_safe_overwrite_without_changing_runtime_lifetimes() {
     let source = r#"
-struct Node { v: i32, next: ptr? Node }
+struct Node { v: i32, next: mut? Node }
 fn main() -> u8 {
     arena {
-        fix ptr outer = new Node { v: 1, next: null }
+        fix outer = new Node { v: 1, next: null }
         arena {
-            fix ptr inner = new Node { v: 2, next: null }
-            var ptr selected = outer
+            fix inner = new Node { v: 2, next: null }
+            var selected = outer
             selected = inner
             objection [selected was replaced by inner] {
                 let p = selected { p#next = inner }
@@ -69,19 +69,19 @@ fn main() -> u8 {
 fn objection_never_removes_proven_lifetime_violations() {
     for operation in [
         "saved = inner",
-        "fix ptr copy = inner\nsaved = copy",
-        "fix ptr maybe: ptr? Node = inner\nlet p = maybe { saved = p }",
+        "fix copy = inner\nsaved = copy",
+        "fix maybe: mut? Node = inner\nlet p = maybe { saved = p }",
         "saved = new Node { next: null }",
         "saved = ifexpr true { inner } else { new Node { next: null } }",
         "outer#next = inner",
     ] {
         let source = format!(
-            "struct Node {{ next: ptr? Node }}\nfn main() -> u8 {{ arena {{ var ptr saved: ptr? Node = null\nfix ptr outer = new Node {{ next: null }}\narena {{ fix ptr inner = new Node {{ next: null }}\nobjection [claimed safety] {{ {operation} }}\n}}\n}}\nreturn 0 }}"
+            "struct Node {{ next: mut? Node }}\nfn main() -> u8 {{ arena {{ var saved: mut? Node = null\nfix outer = new Node {{ next: null }}\narena {{ fix inner = new Node {{ next: null }}\nobjection [claimed safety] {{ {operation} }}\n}}\n}}\nreturn 0 }}"
         );
         // savedを使わない例でもvarの再代入規則を満たす。
         let source = source.replace(
-            "var ptr saved: ptr? Node = null",
-            "var ptr saved: ptr? Node = null\nsaved = null",
+            "var saved: mut? Node = null",
+            "var saved: mut? Node = null\nsaved = null",
         );
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert!(
@@ -94,7 +94,7 @@ fn objection_never_removes_proven_lifetime_violations() {
         );
         assert_eq!(error.related.len(), 2);
     }
-    let source = b"fn bad() -> ptr? i32 { arena { objection [claim] { return new (1 as i32) } } }\nfn main() -> u8 { return 0 }";
+    let source = b"fn bad() -> mut? i32 { arena { objection [claim] { return new (1 as i32) } } }\nfn main() -> u8 { return 0 }";
     assert!(
         suz::compile(source)
             .unwrap_err()
@@ -106,13 +106,13 @@ fn objection_never_removes_proven_lifetime_violations() {
 #[test]
 fn a_nullable_source_is_not_a_proven_violation() {
     let source = r#"
-struct Node { next: ptr? Node }
+struct Node { next: mut? Node }
 fn main() -> u8 {
     arena {
-        var ptr saved: ptr? Node = null
+        var saved: mut? Node = null
         arena {
-            fix ptr inner = new Node { next: null }
-            fix ptr maybe: ptr? Node = ifexpr true { null } else { inner }
+            fix inner = new Node { next: null }
+            fix maybe: mut? Node = ifexpr true { null } else { inner }
             objection [the true branch yields null] { saved = maybe }
         }
     }
@@ -131,14 +131,14 @@ fn main() -> u8 {
 
 #[test]
 fn objection_effects_remain_visible_and_permission_ends_at_the_block() {
-    let source = r#"struct Node { next: ptr? Node }
+    let source = r#"struct Node { next: mut? Node }
 fn main() -> u8 {
     arena {
-        var ptr saved: ptr? Node = null
-        fix ptr outer = new Node { next: null }
+        var saved: mut? Node = null
+        fix outer = new Node { next: null }
         arena {
-            fix ptr inner = new Node { next: null }
-            var ptr selected = outer
+            fix inner = new Node { next: null }
+            var selected = outer
             selected = inner
             objection [selected is inner] {
                 objection [same guarantee] {
@@ -159,15 +159,15 @@ fn main() -> u8 {
 fn objection_does_not_override_explicit_contracts_or_callee_checks() {
     for (source, rule) in [
         (
-            "fn main() -> u8 { objection [claim] { fix ptr p: ptr? i32 = null\nfix n = .p }\nreturn 0 }",
+            "fn main() -> u8 { objection [claim] { fix p: mut? i32 = null\nfix n = .p }\nreturn 0 }",
             "arena.null-deref",
         ),
         (
-            "fn bad(flag: bool) -> ptr? i32 { arena { fix ptr p: ptr? i32 = ifexpr flag { new (1 as i32) } else { null }\nreturn p } }\nfn main() -> u8 { arena { objection [caller guarantee] { bad(false) } }\nreturn 0 }",
+            "fn bad(flag: bool) -> mut? i32 { arena { fix p: mut? i32 = ifexpr flag { new (1 as i32) } else { null }\nreturn p } }\nfn main() -> u8 { arena { objection [caller guarantee] { bad(false) } }\nreturn 0 }",
             "arena.store",
         ),
         (
-            "fnshape Act() -> void\nfn run(f: fn Act) -> void { f() }\nfn main() -> u8 { objection [caller guarantee] { run(fn []() -> void { arena { var ptr saved: ptr? i32 = null\narena { fix ptr p: ptr? i32 = ifexpr true { null } else { new (1 as i32) }\nsaved = p } } }) }\nreturn 0 }",
+            "fnshape Act() -> void\nfn run(f: fn Act) -> void { f() }\nfn main() -> u8 { objection [caller guarantee] { run(fn []() -> void { arena { var saved: mut? i32 = null\narena { fix p: mut? i32 = ifexpr true { null } else { new (1 as i32) }\nsaved = p } } }) }\nreturn 0 }",
             "arena.store",
         ),
     ] {

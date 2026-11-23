@@ -19,7 +19,7 @@ pub(super) fn contains(ty: Type, scope: &Scope) -> bool {
 
 fn contains_in(ty: Type, structs: &super::type_parameters::structs::Structs) -> bool {
     match ty {
-        Type::Pointer { .. } => true,
+        Type::Pointer { .. } | Type::ArrayRef { mutable: true, .. } => true,
         Type::Struct(id) => structs
             .get(id)
             .fields
@@ -33,7 +33,7 @@ fn contains_in(ty: Type, structs: &super::type_parameters::structs::Structs) -> 
 // 寿命グラフでは葉の実体として扱い、言語上のpointeeやポインタ禁止規則は変えない。
 fn reference_target(ty: Type) -> Option<Type> {
     match ty {
-        Type::ReadOnlyArray(id) => Some(Type::Array(id)),
+        Type::ArrayRef { id, .. } => Some(Type::Array(id)),
         Type::Text | Type::CPointer => Some(Type::Void),
         _ => ty.pointee(),
     }
@@ -57,7 +57,7 @@ pub(super) fn callable_type(ty: Type, structs: &super::type_parameters::structs:
     while let Some(ty) = pending.pop() {
         match ty {
             Type::Function(_) | Type::StaticFunction(_) => return true,
-            Type::Array(id) | Type::ReadOnlyArray(id) => {
+            Type::Array(id) | Type::ArrayRef { id, .. } => {
                 pending.push(structs.arrays.borrow().get(id).element)
             }
             Type::Pointer { .. } => pending.push(ty.pointee().unwrap()),
@@ -73,7 +73,7 @@ pub(super) fn observe_type(ty: Type, scope: &Scope) {
     if !matches!(
         ty,
         Type::Pointer { .. }
-            | Type::ReadOnlyArray(_)
+            | Type::ArrayRef { .. }
             | Type::Text
             | Type::CPointer
             | Type::Struct(_)
@@ -98,12 +98,6 @@ pub(super) fn deref(
     value: CheckedExpression,
     location: Location,
 ) -> Result<CheckedExpression, Diagnostic> {
-    let Some(ty) = value.ty.pointee() else {
-        return Err(location.error(
-            ErrorKind::InvalidSource,
-            crate::diagnostic!("arena.ptr-operations", "dereference requires ptr"),
-        ));
-    };
     if value.ty.array_id().is_some() {
         return Err(location.error(
             ErrorKind::InvalidSource,
@@ -113,6 +107,12 @@ pub(super) fn deref(
             ),
         ));
     }
+    let Some(ty) = value.ty.pointee() else {
+        return Err(location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!("arena.ptr-operations", "dereference requires a pointer"),
+        ));
+    };
     if !value.ty.is_nonnull() {
         return Err(location.error(
             ErrorKind::InvalidSource,
@@ -135,16 +135,19 @@ pub(super) fn expression(
 ) -> Result<CheckedExpression, Diagnostic> {
     match &expr.kind {
         ExpressionKind::Null => {
-            let Some(ty @ Type::Pointer { .. }) = expected else {
+            let Some(ty) = expected.filter(|ty| ty.is_reference()) else {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
-                    crate::diagnostic!("arena.null", "null requires an expected ptr? type"),
+                    crate::diagnostic!(
+                        "arena.null",
+                        "null requires an expected nullable reference type"
+                    ),
                 ));
             };
             if !ty.is_nullable() {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
-                    crate::diagnostic!("arena.null", "null requires ptr?"),
+                    crate::diagnostic!("arena.null", "null requires a nullable reference type"),
                 ));
             }
             Ok(CheckedExpression {
@@ -162,31 +165,18 @@ pub(super) fn expression(
                     ),
                 ));
             }
-            let value = if matches!(inner.kind, ExpressionKind::ArrayInit { .. }) {
-                let array_type = expected.and_then(|ty| match ty {
-                    Type::ReadOnlyArray(_) => Some(ty),
-                    _ => ty.pointee(),
+            if let ExpressionKind::ArrayInit { readonly, .. } = &inner.kind {
+                let array_type = expected.and_then(|ty| ty.array_id().map(Type::Array));
+                let value = super::arrays::initializer(inner, array_type, scope)?;
+                return Ok(CheckedExpression {
+                    ty: value.ty.array_reference(*readonly),
+                    value: Value::New {
+                        value: Box::new(value),
+                        location: expr.location,
+                    },
                 });
-                super::arrays::initializer(inner, array_type, scope)?
-            } else {
-                if matches!(
-                    expression::operand_type(inner, scope),
-                    Some(Type::ReadOnlyArray(_))
-                ) {
-                    return Err(expr.location.error(ErrorKind::InvalidSource,
-                        crate::diagnostic!("arena.new-value", "new cannot allocate a readonly array reference; store it in a struct field")));
-                }
-                expression::coerced(inner, expected.and_then(Type::pointee), scope)?
-            };
-            if matches!(value.ty, Type::ReadOnlyArray(_)) {
-                return Err(expr.location.error(
-                    ErrorKind::InvalidSource,
-                    crate::diagnostic!(
-                        "arena.new-value",
-                        "new cannot allocate a readonly array reference; store it in a struct field"
-                    ),
-                ));
             }
+            let value = expression::coerced(inner, expected.and_then(Type::pointee), scope)?;
             if value.ty == Type::Void || matches!(value.ty, Type::Function(_)) {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
@@ -245,10 +235,10 @@ pub(super) fn statement(
                 ));
             }
             let value = expression::expression(value, None, context.bindings)?;
-            if value.ty.pointee().is_none() {
+            if !value.ty.is_reference() {
                 return Err(location.error(
                     ErrorKind::InvalidSource,
-                    crate::diagnostic!("arena.let", "let requires ptr"),
+                    crate::diagnostic!("arena.let", "let requires a pointer or array reference"),
                 ));
             }
             let id = *context.next_id;
@@ -389,21 +379,33 @@ fn store(
 ) -> Result<(), Diagnostic> {
     super::writes::array(value, target)?;
     let target = super::arrays::write_target(target, context.bindings)?;
-    fn indirect(value: &Value) -> bool {
+    fn deref_pointer(value: &Value) -> Option<Type> {
         match value {
-            Value::Deref(_) => true,
-            Value::Field { target, .. } => indirect(&target.value),
-            _ => false,
+            Value::Deref(pointer) => Some(pointer.ty),
+            Value::Field { target, .. } => deref_pointer(&target.value),
+            _ => None,
         }
     }
-    if !indirect(&target.value) {
-        return Err(location.error(
-            ErrorKind::InvalidSource,
-            crate::diagnostic!(
-                "arena.ptr-operations",
-                "pointer assignment requires a dereferenced destination"
-            ),
-        ));
+    match deref_pointer(&target.value) {
+        None => {
+            return Err(location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "arena.ptr-operations",
+                    "pointer assignment requires a dereferenced destination"
+                ),
+            ));
+        }
+        Some(ty) if ty.is_readonly_pointer() => {
+            return Err(location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "arena.ptr-operations",
+                    "cannot write through a readonly pointer"
+                ),
+            ));
+        }
+        Some(_) => {}
     }
     let id = *context.next_id;
     *context.next_id += 1;

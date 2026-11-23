@@ -10,7 +10,7 @@
 
 ```suz
 struct Counter { value: i32 }
-struct Holder { counter: Counter, pointer: ptr Counter }
+struct Holder { counter: Counter, pointer: mut Counter }
 enum Mode: u8 { Off, On }
 fnshape Read() -> i32
 fnshape Action() -> void
@@ -32,7 +32,7 @@ fn Counter#capture() -> i32 {
     act(fn [var self]() -> void { self#twice() })
     return read(fn [self]() -> i32 { return self.get() })
 }
-fn Counter#observe_alias(other: ptr Counter) -> i32 {
+fn Counter#observe_alias(other: mut Counter) -> i32 {
     self#value = 30
     return other.value
 }
@@ -55,9 +55,9 @@ fn main() -> u8 {
     if not Mode.On.enabled() { return 5 }
     if (Counter { value: 8 }).get() != 8 { return 6 }
     arena {
-        fix ptr first = new Counter { value: 10 }
-        fix ptr second = new Counter { value: 20 }
-        var ptr selected = first
+        fix first = new Counter { value: 10 }
+        fix second = new Counter { value: 20 }
+        var selected = first
         selected#add(expr { selected = second
             2 as i16 })
         if first.value != 12 || second.value != 20 { return 7 }
@@ -68,7 +68,7 @@ fn main() -> u8 {
         holder.counter#add(3 as i8)
         holder.bump_pointer()
         if holder.counter.value != 5 || first.value != 31 { return 10 }
-        fix ptr maybe: ptr? Counter = first
+        fix maybe: mut? Counter = first
         let p = maybe { p#reset() }
         if first.value != 0 { return 11 }
         selected = expr { selected#reset()
@@ -92,25 +92,25 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
-struct Node { next: ptr? Node, value: i32 }
+struct Node { next: mut? Node, value: i32 }
 error Trouble { Empty }
-fn Node#append(value: i32) -> ptr Node {
-    fix ptr child = new Node { next: null, value }
+fn Node#append(value: i32) -> mut Node {
+    fix child = new Node { next: null, value }
     self#next = child
     return child
 }
-fn Node.follow() -> ptr? Node { return self.next }
+fn Node.follow() -> mut? Node { return self.next }
 fn Node.read() -> i32 or Trouble {
     if self.value == 0 { fail Trouble.Empty }
     return self.value
 }
-fn make() -> ptr Node { return new Node { next: null, value: 0 } }
+fn make() -> mut Node { return new Node { next: null, value: 0 } }
 fn main() -> u8 {
     arena {
-        fix ptr p = make()
-        fix ptr child = p#append(9)
+        fix p = make()
+        fix child = p#append(9)
         if (child.read() or 0) != 9 { return 1 }
-        fix ptr next = p.follow()
+        fix next = p.follow()
         let n = next { if n.value != 9 { return 2 } } else { return 3 }
         if (p.read() or 7) != 7 { return 4 }
         make()#append(4)
@@ -454,7 +454,7 @@ struct Vec2 { x: f32, y: f32 }
 fn Vec2#add(other: Vec2) -> void { self#x += other.x
     self#y += other.y }
 fn main() -> u8 {
-    fix ptr p = new Vec2 { x: 1.0, y: 2.0 }
+    fix p = new Vec2 { x: 1.0, y: 2.0 }
     p#add(Vec2 { x: 3.0, y: 4.0 })
     if p.x != 4.0 { return 1 }
     return 0
@@ -800,7 +800,7 @@ fn main() -> u8 {
 struct Vec2 { x: f32, y: f32 }
 fn Vec2.+(other: Vec2) -> Vec2 { return Vec2 { x: self.x + other.x, y: self.y + other.y } }
 fn main() -> u8 {
-    fix ptr p = new Vec2 { x: 1.0, y: 2.0 }
+    fix p = new Vec2 { x: 1.0, y: 2.0 }
     fix q = p + Vec2 { x: 1.0, y: 2.0 }
     return 0
 }
@@ -933,10 +933,10 @@ fn main() -> u8 {
 ```suz
 struct Vec2 { x: f32, y: f32 }
 fn Vec2.<(other: Vec2) -> bool { return self.x < other.x }
-fn middle(count: ptr i32) -> Vec2 { #count += 1
+fn middle(count: mut i32) -> Vec2 { #count += 1
     return Vec2 { x: 2.0, y: 0.0 } }
 fn main() -> u8 {
-    fix ptr count = new (0 as i32)
+    fix count = new (0 as i32)
     fix a = Vec2 { x: 1.0, y: 0.0 }
     fix c = Vec2 { x: 3.0, y: 0.0 }
     if not (a < middle(count) < c) || .count != 1 { return 1 }

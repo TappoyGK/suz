@@ -448,7 +448,7 @@ fn mutable_receivers_with_the_same_value_keep_distinct_storage() {
 
 fn recursive_ring(count: usize, writes_input: bool) -> BTreeMap<usize, Rc<Analysis>> {
     let tokens =
-        crate::lexer::lex("struct Node { v: i32, next: ptr? Node }\nfn main() -> u8 { return 0 }")
+        crate::lexer::lex("struct Node { v: i32, next: mut? Node }\nfn main() -> u8 { return 0 }")
             .unwrap();
     let program = crate::parser::parse(&tokens).unwrap();
     let structs = Rc::new(crate::check::type_parameters::structs::Structs::new(

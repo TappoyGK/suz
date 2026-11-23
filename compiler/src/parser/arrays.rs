@@ -16,6 +16,17 @@ impl Parser<'_, '_> {
         names: bool,
     ) -> Result<(Type, Vec<crate::ast::arrays::Dimension>), Diagnostic> {
         let location = self.location();
+        let mutable = match self.token().kind {
+            Kind::Symbol("#") => true,
+            Kind::Symbol(".") => false,
+            _ => {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("array.type", "expected .[T] or #[T] array type"),
+                ));
+            }
+        };
+        self.cursor += 1;
         self.nested(location, |parser| {
             parser.expect(FixedToken::Symbol("["))?;
             let element = parser.parse_type()?;
@@ -42,7 +53,7 @@ impl Parser<'_, '_> {
                             dimensions.push(crate::ast::arrays::Dimension { name: name.into(), index: rank, location });
                         }
                         _ => return Err(parser.error(ErrorKind::InvalidSource, crate::diagnostic!(
-                            "array.dimension-bind", "dimension names require a nonnull array parameter or fix ptr annotation; use _ here"
+                            "array.dimension-bind", "dimension names require a nonnull array parameter or fix annotation; use _ here"
                         ))),
                     }
                     parser.cursor += 1;
@@ -72,23 +83,46 @@ impl Parser<'_, '_> {
                 }
             }
             parser.expect(FixedToken::Symbol("]"))?;
-            let ty = parser.applications.borrow_mut().arrays.intern(element, rank);
-            Ok((ty, dimensions))
+            let nullable = parser.token().kind == Kind::Symbol("?");
+            if nullable {
+                if !dimensions.is_empty() {
+                    return Err(parser.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "array.dimension-bind",
+                            "dimension names require a nonnull array type; use _ here"
+                        ),
+                    ));
+                }
+                parser.cursor += 1;
+            }
+            let Type::Array(id) = parser.applications.borrow_mut().arrays.intern(element, rank)
+            else {
+                unreachable!()
+            };
+            Ok((
+                Type::ArrayRef {
+                    id,
+                    mutable,
+                    nullable,
+                },
+                dimensions,
+            ))
         })
     }
 
-    pub(super) fn array_initializer(&mut self) -> Result<Expression, Diagnostic> {
+    pub(super) fn array_initializer(&mut self, readonly: bool) -> Result<Expression, Diagnostic> {
         let location = self.location();
         self.nested(location, |parser| {
             let open = parser.location();
             parser.expect(FixedToken::Symbol("["))?;
-            let mut values = Vec::new();
+            let mut items = Vec::new();
             let mut lengths = Vec::new();
             let mut repeated = false;
             if parser.token().kind != Kind::Symbol("]") {
-                values.push(parser.array_item()?);
+                items.push(parser.array_item()?);
                 if parser.token().kind == Kind::Symbol(";") {
-                    if matches!(values[0].kind, ExpressionKind::ArrayInit { .. }) {
+                    if items[0].1 {
                         return Err(location.error(
                             ErrorKind::InvalidSource,
                             crate::diagnostic!(
@@ -127,62 +161,28 @@ impl Parser<'_, '_> {
                     if repeated {
                         lengths.push(parser.expression()?);
                     } else {
-                        values.push(parser.array_item()?);
+                        items.push(parser.array_item()?);
                     }
                 }
             }
             parser.expect(FixedToken::Symbol("]"))?;
             // 列挙を平坦化しても、元の角括弧の深さは後続の構文検査へ残す。
-            let height = 1 + values
+            let height = 1 + items
                 .iter()
+                .map(|(v, _)| v)
                 .chain(&lengths)
                 .map(|v| v.height)
                 .max()
                 .unwrap_or(0);
             parser.check_height(height, location)?;
-            if !repeated {
-                let count = values.len();
+            let values = if !repeated {
+                let count = items.len();
                 let mut flattened = Vec::new();
                 let mut shape: Option<Vec<Expression>> = None;
-                let nested = values
-                    .first()
-                    .is_some_and(|v| matches!(v.kind, ExpressionKind::ArrayInit { .. }));
-                for value in values {
-                    match value.kind {
-                        ExpressionKind::ArrayInit {
-                            values,
-                            lengths,
-                            repeated: false,
-                        } if nested && !values.is_empty() => {
-                            if let Some(previous) = &shape {
-                                if previous
-                                    .iter()
-                                    .map(dimension)
-                                    .ne(lengths.iter().map(dimension))
-                                {
-                                    return Err(location.error(
-                                        ErrorKind::InvalidSource,
-                                        crate::diagnostic!(
-                                            "array.enumeration",
-                                            "array rows must have equal shapes"
-                                        ),
-                                    ));
-                                }
-                            } else {
-                                shape = Some(lengths);
-                            }
-                            flattened.extend(values);
-                        }
-                        ExpressionKind::ArrayInit { .. } => {
-                            return Err(location.error(
-                                ErrorKind::InvalidSource,
-                                crate::diagnostic!(
-                                    "array.enumeration",
-                                    "array rows must be nonempty rectangular enumerations"
-                                ),
-                            ));
-                        }
-                        _ if nested => {
+                let nested = items.first().is_some_and(|(_, is_row)| *is_row);
+                for (value, is_row) in items {
+                    if is_row {
+                        if !nested {
                             return Err(location.error(
                                 ErrorKind::InvalidSource,
                                 crate::diagnostic!(
@@ -191,10 +191,51 @@ impl Parser<'_, '_> {
                                 ),
                             ));
                         }
-                        _ => flattened.push(value),
+                        match value.kind {
+                            ExpressionKind::ArrayInit {
+                                values,
+                                lengths,
+                                repeated: false,
+                                ..
+                            } if !values.is_empty() => {
+                                if let Some(previous) = &shape {
+                                    if previous
+                                        .iter()
+                                        .map(dimension)
+                                        .ne(lengths.iter().map(dimension))
+                                    {
+                                        return Err(location.error(
+                                            ErrorKind::InvalidSource,
+                                            crate::diagnostic!(
+                                                "array.enumeration",
+                                                "array rows must have equal shapes"
+                                            ),
+                                        ));
+                                    }
+                                } else {
+                                    shape = Some(lengths);
+                                }
+                                flattened.extend(values);
+                            }
+                            _ => {
+                                return Err(location.error(
+                                    ErrorKind::InvalidSource,
+                                    crate::diagnostic!(
+                                        "array.enumeration",
+                                        "array rows must be nonempty rectangular enumerations"
+                                    ),
+                                ));
+                            }
+                        }
+                    } else if nested {
+                        return Err(location.error(
+                            ErrorKind::InvalidSource,
+                            crate::diagnostic!("array.enumeration", "cannot mix rows and values"),
+                        ));
+                    } else {
+                        flattened.push(value);
                     }
                 }
-                values = flattened;
                 lengths.push(parser.node(
                     ExpressionKind::Integer {
                         digits: count.to_string(),
@@ -203,23 +244,27 @@ impl Parser<'_, '_> {
                     location,
                 )?);
                 lengths.extend(shape.unwrap_or_default());
-            }
+                flattened
+            } else {
+                items.into_iter().map(|(v, _)| v).collect()
+            };
             Ok(Expression {
                 kind: ExpressionKind::ArrayInit {
                     values,
                     lengths,
                     repeated,
+                    readonly,
                 },
                 location,
                 height,
             })
         })
     }
-    fn array_item(&mut self) -> Result<Expression, Diagnostic> {
+    fn array_item(&mut self) -> Result<(Expression, bool), Diagnostic> {
         if self.token().kind == Kind::Symbol("[") {
-            self.array_initializer()
+            Ok((self.array_initializer(false)?, true))
         } else {
-            self.expression()
+            Ok((self.expression()?, false))
         }
     }
 }

@@ -24,6 +24,29 @@ pub(crate) fn check(expr: &Expression, bindings: &Scope) -> Result<CheckedExpres
     else {
         unreachable!()
     };
+    let non_indexable = |ty: Type| {
+        let found = bindings.type_name(ty);
+        let message = if ty
+            .pointee()
+            .is_some_and(|inner| inner.array_id().is_some() || inner.is_text())
+        {
+            crate::diagnostic!(
+                "type.expected",
+                "indexing requires an array or text, found {found}; to index through a pointer, write (.p).[i]"
+            )
+        } else {
+            crate::diagnostic!(
+                "type.expected",
+                "indexing requires an array or text, found {found}"
+            )
+        };
+        target.location.error(ErrorKind::InvalidSource, message)
+    };
+    if let Some(ty) = super::operand_type(target, bindings)
+        && !ty.is_text()
+    {
+        return Err(non_indexable(ty));
+    }
     let target = expression(target, Some(Type::Text), bindings)?;
     let bound = |value: &Expression| -> Result<Box<CheckedExpression>, Diagnostic> {
         let checked = expression(value, None, bindings)?;
