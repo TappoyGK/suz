@@ -690,33 +690,3 @@ fn main() -> u8 {
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
 | 通常 | `[type.expected]` | 5 | 27 |
-
-### arena-028 mut #[T]からmut .[T]へ暗黙変換できない
-
-主根拠：`[array.readonly-conversion]`。
-補助根拠：`[arena.ptr-conversion]`・`[type.expected]`。
-
-**ソース：**
-
-```suz
-fn main() -> u8 {
-    arena {
-        fix a: #[i32] = new #[1, 2]
-        fix p: mut #[i32] = new a
-        fix q: mut .[i32] = p
-    }
-    return 0
-}
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | コンパイルエラー | — | 0 |
-
-**コンパイル診断：**
-
-| 設定 | 規則 | 行 | 列 |
-|---|---|---:|---:|
-| 通常 | `[type.expected]` | 5 | 29 |

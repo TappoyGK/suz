@@ -1068,13 +1068,24 @@ fn main() -> u8 {
         if (b.[0].[1] or 0) != 20 || (b.[1].[0] or 0) != 30 { return 2 }
         fix rep: #[.[i32]] = new #[.[7, 8]; 2]
         if (rep.[1].[0] or 0) != 7 { return 3 }
-        if (JAGGED.[0].[1] or 0) != 2 || (JAGGED.[1].[0] or 0) != 3 { return 4 }
+        fix empty_rep: #[.[i32]] = new #[.[]; 2]
+        if len empty_rep != 2 || len empty_rep.[0] != 0 { return 4 }
+        fix grid: #[.[i32]; _, _] = new #[[.[1], .[2]], [.[3], .[4]]]
+        if (grid.[1].[0].[0] or 0) != 3 || (grid.[1].[1].[0] or 0) != 4 { return 5 }
+        if (JAGGED.[0].[1] or 0) != 2 || (JAGGED.[1].[0] or 0) != 3 { return 6 }
     }
     return 0
 }
 "#;
     let output = compile_and_run_c23(source, "const-array-elements.suz");
     assert_eq!(output.status.code(), Some(0), "{output:?}");
+
+    // 要素の定数配列は読み取り専用であり、a.[0]#[0] = 9 を拒否する。
+    let ro_elem_write = suz::compile(
+        b"fn main() -> u8 {\n    arena {\n        fix a = new #[.[1 as i32, 2 as i32]]\n        a.[0]#[0] = 9\n    }\n    return 0\n}",
+    )
+    .unwrap_err();
+    assert_eq!(ro_elem_write.rule(), "array.readonly", "{ro_elem_write}");
 
     // 行 [...] と定数配列要素 .[...] の混在は拒否する。
     for mixed in [
@@ -1091,13 +1102,28 @@ fn main() -> u8 {
     assert_eq!(bare.rule(), "array.new", "{bare}");
     assert!(bare.message().contains("new #[...]"), "{bare}");
 
-    // ポインタへの直接添字 (.pa.[0]) には (.p).[i] を案内する。
+    // 配列・text を指すポインタへの直接添字 (.pa.[0]) には (.p).[i] を案内する。
     let ptr_index = suz::compile(
         b"fn main() -> u8 {\n    arena {\n        fix pa: mut #[i64] = new (new #[5, 6])\n        fix x = .pa.[0]\n    }\n    return 0\n}",
     )
     .unwrap_err();
     assert_eq!(ptr_index.rule(), "type.expected", "{ptr_index}");
     assert!(ptr_index.message().contains("(.p).[i]"), "{ptr_index}");
+
+    // 配列も text も指さないポインタ (mut i64) には (.p).[i] を案内しない。
+    let scalar_ptr_index = suz::compile(
+        b"fn main() -> u8 {\n    arena {\n        fix mp: mut i64 = new 5\n        fix x = mp.[0]\n    }\n    return 0\n}",
+    )
+    .unwrap_err();
+    assert_eq!(
+        scalar_ptr_index.rule(),
+        "type.expected",
+        "{scalar_ptr_index}"
+    );
+    assert!(
+        !scalar_ptr_index.message().contains("(.p).[i]"),
+        "{scalar_ptr_index}"
+    );
 
     // ジェネリック構造体の型引数に含まれる配列参照は #[T] / .[T] で表示する。
     let generic_diag = suz::compile(

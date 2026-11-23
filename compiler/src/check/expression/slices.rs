@@ -26,7 +26,10 @@ pub(crate) fn check(expr: &Expression, bindings: &Scope) -> Result<CheckedExpres
     };
     let non_indexable = |ty: Type| {
         let found = bindings.type_name(ty);
-        let message = if ty.pointee().is_some() {
+        let message = if ty
+            .pointee()
+            .is_some_and(|inner| inner.array_id().is_some() || inner.is_text())
+        {
             crate::diagnostic!(
                 "type.expected",
                 "indexing requires an array or text, found {found}; to index through a pointer, write (.p).[i]"
