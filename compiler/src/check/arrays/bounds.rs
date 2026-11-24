@@ -39,6 +39,24 @@ fn constant(v: &CheckedExpression) -> Option<i128> {
     super::super::constants::constant_integer(v).ok().flatten()
 }
 
+fn field_value(v: &CheckedExpression) -> Option<&CheckedExpression> {
+    let Value::Field { target, index } = &v.value else {
+        return None;
+    };
+    let inner = if matches!(target.value, Value::Field { .. }) {
+        field_value(target)?
+    } else {
+        target.as_ref()
+    };
+    let Value::Struct { fields } = &inner.value else {
+        return None;
+    };
+    fields
+        .iter()
+        .find(|(id, _)| id == index)
+        .map(|(_, value)| value)
+}
+
 pub(in crate::check) fn shape(v: &CheckedExpression, scope: &Scope) -> Vec<Option<Dimension>> {
     let Some(id) = v.ty.array_id() else {
         return Vec::new();
@@ -104,7 +122,30 @@ pub(in crate::check) fn shape(v: &CheckedExpression, scope: &Scope) -> Vec<Optio
             }
             result
         }
-        _ => unknown(),
+        // 構造体の値のフィールドに書いた定数配列の長さは、構造体の全体を評価し直さずに読む。
+        Value::Field { .. }
+            if field_value(v).is_some_and(|f| matches!(f.value, Value::Array { .. })) =>
+        {
+            shape(field_value(v).unwrap(), scope)
+        }
+        _ => {
+            if let Ok(Some(evaluated)) = super::super::constants::evaluate(v)
+                && let Value::Array {
+                    metadata, lengths, ..
+                } = &evaluated.value
+            {
+                return lengths
+                    .iter()
+                    .enumerate()
+                    .map(|(axis, v)| {
+                        constant(v).map(|n| {
+                            Dimension::Static(metadata.origins[axis].0, metadata.origins[axis].1, n)
+                        })
+                    })
+                    .collect();
+            }
+            unknown()
+        }
     }
 }
 

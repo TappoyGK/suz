@@ -1072,7 +1072,7 @@ fn main() -> u8 {
         if len empty_rep != 2 || len empty_rep.[0] != 0 { return 4 }
         fix grid: #[.[i32]; _, _] = new #[[.[1], .[2]], [.[3], .[4]]]
         if (grid.[1].[0].[0] or 0) != 3 || (grid.[1].[1].[0] or 0) != 4 { return 5 }
-        if (JAGGED.[0].[1] or 0) != 2 || (JAGGED.[1].[0] or 0) != 3 { return 6 }
+        if JAGGED.[0].[1] != 2 || JAGGED.[1].[0] != 3 { return 6 }
     }
     return 0
 }
@@ -1136,4 +1136,127 @@ fn main() -> u8 {
             && generic_diag.message().contains("Boxed[.[i32]]"),
         "{generic_diag}"
     );
+}
+
+#[test]
+fn constant_expression_array_refs_keep_known_lengths_across_chains_and_struct_fields() {
+    let source = r#"
+struct Cfg { xs: .[i32] }
+fix JAGGED: .[.[i32]] = .[.[1, 2], .[3]]
+fix CFG = Cfg { xs: .[10, 20] }
+fix XS: .[i32] = CFG.xs
+fix DEEP: .[.[.[i32]]] = .[.[.[1], .[2, 3]], .[.[4]]]
+fix V: i32 = JAGGED.[1].[0]
+
+fn main() -> u8 {
+    if JAGGED.[1].[0] != 3 || V != 3 { return 1 }
+    if JAGGED.[0:2].[1].[0] != 3 { return 2 }
+    if CFG.xs.[1] != 20 || XS.[1] != 20 { return 3 }
+    if DEEP.[0].[1].[1] != 3 { return 4 }
+    var sum: i32 = 0
+    for i in 0..<len JAGGED.[0] { sum += JAGGED.[0].[i] }
+    for i in 0..<len CFG.xs { sum += CFG.xs.[i] }
+    if sum != 33 { return 5 }
+    if (JAGGED.[1].[5] or 9) != 9 { return 6 }
+    if (JAGGED.[5] or .[9]).[0] != 9 { return 7 }
+    if (CFG.xs.[0:5] or CFG.xs).[1] != 20 { return 8 }
+    return 0
+}
+"#;
+    let output = compile_and_run_c23(source, "const-array-ref-bounds.suz");
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+
+    for (code, rule) in [
+        (
+            "fix JAGGED: .[.[i32]] = .[.[1, 2], .[3]]\nfn main() -> u8 {\n    fix x: i32 = JAGGED.[1].[0] or 0\n    return 0\n}",
+            "array.access-handler",
+        ),
+        (
+            "fix JAGGED: .[.[i32]] = .[.[1, 2], .[3]]\nfn main() -> u8 {\n    fix x: i32 = (JAGGED.[5] or .[9]).[0] or 7\n    return 0\n}",
+            "array.access-handler",
+        ),
+        (
+            "struct Cfg { xs: .[i32] }\nfix CFG = Cfg { xs: .[1, 2] }\nfn main() -> u8 {\n    fix x: i32 = CFG.xs.[1] or 0\n    return 0\n}",
+            "array.access-handler",
+        ),
+        (
+            "fix JAGGED: .[.[i32]] = .[.[1, 2], .[3]]\nfn main() -> u8 {\n    fix x: i32 = JAGGED.[1].[5]\n    return 0\n}",
+            "array.constant-index",
+        ),
+        (
+            "fn main() -> u8 {\n    arena {\n        fix a: .[.[i32]] = new .[.[1, 2], .[3]]\n        fix x: i32 = a.[1].[0]\n    }\n    return 0\n}",
+            "array.access-handler",
+        ),
+        (
+            "fn take(rows: .[.[i32]]) -> i32 {\n    return rows.[0].[0]\n}\nfn main() -> u8 { return 0 }",
+            "array.access-handler",
+        ),
+        (
+            "fix JAGGED: .[.[i32]] = .[.[1, 2], .[3]]\nfn main() -> u8 {\n    var i: i64 = 1\n    fix x: i32 = JAGGED.[i].[0]\n    return 0\n}",
+            "array.access-handler",
+        ),
+    ] {
+        let err = suz::compile(code.as_bytes()).unwrap_err();
+        assert_eq!(err.rule(), rule, "{code}\n{err}");
+    }
+
+    // トップレベルの定数配列への書き込みは、連鎖や構造体フィールドを経ても [array.readonly] で拒否する。
+    for body in [
+        "A#[0] = 5",
+        "A#[0] += 5",
+        "JAGGED.[0]#[0] = 5",
+        "JAGGED#[0] = .[5]",
+        "CFG.xs#[0] = 5",
+        "G.[0]#[1] = 5",
+    ] {
+        let source = format!(
+            "struct Cfg {{ xs: .[i32] }}\nfix A: .[i32] = .[1, 2]\nfix JAGGED: .[.[i32]] = .[.[1, 2], .[3]]\nfix G: .[i32; _, _] = .[[1, 2], [3, 4]]\nfix CFG = Cfg {{ xs: .[1, 2] }}\nfn main() -> u8 {{\n    {body}\n    return 0\n}}"
+        );
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(error.rule(), "array.readonly", "{body}: {error}");
+    }
+
+    // 途中の段が範囲外になる連鎖の定数式・リテラル根・定数参照の同一性を検証する。
+    let extra_ok = r#"
+struct Cfg { xs: .[i32] }
+fix A: .[i32] = .[1, 2]
+fix JAGGED: .[.[i32]] = .[.[1, 2], .[3]]
+fix CFG = Cfg { xs: .[10, 20] }
+fix T: .[.[i32]] = .[A, A]
+fix K: i64 = 7
+fix V: i32 = JAGGED.[5].[0] or 9
+fix W: i32 = A.[0:5].[0] or 8
+fix R: .[i32] = JAGGED.[5].[0:1] or A
+
+fn main() -> u8 {
+    if V != 9 || W != 8 || R.[1] != 2 { return 1 }
+    fix arr: .[i32] = .[0; JAGGED.[5].[0] or 2]
+    if len arr != 2 { return 2 }
+    if (JAGGED.[5].[0:1] or A).[1] != 2 { return 3 }
+    if .[.[K], .[1 + 2, 3]].[1].[0] != 3 { return 4 }
+    var t: i32 = 0
+    for i in 0..<len CFG.xs { t += CFG.xs.[i] }
+    for i in 0..<len T.[0] { t += T.[1].[i] }
+    for i in 0..<len JAGGED.[0:1].[0] { t += JAGGED.[0:1].[0].[i] }
+    for i in 0..<len A.[:] { t += A.[:].[i] }
+    if t != 39 { return 5 }
+    return 0
+}
+"#;
+    let output = compile_and_run_c23(extra_ok, "const-array-ref-extra.suz");
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+
+    for (code, rule) in [
+        (
+            "fix A: .[i32] = .[1, 2]\nfn main() -> u8 {\n    var t: i32 = 0\n    for i in 0..<len A.[0:2] { t += A.[0:2].[i] }\n    return 0\n}",
+            "array.access-handler",
+        ),
+        (
+            "fix K: i64 = 7\nfn main() -> u8 {\n    fix x = .[.[K], .[1 + 2, 4]].[0].[1]\n    return 0\n}",
+            "array.constant-index",
+        ),
+    ] {
+        let err = suz::compile(code.as_bytes()).unwrap_err();
+        assert_eq!(err.rule(), rule, "{code}\n{err}");
+    }
 }

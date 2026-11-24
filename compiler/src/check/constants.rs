@@ -437,8 +437,40 @@ fn equal_structs(left: &CheckedExpression, right: &CheckedExpression) -> Option<
     Some(true)
 }
 
-// 定数配列の部分参照を求める。反復初期化は展開せず、一つの初期値と寸法を保つ。
+// 連続する添字・切り出しの1段の結果。orのない途中の段の範囲外は、外側の段のorへ伝える。
+enum ArrayStep {
+    Value(CheckedExpression),
+    OutOfRange,
+}
+
 fn array_access(expr: &CheckedExpression) -> Option<CheckedExpression> {
+    match array_step(expr)? {
+        ArrayStep::Value(value) => Some(value),
+        ArrayStep::OutOfRange => None,
+    }
+}
+
+fn chain_target(target: &CheckedExpression) -> Option<ArrayStep> {
+    if matches!(
+        target.value,
+        Value::ArrayRead { handler: None, .. } | Value::ArrayView { handler: None, .. }
+    ) {
+        array_step(target)
+    } else {
+        evaluate_raw(target).map(ArrayStep::Value)
+    }
+}
+
+fn chain_fallback(handler: &Option<CheckedHandler>) -> Option<ArrayStep> {
+    match handler {
+        Some(CheckedHandler::Value(v)) => evaluate_raw(v).map(ArrayStep::Value),
+        None => Some(ArrayStep::OutOfRange),
+        _ => None,
+    }
+}
+
+// 定数配列の部分参照を求める。反復初期化は展開せず、一つの初期値と寸法を保つ。
+fn array_step(expr: &CheckedExpression) -> Option<ArrayStep> {
     if let Value::ArrayView {
         target,
         start,
@@ -449,17 +481,32 @@ fn array_access(expr: &CheckedExpression) -> Option<CheckedExpression> {
         ..
     } = &expr.value
     {
+        // 対象がすでに配列の値なら、全要素を評価し直さず、取り出す範囲だけを評価する。
+        let owned;
+        let array = if matches!(target.value, Value::Array { .. }) {
+            target.as_ref()
+        } else {
+            owned = match chain_target(target)? {
+                ArrayStep::Value(value) => value,
+                ArrayStep::OutOfRange => return chain_fallback(handler),
+            };
+            &owned
+        };
         let Value::Array {
             metadata,
             values,
-            mut lengths,
+            lengths,
             repeated,
-            ..
-        } = evaluate_raw(target)?.value
+        } = &array.value
         else {
             return None;
         };
-        let mut origins = metadata.origins;
+        let repeated = *repeated;
+        let mut lengths = lengths
+            .iter()
+            .map(evaluate_raw)
+            .collect::<Option<Vec<_>>>()?;
+        let mut origins = metadata.origins.clone();
         let length = constant_integer_raw(&lengths[0])?;
         let first = start
             .as_ref()
@@ -471,21 +518,20 @@ fn array_access(expr: &CheckedExpression) -> Option<CheckedExpression> {
                 .map_or(Some(length), |v| constant_integer_raw(v))?
         };
         if first < 0 || last < first || last > length {
-            return match handler {
-                Some(CheckedHandler::Value(v)) => evaluate_raw(v),
-                _ => None,
-            };
+            return chain_fallback(handler);
         }
         let stride = lengths[1..].iter().try_fold(1usize, |n, v| {
             n.checked_mul(constant_integer_raw(v)? as usize)
         })?;
         let values = if repeated {
-            values
+            values.as_slice()
         } else {
-            values
-                .get(first as usize * stride..last as usize * stride)?
-                .to_vec()
+            values.get(first as usize * stride..last as usize * stride)?
         };
+        let values = values
+            .iter()
+            .map(evaluate_raw)
+            .collect::<Option<Vec<_>>>()?;
         if *index {
             origins.remove(0);
             lengths.remove(0);
@@ -507,7 +553,7 @@ fn array_access(expr: &CheckedExpression) -> Option<CheckedExpression> {
             count = count.checked_mul(constant_integer_raw(length)? as u64)?;
             constant_counts.push(count);
         }
-        return Some(CheckedExpression {
+        return Some(ArrayStep::Value(CheckedExpression {
             ty: expr.ty,
             value: Value::Array {
                 metadata: Box::new(super::ir::ArrayMetadata {
@@ -518,36 +564,46 @@ fn array_access(expr: &CheckedExpression) -> Option<CheckedExpression> {
                 lengths,
                 repeated,
             },
-        });
+        }));
     }
     if let Value::ArrayRead { address, handler } = &expr.value {
         let Value::ArrayElement { target, indices } = &address.value else {
             return None;
+        };
+        let owned;
+        let array = if matches!(target.value, Value::Array { .. }) {
+            target.as_ref()
+        } else {
+            owned = match chain_target(target)? {
+                ArrayStep::Value(value) => value,
+                ArrayStep::OutOfRange => return chain_fallback(handler),
+            };
+            &owned
         };
         let Value::Array {
             values,
             lengths,
             repeated,
             ..
-        } = evaluate_raw(target)?.value
+        } = &array.value
         else {
             return None;
         };
         let mut offset = 0usize;
-        for ((index, _, _), length) in indices.iter().zip(&lengths) {
+        for ((index, _, _), length) in indices.iter().zip(lengths) {
             let index = constant_integer_raw(index)?;
-            let length = constant_integer_raw(length)?;
+            let length = constant_integer_raw(&evaluate_raw(length)?)?;
             if !(0..length).contains(&index) {
-                return match handler {
-                    Some(CheckedHandler::Value(v)) => evaluate_raw(v),
-                    _ => None,
-                };
+                return chain_fallback(handler);
             }
             offset = offset
                 .checked_mul(length as usize)?
                 .checked_add(index as usize)?;
         }
-        return values.get(if repeated { 0 } else { offset }).cloned();
+        return values
+            .get(if *repeated { 0 } else { offset })
+            .and_then(evaluate_raw)
+            .map(ArrayStep::Value);
     }
     None
 }
