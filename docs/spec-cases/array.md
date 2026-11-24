@@ -1513,3 +1513,71 @@ fn main() -> u8 {
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
 | 通常 | `[array.access-handler]` | 4 | 23 |
+
+### array-050 null許容の読み取り専用配列とnullをトップレベル定数と定数配列で使う
+
+主根拠：`[const.expression]`。
+
+補助根拠：`[array.constant]`・`[array.readonly-conversion]`・`[arena.null]`。
+
+**ソース：**
+
+```suz
+struct Opt { xs: .[i32]? }
+fix A: .[i32] = .[1, 2]
+fix N1: .[i32]? = .[1, 2]
+fix N2: .[i32]? = null
+fix N3: .[i32]? = A
+fix O1 = Opt { xs: .[1, 2] }
+fix O2 = Opt { xs: null }
+fix O3 = Opt { xs: A }
+fix TABLE: .[.[i32]?] = .[.[3, 4], null]
+fix OPTS: .[Opt] = .[O1, O2]
+
+fn main() -> u8 {
+    let a = N1 { if a.[1] != 2 { return 1 } } else { return 2 }
+    let a = N2 { return 3 }
+    let a = N3 { if a.[0] != 1 { return 4 } } else { return 5 }
+    let a = O1.xs { if a.[1] != 2 { return 6 } } else { return 7 }
+    let a = O2.xs { return 8 }
+    let a = O3.xs { if a.[0] != 1 { return 9 } } else { return 10 }
+    let a = TABLE.[0] { if a.[1] != 4 { return 11 } } else { return 12 }
+    let a = TABLE.[1] { return 13 }
+    let a = OPTS.[0].xs { if a.[0] != 1 { return 14 } } else { return 15 }
+    let a = OPTS.[1].xs { return 16 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### array-051 書き込み可能なnull許容配列参照をトップレベル定数に保存できない
+
+主根拠：`[arena.store]`。
+
+補助根拠：`[const.expression]`。
+
+**ソース：**
+
+```suz
+fix W: #[i32]? = null
+fn main() -> u8 {
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[arena.store]` | 1 | 5 |

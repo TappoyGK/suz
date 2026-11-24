@@ -523,7 +523,7 @@ pub(super) fn constant_initializer(
             ErrorKind::InvalidSource,
             crate::diagnostic!(
                 "array.constant",
-                "constant arrays cannot contain pointer or function values"
+                "constant arrays cannot contain writable arrays, pointers, or function values"
             ),
         ));
     }
@@ -562,9 +562,7 @@ fn constant_element_type(
             .iter()
             .all(|f| constant_element_type(f.ty, scope, seen)),
         Type::ArrayRef {
-            id,
-            mutable: false,
-            nullable: false,
+            id, mutable: false, ..
         } => constant_element_type(scope.structs.arrays.borrow().get(id).element, scope, seen),
         Type::ArrayRef { .. } => false,
         _ => true,
