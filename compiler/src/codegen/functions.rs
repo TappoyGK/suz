@@ -9,6 +9,35 @@ use crate::{
 };
 use std::fmt::Write;
 
+/// 構造体の値仮引数はCでは読み取り専用ポインタで受け取る。
+pub(super) fn parameter_type(ty: Type) -> String {
+    if matches!(ty, Type::Struct(_)) {
+        format!("const {} *restrict", ty.c_name())
+    } else {
+        ty.c_name()
+    }
+}
+
+/// 呼び出し中に値が変わり得ない構造体の場所かを判定する。
+/// fix束縛・値仮引数・値キャプチャーと、それらの構造体フィールド連鎖だけが該当する。
+/// var束縛・ポインタ参照外し・参照キャプチャー・#メソッドのselfは含めない。
+pub(super) fn immutable_struct_place(
+    expr: &CheckedExpression,
+    context: &ExpressionContext,
+) -> bool {
+    match &expr.value {
+        crate::check::ir::Value::Local(id) => context.immutable_locals.contains(id),
+        crate::check::ir::Value::Receiver {
+            mutable: false,
+            target,
+        } => immutable_struct_place(target, context),
+        crate::check::ir::Value::Field { target, .. } => {
+            matches!(target.ty, Type::Struct(_)) && immutable_struct_place(target, context)
+        }
+        _ => false,
+    }
+}
+
 pub(super) fn declaration(function: &CheckedFunction) -> String {
     let mut parameters = function
         .parameters
@@ -17,6 +46,8 @@ pub(super) fn declaration(function: &CheckedFunction) -> String {
         .map(|(id, ty)| {
             if id == 0 && function.mutable_receiver {
                 format!("{} *const suz_ref_0", ty.c_name())
+            } else if matches!(ty, Type::Struct(_)) {
+                format!("const {} *restrict suz_ref_{id}", ty.c_name())
             } else {
                 format!("const {} suz_local_{id}", ty.c_name())
             }
@@ -54,6 +85,11 @@ pub(super) fn emit(function: &CheckedFunction, context: &mut ExpressionContext) 
     if function.mutable_receiver {
         context.references.insert(0);
     }
+    for (id, ty) in function.parameters.iter().enumerate() {
+        if !(id == 0 && function.mutable_receiver) && matches!(ty, Type::Struct(_)) {
+            context.references.insert(id);
+        }
+    }
     context.function_result = Some(function.result);
     context.temporaries.clear();
     context.closure_environments.clear();
@@ -90,36 +126,60 @@ pub(super) fn emit(function: &CheckedFunction, context: &mut ExpressionContext) 
     c
 }
 
+fn emit_argument(
+    argument: &CheckedExpression,
+    external: bool,
+    setup: &mut Vec<String>,
+    names: &mut Vec<String>,
+    context: &mut ExpressionContext,
+) {
+    let by_reference = matches!(
+        argument.value,
+        crate::check::ir::Value::Receiver { mutable: true, .. }
+    );
+    if !external && !by_reference && matches!(argument.ty, Type::Struct(_)) {
+        if immutable_struct_place(argument, context) {
+            let value = expression(argument, context);
+            names.push(format!("&({value})"));
+            return;
+        }
+        let index = context.temporaries.len();
+        context.temporaries.push(argument.ty);
+        let value = expression(argument, context);
+        setup.push(format!("suz_cmp_{index} = {value}"));
+        names.push(format!("&suz_cmp_{index}"));
+        return;
+    }
+    let index = context.temporaries.len();
+    context.temporaries.push(if by_reference {
+        argument.ty.pointer()
+    } else {
+        argument.ty
+    });
+    let name = format!("suz_cmp_{index}");
+    let value = expression(argument, context);
+    setup.push(format!(
+        "{name} = {}",
+        if by_reference {
+            format!("&({value})")
+        } else {
+            value
+        }
+    ));
+    names.push(name);
+}
+
 pub(super) fn call(
     id: usize,
     arguments: &[CheckedExpression],
     context: &mut ExpressionContext,
     error: Option<&str>,
 ) -> String {
+    let external = context.external_ids.contains(&id);
     let mut setup = Vec::new();
     let mut names = Vec::new();
     for argument in arguments {
-        let index = context.temporaries.len();
-        let by_reference = matches!(
-            argument.value,
-            crate::check::ir::Value::Receiver { mutable: true, .. }
-        );
-        context.temporaries.push(if by_reference {
-            argument.ty.pointer()
-        } else {
-            argument.ty
-        });
-        let name = format!("suz_cmp_{index}");
-        let value = expression(argument, context);
-        setup.push(format!(
-            "{name} = {}",
-            if by_reference {
-                format!("&({value})")
-            } else {
-                value
-            }
-        ));
-        names.push(name);
+        emit_argument(argument, external, &mut setup, &mut names, context);
     }
     if let Some(error) = error {
         names.push(format!("&{error}"));
@@ -145,13 +205,7 @@ pub(super) fn invoke(
     let mut setup = vec![format!("suz_cmp_{id} = {}", expression(target, context))];
     let mut names = Vec::new();
     for argument in arguments {
-        let index = context.temporaries.len();
-        context.temporaries.push(argument.ty);
-        setup.push(format!(
-            "suz_cmp_{index} = {}",
-            expression(argument, context)
-        ));
-        names.push(format!("suz_cmp_{index}"));
+        emit_argument(argument, false, &mut setup, &mut names, context);
     }
     if let Some(error) = error {
         names.push(format!("&{error}"));
@@ -206,7 +260,7 @@ pub(super) fn type_declarations(c: &mut String, context: &ExpressionContext) {
         } else {
             ty.parameters
                 .iter()
-                .map(|t| t.c_name())
+                .map(|t| parameter_type(*t))
                 .collect::<Vec<_>>()
                 .join(", ")
         };
@@ -226,7 +280,7 @@ pub(super) fn type_declarations(c: &mut String, context: &ExpressionContext) {
         .unwrap();
         if context.call_only_types.contains(&id) {
             let mut arguments = vec!["void *".to_owned()];
-            arguments.extend(ty.parameters.iter().map(|ty| ty.c_name()));
+            arguments.extend(ty.parameters.iter().map(|ty| parameter_type(*ty)));
             if !ty.errors.is_empty() {
                 arguments.push("uint64_t *".into());
             }
@@ -267,7 +321,7 @@ pub(super) fn call_only_declarations(c: &mut String, context: &ExpressionContext
             .parameters
             .iter()
             .enumerate()
-            .map(|(i, ty)| format!("{} argument_{i}", ty.c_name()))
+            .map(|(i, ty)| format!("{} argument_{i}", parameter_type(*ty)))
             .collect();
         let mut with_environment = vec!["void *environment".to_owned()];
         with_environment.extend(parameters);
