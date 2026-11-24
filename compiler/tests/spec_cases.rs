@@ -94,8 +94,8 @@ mod names;
 mod native_cli;
 #[path = "spec_cases/nesting.rs"]
 mod nesting;
-#[path = "spec_cases/nullable_pointers.rs"]
-mod nullable_pointers;
+#[path = "spec_cases/nilable_pointers.rs"]
+mod nilable_pointers;
 #[path = "spec_cases/numeric.rs"]
 mod numeric;
 #[path = "spec_cases/panic.rs"]

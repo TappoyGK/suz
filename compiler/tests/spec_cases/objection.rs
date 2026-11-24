@@ -104,7 +104,7 @@ fn objection_never_removes_proven_lifetime_violations() {
 }
 
 #[test]
-fn a_nullable_source_is_not_a_proven_violation() {
+fn a_nilable_source_is_not_a_proven_violation() {
     let source = r#"
 struct Node { next: mut? Node }
 fn main() -> u8 {
@@ -120,7 +120,7 @@ fn main() -> u8 {
 }
 "#;
     assert_eq!(
-        compile_and_run_c23(source, "nullable.suz").status.code(),
+        compile_and_run_c23(source, "nilable.suz").status.code(),
         Some(0)
     );
     let source = source.replace("objection [the true branch yields nil]", "");

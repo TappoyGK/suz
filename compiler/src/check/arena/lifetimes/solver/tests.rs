@@ -413,13 +413,13 @@ fn period_survives_loading_an_older_reference_from_a_callers_arena_object() {
 }
 
 #[test]
-fn limiting_null_does_not_create_a_reference() {
+fn limiting_nil_does_not_create_a_reference() {
     let scope = Scope::default();
     let mut analysis = Analysis::new(&scope);
     let inner = analysis.region(0, HERE);
-    let null = analysis.node();
+    let nil = analysis.node();
     let returned = analysis.node();
-    Worklist::default().run(&mut analysis, &[Constraint::Limit(returned, null, inner)]);
+    Worklist::default().run(&mut analysis, &[Constraint::Limit(returned, nil, inner)]);
     assert!(analysis.targets[returned].is_empty());
 }
 

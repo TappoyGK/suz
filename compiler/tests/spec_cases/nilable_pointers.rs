@@ -1,7 +1,7 @@
 use crate::test_util::compile_and_run_c23;
 
 #[test]
-fn pointer_types_preserve_nonnull_guarantees_across_calls_fields_and_captures() {
+fn pointer_types_preserve_nonnil_guarantees_across_calls_fields_and_captures() {
     let output = compile_and_run_c23(
         r#"
 struct State { value: i32 }
@@ -32,13 +32,13 @@ fn main() -> u8 {
     return 0
 }
 "#,
-        "nonnull.suz",
+        "nonnil.suz",
     );
     assert_eq!(output.status.code(), Some(0), "{output:?}");
 }
 
 #[test]
-fn pointer_branch_join_is_order_independent_and_only_changes_outer_nullability() {
+fn pointer_branch_join_is_order_independent_and_only_changes_outer_nilability() {
     let output = compile_and_run_c23(
         r#"
 struct Node { value: i32, next: mut? Node }
@@ -91,7 +91,7 @@ fn pointer_type_errors_cannot_be_bypassed_by_aliases_or_objection() {
         "fix p = ifexpr true { new 1 } else { new 2.0 }",
         "fix p = ifexpr true { new 2.0 } else { new 1 }",
         "fix p: mut Node = ifexpr true { nil } else { new Node { value: 1 } }",
-        "fix p: mut? Node = new Node { value: 1 }\nobjection [known nonnull] { take(p) }",
+        "fix p: mut? Node = new Node { value: 1 }\nobjection [known nonnil] { take(p) }",
     ] {
         let source = format!("{prefix}fn main() -> u8 {{ arena {{ {body} }}\nreturn 0 }}");
         assert!(suz::compile(source.as_bytes()).is_err(), "{body}");
@@ -99,7 +99,7 @@ fn pointer_type_errors_cannot_be_bypassed_by_aliases_or_objection() {
 }
 
 #[test]
-fn required_initialization_cycles_report_the_fields_and_nullable_edges_break_them() {
+fn required_initialization_cycles_report_the_fields_and_nilable_edges_break_them() {
     for (types, fields) in [
         ("struct Node { next: mut Node }", vec!["Node.next"]),
         (
@@ -183,8 +183,8 @@ fn explicit_pointer_depth_uses_the_pointer_limit_diagnostic() {
 }
 
 #[test]
-fn let_only_tests_null_for_nullable_inputs() {
-    // 非nullの引数でもCコンパイラが分岐を取り除くとは限らないため、生成時点で確認する。
+fn let_only_tests_nil_for_nilable_inputs() {
+    // 非nilの引数でもCコンパイラが分岐を取り除くとは限らないため、生成時点で確認する。
     for (ty, expected_checks) in [("mut", 0), ("mut?", 1)] {
         let source = format!(
             "struct Cell {{ value: i32 }}\nfn get(p: {ty} Cell) -> i32 {{ let q = p {{ return q.value }}\nreturn 7 }}\nfn main() -> u8 {{ arena {{ fix p = new Cell {{ value: 3 }}\nreturn get(p) as u8 or 0 }} }}"
@@ -203,13 +203,13 @@ fn let_only_tests_null_for_nullable_inputs() {
 }
 
 #[test]
-fn deep_pointer_assignments_cannot_change_inner_nullability() {
+fn deep_pointer_assignments_cannot_change_inner_nilability() {
     // 62/63段目を内側に持つ型で、型表現の違いが代入の許否を変えないことを確認する。
     // 末端から数えた段を、ソースでは最外側から並べる。
-    fn pointer_type(depth: usize, nullable_layer: usize) -> String {
+    fn pointer_type(depth: usize, nilable_layer: usize) -> String {
         let mut ty = String::new();
         for layer in (1..=depth).rev() {
-            ty.push_str(if layer == nullable_layer {
+            ty.push_str(if layer == nilable_layer {
                 "mut? "
             } else {
                 "mut "
@@ -272,9 +272,9 @@ fn main() -> u8 {
         fix mo: mut? Node = m
         fix ro2: ref? Node = mo
         fix ro3: ref? Node = r
-        fix ro_null: ref? Node = nil
+        fix ro_nil: ref? Node = nil
         if read_opt(ro1) != 10 || read_opt(ro2) != 10 || read_opt(ro3) != 10 { return 4 }
-        if read_opt(ro_null) != -1 { return 5 }
+        if read_opt(ro_nil) != -1 { return 5 }
 
         // 分岐合流: mut? + ref -> ref?, mut + ref -> ref, ref + nil -> ref?
         fix j1 = ifexpr true { mo } else { r }

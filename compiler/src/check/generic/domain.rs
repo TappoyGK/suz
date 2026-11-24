@@ -50,7 +50,7 @@ pub(crate) fn at(ty: Type, index: usize) -> Option<Type> {
             inner
                 .pointer()
                 .with_readonly(ty.is_readonly_pointer())
-                .with_nullable(ty.is_nullable())
+                .with_nilable(ty.is_nilable())
         }),
         Type::GenericInt => Some(Type::Integer(INTS[index / 2])),
         Type::GenericFloat => Some(Type::Float(if index.is_multiple_of(2) {

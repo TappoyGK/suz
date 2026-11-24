@@ -95,7 +95,7 @@ pub(super) struct StoreInfo {
     function: usize,
     location: Location,
     objection: bool,
-    nonnull: bool,
+    nonnil: bool,
 }
 #[derive(Clone, Default, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct StoreEffect {
@@ -229,7 +229,7 @@ impl Summary {
             let key = (
                 effect.destinations.clone(),
                 info.objection,
-                info.nonnull,
+                info.nonnil,
                 info.objection.then(|| effect.values.clone()),
             );
             combined
@@ -255,7 +255,7 @@ impl Summary {
             summary
                 .stores
                 .iter()
-                .map(|(info, effect)| (info.objection, info.nonnull, effect.clone()))
+                .map(|(info, effect)| (info.objection, info.nonnil, effect.clone()))
                 .collect::<BTreeSet<_>>()
         };
         effects(self) == effects(other)
@@ -471,7 +471,7 @@ impl Analysis {
                     function: self.function_id,
                     location: *location,
                     objection: self.objections.contains(&index),
-                    nonnull: self.nonnull_values.contains(source),
+                    nonnil: self.nonnil_values.contains(source),
                 });
             let destinations: BTreeSet<_> = self
                 .destinations(place)
@@ -638,8 +638,8 @@ impl Analysis {
                 let value = self.call_value(value, &objects, call.region);
                 self.constraints.push(Constraint::Copy(source, value));
             }
-            if info.nonnull {
-                self.nonnull_values.insert(source);
+            if info.nonnil {
+                self.nonnil_values.insert(source);
             }
             // 呼び出し先の字句上のobjectionは呼び出し元へ持ち出さない。
             // 実引数を代入して初めて分かる保存先の寿命は、この境界で必ず検査する。

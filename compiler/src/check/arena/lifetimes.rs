@@ -107,8 +107,8 @@ pub(crate) struct Analysis {
     objection: bool,
     // 字句上のobjection内で作ったStoreの添字。呼出し契約由来の制約は含めない。
     objections: BTreeSet<usize>,
-    // 候補集合はnullを表さないため、非nullの証明を値と不変の保存場所に別途保持する。
-    nonnull_values: BTreeSet<Node>,
+    // 候補集合はnilを表さないため、非nilの証明を値と不変の保存場所に別途保持する。
+    nonnil_values: BTreeSet<Node>,
     return_region: Option<usize>,
     recovery: Option<Shape>,
     // 各値が指しうる保存場所。実体の領域は参照変数の宣言位置から独立している。
@@ -147,7 +147,7 @@ impl Analysis {
             effect_stores: BTreeMap::new(),
             objection: false,
             objections: BTreeSet::new(),
-            nonnull_values: BTreeSet::new(),
+            nonnil_values: BTreeSet::new(),
             return_region: None,
             recovery: None,
             targets: vec![],
@@ -230,8 +230,8 @@ impl Analysis {
             .into_iter()
             .map(|p| {
                 let n = self.node();
-                if self.field_type(ty, &p).is_nonnull() {
-                    self.nonnull_values.insert(n);
+                if self.field_type(ty, &p).is_nonnil() {
+                    self.nonnil_values.insert(n);
                 }
                 (p, n)
             })
@@ -278,7 +278,7 @@ impl Analysis {
             }
         }
     }
-    // 分岐で候補を合流する。非null性は分岐の結果型で決まる。
+    // 分岐で候補を合流する。非nil性は分岐の結果型で決まる。
     fn alternatives(&mut self, ty: Type, alternatives: Vec<Shape>) -> Shape {
         let result = self.shape(ty);
         for shape in alternatives {
@@ -371,8 +371,8 @@ impl Analysis {
                 }
                 self.alternatives(value.ty, alternatives)
             }
-            Value::Null => self.shape(value.ty),
-            // 最外側の暗黙変換は実体と、保存直前の非nullの証明を変えない。
+            Value::Nil => self.shape(value.ty),
+            // 最外側の暗黙変換は実体と、保存直前の非nilの証明を変えない。
             Value::Cast(inner) if super::reference_target(value.ty).is_some() => {
                 self.expr(inner, region, arena)
             }
@@ -412,7 +412,7 @@ impl Analysis {
                 self.write(Place::Direct(cell), initial, *location);
                 let n = self.node();
                 self.targets[n].insert(Reference::object(cell));
-                self.nonnull_values.insert(n);
+                self.nonnil_values.insert(n);
                 BTreeMap::from([(vec![], n)])
             }
             Value::Local(id) => {
@@ -603,7 +603,7 @@ impl Analysis {
                 }
             }
             Value::Cast(v)
-            | Value::NonNull(v)
+            | Value::NonNil(v)
             | Value::CByteLen { operand: v, .. }
             | Value::FunctionBorrow(v)
             | Value::ArrayLength { target: v, .. }
@@ -1165,9 +1165,9 @@ impl Analysis {
                 continue;
             };
             let destinations = self.destinations(place);
-            // 実行される保存について、非nullで全候補対が違反する場合だけを証明済みとする。
+            // 実行される保存について、非nilで全候補対が違反する場合だけを証明済みとする。
             // 候補の空集合は証明に使わない。集合が変わらない状態で全保存先をまとめて判定する。
-            let proven = self.nonnull_values.contains(src)
+            let proven = self.nonnil_values.contains(src)
                 && !destinations.is_empty()
                 && !self.targets[*src].is_empty()
                 && destinations.iter().all(|dst| {

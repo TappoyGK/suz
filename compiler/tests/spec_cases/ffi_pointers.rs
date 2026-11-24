@@ -138,7 +138,7 @@ fn c_pointer_headers_require_exact_pointees_and_const() {
 }
 
 #[test]
-fn c_pointer_calls_reject_wrong_types_nullability_and_untrusted_calls() {
+fn c_pointer_calls_reject_wrong_types_nilability_and_untrusted_calls() {
     let declarations = "struct Local { value: i32 }\nextern \"fixture.h\" {\nstruct sample as Sample { value: i32 }\nstruct other as Other { value: i32 }\nfn take(p: *const Sample) -> void\nfn number(p: *i32) -> void\n}";
     for (body, rule) in [
         ("fix p = new Sample { value: 0 }\ntake(p)", "ffi.trusted"),

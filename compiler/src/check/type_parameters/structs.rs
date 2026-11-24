@@ -62,7 +62,7 @@ impl Structs {
                 .normalize(inner)
                 .pointer()
                 .with_readonly(ty.is_readonly_pointer())
-                .with_nullable(ty.is_nullable());
+                .with_nilable(ty.is_nilable());
         }
         match ty {
             Type::Array(id) => {
@@ -73,7 +73,7 @@ impl Structs {
             Type::ArrayRef {
                 id,
                 mutable,
-                nullable,
+                nilable,
             } => {
                 let array = self.arrays.borrow().get(id);
                 let element = self.normalize(array.element);
@@ -83,7 +83,7 @@ impl Structs {
                 Type::ArrayRef {
                     id,
                     mutable,
-                    nullable,
+                    nilable,
                 }
             }
             Type::Struct(id) => Type::Struct(self.canonical_id(id)),
@@ -270,7 +270,7 @@ impl Structs {
                 } else {
                     "mut"
                 },
-                if ty.is_nullable() { "?" } else { "" },
+                if ty.is_nilable() { "?" } else { "" },
                 self.name(inner)
             );
         }
@@ -287,12 +287,12 @@ impl Structs {
             Type::ArrayRef {
                 id,
                 mutable,
-                nullable,
+                nilable,
             } => {
                 let array = self.arrays.borrow().get(id);
                 let element = self.name(array.element);
                 let prefix = if mutable { "#" } else { "." };
-                let suffix = if nullable { "?" } else { "" };
+                let suffix = if nilable { "?" } else { "" };
                 if array.rank == 1 {
                     format!("{prefix}[{element}]{suffix}")
                 } else {
@@ -329,7 +329,7 @@ impl Structs {
                 } else {
                     "mut"
                 },
-                if ty.is_nullable() { "?" } else { "" },
+                if ty.is_nilable() { "?" } else { "" },
                 self.name_with_parameters(inner, parameters)
             );
         }
@@ -346,12 +346,12 @@ impl Structs {
             Type::ArrayRef {
                 id,
                 mutable,
-                nullable,
+                nilable,
             } => {
                 let array = self.arrays.borrow().get(id);
                 let element = self.name_with_parameters(array.element, parameters);
                 let prefix = if mutable { "#" } else { "." };
-                let suffix = if nullable { "?" } else { "" };
+                let suffix = if nilable { "?" } else { "" };
                 if array.rank == 1 {
                     format!("{prefix}[{element}]{suffix}")
                 } else {
@@ -550,7 +550,7 @@ impl Structs {
             return Ok(inner
                 .pointer()
                 .with_readonly(ty.is_readonly_pointer())
-                .with_nullable(ty.is_nullable()));
+                .with_nilable(ty.is_nilable()));
         }
         if matches!(
             ty,
@@ -573,7 +573,7 @@ impl Structs {
         if let Type::ArrayRef {
             id,
             mutable,
-            nullable,
+            nilable,
         } = ty
         {
             let array = self.arrays.borrow().get(id);
@@ -591,7 +591,7 @@ impl Structs {
             return Ok(Type::ArrayRef {
                 id,
                 mutable,
-                nullable,
+                nilable,
             });
         }
         let application = match ty {

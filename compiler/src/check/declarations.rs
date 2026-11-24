@@ -97,7 +97,7 @@ pub(super) fn dependencies(
         }
         ExpressionKind::Field { target, .. } => dependencies(target, names)?,
         ExpressionKind::Name(name) => names.push((name.clone(), expr.location)),
-        ExpressionKind::Null
+        ExpressionKind::Nil
         | ExpressionKind::FunctionValue { .. }
         | ExpressionKind::Integer { .. }
         | ExpressionKind::Float(_)

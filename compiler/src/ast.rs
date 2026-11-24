@@ -163,11 +163,11 @@ pub(crate) const NUMERIC_COMBINATIONS: usize = 18;
 /// Structの番号は構造体宣言、Functionの番号は共通化した関数値の型を参照する。汎用の型はC生成までに具体化する。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Type {
-    /// 配列への参照値。`mutable=true` は `#[T]`、`false` は `.[T]`。`nullable=true` は `?` 付き。
+    /// 配列への参照値。`mutable=true` は `#[T]`、`false` は `.[T]`。`nilable=true` は `?` 付き。
     ArrayRef {
         id: usize,
         mutable: bool,
-        nullable: bool,
+        nilable: bool,
     },
     Array(usize), // 寿命グラフ内部の配列本体専用。単独の値型としては使わない。
     Pointer {
@@ -197,13 +197,13 @@ pub(crate) enum Type {
     Text,
 }
 
-/// ポインタの末端の値型。各段のnull許容性はPointerShapeで別に持つ。
+/// ポインタの末端の値型。各段のnil許容性はPointerShapeで別に持つ。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum PointerLeaf {
     ArrayRef {
         id: usize,
         mutable: bool,
-        nullable: bool,
+        nilable: bool,
     },
     Array(usize),
     CPointer,
@@ -246,7 +246,7 @@ impl Type {
         Self::ArrayRef {
             id,
             mutable: !readonly,
-            nullable: false,
+            nilable: false,
         }
     }
     pub fn pointer(self) -> Self {
@@ -260,11 +260,11 @@ impl Type {
             Self::ArrayRef {
                 id,
                 mutable,
-                nullable,
+                nilable,
             } => PointerLeaf::ArrayRef {
                 id,
                 mutable,
-                nullable,
+                nilable,
             },
             Self::Array(id) => PointerLeaf::Array(id),
             Self::CPointer => PointerLeaf::CPointer,
@@ -297,26 +297,26 @@ impl Type {
     pub fn is_reference(self) -> bool {
         matches!(self, Self::Pointer { .. } | Self::ArrayRef { .. })
     }
-    pub fn is_nullable(self) -> bool {
-        matches!(self, Self::Pointer { shape, .. } if shape.is_nullable())
-            || matches!(self, Self::ArrayRef { nullable: true, .. })
+    pub fn is_nilable(self) -> bool {
+        matches!(self, Self::Pointer { shape, .. } if shape.is_nilable())
+            || matches!(self, Self::ArrayRef { nilable: true, .. })
     }
     pub fn is_readonly_pointer(self) -> bool {
         matches!(self, Self::Pointer { shape, .. } if shape.is_readonly())
     }
-    pub fn is_nonnull(self) -> bool {
-        self.is_reference() && !self.is_nullable()
+    pub fn is_nonnil(self) -> bool {
+        self.is_reference() && !self.is_nilable()
     }
-    pub fn with_nullable(self, enabled: bool) -> Self {
+    pub fn with_nilable(self, enabled: bool) -> Self {
         match self {
             Self::Pointer { leaf, shape } => Self::Pointer {
                 leaf,
-                shape: shape.with_nullable(enabled),
+                shape: shape.with_nilable(enabled),
             },
             Self::ArrayRef { id, mutable, .. } => Self::ArrayRef {
                 id,
                 mutable,
-                nullable: enabled,
+                nilable: enabled,
             },
             _ => self,
         }
@@ -330,35 +330,35 @@ impl Type {
             _ => self,
         }
     }
-    /// 最外側のnull許容性・読み取り専用性を広げる。要素型と実体は保つ。
+    /// 最外側のnil許容性・読み取り専用性を広げる。要素型と実体は保つ。
     pub fn lifts_to(self, to: Self) -> bool {
         match (self, to) {
             (Self::Pointer { .. }, Self::Pointer { .. }) => {
                 let from_ro = self.is_readonly_pointer();
                 let to_ro = to.is_readonly_pointer();
-                let from_null = self.is_nullable();
-                let to_null = to.is_nullable();
+                let from_nil = self.is_nilable();
+                let to_nil = to.is_nilable();
                 self.pointee() == to.pointee()
                     && (!from_ro || to_ro)
-                    && (!from_null || to_null)
-                    && (from_ro != to_ro || from_null != to_null)
+                    && (!from_nil || to_nil)
+                    && (from_ro != to_ro || from_nil != to_nil)
             }
             (
                 Self::ArrayRef {
                     id: from_id,
                     mutable: from_mut,
-                    nullable: from_null,
+                    nilable: from_nil,
                 },
                 Self::ArrayRef {
                     id: to_id,
                     mutable: to_mut,
-                    nullable: to_null,
+                    nilable: to_nil,
                 },
             ) => {
                 from_id == to_id
                     && (from_mut || !to_mut)
-                    && (!from_null || to_null)
-                    && (from_mut != to_mut || from_null != to_null)
+                    && (!from_nil || to_nil)
+                    && (from_mut != to_mut || from_nil != to_nil)
             }
             _ => false,
         }
@@ -377,11 +377,11 @@ impl Type {
             PointerLeaf::ArrayRef {
                 id,
                 mutable,
-                nullable,
+                nilable,
             } => Self::ArrayRef {
                 id,
                 mutable,
-                nullable,
+                nilable,
             },
             PointerLeaf::Array(id) => Self::Array(id),
             PointerLeaf::CPointer => Self::CPointer,
@@ -495,7 +495,7 @@ impl Type {
     }
     pub fn name(self) -> &'static str {
         match self {
-            Self::Pointer { .. } => match (self.is_readonly_pointer(), self.is_nullable()) {
+            Self::Pointer { .. } => match (self.is_readonly_pointer(), self.is_nilable()) {
                 (false, false) => "mut",
                 (false, true) => "mut?",
                 (true, false) => "ref",
@@ -503,22 +503,22 @@ impl Type {
             },
             Self::ArrayRef {
                 mutable: false,
-                nullable: false,
+                nilable: false,
                 ..
             } => "readonly array",
             Self::ArrayRef {
                 mutable: false,
-                nullable: true,
+                nilable: true,
                 ..
             } => "nilable readonly array",
             Self::ArrayRef {
                 mutable: true,
-                nullable: false,
+                nilable: false,
                 ..
             } => "array",
             Self::ArrayRef {
                 mutable: true,
-                nullable: true,
+                nilable: true,
                 ..
             } => "nilable array",
             Self::Array(_) => "array",
@@ -1073,7 +1073,7 @@ pub(crate) enum ExpressionKind {
         value: Box<Expression>,
     },
     Deref(Box<Expression>),
-    Null,
+    Nil,
     /// or panicの内部表現。通常の値式としては構文から作らない。
     Panic(Vec<TemplatePart<Expression>>),
     Closure(Box<Closure>),
@@ -1240,7 +1240,7 @@ pub(crate) struct ExternFunction {
     pub location: Location,
 }
 
-/// 外部関数の仮引数。型付きCポインタはSuz側では非nullのptr Tとして検査する。
+/// 外部関数の仮引数。型付きCポインタはSuz側では非nilのptr Tとして検査する。
 #[derive(Clone)]
 pub(crate) struct ExternParameter {
     /// Cが呼び出し後も参照を保持する。蓄積警告の逃避先として使う。

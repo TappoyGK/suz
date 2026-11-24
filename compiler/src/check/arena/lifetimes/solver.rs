@@ -137,7 +137,7 @@ impl Worklist {
                 analysis.targets[representative].extend(initial);
             }
         }
-        // newが作った初期候補をキューへ載せる。nullには候補がない。
+        // newが作った初期候補をキューへ載せる。nilには候補がない。
         for (node, targets) in analysis.targets.iter().enumerate() {
             if !targets.is_empty() {
                 self.pending[node].extend(targets);

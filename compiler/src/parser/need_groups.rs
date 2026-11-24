@@ -311,7 +311,7 @@ impl Parser<'_, '_> {
                 .replace_need_type(inner, arguments)
                 .pointer()
                 .with_readonly(ty.is_readonly_pointer())
-                .with_nullable(ty.is_nullable());
+                .with_nilable(ty.is_nilable());
         }
         match ty {
             Type::Parameter(id) => arguments[id],

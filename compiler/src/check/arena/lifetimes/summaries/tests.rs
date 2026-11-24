@@ -269,7 +269,7 @@ fn missing_callee_is_an_error_not_an_empty_effect() {
 }
 
 #[test]
-fn callee_objection_is_lexical_and_call_store_keeps_the_nonnull_proof() {
+fn callee_objection_is_lexical_and_call_store_keeps_the_nonnil_proof() {
     let mut f = body(1);
     let a = parameter(&mut f, 0, Type::Bool.pointer());
     let b = parameter(&mut f, 1, Type::Bool.pointer());
@@ -280,7 +280,7 @@ fn callee_objection_is_lexical_and_call_store_keeps_the_nonnull_proof() {
         Constraint::Copy(destination, b),
     ]);
     f.objections.insert(f.constraints.len());
-    f.nonnull_values.insert(source);
+    f.nonnil_values.insert(source);
     f.constraints.push(Constraint::Store(
         Place::Indirect(destination, vec![]),
         source,

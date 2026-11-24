@@ -2,7 +2,7 @@
 use crate::test_util::compile_and_run_c23;
 
 #[test]
-fn arrays_allocate_read_write_and_keep_empty_distinct_from_null() {
+fn arrays_allocate_read_write_and_keep_empty_distinct_from_nil() {
     let output = compile_and_run_c23(
         r#"
 fn read(a: #[i64], i: i64) -> i64 { return a.[i] or -1 }
@@ -955,7 +955,7 @@ fn a_sub(v: .[i32]) -> .[i32] { return v }
 }
 
 #[test]
-fn nullable_readonly_arrays_support_let_conversions_branches_generics_and_nested_pointers() {
+fn nilable_readonly_arrays_support_let_conversions_branches_generics_and_nested_pointers() {
     let source = r#"
 fn first_or[T](a: .[T]?, fallback: T) -> T {
     let items = a {
@@ -968,7 +968,7 @@ fn maybe_view(flag: bool, rw: #[i32], opt_rw: #[i32]?) -> .[i32]? {
     return opt_rw
 }
 fn main() -> u8 {
-    // 空配列とnullを区別する。
+    // 空配列とnilを区別する。
     fix empty_opt: .[i32]? = .[]
     let e = empty_opt {
         if len e != 0 { return 1 }
@@ -981,7 +981,7 @@ fn main() -> u8 {
     fix ro: .[i32] = .[11, 22]
     fix rw: #[i32] = new #[33, 44]
     fix rw_opt: #[i32]? = rw
-    fix rw_null: #[i32]? = nil
+    fix rw_nil: #[i32]? = nil
 
     var cur: .[i32]? = ro
     if first_or(cur, 0) != 11 { return 4 }
@@ -989,18 +989,18 @@ fn main() -> u8 {
     if first_or(cur, 0) != 33 { return 5 }
     cur = rw_opt
     if first_or(cur, 0) != 33 { return 6 }
-    cur = rw_null
+    cur = rw_nil
     if first_or(cur, 99) != 99 { return 7 }
 
-    if first_or(maybe_view(true, rw, rw_null), 0) != 33 { return 8 }
-    if first_or(maybe_view(false, rw, rw_null), 88) != 88 { return 9 }
+    if first_or(maybe_view(true, rw, rw_nil), 0) != 33 { return 8 }
+    if first_or(maybe_view(false, rw, rw_nil), 88) != 88 { return 9 }
 
     // 分岐の型合わせ: .[i32] と nil -> .[i32]?、#[i32]? と .[i32] -> .[i32]?
     fix b1 = ifexpr true { ro } else { nil }
     if first_or(b1, 0) != 11 { return 10 }
     fix b2 = ifexpr false { rw_opt } else { ro }
     if first_or(b2, 0) != 11 { return 11 }
-    fix b3 = ifexpr true { rw_null } else { ro }
+    fix b3 = ifexpr true { rw_nil } else { ro }
     if first_or(b3, 77) != 77 { return 12 }
 
     // mut? .[T], mut .[T]?, mut? .[T]? の区別と、letが最外側だけを外すことの確認。
@@ -1011,15 +1011,15 @@ fn main() -> u8 {
     } else { return 14 }
 
     fix both_opt: mut? .[i32]? = slot_opt_inner
-    let nonnull_slot = both_opt {
-        #nonnull_slot = nil
-        let inner_val = .nonnull_slot { return 15 }
+    let nonnil_slot = both_opt {
+        #nonnil_slot = nil
+        let inner_val = .nonnil_slot { return 15 }
     } else { return 16 }
 
     return 0
 }
 "#;
-    let output = compile_and_run_c23(source, "nullable-readonly-array.suz");
+    let output = compile_and_run_c23(source, "nilable-readonly-array.suz");
     assert_eq!(output.status.code(), Some(0), "{output:?}");
 
     // 未確認の .[T]? への直接アクセスは拒否する。
@@ -1038,15 +1038,11 @@ fn main() -> u8 {
     }
 
     // mut? .[i32]? をletで確認しても内側の ? は外れない。
-    let inner_still_null = suz::compile(
+    let inner_still_nil = suz::compile(
         b"fn main() -> u8 {\n    fix a: .[i32]? = nil\n    fix p: mut? .[i32]? = new a\n    let q = p {\n        fix x: .[i32] = .q\n    }\n    return 0\n}",
     )
     .unwrap_err();
-    assert_eq!(
-        inner_still_null.rule(),
-        "type.expected",
-        "{inner_still_null}"
-    );
+    assert_eq!(inner_still_nil.rule(), "type.expected", "{inner_still_nil}");
 
     // 寿命検査: 内側arenaの .[T]? を外側へ保存できない。
     let escape = suz::compile(
@@ -1262,7 +1258,7 @@ fn main() -> u8 {
 }
 
 #[test]
-fn top_level_constants_and_constant_arrays_support_nullable_readonly_arrays_and_null() {
+fn top_level_constants_and_constant_arrays_support_nilable_readonly_arrays_and_nil() {
     let source = r#"
 struct Opt { xs: .[i32]? }
 struct Node { value: i32, next: mut? Node }
@@ -1323,10 +1319,10 @@ fn main() -> u8 {
     return 0
 }
 "#;
-    let output = compile_and_run_c23(source, "const-nullable-readonly.suz");
+    let output = compile_and_run_c23(source, "const-nilable-readonly.suz");
     assert_eq!(output.status.code(), Some(0), "{output:?}");
 
-    // 同じ内容の定数配列は非null・null許容で静的データを共有する。
+    // 同じ内容の定数配列は非nil・nil許容で静的データを共有する。
     let dedup = suz::compile(
         b"fix A: .[i32] = .[1, 2]\nfix N: .[i32]? = .[1, 2]\nfn main() -> u8 {\n    let a = N { if A.[0] + a.[1] != 3 { return 1 } }\n    return 0\n}",
     )

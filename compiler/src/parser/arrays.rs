@@ -83,8 +83,8 @@ impl Parser<'_, '_> {
                 }
             }
             parser.expect(FixedToken::Symbol("]"))?;
-            let nullable = parser.token().kind == Kind::Symbol("?");
-            if nullable {
+            let nilable = parser.token().kind == Kind::Symbol("?");
+            if nilable {
                 if !dimensions.is_empty() {
                     return Err(parser.error(
                         ErrorKind::InvalidSource,
@@ -104,7 +104,7 @@ impl Parser<'_, '_> {
                 Type::ArrayRef {
                     id,
                     mutable,
-                    nullable,
+                    nilable,
                 },
                 dimensions,
             ))

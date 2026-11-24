@@ -209,11 +209,11 @@ impl Parser<'_, '_> {
                 ));
             }
             self.cursor += 1;
-            let nullable = self.token().kind == Kind::Symbol("?");
-            if nullable {
+            let nilable = self.token().kind == Kind::Symbol("?");
+            if nilable {
                 self.cursor += 1;
             }
-            layers.push((readonly, nullable));
+            layers.push((readonly, nilable));
         }
         let mut ty = if matches!(self.token().kind, Kind::Symbol("." | "#"))
             && self
@@ -242,8 +242,8 @@ impl Parser<'_, '_> {
                 crate::diagnostic!("arena.ptr-type", "pointer requires a stored value type"),
             ));
         }
-        for (readonly, nullable) in layers.into_iter().rev() {
-            ty = ty.pointer().with_readonly(readonly).with_nullable(nullable);
+        for (readonly, nilable) in layers.into_iter().rev() {
+            ty = ty.pointer().with_readonly(readonly).with_nilable(nilable);
         }
         Ok(ty)
     }

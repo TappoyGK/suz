@@ -113,7 +113,7 @@ pub(super) fn deref(
             crate::diagnostic!("arena.ptr-operations", "dereference requires a pointer"),
         ));
     };
-    if !value.ty.is_nonnull() {
+    if !value.ty.is_nonnil() {
         return Err(location.error(
             ErrorKind::InvalidSource,
             crate::diagnostic!(
@@ -134,7 +134,7 @@ pub(super) fn expression(
     scope: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
     match &expr.kind {
-        ExpressionKind::Null => {
+        ExpressionKind::Nil => {
             let Some(ty) = expected.filter(|ty| ty.is_reference()) else {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
@@ -144,7 +144,7 @@ pub(super) fn expression(
                     ),
                 ));
             };
-            if !ty.is_nullable() {
+            if !ty.is_nilable() {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
                     crate::diagnostic!("arena.nil", "nil requires a nilable reference type"),
@@ -152,7 +152,7 @@ pub(super) fn expression(
             }
             Ok(CheckedExpression {
                 ty,
-                value: Value::Null,
+                value: Value::Nil,
             })
         }
         ExpressionKind::New(inner) => {
@@ -243,8 +243,8 @@ pub(super) fn statement(
             }
             let id = *context.next_id;
             *context.next_id += 1;
-            let nonnull = value.ty.is_nonnull();
-            let ty = value.ty.with_nullable(false);
+            let nonnil = value.ty.is_nonnil();
+            let ty = value.ty.with_nilable(false);
             context.bindings.locals.insert(
                 name.clone(),
                 Binding::local(id, ty, false, false, *location),
@@ -272,14 +272,14 @@ pub(super) fn statement(
                     ty,
                     initializer: Box::new(value),
                 },
-                if nonnull {
+                if nonnil {
                     CheckedStatement::Block(body)
                 } else {
                     CheckedStatement::If {
                         branches: vec![(
                             CheckedExpression {
                                 ty: Type::Bool,
-                                value: Value::NonNull(Box::new(CheckedExpression {
+                                value: Value::NonNil(Box::new(CheckedExpression {
                                     ty,
                                     value: Value::Local(id),
                                 })),

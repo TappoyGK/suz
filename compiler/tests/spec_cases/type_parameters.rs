@@ -323,7 +323,7 @@ fn inferred_types_follow_nested_structures_pointers_and_forwarded_requirements()
 struct Box[T] { value: T }
 fn unbox[T](box: Box[T]) -> T { return box.value }
 fn read[T](p: mut T) -> T { return .p }
-fn nullable[T](p: mut? T, value: T) -> T { let q = p { return .q }
+fn nilable[T](p: mut? T, value: T) -> T { let q = p { return .q }
 return value }
 @needs T: +(T) -> T
 fn add[T](a: T, b: T) -> T { return a + b }
@@ -337,8 +337,8 @@ fn main() -> u8 {
     arena {
         fix p = new n
         if read(p) != 3 { return 3 }
-        if nullable(nil, n) != 3 { return 4 }
-        if nullable(p, n) != 3 { return 5 }
+        if nilable(nil, n) != 3 { return 4 }
+        if nilable(p, n) != 3 { return 5 }
         if read(new 4) != 4 { return 6 }
     }
     return 0

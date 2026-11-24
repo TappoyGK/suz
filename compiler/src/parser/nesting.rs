@@ -260,7 +260,7 @@ fn kind_height(kind: &ExpressionKind) -> usize {
         Comparison { operands, .. } => operands.iter().map(|v| v.height).max().unwrap_or(0),
         Integer { negative: true, .. } => 1,
         Float(value) if value.starts_with('-') => 1,
-        Integer { .. } | Float(_) | Bool(_) | Char(_) | Name(_) | Variant { .. } | Null | Void => 0,
+        Integer { .. } | Float(_) | Bool(_) | Char(_) | Name(_) | Variant { .. } | Nil | Void => 0,
     }
 }
 

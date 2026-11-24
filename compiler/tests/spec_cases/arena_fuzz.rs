@@ -37,7 +37,7 @@ fn pick_opt_ptr(rng: &mut Rng, has_inner: bool) -> &'static str {
     outer[rng.pick(outer.len())]
 }
 
-fn pick_nonnull_ptr(rng: &mut Rng, has_inner: bool) -> &'static str {
+fn pick_nonnil_ptr(rng: &mut Rng, has_inner: bool) -> &'static str {
     if has_inner && rng.chance(1, 5) {
         let inner = ["inner_a", "inner_holder.q"];
         return inner[rng.pick(inner.len())];
@@ -62,7 +62,7 @@ fn emit_inner_ops(out: &mut String, rng: &mut Rng, phase: usize, in_loop: bool, 
                 let _ = writeln!(out, "{indent}outer_opt = {src}");
             }
             1 => {
-                let src = pick_nonnull_ptr(rng, true);
+                let src = pick_nonnil_ptr(rng, true);
                 let _ = writeln!(out, "{indent}outer_mut = {src}");
             }
             2 => {
@@ -88,7 +88,7 @@ fn emit_inner_ops(out: &mut String, rng: &mut Rng, phase: usize, in_loop: bool, 
             }
             4 => {
                 let p = pick_opt_ptr(rng, true);
-                let q = pick_nonnull_ptr(rng, true);
+                let q = pick_nonnil_ptr(rng, true);
                 if rng.chance(1, 2) {
                     let _ = writeln!(out, "{indent}#outer_mut = $Node {{ value: 42, next: {p} }}");
                 } else {
@@ -160,7 +160,7 @@ fn emit_inner_ops(out: &mut String, rng: &mut Rng, phase: usize, in_loop: bool, 
                 }
             }
             10 => {
-                let target = pick_nonnull_ptr(rng, true);
+                let target = pick_nonnil_ptr(rng, true);
                 let opt = pick_opt_ptr(rng, true);
                 let _ = writeln!(out, "{indent}borrow_mutate({target})");
                 let _ = writeln!(out, "{indent}sink = borrow_read({opt})");
@@ -175,7 +175,7 @@ fn emit_inner_ops(out: &mut String, rng: &mut Rng, phase: usize, in_loop: bool, 
                 }
             }
             12 => {
-                let q = pick_nonnull_ptr(rng, true);
+                let q = pick_nonnil_ptr(rng, true);
                 let h_var = format!("h_arg_{phase}_{op_idx}");
                 let _ = writeln!(
                     out,
@@ -189,7 +189,7 @@ fn emit_inner_ops(out: &mut String, rng: &mut Rng, phase: usize, in_loop: bool, 
                 let _ = writeln!(out, "{indent}sink = outer_holder.read_p()");
             }
             _ => {
-                let q = pick_nonnull_ptr(rng, true);
+                let q = pick_nonnil_ptr(rng, true);
                 let _ = writeln!(out, "{indent}#pp_outer = {q}");
             }
         }

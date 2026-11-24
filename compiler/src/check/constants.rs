@@ -644,7 +644,7 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
             _ => return None,
         },
         Type::ArrayRef { mutable: false, .. } => match &expr.value {
-            Value::Null => Value::Null,
+            Value::Nil => Value::Nil,
             Value::Cast(inner) => {
                 let mut value = evaluate_raw(inner)?;
                 value.ty = expr.ty;
@@ -665,10 +665,10 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
         },
         Type::ArrayRef {
             mutable: true,
-            nullable: true,
+            nilable: true,
             ..
         } => match &expr.value {
-            Value::Null => Value::Null,
+            Value::Nil => Value::Nil,
             Value::Cast(inner) => {
                 let mut value = evaluate_raw(inner)?;
                 value.ty = expr.ty;
@@ -676,8 +676,8 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
             }
             _ => return None,
         },
-        Type::Pointer { .. } if expr.ty.is_nullable() => match &expr.value {
-            Value::Null => Value::Null,
+        Type::Pointer { .. } if expr.ty.is_nilable() => match &expr.value {
+            Value::Nil => Value::Nil,
             Value::Cast(inner) => {
                 let mut value = evaluate_raw(inner)?;
                 value.ty = expr.ty;

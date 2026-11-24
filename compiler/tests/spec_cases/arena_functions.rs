@@ -42,7 +42,7 @@ fn main() -> u8 {{
 }
 
 #[test]
-fn value_captures_preserve_nonnull_pointers_with_independent_local_ids() {
+fn value_captures_preserve_nonnil_pointers_with_independent_local_ids() {
     let output = compile_and_run_c23(
         r#"
 struct Node { v: i64 }
@@ -64,14 +64,14 @@ fn main() -> u8 {
     return 0
 }
 "#,
-        "nonnull-capture.suz",
+        "nonnil-capture.suz",
     );
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     for body in [
         "fix p: mut? Node = nil\ncall(fn [p]() -> i64 { return p.v })",
         "var p: mut? Node = new Node { v: 1 }\ncall(fn [p]() -> i64 { return p.v })\np = nil",
         "var p: mut? Node = new Node { v: 1 }\ncall(fn [var p]() -> i64 { return p.v })\np = nil",
-        // 外側の非nullのローカル番号0と、クロージャの通常の仮引数番号0を混同しない。
+        // 外側の非nilのローカル番号0と、クロージャの通常の仮引数番号0を混同しない。
         "fix p = new Node { v: 1 }\nborrow(fn [p](q: mut? Node) -> i64 { return q.v })",
     ] {
         let source = format!(
@@ -226,7 +226,7 @@ fn arena_calls_check_transitive_regions_and_effects_of_callee_allocations() {
             "arena { var saved: mut? Node = nil\narena { fix b = new Box { p: nil }\nattach(b)\nsaved = b.p } }",
             "arena.store",
         ),
-        // 後の更新も候補集合に含むため、呼び出し前のnullだけで安全とは判定しない。
+        // 後の更新も候補集合に含むため、呼び出し前のnilだけで安全とは判定しない。
         (
             "arena { fix outer = new Node { next: nil }\narena { fix b = new Box { p: nil }\nattach(b)\nb#p = outer } }",
             "accept",
@@ -407,7 +407,7 @@ fn main() -> u8 {
 }
 
 #[test]
-fn let_evaluates_the_pointer_once_and_selects_the_nonnull_or_null_branch() {
+fn let_evaluates_the_pointer_once_and_selects_the_nonnil_or_nil_branch() {
     let source = r#"
 fn select(count: mut? i32, value: mut? i32) -> mut? i32 {
     let c = count { #c += 1 }
