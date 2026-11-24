@@ -241,12 +241,6 @@ impl Resolver<'_> {
             .map(|ty| scope.resolve_type_at(ty, declaration.location))
             .transpose()?;
         let checked = expression(&declaration.initializer, annotation, &scope)?;
-        if super::arena::contains(checked.ty, &self.bindings) {
-            return Err(declaration.location.error(
-                ErrorKind::InvalidSource,
-                crate::diagnostic!("arena.store", "arena pointers cannot be stored globally"),
-            ));
-        }
         if super::ffi::uses_c_environment(&checked) {
             return Err(declaration.initializer.location.error(
                 ErrorKind::InvalidSource,

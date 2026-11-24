@@ -663,6 +663,28 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
             },
             _ => return None,
         },
+        Type::ArrayRef {
+            mutable: true,
+            nullable: true,
+            ..
+        } => match &expr.value {
+            Value::Null => Value::Null,
+            Value::Cast(inner) => {
+                let mut value = evaluate_raw(inner)?;
+                value.ty = expr.ty;
+                return Some(value);
+            }
+            _ => return None,
+        },
+        Type::Pointer { .. } if expr.ty.is_nullable() => match &expr.value {
+            Value::Null => Value::Null,
+            Value::Cast(inner) => {
+                let mut value = evaluate_raw(inner)?;
+                value.ty = expr.ty;
+                return Some(value);
+            }
+            _ => return None,
+        },
         Type::ArrayRef { .. }
         | Type::Array(_)
         | Type::Pointer { .. }
