@@ -1266,6 +1266,7 @@ fn top_level_constants_and_constant_arrays_support_nullable_readonly_arrays_and_
     let source = r#"
 struct Opt { xs: .[i32]? }
 struct Node { value: i32, next: mut? Node }
+struct Wrap { d: .[#[i32]]? }
 fix A: .[i32] = .[1, 2]
 fix N1: .[i32]? = .[1, 2]
 fix N2: .[i32]? = null
@@ -1286,6 +1287,8 @@ fix N5: .[i32]? = NA.[5] or null
 fix REP: .[.[i32]?] = .[null; 3]
 fix PTRS: .[mut? i32] = .[null, P1]
 fix WRS: .[#[i32]?] = .[null, W1]
+fix RW_OPT_ARR: .[.[#[i32]]?] = .[null]
+fix WRAPS: .[Wrap] = .[Wrap { d: null }]
 fix OS: .[Opt] = .[Opt { xs: .[1, 2] }, Opt { xs: null }]
 fix NODES: .[Node] = .[EMPTY]
 
@@ -1311,6 +1314,8 @@ fn main() -> u8 {
     let a = REP.[2] { return 19 }
     let p = PTRS.[1] { return 29 }
     let w = WRS.[1] { return 30 }
+    let r = RW_OPT_ARR.[0] { return 33 }
+    let d = WRAPS.[0].d { return 34 }
     let a = OS.[0].xs { if a.[0] != 1 { return 20 } } else { return 21 }
     let a = OS.[1].xs { return 22 }
     if NODES.[0].value != 9 { return 31 }
@@ -1365,6 +1370,14 @@ fn main() -> u8 {
         ),
         (
             "fix BAD: .[mut i32] = .[]\nfn main() -> u8 { return 0 }",
+            "array.constant",
+        ),
+        (
+            "fix BAD: .[.[#[i32]]?] = .[.[]]\nfn main() -> u8 { return 0 }",
+            "array.constant",
+        ),
+        (
+            "struct Wrap { d: .[#[i32]]? }\nfix BAD: .[Wrap] = .[Wrap { d: .[] }]\nfn main() -> u8 { return 0 }",
             "array.constant",
         ),
     ] {

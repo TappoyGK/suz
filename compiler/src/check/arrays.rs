@@ -562,14 +562,10 @@ fn constant_element_type(
             .fields
             .iter()
             .all(|f| constant_element_type(f.ty, scope, seen)),
+        Type::ArrayRef { nullable: true, .. } => true,
         Type::ArrayRef {
             id, mutable: false, ..
         } => constant_element_type(scope.structs.arrays.borrow().get(id).element, scope, seen),
-        Type::ArrayRef {
-            mutable: true,
-            nullable: true,
-            ..
-        } => true,
         Type::ArrayRef { .. } => false,
         _ => true,
     }
