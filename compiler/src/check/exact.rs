@@ -546,13 +546,20 @@ pub(super) fn cast(
             FailureHandler::Fail { location, .. } => {
                 return Err(super::errors::invalid_handler(*location));
             }
-            FailureHandler::Value(v) => Value::CheckedCast {
-                location,
-                constant_struct: None,
-                wrap: false,
-                operand: Box::new(operand),
-                fallback: Box::new(super::expression::coerced(v, Some(target), bindings)?),
-            },
+            FailureHandler::Value(v) => {
+                let exits = matches!(v.kind, ExpressionKind::Panic(_));
+                Value::CheckedCast {
+                    location,
+                    constant_struct: None,
+                    wrap: false,
+                    operand: Box::new(operand),
+                    fallback: Box::new(super::arrays::bounds::with_fallback(
+                        bindings,
+                        exits,
+                        || super::expression::coerced(v, Some(target), bindings),
+                    )?),
+                }
+            }
             FailureHandler::Return {
                 value,
                 location: return_location,
@@ -561,7 +568,11 @@ pub(super) fn cast(
                 location,
                 wrap: false,
                 operand: Box::new(operand),
-                return_value: Box::new(super::functions::return_value(value, bindings)?),
+                return_value: Box::new(super::arrays::bounds::with_fallback(
+                    bindings,
+                    true,
+                    || super::functions::return_value(value, bindings),
+                )?),
             },
         };
         return Ok(CheckedExpression { ty: target, value });

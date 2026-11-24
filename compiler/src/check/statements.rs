@@ -456,13 +456,11 @@ fn check_for(statement: &Statement, context: &mut StatementContext<'_>) -> Resul
         Binding::local(id, variable_type, false, true, *location),
     );
     super::arrays::bounds::forget_loop_writes(body, None, context.bindings);
-    let pre_loop = context.bindings.array_bounds.facts.borrow().clone();
-    context
-        .bindings
-        .array_bounds
-        .loop_breaks
-        .borrow_mut()
-        .push(Vec::new());
+    let pre_loop = if context.bindings.array_bounds.facts.borrow().is_empty() {
+        None
+    } else {
+        Some(context.bindings.array_bounds.facts.borrow().clone())
+    };
     if let Some(end) = &end {
         super::arrays::bounds::register_nonneg(id, variable_type, context.bindings);
         super::arrays::bounds::loop_bound(id, &start, end, *inclusive, *location, context.bindings);
@@ -478,16 +476,25 @@ fn check_for(statement: &Statement, context: &mut StatementContext<'_>) -> Resul
             super::arrays::bounds::register(id, variable_type, false, Vec::new(), context.bindings);
         }
     }
-    let body = block_with_bindings(
+    let mut declared = vec![name.clone()];
+    let body = check_statements(
         body,
         context.bindings,
         context.next_id,
         context.loop_depth + 1,
-        vec![name.clone()],
+        &mut declared,
     );
-    context.bindings.array_bounds.loop_breaks.borrow_mut().pop();
+    match pre_loop {
+        None => context
+            .bindings
+            .array_bounds
+            .facts
+            .borrow_mut()
+            .clear_edges(),
+        Some(saved) => *context.bindings.array_bounds.facts.borrow_mut() = saved,
+    }
     let body = body?;
-    *context.bindings.array_bounds.facts.borrow_mut() = pre_loop;
+    finish_scope(context.bindings, declared)?;
     context.output.push(CheckedStatement::For {
         id,
         variable_type,

@@ -522,3 +522,107 @@ fn main() -> u8 {
         "{stderr}"
     );
 }
+
+#[test]
+fn assignments_inside_expressions_and_conditional_fallbacks_do_not_forge_bounds_proofs() {
+    // 指摘 1（F20）: 式の中の代入・複合代入・配列/構造体フィールド再代入の後ろで条件を忘れる。
+    for (label, source) in [
+        (
+            "expr block binding",
+            "fn f(a: .[i32]) -> i32 {\n    var i: i64 = 0\n    if 0 <= i < len a {\n        fix z: i32 = expr { i = 77\n1 }\n        return a.[i] + z\n    }\n    return 0\n}\nfn main() -> u8 { return 0 }",
+        ),
+        (
+            "expr block inside && condition",
+            "fn f(a: .[i32]) -> i32 {\n    var i: i64 = 0\n    if 0 <= i < len a && expr { i = 77\ntrue } {\n        return a.[i]\n    }\n    return 0\n}\nfn main() -> u8 { return 0 }",
+        ),
+        (
+            "ifexpr arm assignment",
+            "fn f(a: .[i32], c: i32) -> i32 {\n    var i: i64 = 0\n    if 0 <= i < len a {\n        fix z: i32 = ifexpr c == 0 { expr { i = 77\n1 } } else { 2 }\n        return a.[i] + z\n    }\n    return 0\n}\nfn main() -> u8 { return 0 }",
+        ),
+        (
+            "matchexpr arm assignment",
+            "fn f(a: .[i32], c: i32) -> i32 {\n    var i: i64 = 0\n    if 0 <= i < len a {\n        fix z: i32 = matchexpr c {\n            0 => expr { i = 77\n1 }\n            _ => 2\n        }\n        return a.[i] + z\n    }\n    return 0\n}\nfn main() -> u8 { return 0 }",
+        ),
+        (
+            "or fallback expr block assignment",
+            "fn f(a: .[i32], y: .[i32]) -> i32 {\n    var i: i64 = 0\n    if 0 <= i < len a {\n        fix z: i32 = y.[5] or expr { i = 77\n1 }\n        return a.[i] + z\n    }\n    return 0\n}\nfn main() -> u8 { return 0 }",
+        ),
+        (
+            "call argument expr block assignment",
+            "fn id(x: i32) -> i32 { return x }\nfn f(a: .[i32]) -> i32 {\n    var i: i64 = 0\n    if 0 <= i < len a {\n        fix z: i32 = id(expr { i = 77\n1 })\n        return a.[i] + z\n    }\n    return 0\n}\nfn main() -> u8 { return 0 }",
+        ),
+        (
+            "binary lhs expr block assignment",
+            "fn f(a: .[i32]) -> i32 {\n    var i: i64 = 0\n    if 0 <= i < len a {\n        return expr { i = 77\n1 } + a.[i]\n    }\n    return 0\n}\nfn main() -> u8 { return 0 }",
+        ),
+        (
+            "expr block compound assignment",
+            "fn f(a: .[i32]) -> i32 {\n    var i: i64 = 0\n    if 0 <= i < len a {\n        fix z: i32 = expr { i += 77\n1 }\n        return a.[i] + z\n    }\n    return 0\n}\nfn main() -> u8 { return 0 }",
+        ),
+        (
+            "logical rhs expr block assignment",
+            "fn f(a: .[i32], c: i32) -> i32 {\n    var i: i64 = 0\n    if 0 <= i < len a {\n        fix z = c == 0 && expr { i = 77\ntrue }\n        if z { return a.[i] }\n        return a.[i]\n    }\n    return 0\n}\nfn main() -> u8 { return 0 }",
+        ),
+        (
+            "var array reassigned in expr block",
+            "fn f(a: .[i32], y: .[i32], i: i64) -> i32 {\n    var b = a\n    if 0 <= i < len b {\n        fix z: i32 = expr { b = y\n1 }\n        return b.[i] + z\n    }\n    return 0\n}\nfn main() -> u8 { return 0 }",
+        ),
+        (
+            "var struct field reassigned in expr block",
+            "struct Frame { palette: .[i32] }\nfn f(a: .[i32], y: .[i32], i: i64) -> i32 {\n    var fr = Frame { palette: a }\n    if 0 <= i < len fr.palette {\n        fix z: i32 = expr { fr#palette = y\n1 }\n        return fr.palette.[i] + z\n    }\n    return 0\n}\nfn main() -> u8 { return 0 }",
+        ),
+        (
+            "slice bound reassigned in expr block",
+            "fn f(a: .[i32]) -> i64 {\n    var s: i64 = 0\n    var e: i64 = 1\n    if 0 <= s <= e <= len a {\n        fix z: i32 = expr { e = 77\n1 }\n        fix sub = a.[s:e]\n        return len sub as i64 + z as i64\n    }\n    return 0\n}\nfn main() -> u8 { return 0 }",
+        ),
+        (
+            "guard exit then expr block assignment",
+            "fn f(a: .[i32]) -> i32 {\n    var i: i64 = 0\n    if not (0 <= i < len a) { return 0 }\n    fix z: i32 = expr { i = 77\n1 }\n    return a.[i] + z\n}\nfn main() -> u8 { return 0 }",
+        ),
+        (
+            "while body expr block assignment",
+            "fn f(a: .[i32]) -> i32 {\n    var i: i64 = 0\n    while 0 <= i < len a {\n        fix z: i32 = expr { i = 77\n1 }\n        return a.[i] + z\n    }\n    return 0\n}\nfn main() -> u8 { return 0 }",
+        ),
+        (
+            "post or-return then expr block assignment",
+            "fn f(a: .[i32]) -> i32 {\n    var i: i64 = 0\n    fix v = a.[i] or return 0\n    fix z: i32 = expr { i = 77\n1 }\n    return v + a.[i] + z\n}\nfn main() -> u8 { return 0 }",
+        ),
+        // 指摘 2（F21）: or の代替値内の or panic は、外側のアクセスが成功した場合に評価されない。
+        (
+            "fallback or panic read does not prove outer read",
+            "fn f(a: .[i32], b: .[i32], i: i64) -> i32 {\n    fix v = b.[0] or (a.[i] or panic `oob`)\n    return v + a.[i]\n}\nfn main() -> u8 { return 0 }",
+        ),
+        (
+            "fallback or panic slice does not prove outer slice",
+            "fn f(a: .[i32], b: .[i32], s: i64, e: i64) -> i64 {\n    fix v = b.[0:1] or (a.[s:e] or panic `oob`)\n    fix w = a.[s:e]\n    return len v as i64 + len w as i64\n}\nfn main() -> u8 { return 0 }",
+        ),
+    ] {
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(error.rule(), "array.access-handler", "{label}: {error}");
+    }
+
+    // 書き込みも expr ブロック内代入の後ろでは実行時範囲検査を行いパニックする。
+    let write_oob = compile_and_run_c23(
+        r#"
+fn f(a: #[i32]) -> void {
+    var i: i64 = 0
+    if 0 <= i < len a {
+        fix z: i32 = expr { i = 77
+            1 }
+        a#[i] = z
+    }
+}
+fn main() -> u8 {
+    fix a: #[i32] = new #[10, 20, 30]
+    f(a)
+    return 0
+}
+"#,
+        "expr-block-write-oob.suz",
+    );
+    assert_eq!(write_oob.status.code(), Some(101), "{write_oob:?}");
+    assert!(
+        String::from_utf8_lossy(&write_oob.stderr).contains("[rt.array-bounds]"),
+        "{write_oob:?}"
+    );
+}

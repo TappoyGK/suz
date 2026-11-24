@@ -44,26 +44,72 @@ impl Affine {
     }
 }
 
+/// 制約の根拠となった条件のソース位置群。0〜1 件ではヒープ確保を避ける。
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub(in crate::check) enum Origins {
+    #[default]
+    Empty,
+    One(Location),
+    Many(Vec<Location>),
+}
+
+impl Origins {
+    pub fn from_vec(mut v: Vec<Location>) -> Self {
+        v.sort_by_key(|l| (l.line, l.column));
+        v.dedup();
+        match v.len() {
+            0 => Self::Empty,
+            1 => Self::One(v[0]),
+            _ => Self::Many(v),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        matches!(self, Self::Empty)
+    }
+
+    pub fn to_vec(&self) -> Vec<Location> {
+        match self {
+            Self::Empty => Vec::new(),
+            Self::One(l) => vec![*l],
+            Self::Many(v) => v.clone(),
+        }
+    }
+
+    fn merge(&self, other: &Self) -> Self {
+        match (self, other) {
+            (Self::Empty, b) => b.clone(),
+            (a, Self::Empty) => a.clone(),
+            (Self::One(a), Self::One(b)) if a == b => Self::One(*a),
+            (Self::One(a), Self::One(b)) => {
+                if (a.line, a.column) <= (b.line, b.column) {
+                    Self::Many(vec![*a, *b])
+                } else {
+                    Self::Many(vec![*b, *a])
+                }
+            }
+            _ => {
+                let mut out = self.to_vec();
+                out.extend(other.to_vec());
+                Self::from_vec(out)
+            }
+        }
+    }
+}
+
 /// 制約 `u - v <= bound` と、その根拠となった条件のソース位置群。
 #[derive(Clone, PartialEq, Eq, Debug)]
 struct Edge {
     bound: i128,
-    origins: Vec<Location>,
+    origins: Origins,
 }
 
 /// 判定済みの条件集合（疎グラフ表現）。
 #[derive(Clone, Default, Debug)]
 pub(in crate::check) struct Facts {
-    edges: BTreeMap<(Term, Term), Edge>,
+    edges: Vec<(Term, Term, Edge)>,
     /// 符号なし整数型・`len_t` のローカル束縛（常に 0 以上であり、代入でも失われない）。
-    nonneg_locals: BTreeSet<usize>,
-}
-
-fn merge_origins(a: &[Location], b: &[Location]) -> Vec<Location> {
-    let mut out: Vec<Location> = a.iter().chain(b.iter()).copied().collect();
-    out.sort_by_key(|l| (l.line, l.column));
-    out.dedup();
-    out
+    nonneg_locals: Vec<usize>,
 }
 
 impl Facts {
@@ -71,12 +117,22 @@ impl Facts {
         self.edges.is_empty()
     }
 
+    pub fn clear_edges(&mut self) {
+        self.edges.clear();
+    }
+
     pub fn mark_nonneg(&mut self, id: usize) {
-        self.nonneg_locals.insert(id);
+        if !self.nonneg_locals.contains(&id) {
+            self.nonneg_locals.push(id);
+        }
     }
 
     pub fn unmark_nonneg(&mut self, id: usize) {
-        self.nonneg_locals.remove(&id);
+        if self.nonneg_locals.last() == Some(&id) {
+            self.nonneg_locals.pop();
+        } else if let Some(pos) = self.nonneg_locals.iter().position(|x| *x == id) {
+            self.nonneg_locals.swap_remove(pos);
+        }
     }
 
     fn is_implicit_nonneg(&self, term: &Term) -> bool {
@@ -87,24 +143,32 @@ impl Facts {
         }
     }
 
+    fn get_edge(&self, u: &Term, v: &Term) -> Option<&Edge> {
+        self.edges
+            .iter()
+            .find(|(eu, ev, _)| eu == u && ev == v)
+            .map(|(_, _, e)| e)
+    }
+
     /// `u - v <= bound` を記録する。既存の制約より厳しい場合のみ更新する。
-    pub fn add_diff(&mut self, u: Term, v: Term, bound: i128, origins: Vec<Location>) {
+    pub fn add_diff(&mut self, u: Term, v: Term, bound: i128, origins: Origins) {
         if u == v {
             return;
         }
         if u == Term::Zero && self.is_implicit_nonneg(&v) && bound >= 0 && origins.is_empty() {
             return;
         }
-        match self.edges.get_mut(&(u.clone(), v.clone())) {
-            Some(existing) => {
-                if bound < existing.bound {
-                    existing.bound = bound;
-                    existing.origins = origins;
-                }
+        if let Some((_, _, existing)) = self
+            .edges
+            .iter_mut()
+            .find(|(eu, ev, _)| *eu == u && *ev == v)
+        {
+            if bound < existing.bound {
+                existing.bound = bound;
+                existing.origins = origins;
             }
-            None => {
-                self.edges.insert((u, v), Edge { bound, origins });
-            }
+        } else {
+            self.edges.push((u, v, Edge { bound, origins }));
         }
     }
 
@@ -129,7 +193,7 @@ impl Facts {
         } else {
             op
         };
-        let origins = vec![location];
+        let origins = Origins::One(location);
         match op {
             ComparisonOperator::Less => {
                 if let Some(b) = right
@@ -175,7 +239,7 @@ impl Facts {
     fn adjacency(&self) -> (Vec<Term>, Vec<Vec<(usize, Edge)>>) {
         let mut terms_set = BTreeSet::new();
         terms_set.insert(Term::Zero);
-        for (u, v) in self.edges.keys() {
+        for (u, v, _) in &self.edges {
             terms_set.insert(u.clone());
             terms_set.insert(v.clone());
         }
@@ -190,12 +254,12 @@ impl Facts {
                     i,
                     Edge {
                         bound: 0,
-                        origins: Vec::new(),
+                        origins: Origins::Empty,
                     },
                 ));
             }
         }
-        for ((u, v), edge) in &self.edges {
+        for (u, v, edge) in &self.edges {
             let ui = index_of(u);
             let vi = index_of(v);
             adj[ui].push((vi, edge.clone()));
@@ -211,7 +275,7 @@ impl Facts {
         let mut queue = VecDeque::new();
         dist[start] = Some(Edge {
             bound: 0,
-            origins: Vec::new(),
+            origins: Origins::Empty,
         });
         queue.push_back(start);
         in_queue[start] = true;
@@ -231,7 +295,7 @@ impl Facts {
                 if better && relax_count[*v] < n {
                     dist[*v] = Some(Edge {
                         bound: cand,
-                        origins: merge_origins(&du.origins, &edge.origins),
+                        origins: du.origins.merge(&edge.origins),
                     });
                     relax_count[*v] += 1;
                     if !in_queue[*v] {
@@ -257,17 +321,17 @@ impl Facts {
             return None;
         }
         // 直接辺で満たせる場合は探索を省く。
-        if let Some(edge) = self.edges.get(&(left.term.clone(), right.term.clone()))
+        if let Some(edge) = self.get_edge(&left.term, &right.term)
             && edge.bound <= needed
         {
-            return Some(edge.origins.clone());
+            return Some(edge.origins.to_vec());
         }
         let (terms, adj) = self.adjacency();
         let ui = terms.binary_search(&left.term).ok()?;
         let vi = terms.binary_search(&right.term).ok()?;
         let dist = Self::shortest_from(ui, terms.len(), &adj);
         let edge = dist[vi].as_ref()?;
-        (edge.bound <= needed).then(|| edge.origins.clone())
+        (edge.bound <= needed).then(|| edge.origins.to_vec())
     }
 
     /// `left < right` が導けるなら、その根拠となった条件のソース位置を返す。
@@ -281,13 +345,13 @@ impl Facts {
         if self.edges.is_empty() {
             return;
         }
-        let mut removed = BTreeSet::new();
-        for (u, v) in self.edges.keys() {
-            if predicate(u) {
-                removed.insert(u.clone());
+        let mut removed = Vec::new();
+        for (u, v, _) in &self.edges {
+            if predicate(u) && !removed.contains(u) {
+                removed.push(u.clone());
             }
-            if predicate(v) {
-                removed.insert(v.clone());
+            if predicate(v) && !removed.contains(v) {
+                removed.push(v.clone());
             }
         }
         if removed.is_empty() {
@@ -296,20 +360,19 @@ impl Facts {
         for target in &removed {
             let mut incoming: Vec<(Term, Edge)> = Vec::new();
             let mut outgoing: Vec<(Term, Edge)> = Vec::new();
-            for ((u, v), edge) in &self.edges {
+            for (u, v, edge) in &self.edges {
                 if v == target && u != target {
                     incoming.push((u.clone(), edge.clone()));
                 } else if u == target && v != target {
                     outgoing.push((v.clone(), edge.clone()));
                 }
             }
-            // 暗黙の 0 <= target も incoming として考慮する。
             if self.is_implicit_nonneg(target) {
                 incoming.push((
                     Term::Zero,
                     Edge {
                         bound: 0,
-                        origins: Vec::new(),
+                        origins: Origins::Empty,
                     },
                 ));
             }
@@ -322,16 +385,11 @@ impl Facts {
                         continue;
                     }
                     if let Some(bound) = e1.bound.checked_add(e2.bound) {
-                        self.add_diff(
-                            u.clone(),
-                            v.clone(),
-                            bound,
-                            merge_origins(&e1.origins, &e2.origins),
-                        );
+                        self.add_diff(u.clone(), v.clone(), bound, e1.origins.merge(&e2.origins));
                     }
                 }
             }
-            self.edges.retain(|(u, v), _| u != target && v != target);
+            self.edges.retain(|(u, v, _)| u != target && v != target);
         }
     }
 
@@ -370,27 +428,27 @@ impl Facts {
         }
         if paths.iter().any(|f| f.is_empty()) {
             return Facts {
-                edges: BTreeMap::new(),
+                edges: Vec::new(),
                 nonneg_locals,
             };
         }
         let mut joined = Facts {
-            edges: BTreeMap::new(),
+            edges: Vec::new(),
             nonneg_locals,
         };
         // 全経路で完全に一致する辺は探索せずそのまま引き継ぐ。
         let mut changed_pairs: BTreeSet<(Term, Term)> = BTreeSet::new();
-        for (pair, edge) in &first.edges {
-            if rest.iter().all(|p| p.edges.get(pair) == Some(edge)) {
-                joined.edges.insert(pair.clone(), edge.clone());
+        for (u, v, edge) in &first.edges {
+            if rest.iter().all(|p| p.get_edge(u, v) == Some(edge)) {
+                joined.edges.push((u.clone(), v.clone(), edge.clone()));
             } else {
-                changed_pairs.insert(pair.clone());
+                changed_pairs.insert((u.clone(), v.clone()));
             }
         }
         for p in rest {
-            for pair in p.edges.keys() {
-                if !joined.edges.contains_key(pair) {
-                    changed_pairs.insert(pair.clone());
+            for (u, v, _) in &p.edges {
+                if joined.get_edge(u, v).is_none() {
+                    changed_pairs.insert((u.clone(), v.clone()));
                 }
             }
         }
@@ -414,7 +472,7 @@ impl Facts {
         }
         for (u, v) in &changed_pairs {
             let mut max_bound: Option<i128> = None;
-            let mut origins: Vec<Location> = Vec::new();
+            let mut origins = Origins::Empty;
             let mut all_have = true;
             for (idx, (terms, _)) in graphs.iter().enumerate() {
                 let Some(dist) = dist_cache[idx].get(u) else {
@@ -430,7 +488,7 @@ impl Facts {
                     break;
                 };
                 max_bound = Some(max_bound.map_or(edge.bound, |m| m.max(edge.bound)));
-                origins = merge_origins(&origins, &edge.origins);
+                origins = origins.merge(&edge.origins);
             }
             if all_have && let Some(bound) = max_bound {
                 joined.add_diff(u.clone(), v.clone(), bound, origins);
@@ -444,7 +502,7 @@ impl Facts {
         let mut out = Facts::default();
         for &id in &self.nonneg_locals {
             if let Some(Term::Local(new_id)) = map_term(&Term::Local(id)) {
-                out.nonneg_locals.insert(new_id);
+                out.mark_nonneg(new_id);
             }
         }
         if self.edges.is_empty() {

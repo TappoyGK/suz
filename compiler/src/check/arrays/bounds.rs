@@ -6,7 +6,7 @@ use super::{
         ir::{CheckedExpression, CheckedHandler, CheckedStatement, IntegerOperation, Value},
         scope::Scope,
     },
-    facts::{Affine, Facts, Term},
+    facts::{Affine, Facts, Origins, Term},
 };
 use crate::{
     Diagnostic, ErrorKind,
@@ -47,6 +47,7 @@ pub(in crate::check) struct Loop {
     length: Dimension,
     start: i128,
     margin: i128,
+    location: Location,
 }
 
 /// 範囲保証の根拠となった条件のソース位置群。
@@ -234,10 +235,8 @@ pub(in crate::check) fn register(
 fn length(v: &CheckedExpression, scope: &Scope) -> Option<Dimension> {
     match &v.value {
         Value::Local(id) => scope.array_bounds.names.get(id).copied(),
-        Value::Len(target) => shape(target, scope).first().copied().flatten(),
-        Value::ArrayLength { target, dimension } => {
-            shape(target, scope).get(*dimension).copied().flatten()
-        }
+        Value::Len(target) => target_dimension(target, 0, scope),
+        Value::ArrayLength { target, dimension } => target_dimension(target, *dimension, scope),
         _ => None,
     }
 }
@@ -325,9 +324,22 @@ fn array_value_path(target: &CheckedExpression) -> Option<(usize, Vec<usize>)> {
     }
 }
 
+/// ローカル配列束縛の `axis` 番目の寸法を `Vec` を複製せずに引く。
+fn target_dimension(target: &CheckedExpression, axis: usize, scope: &Scope) -> Option<Dimension> {
+    match &target.value {
+        Value::Local(id) => scope
+            .array_bounds
+            .arrays
+            .get(id)
+            .and_then(|dims| dims.get(axis).copied().flatten()),
+        Value::Cast(inner) => target_dimension(inner, axis, scope),
+        _ => shape(target, scope).get(axis).copied().flatten(),
+    }
+}
+
 /// 配列参照 `target` の `axis` 番目の次元の長さを、仕様 1.1 の項として抽出する。
 fn target_dim_affine(target: &CheckedExpression, axis: usize, scope: &Scope) -> Option<Affine> {
-    if let Some(dim) = shape(target, scope).get(axis).copied().flatten() {
+    if let Some(dim) = target_dimension(target, axis, scope) {
         return Some(dim_to_affine(dim));
     }
     let (root, fields) = array_value_path(target)?;
@@ -386,8 +398,12 @@ pub(in crate::check) fn loop_bound(
     location: Location,
     scope: &mut Scope,
 ) {
+    let start_const = constant(start);
     let i_term = Affine::term(Term::Local(id));
-    if let Some(s) = affine(start, scope) {
+    if let Some(s) = start_const
+        .map(Affine::constant)
+        .or_else(|| affine(start, scope))
+    {
         scope.array_bounds.facts.borrow_mut().add_comparison(
             &s,
             ComparisonOperator::LessEqual,
@@ -396,7 +412,14 @@ pub(in crate::check) fn loop_bound(
             location,
         );
     }
-    if let Some(e) = affine(end, scope) {
+    let end_offset = offset(end);
+    let end_dim = end_offset.and_then(|(base, _)| length(base, scope));
+    let end_affine = if let (Some((_, delta)), Some(dim)) = (end_offset, end_dim) {
+        dim_to_affine(dim).shifted(delta)
+    } else {
+        affine(end, scope)
+    };
+    if let Some(e) = end_affine {
         let op = if inclusive {
             ComparisonOperator::LessEqual
         } else {
@@ -411,16 +434,16 @@ pub(in crate::check) fn loop_bound(
     if inclusive {
         return;
     }
-    let Some(s) = constant(start).filter(|n| *n >= 0) else {
+    let Some(s) = start_const.filter(|n| *n >= 0) else {
         return;
     };
-    let Some((end, offset)) = offset(end).filter(|(_, n)| *n <= 0) else {
+    let Some((_, delta)) = end_offset.filter(|(_, n)| *n <= 0) else {
         return;
     };
-    let Some(length @ (Dimension::Source(..) | Dimension::Static(..))) = length(end, scope) else {
+    let Some(length @ (Dimension::Source(..) | Dimension::Static(..))) = end_dim else {
         return;
     };
-    let Some(margin) = offset.checked_neg() else {
+    let Some(margin) = delta.checked_neg() else {
         return;
     };
     scope.array_bounds.loops.insert(
@@ -429,6 +452,7 @@ pub(in crate::check) fn loop_bound(
             length,
             start: s,
             margin,
+            location,
         },
     );
 }
@@ -539,11 +563,52 @@ pub(in crate::check) fn record_binding_remainder(
         origins.push(location);
     }
     let idx = Affine::term(Term::Local(id));
+    let origins = Origins::from_vec(origins);
     let mut facts = scope.array_bounds.facts.borrow_mut();
     facts.add_diff(Term::Zero, Term::Local(id), 0, origins.clone());
     if let Some(bound) = dim.offset.checked_sub(1) {
         facts.add_diff(idx.term, dim.term, bound, origins);
     }
+}
+
+/// 式が条件集合を一切変化させない単純なリテラル・変数参照であるかを返す。
+pub(in crate::check) fn is_facts_pure(expr: &Expression) -> bool {
+    match &expr.kind {
+        ExpressionKind::Integer { .. }
+        | ExpressionKind::Float(_)
+        | ExpressionKind::Bool(_)
+        | ExpressionKind::Char(_)
+        | ExpressionKind::Nil
+        | ExpressionKind::Void
+        | ExpressionKind::Name(_)
+        | ExpressionKind::Variant { .. } => true,
+        ExpressionKind::Group(inner)
+        | ExpressionKind::Negate(inner)
+        | ExpressionKind::BitNot(inner) => is_facts_pure(inner),
+        _ => false,
+    }
+}
+
+/// 条件付きで評価される代替値（`or 式`・`or return`・`or error`）を検査する。
+/// 脱出するハンドラでは事前状態を復元し、値を返すハンドラでは成功経路と失敗経路を合流する。
+pub(in crate::check) fn with_fallback<T>(
+    scope: &Scope,
+    exits: bool,
+    f: impl FnOnce() -> Result<T, Diagnostic>,
+) -> Result<T, Diagnostic> {
+    let before = scope.array_bounds.facts.borrow().clone();
+    let result = f();
+    if result.is_ok() {
+        if exits {
+            *scope.array_bounds.facts.borrow_mut() = before;
+        } else {
+            let after = scope.array_bounds.facts.borrow().clone();
+            *scope.array_bounds.facts.borrow_mut() = Facts::join_all(&[before, after]);
+        }
+    } else {
+        *scope.array_bounds.facts.borrow_mut() = before;
+    }
+    result
 }
 
 /// 範囲外で抜ける（`or return` / `or panic`）配列読み出し・切り出しの後ろで、通過した範囲条件を覚える。
@@ -644,21 +709,56 @@ pub(super) fn index(
     target: &CheckedExpression,
     value: &CheckedExpression,
     axis: usize,
+    need_origins: bool,
     scope: &Scope,
 ) -> Option<Proof> {
+    let dim_opt = target_dimension(target, axis, scope);
     // 既知の定数長と定数添字の組（new #[0; 3] の a.[0] 等）。
-    if let Some(n) = shape(target, scope)
-        .get(axis)
-        .copied()
-        .flatten()
-        .and_then(Dimension::known)
+    if let Some(n) = dim_opt.and_then(Dimension::known)
         && let Some(i) = constant(value)
         && 0 <= i
         && i < n
     {
         return Some(Proof::default());
     }
-    let dim = target_dim_affine(target, axis, scope)?;
+    // for ループ変数の直接証明を O(1) で判定する。
+    if let Some(dimension) = dim_opt
+        && let Some((base, c)) = offset(value)
+        && let Value::Local(id) = base.value
+        && let Some(bound) = scope
+            .array_bounds
+            .loops
+            .get(&id)
+            .filter(|b| b.length == dimension)
+        && let Some(low) = bound.start.checked_add(c).filter(|n| *n >= 0)
+        && c <= bound.margin
+    {
+        let max_length = dimension.known().unwrap_or(i32::MAX as i128);
+        if let Some(high) = max_length
+            .checked_sub(bound.margin)
+            .and_then(|n| n.checked_sub(1))
+            .and_then(|n| n.checked_add(c))
+            && value
+                .ty
+                .integer_bounds()
+                .is_some_and(|(min, max)| low >= min && high <= max)
+        {
+            return Some(if need_origins {
+                Proof {
+                    origins: vec![bound.location],
+                }
+            } else {
+                Proof::default()
+            });
+        }
+    }
+    let dim = match dim_opt {
+        Some(d) => dim_to_affine(d),
+        None => {
+            let (root, fields) = array_value_path(target)?;
+            Affine::term(Term::PathDim(root, fields, axis))
+        }
+    };
     if let Some((m_dim, origins)) = remainder_dim_proof(value, scope)
         && m_dim == dim
     {
@@ -789,6 +889,7 @@ pub(in crate::check) fn captures(
                     length: rename(bound.length),
                     start: bound.start,
                     margin: bound.margin,
+                    location: bound.location,
                 },
             );
         }
