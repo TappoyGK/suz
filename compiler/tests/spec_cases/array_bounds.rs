@@ -443,3 +443,82 @@ fn main() -> u8 { return 0 }
     let warnings = suz::check_source(allowed.as_bytes(), suz::ArithmeticMode::Default).unwrap();
     assert!(warnings.is_empty(), "{warnings:?}");
 }
+
+#[test]
+fn post_read_unsigned_and_remainder_bounds_proofs_work_and_empty_rem_panics_as_div_zero() {
+    let output = compile_and_run_c23(
+        r#"
+fn read_twice(a: .[i32], i: i64) -> i32 {
+    fix v = a.[i] or return -1
+    return v + a.[i]
+}
+
+fn sum_len_t(a: .[i32]) -> i32 {
+    var i: len_t = 0
+    var total: i32 = 0
+    while i < len a {
+        total += a.[i]
+        i += 1
+    }
+    return total
+}
+
+fn pick_u32(palette: .[i32], n: u32) -> i32 {
+    return palette.[n % len palette]
+}
+
+fn pick_u32_dim(palette: .[i32; m], n: u32) -> i32 {
+    fix idx = n % m
+    return palette.[idx]
+}
+
+fn pick_signed_checked(palette: .[i32], n: i32) -> i32 {
+    if 0 <= n {
+        return palette.[n % len palette]
+    }
+    return 0
+}
+
+fn main() -> u8 {
+    fix pal: .[i32] = .[10, 20, 30]
+    if read_twice(pal, 1) != 40 || read_twice(pal, 9) != -1 { return 1 }
+    if sum_len_t(pal) != 60 { return 2 }
+    if pick_u32(pal, 5) != 30 { return 3 }
+    if pick_u32_dim(pal, 4) != 20 { return 4 }
+    if pick_signed_checked(pal, 3) != 10 || pick_signed_checked(pal, -1) != 0 { return 5 }
+    return 0
+}
+"#,
+        "step2-bounds-proof.suz",
+    );
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+
+    // 符号付き i32 で 0 <= n を確認していない n % len palette は or を要求する。
+    let signed_err = suz::compile(
+        b"fn f(palette: .[i32], n: i32) -> i32 {\n    return palette.[n % len palette]\n}\nfn main() -> u8 { return 0 }",
+    )
+    .unwrap_err();
+    assert_eq!(signed_err.rule(), "array.access-handler", "{signed_err}");
+
+    // len palette == 0 のときは、配列範囲外ではなく 0 除算でパニックする。
+    let div_zero = compile_and_run_c23(
+        r#"
+fn pick(palette: .[i32], n: u32) -> i32 {
+    return palette.[n % len palette]
+}
+fn main() -> u8 {
+    fix empty: .[i32] = .[]
+    fix v = pick(empty, 3)
+    return v as u8 or 0
+}
+"#,
+        "step2-rem-div-zero.suz",
+    );
+    assert_eq!(div_zero.status.code(), Some(101), "{div_zero:?}");
+    let stderr = String::from_utf8_lossy(&div_zero.stderr);
+    assert!(!stderr.contains("[rt.array-bounds]"), "{stderr}");
+    assert!(
+        stderr.contains("[rt.div-zero]") || stderr.contains("[rt.int-overflow]"),
+        "{stderr}"
+    );
+}

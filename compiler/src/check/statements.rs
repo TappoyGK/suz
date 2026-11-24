@@ -464,6 +464,7 @@ fn check_for(statement: &Statement, context: &mut StatementContext<'_>) -> Resul
         .borrow_mut()
         .push(Vec::new());
     if let Some(end) = &end {
+        super::arrays::bounds::register_nonneg(id, variable_type, context.bindings);
         super::arrays::bounds::loop_bound(id, &start, end, *inclusive, *location, context.bindings);
     } else if let Some(array) = start.ty.array_id() {
         let rank = context.bindings.structs.arrays.borrow().get(array).rank;
@@ -579,6 +580,7 @@ fn check_binding(
         Binding::local(id, ty, *mutable, false, *location),
     );
     super::arrays::bounds::register(id, ty, *mutable, dimensions_known, context.bindings);
+    super::arrays::bounds::record_binding_remainder(id, &initializer, *location, context.bindings);
     context.output.push(CheckedStatement::Binding {
         location: *location,
         mutable: *mutable,
@@ -692,6 +694,11 @@ pub(super) fn finish_scope(bindings: &mut Scope, declared: Vec<String>) -> Resul
             .facts
             .borrow_mut()
             .forget_local(binding.id);
+        bindings
+            .array_bounds
+            .facts
+            .borrow_mut()
+            .unmark_nonneg(binding.id);
         if binding.mutable && !binding.assigned.get() {
             let error = binding.location.error(
                 ErrorKind::InvalidSource,

@@ -455,6 +455,14 @@ pub(super) fn read_or_text(
             ));
         }
     };
+    let exits_on_oob = match fallback {
+        Some(FailureHandler::Return { .. }) => true,
+        Some(FailureHandler::Value(v)) => matches!(v.kind, ExpressionKind::Panic(_)),
+        _ => false,
+    };
+    if exits_on_oob {
+        bounds::record_checked_access(&result, scope);
+    }
     match &mut result.value {
         Value::ArrayRead { handler: h, .. } | Value::ArrayView { handler: h, .. } => {
             *h = Some(handler)

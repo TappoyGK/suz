@@ -189,6 +189,25 @@ pub(in crate::check) fn shape(v: &CheckedExpression, scope: &Scope) -> Vec<Optio
     }
 }
 
+fn is_nonneg_int(ty: Type) -> bool {
+    matches!(
+        ty,
+        Type::Integer(
+            crate::ast::IntegerType::U8
+                | crate::ast::IntegerType::U16
+                | crate::ast::IntegerType::U32
+                | crate::ast::IntegerType::U64
+                | crate::ast::IntegerType::Len
+        )
+    )
+}
+
+pub(in crate::check) fn register_nonneg(id: usize, ty: Type, scope: &Scope) {
+    if is_nonneg_int(ty) {
+        scope.array_bounds.facts.borrow_mut().mark_nonneg(id);
+    }
+}
+
 pub(in crate::check) fn register(
     id: usize,
     ty: Type,
@@ -196,6 +215,7 @@ pub(in crate::check) fn register(
     mut dimensions: Vec<Option<Dimension>>,
     scope: &mut Scope,
 ) {
+    register_nonneg(id, ty, scope);
     let Some(array) = ty.array_id() else { return };
     if mutable {
         scope.array_bounds.arrays.remove(&id);
@@ -434,6 +454,192 @@ pub(in crate::check) fn record_match_arm(
     );
 }
 
+/// `Exact` 式が `0 <= expr` を満たすかを判定し、根拠位置を返す。
+fn proves_exact_nonneg(exact: &Exact, scope: &Scope) -> Option<Vec<Location>> {
+    if let Some(n) = exact_constant(exact) {
+        return (n >= 0).then(Vec::new);
+    }
+    if let ExactKind::Leaf(expr) = &exact.kind {
+        if is_nonneg_int(expr.ty) {
+            return Some(Vec::new());
+        }
+        let a = affine(expr, scope)?;
+        return scope
+            .array_bounds
+            .facts
+            .borrow()
+            .proves_le(&Affine::constant(0), &a);
+    }
+    let wrapped = CheckedExpression {
+        ty: Type::Integer(crate::ast::IntegerType::I64),
+        value: Value::Exact(Box::new(exact.clone())),
+    };
+    let a = affine(&wrapped, scope)?;
+    scope
+        .array_bounds
+        .facts
+        .borrow()
+        .proves_le(&Affine::constant(0), &a)
+}
+
+/// `Exact` 式が配列の `len a` または寸法名であれば、対応する `Affine` を返す。
+fn exact_dim_expr(exact: &Exact, scope: &Scope) -> Option<Affine> {
+    let ExactKind::Leaf(expr) = &exact.kind else {
+        return None;
+    };
+    dim_expr_affine(expr, scope)
+}
+
+fn dim_expr_affine(expr: &CheckedExpression, scope: &Scope) -> Option<Affine> {
+    match &expr.value {
+        Value::Local(id) => scope.array_bounds.names.get(id).copied().map(dim_to_affine),
+        Value::Len(target) => target_dim_affine(target, 0, scope),
+        Value::ArrayLength { target, dimension } => target_dim_affine(target, *dimension, scope),
+        Value::Cast(inner) if expr.ty.is_integer() && inner.ty.is_integer() => {
+            dim_expr_affine(inner, scope)
+        }
+        Value::Exact(e) => exact_dim_expr(e, scope),
+        _ => None,
+    }
+}
+
+/// `x % m`（`or` ハンドラなし）で `0 <= x` が導け、かつ `m` が `len a` または寸法名なら `(m, origins)` を返す。
+fn remainder_dim_proof(expr: &CheckedExpression, scope: &Scope) -> Option<(Affine, Vec<Location>)> {
+    let exact = match &expr.value {
+        Value::IntegerArithmetic {
+            operation: IntegerOperation::Exact(e),
+            handler: None,
+            ..
+        } => e.as_ref(),
+        Value::Exact(e) => e.as_ref(),
+        Value::Cast(inner) if expr.ty.is_integer() && inner.ty.is_integer() => {
+            return remainder_dim_proof(inner, scope);
+        }
+        _ => return None,
+    };
+    let ExactKind::Binary(BinaryOperator::Remainder, left, right) = &exact.kind else {
+        return None;
+    };
+    let dim = exact_dim_expr(right, scope)?;
+    let origins = proves_exact_nonneg(left, scope)?;
+    Some((dim, origins))
+}
+
+/// `fix idx = x % len a` のように剰余を束縛したとき、`0 <= idx < len a` を覚える。
+pub(in crate::check) fn record_binding_remainder(
+    id: usize,
+    initializer: &CheckedExpression,
+    location: Location,
+    scope: &Scope,
+) {
+    let Some((dim, mut origins)) = remainder_dim_proof(initializer, scope) else {
+        return;
+    };
+    if !origins.contains(&location) {
+        origins.push(location);
+    }
+    let idx = Affine::term(Term::Local(id));
+    let mut facts = scope.array_bounds.facts.borrow_mut();
+    facts.add_diff(Term::Zero, Term::Local(id), 0, origins.clone());
+    if let Some(bound) = dim.offset.checked_sub(1) {
+        facts.add_diff(idx.term, dim.term, bound, origins);
+    }
+}
+
+/// 範囲外で抜ける（`or return` / `or panic`）配列読み出し・切り出しの後ろで、通過した範囲条件を覚える。
+pub(in crate::check) fn record_checked_access(expr: &CheckedExpression, scope: &Scope) {
+    match &expr.value {
+        Value::ArrayRead { address, .. } => {
+            if let Value::ArrayElement { target, indices } = &address.value {
+                record_checked_access(target, scope);
+                for (axis, (idx_expr, loc, _)) in indices.iter().enumerate() {
+                    if let (Some(dim), Some(idx)) = (
+                        target_dim_affine(target, axis, scope),
+                        affine(idx_expr, scope),
+                    ) {
+                        let mut facts = scope.array_bounds.facts.borrow_mut();
+                        facts.add_comparison(
+                            &Affine::constant(0),
+                            ComparisonOperator::LessEqual,
+                            &idx,
+                            false,
+                            *loc,
+                        );
+                        facts.add_comparison(&idx, ComparisonOperator::Less, &dim, false, *loc);
+                    }
+                }
+            }
+        }
+        Value::ArrayView {
+            target,
+            start,
+            end,
+            index,
+            location,
+            ..
+        } => {
+            record_checked_access(target, scope);
+            if let Some(dim) = target_dim_affine(target, 0, scope) {
+                if *index {
+                    if let Some(idx_expr) = start.as_deref()
+                        && let Some(idx) = affine(idx_expr, scope)
+                    {
+                        let mut facts = scope.array_bounds.facts.borrow_mut();
+                        facts.add_comparison(
+                            &Affine::constant(0),
+                            ComparisonOperator::LessEqual,
+                            &idx,
+                            false,
+                            *location,
+                        );
+                        facts.add_comparison(
+                            &idx,
+                            ComparisonOperator::Less,
+                            &dim,
+                            false,
+                            *location,
+                        );
+                    }
+                } else {
+                    let s = match start.as_deref() {
+                        None => Some(Affine::constant(0)),
+                        Some(e) => affine(e, scope),
+                    };
+                    let e = match end.as_deref() {
+                        None => Some(dim.clone()),
+                        Some(ex) => affine(ex, scope),
+                    };
+                    if let (Some(s), Some(e)) = (s, e) {
+                        let mut facts = scope.array_bounds.facts.borrow_mut();
+                        facts.add_comparison(
+                            &Affine::constant(0),
+                            ComparisonOperator::LessEqual,
+                            &s,
+                            false,
+                            *location,
+                        );
+                        facts.add_comparison(
+                            &s,
+                            ComparisonOperator::LessEqual,
+                            &e,
+                            false,
+                            *location,
+                        );
+                        facts.add_comparison(
+                            &e,
+                            ComparisonOperator::LessEqual,
+                            &dim,
+                            false,
+                            *location,
+                        );
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
 pub(super) fn index(
     target: &CheckedExpression,
     value: &CheckedExpression,
@@ -453,6 +659,11 @@ pub(super) fn index(
         return Some(Proof::default());
     }
     let dim = target_dim_affine(target, axis, scope)?;
+    if let Some((m_dim, origins)) = remainder_dim_proof(value, scope)
+        && m_dim == dim
+    {
+        return Some(Proof { origins });
+    }
     let idx = affine(value, scope)?;
     let facts = scope.array_bounds.facts.borrow();
     let low = facts.proves_le(&Affine::constant(0), &idx)?;

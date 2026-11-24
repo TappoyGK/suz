@@ -1,8 +1,8 @@
-//! 制御の流れの中で判定済みの整数・配列寸法の条件を差分制約（u - v <= c）として保持し、
+//! 制御の流れの中で判定済みの整数・配列寸法の条件を疎な差分制約グラフ（u - v <= c）として保持し、
 //! 推移・定数加減算・合流・忘却と関連診断の由来位置を管理する。
 
 use crate::ast::{ComparisonOperator, Location};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 /// 差分制約グラフの頂点。
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
@@ -45,16 +45,18 @@ impl Affine {
 }
 
 /// 制約 `u - v <= bound` と、その根拠となった条件のソース位置群。
-#[derive(Clone, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 struct Edge {
     bound: i128,
     origins: Vec<Location>,
 }
 
-/// 判定済みの条件集合。
+/// 判定済みの条件集合（疎グラフ表現）。
 #[derive(Clone, Default, Debug)]
 pub(in crate::check) struct Facts {
     edges: BTreeMap<(Term, Term), Edge>,
+    /// 符号なし整数型・`len_t` のローカル束縛（常に 0 以上であり、代入でも失われない）。
+    nonneg_locals: BTreeSet<usize>,
 }
 
 fn merge_origins(a: &[Location], b: &[Location]) -> Vec<Location> {
@@ -69,9 +71,28 @@ impl Facts {
         self.edges.is_empty()
     }
 
+    pub fn mark_nonneg(&mut self, id: usize) {
+        self.nonneg_locals.insert(id);
+    }
+
+    pub fn unmark_nonneg(&mut self, id: usize) {
+        self.nonneg_locals.remove(&id);
+    }
+
+    fn is_implicit_nonneg(&self, term: &Term) -> bool {
+        match term {
+            Term::Dim(..) | Term::PathDim(..) => true,
+            Term::Local(id) => self.nonneg_locals.contains(id),
+            Term::Zero => false,
+        }
+    }
+
     /// `u - v <= bound` を記録する。既存の制約より厳しい場合のみ更新する。
     pub fn add_diff(&mut self, u: Term, v: Term, bound: i128, origins: Vec<Location>) {
         if u == v {
+            return;
+        }
+        if u == Term::Zero && self.is_implicit_nonneg(&v) && bound >= 0 && origins.is_empty() {
             return;
         }
         match self.edges.get_mut(&(u.clone(), v.clone())) {
@@ -111,8 +132,6 @@ impl Facts {
         let origins = vec![location];
         match op {
             ComparisonOperator::Less => {
-                // left.term + left.offset <= right.term + right.offset - 1
-                // left.term - right.term <= right.offset - left.offset - 1
                 if let Some(b) = right
                     .offset
                     .checked_sub(left.offset)
@@ -152,8 +171,8 @@ impl Facts {
         }
     }
 
-    /// 閉包（全対最短路）を計算する。配列寸法は常に 0 以上であることを暗黙に含める。
-    fn closure(&self) -> (Vec<Term>, Vec<Vec<Option<Edge>>>) {
+    /// 疎グラフの隣接リスト（`u -> [(v, Edge)]`）を構築する。
+    fn adjacency(&self) -> (Vec<Term>, Vec<Vec<(usize, Edge)>>) {
         let mut terms_set = BTreeSet::new();
         terms_set.insert(Term::Zero);
         for (u, v) in self.edges.keys() {
@@ -162,65 +181,67 @@ impl Facts {
         }
         let terms: Vec<Term> = terms_set.into_iter().collect();
         let n = terms.len();
-        let mut dist: Vec<Vec<Option<Edge>>> = vec![vec![None; n]; n];
-        for (i, row) in dist.iter_mut().enumerate() {
-            row[i] = Some(Edge {
-                bound: 0,
-                origins: Vec::new(),
-            });
-        }
+        let mut adj: Vec<Vec<(usize, Edge)>> = vec![Vec::new(); n];
         let index_of = |t: &Term| terms.binary_search(t).unwrap();
         let zero_idx = index_of(&Term::Zero);
-        // 配列の寸法は常に 0 以上（Zero - Dim <= 0）。
         for (i, term) in terms.iter().enumerate() {
-            if matches!(term, Term::Dim(..) | Term::PathDim(..)) {
-                dist[zero_idx][i] = Some(Edge {
-                    bound: 0,
-                    origins: Vec::new(),
-                });
+            if self.is_implicit_nonneg(term) {
+                adj[zero_idx].push((
+                    i,
+                    Edge {
+                        bound: 0,
+                        origins: Vec::new(),
+                    },
+                ));
             }
         }
         for ((u, v), edge) in &self.edges {
             let ui = index_of(u);
             let vi = index_of(v);
-            let update = match &dist[ui][vi] {
-                None => true,
-                Some(cur) => edge.bound < cur.bound,
-            };
-            if update {
-                dist[ui][vi] = Some(edge.clone());
-            }
+            adj[ui].push((vi, edge.clone()));
         }
-        // Floyd-Warshall（負閉路があっても必ず n^3 で終了する）。
-        for k in 0..n {
-            for i in 0..n {
-                let Some(ik) = dist[i][k].clone() else {
+        (terms, adj)
+    }
+
+    /// 単一始点最短路（SPFA、緩和回数上限で負閉路でも必ず停止）。
+    fn shortest_from(start: usize, n: usize, adj: &[Vec<(usize, Edge)>]) -> Vec<Option<Edge>> {
+        let mut dist: Vec<Option<Edge>> = vec![None; n];
+        let mut in_queue = vec![false; n];
+        let mut relax_count = vec![0usize; n];
+        let mut queue = VecDeque::new();
+        dist[start] = Some(Edge {
+            bound: 0,
+            origins: Vec::new(),
+        });
+        queue.push_back(start);
+        in_queue[start] = true;
+        while let Some(u) = queue.pop_front() {
+            in_queue[u] = false;
+            let Some(du) = dist[u].clone() else {
+                continue;
+            };
+            for (v, edge) in &adj[u] {
+                let Some(cand) = du.bound.checked_add(edge.bound) else {
                     continue;
                 };
-                for j in 0..n {
-                    if i == j {
-                        continue;
-                    }
-                    let Some(kj) = &dist[k][j] else {
-                        continue;
-                    };
-                    let Some(cand) = ik.bound.checked_add(kj.bound) else {
-                        continue;
-                    };
-                    let better = match &dist[i][j] {
-                        None => true,
-                        Some(cur) => cand < cur.bound,
-                    };
-                    if better {
-                        dist[i][j] = Some(Edge {
-                            bound: cand,
-                            origins: merge_origins(&ik.origins, &kj.origins),
-                        });
+                let better = match &dist[*v] {
+                    None => true,
+                    Some(cur) => cand < cur.bound,
+                };
+                if better && relax_count[*v] < n {
+                    dist[*v] = Some(Edge {
+                        bound: cand,
+                        origins: merge_origins(&du.origins, &edge.origins),
+                    });
+                    relax_count[*v] += 1;
+                    if !in_queue[*v] {
+                        queue.push_back(*v);
+                        in_queue[*v] = true;
                     }
                 }
             }
         }
-        (terms, dist)
+        dist
     }
 
     /// `left <= right` が導けるなら、その根拠となった条件のソース位置を返す。
@@ -229,20 +250,23 @@ impl Facts {
         if left.term == right.term {
             return (0 <= needed).then(Vec::new);
         }
-        // 配列の寸法は常に 0 以上（制約辺が空でも 0 <= len a は成り立つ）。
-        if left.term == Term::Zero
-            && matches!(right.term, Term::Dim(..) | Term::PathDim(..))
-            && 0 <= needed
-        {
+        if left.term == Term::Zero && self.is_implicit_nonneg(&right.term) && 0 <= needed {
             return Some(Vec::new());
         }
         if self.edges.is_empty() {
             return None;
         }
-        let (terms, dist) = self.closure();
+        // 直接辺で満たせる場合は探索を省く。
+        if let Some(edge) = self.edges.get(&(left.term.clone(), right.term.clone()))
+            && edge.bound <= needed
+        {
+            return Some(edge.origins.clone());
+        }
+        let (terms, adj) = self.adjacency();
         let ui = terms.binary_search(&left.term).ok()?;
         let vi = terms.binary_search(&right.term).ok()?;
-        let edge = dist[ui][vi].as_ref()?;
+        let dist = Self::shortest_from(ui, terms.len(), &adj);
+        let edge = dist[vi].as_ref()?;
         (edge.bound <= needed).then(|| edge.origins.clone())
     }
 
@@ -252,39 +276,63 @@ impl Facts {
         self.proves_le(left, &shifted)
     }
 
-    /// 特定の条件を満たす項を削除する（削除前に残る項同士の推移関係を保存してから除く）。
+    /// 特定の条件を満たす項を削除する（削除対象ノードのみ局所的に Fourier-Motzkin 消去する）。
     pub fn forget_where(&mut self, mut predicate: impl FnMut(&Term) -> bool) {
         if self.edges.is_empty() {
             return;
         }
-        if !self.edges.keys().any(|(u, v)| predicate(u) || predicate(v)) {
+        let mut removed = BTreeSet::new();
+        for (u, v) in self.edges.keys() {
+            if predicate(u) {
+                removed.insert(u.clone());
+            }
+            if predicate(v) {
+                removed.insert(v.clone());
+            }
+        }
+        if removed.is_empty() {
             return;
         }
-        let (terms, dist) = self.closure();
-        let keep: Vec<bool> = terms.iter().map(|t| !predicate(t)).collect();
-        let mut next = BTreeMap::new();
-        for i in 0..terms.len() {
-            if !keep[i] {
-                continue;
+        for target in &removed {
+            let mut incoming: Vec<(Term, Edge)> = Vec::new();
+            let mut outgoing: Vec<(Term, Edge)> = Vec::new();
+            for ((u, v), edge) in &self.edges {
+                if v == target && u != target {
+                    incoming.push((u.clone(), edge.clone()));
+                } else if u == target && v != target {
+                    outgoing.push((v.clone(), edge.clone()));
+                }
             }
-            for j in 0..terms.len() {
-                if i == j || !keep[j] {
+            // 暗黙の 0 <= target も incoming として考慮する。
+            if self.is_implicit_nonneg(target) {
+                incoming.push((
+                    Term::Zero,
+                    Edge {
+                        bound: 0,
+                        origins: Vec::new(),
+                    },
+                ));
+            }
+            for (u, e1) in &incoming {
+                if removed.contains(u) {
                     continue;
                 }
-                if let Some(edge) = &dist[i][j] {
-                    // 暗黙の 0 <= Dim は辺として保持不要。
-                    if terms[i] == Term::Zero
-                        && matches!(terms[j], Term::Dim(..) | Term::PathDim(..))
-                        && edge.bound >= 0
-                        && edge.origins.is_empty()
-                    {
+                for (v, e2) in &outgoing {
+                    if removed.contains(v) || u == v {
                         continue;
                     }
-                    next.insert((terms[i].clone(), terms[j].clone()), edge.clone());
+                    if let Some(bound) = e1.bound.checked_add(e2.bound) {
+                        self.add_diff(
+                            u.clone(),
+                            v.clone(),
+                            bound,
+                            merge_origins(&e1.origins, &e2.origins),
+                        );
+                    }
                 }
             }
+            self.edges.retain(|(u, v), _| u != target && v != target);
         }
-        self.edges = next;
     }
 
     /// ローカル変数 `id`（およびそれを根とするフィールド経路）に関する条件を忘れる。
@@ -316,47 +364,76 @@ impl Facts {
         if rest.is_empty() {
             return first.clone();
         }
-        if paths.iter().any(|f| f.is_empty()) {
-            return Facts::default();
+        let mut nonneg_locals = first.nonneg_locals.clone();
+        for p in rest {
+            nonneg_locals.retain(|id| p.nonneg_locals.contains(id));
         }
-        let closures: Vec<_> = paths.iter().map(Facts::closure).collect();
-        let (base_terms, base_dist) = &closures[0];
-        let mut joined = Facts::default();
-        for (i, u) in base_terms.iter().enumerate() {
-            for (j, v) in base_terms.iter().enumerate() {
-                if i == j {
-                    continue;
+        if paths.iter().any(|f| f.is_empty()) {
+            return Facts {
+                edges: BTreeMap::new(),
+                nonneg_locals,
+            };
+        }
+        let mut joined = Facts {
+            edges: BTreeMap::new(),
+            nonneg_locals,
+        };
+        // 全経路で完全に一致する辺は探索せずそのまま引き継ぐ。
+        let mut changed_pairs: BTreeSet<(Term, Term)> = BTreeSet::new();
+        for (pair, edge) in &first.edges {
+            if rest.iter().all(|p| p.edges.get(pair) == Some(edge)) {
+                joined.edges.insert(pair.clone(), edge.clone());
+            } else {
+                changed_pairs.insert(pair.clone());
+            }
+        }
+        for p in rest {
+            for pair in p.edges.keys() {
+                if !joined.edges.contains_key(pair) {
+                    changed_pairs.insert(pair.clone());
                 }
-                let Some(first_edge) = &base_dist[i][j] else {
-                    continue;
+            }
+        }
+        if changed_pairs.is_empty() {
+            return joined;
+        }
+        // 差分のある辺の端点について、全経路の最短距離の上限を取る。
+        let mut sources: BTreeSet<Term> = BTreeSet::new();
+        for (u, _) in &changed_pairs {
+            sources.insert(u.clone());
+        }
+        let graphs: Vec<_> = paths.iter().map(Facts::adjacency).collect();
+        let mut dist_cache: Vec<BTreeMap<Term, Vec<Option<Edge>>>> =
+            vec![BTreeMap::new(); paths.len()];
+        for src in &sources {
+            for (idx, (terms, adj)) in graphs.iter().enumerate() {
+                if let Ok(si) = terms.binary_search(src) {
+                    dist_cache[idx].insert(src.clone(), Self::shortest_from(si, terms.len(), adj));
+                }
+            }
+        }
+        for (u, v) in &changed_pairs {
+            let mut max_bound: Option<i128> = None;
+            let mut origins: Vec<Location> = Vec::new();
+            let mut all_have = true;
+            for (idx, (terms, _)) in graphs.iter().enumerate() {
+                let Some(dist) = dist_cache[idx].get(u) else {
+                    all_have = false;
+                    break;
                 };
-                if *u == Term::Zero
-                    && matches!(v, Term::Dim(..) | Term::PathDim(..))
-                    && first_edge.bound >= 0
-                    && first_edge.origins.is_empty()
-                {
-                    continue;
-                }
-                let mut max_bound = first_edge.bound;
-                let mut origins = first_edge.origins.clone();
-                let mut all_have = true;
-                for (terms, dist) in &closures[1..] {
-                    let (Ok(ui), Ok(vi)) = (terms.binary_search(u), terms.binary_search(v)) else {
-                        all_have = false;
-                        break;
-                    };
-                    let Some(edge) = &dist[ui][vi] else {
-                        all_have = false;
-                        break;
-                    };
-                    if edge.bound > max_bound {
-                        max_bound = edge.bound;
-                    }
-                    origins = merge_origins(&origins, &edge.origins);
-                }
-                if all_have {
-                    joined.add_diff(u.clone(), v.clone(), max_bound, origins);
-                }
+                let Ok(vi) = terms.binary_search(v) else {
+                    all_have = false;
+                    break;
+                };
+                let Some(edge) = &dist[vi] else {
+                    all_have = false;
+                    break;
+                };
+                max_bound = Some(max_bound.map_or(edge.bound, |m| m.max(edge.bound)));
+                origins = merge_origins(&origins, &edge.origins);
+            }
+            if all_have && let Some(bound) = max_bound {
+                joined.add_diff(u.clone(), v.clone(), bound, origins);
             }
         }
         joined
@@ -364,16 +441,22 @@ impl Facts {
 
     /// クロージャ境界：値キャプチャーで写像できる項だけからなる条件を引き継ぐ。
     pub fn project_captures(&self, mut map_term: impl FnMut(&Term) -> Option<Term>) -> Facts {
-        if self.edges.is_empty() {
-            return Facts::default();
-        }
-        let (terms, dist) = self.closure();
-        let mapped: Vec<Option<Term>> = terms.iter().map(&mut map_term).collect();
         let mut out = Facts::default();
+        for &id in &self.nonneg_locals {
+            if let Some(Term::Local(new_id)) = map_term(&Term::Local(id)) {
+                out.nonneg_locals.insert(new_id);
+            }
+        }
+        if self.edges.is_empty() {
+            return out;
+        }
+        let (terms, adj) = self.adjacency();
+        let mapped: Vec<Option<Term>> = terms.iter().map(&mut map_term).collect();
         for i in 0..terms.len() {
             let Some(u) = &mapped[i] else {
                 continue;
             };
+            let dist = Self::shortest_from(i, terms.len(), &adj);
             for j in 0..terms.len() {
                 if i == j {
                     continue;
@@ -384,14 +467,7 @@ impl Facts {
                 if u == v {
                     continue;
                 }
-                if let Some(edge) = &dist[i][j] {
-                    if *u == Term::Zero
-                        && matches!(v, Term::Dim(..) | Term::PathDim(..))
-                        && edge.bound >= 0
-                        && edge.origins.is_empty()
-                    {
-                        continue;
-                    }
+                if let Some(edge) = &dist[j] {
                     out.add_diff(u.clone(), v.clone(), edge.bound, edge.origins.clone());
                 }
             }

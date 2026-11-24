@@ -323,7 +323,7 @@ fn main() -> u8 {
 fix PALETTE: .[i32] = .[17, 18, 19]
 fix COUNT = len PALETTE
 fix FIRST = PALETTE.[0]
-fn color(n: u32) -> i32 { return PALETTE.[n % len PALETTE] or 16 }
+fn color(n: u32) -> i32 { return PALETTE.[n % len PALETTE] }
 fn first[T](a: .[T]) -> T { return a.[0] or panic `empty array` }
 fnshape Reader(.[i32], u32) -> i32
 fn read(a: .[i32; n], i: u32) -> i32 { return a.[i] or -1 }
@@ -1710,3 +1710,75 @@ fn main() -> u8 {
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
 | 通常 | `[array.redundant-handler]` | 3 | 28 |
+
+### array-055 範囲外で抜ける読み出しの後・符号なし型・剰余による範囲保証
+
+主根拠：`[array.bounds-proof]`。
+
+補助根拠：`[array.index]`・`[array.access-handler]`。
+
+**ソース：**
+
+```suz
+fn read_twice(a: .[i32], i: i64) -> i32 {
+    fix v = a.[i] or return -1
+    return v + a.[i]
+}
+
+fn sum_len_t(a: .[i32]) -> i32 {
+    var i: len_t = 0
+    var total: i32 = 0
+    while i < len a {
+        total += a.[i]
+        i += 1
+    }
+    return total
+}
+
+fn pick_u32(palette: .[i32], n: u32) -> i32 {
+    return palette.[n % len palette]
+}
+
+fn main() -> u8 {
+    fix pal: .[i32] = .[10, 20, 30]
+    if read_twice(pal, 1) != 40 || read_twice(pal, 5) != -1 { return 1 }
+    if sum_len_t(pal) != 60 { return 2 }
+    if pick_u32(pal, 5) != 30 { return 3 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### array-056 符号付き整数の0以上を確認しない剰余は範囲保証しない
+
+主根拠：`[array.bounds-proof]`。
+
+補助根拠：`[array.access-handler]`。
+
+**ソース：**
+
+```suz
+fn pick(palette: .[i32], n: i32) -> i32 {
+    return palette.[n % len palette]
+}
+fn main() -> u8 {
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[array.access-handler]` | 2 | 19 |
