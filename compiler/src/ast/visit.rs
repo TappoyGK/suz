@@ -95,7 +95,7 @@ pub(crate) fn walk_expression<V: Visitor + ?Sized>(
                 visitor.expression(argument)?;
             }
         }
-        ExpressionKind::Null | ExpressionKind::Void | ExpressionKind::Variant { .. } => {}
+        ExpressionKind::Nil | ExpressionKind::Void | ExpressionKind::Variant { .. } => {}
         ExpressionKind::Block { statements, value } => visitor.scope(statements, Some(value))?,
         ExpressionKind::If {
             branches,

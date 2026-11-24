@@ -91,7 +91,7 @@ fn main() -> u8 {{
 }
 
 #[test]
-fn dimension_relations_follow_aliases_views_and_nonnull_bindings() {
+fn dimension_relations_follow_aliases_views_and_nonnil_bindings() {
     let output = compile_and_run_c23(
         r#"
 fn inspect(a: #[i64; h, w], b: #[i64; w, h]) -> void {

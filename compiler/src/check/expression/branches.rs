@@ -21,7 +21,7 @@ pub(super) fn check(
     if expected.is_none() {
         super::super::function_values::require_context(expr, bindings)?;
     }
-    // 最外側だけの拡大は分岐の外で行い、元の非null型を寿命検査まで保つ。
+    // 最外側だけの拡大は分岐の外で行い、元の非nil型を寿命検査まで保つ。
     let inferred = operand_type(expr, bindings);
     let expected = match (inferred, expected) {
         (Some(from), Some(to)) if from.lifts_to(to) => Some(from),

@@ -222,10 +222,10 @@ fn access(expr: &Expression, scope: &Scope) -> Result<(CheckedExpression, bool),
                 crate::diagnostic!("array.index", "array indexing requires an array reference"),
             )
         })?;
-        if target.ty.is_nullable() {
+        if target.ty.is_nilable() {
             return Err(expr.location.error(
                 ErrorKind::InvalidSource,
-                crate::diagnostic!("array.value", "use let before accessing a nullable array"),
+                crate::diagnostic!("array.value", "use let before accessing a nilable array"),
             ));
         }
         let array = scope.structs.arrays.borrow().get(id);
@@ -523,14 +523,14 @@ pub(super) fn constant_initializer(
             ErrorKind::InvalidSource,
             crate::diagnostic!(
                 "array.constant",
-                "constant arrays cannot contain non-null pointers, non-null writable arrays, or function values"
+                "constant arrays cannot contain non-nil pointers, non-nil writable arrays, or function values"
             ),
         ));
     }
     value.ty = Type::ArrayRef {
         id,
         mutable: false,
-        nullable: false,
+        nilable: false,
     };
     constants::evaluate(&value)?.ok_or_else(|| {
         expr.location.error(
@@ -552,7 +552,7 @@ fn constant_element_type(
         return true;
     }
     match ty {
-        Type::Pointer { .. } if ty.is_nullable() => true,
+        Type::Pointer { .. } if ty.is_nilable() => true,
         Type::Pointer { .. } | Type::CPointer | Type::Function(_) | Type::StaticFunction(_) => {
             false
         }
@@ -562,7 +562,7 @@ fn constant_element_type(
             .fields
             .iter()
             .all(|f| constant_element_type(f.ty, scope, seen)),
-        Type::ArrayRef { nullable: true, .. } => true,
+        Type::ArrayRef { nilable: true, .. } => true,
         Type::ArrayRef {
             id, mutable: false, ..
         } => constant_element_type(scope.structs.arrays.borrow().get(id).element, scope, seen),

@@ -111,12 +111,12 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             location,
         } => super::arena::allocate(value, expr.ty, location, context),
         Value::Deref(ref value) => format!("(*({}))", expression(value, context)),
-        Value::NonNull(ref value) if value.ty.array_id().is_some() => {
+        Value::NonNil(ref value) if value.ty.array_id().is_some() => {
             format!("(({}).data != NULL)", expression(value, context))
         }
-        Value::Null if expr.ty.array_id().is_some() => format!("({}){{0}}", expr.ty.c_name()),
-        Value::NonNull(ref value) => format!("({} != NULL)", expression(value, context)),
-        Value::Null => "NULL".into(),
+        Value::Nil if expr.ty.array_id().is_some() => format!("({}){{0}}", expr.ty.c_name()),
+        Value::NonNil(ref value) => format!("({} != NULL)", expression(value, context)),
+        Value::Nil => "NULL".into(),
         Value::CBytes(ref operand) => super::ffi::bytes(operand, context),
         Value::CByteLen {
             ref operand,

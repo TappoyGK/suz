@@ -2,7 +2,7 @@
 use crate::test_util::compile_and_run_c23;
 
 #[test]
-fn arrays_allocate_read_write_and_keep_empty_distinct_from_null() {
+fn arrays_allocate_read_write_and_keep_empty_distinct_from_nil() {
     let output = compile_and_run_c23(
         r#"
 fn read(a: #[i64], i: i64) -> i64 { return a.[i] or -1 }
@@ -17,7 +17,7 @@ fn main() -> u8 {
     if cell(grid, 1, 0) != 8 { return 3 }
     fix empty: #[i64]? = new #[]
     let p = empty { if len p != 0 { return 4 } } else { return 5 }
-    fix absent: #[i64]? = null
+    fix absent: #[i64]? = nil
     let p = absent { return 6 }
     fix repeated = new #[9; 3]
     if read(repeated, 2) != 9 { return 7 }
@@ -34,7 +34,7 @@ fn array_reference_lifetimes_follow_elements_aliases_and_function_calls() {
     let prefix = r#"
 struct Node { v: i64 }
 fn save(a: #[mut? Node], p: mut? Node) -> void { a#[0] = p }
-fn read(a: #[mut? Node]) -> mut? Node { fix p = a.[0] or return null
+fn read(a: #[mut? Node]) -> mut? Node { fix p = a.[0] or return nil
 return p }
 fn wrap(p: mut? Node) -> #[mut? Node] { return new #[p] }
 "#;
@@ -44,7 +44,7 @@ fn wrap(p: mut? Node) -> #[mut? Node] { return new #[p] }
         "save(a, new Node { v: 1 })",
     ] {
         let source = format!(
-            "{prefix}\nfn main() -> u8 {{ fix a: #[mut? Node] = new #[null; 2]\narena {{ {body} }}\nreturn 0 }}"
+            "{prefix}\nfn main() -> u8 {{ fix a: #[mut? Node] = new #[nil; 2]\narena {{ {body} }}\nreturn 0 }}"
         );
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.rule(), "arena.store", "{body}: {error}");
@@ -145,7 +145,7 @@ fn array_types_initializers_and_recursive_dependencies_are_checked() {
             "fix a: #[i32] = new #[1]\nfix b: #[i64] = a",
             "type.expected",
         ),
-        ("", "fix a: #[i32]? = null\nfix n = len a", "len.targets"),
+        ("", "fix a: #[i32]? = nil\nfix n = len a", "len.targets"),
         (
             "struct Node { next: #[Node; _, _] }",
             "",
@@ -293,11 +293,11 @@ struct Node {{ v: i64 }}
 struct Holder {{ p: mut? Node }}
 fnshape Read(#[mut? Node]) -> mut? Node
 fn get(a: #[mut? Node]) -> mut? Node {{
-    fix p = a.[0] or return null
+    fix p = a.[0] or return nil
     return p
 }}
 fn main() -> u8 {{
-    fix h = new Holder {{ p: null }}
+    fix h = new Holder {{ p: nil }}
     arena {{
         fix a: #[mut? Node] = new #[new Node {{ v: 1 }}]
         {reader}
@@ -335,7 +335,7 @@ fn main() -> u8 {
 
 #[test]
 fn array_element_fields_reject_shorter_lived_references() {
-    let source = b"struct Node { v: i32 }\nstruct Item { p: mut? Node, n: i32 }\nfn main() -> u8 {\n    arena { fix a = new #[Item { p: null, n: 0 }; 3]\n      arena { fix t = new Node { v: 2 }\n        a.[0]#p = t } }\n    return 0 }";
+    let source = b"struct Node { v: i32 }\nstruct Item { p: mut? Node, n: i32 }\nfn main() -> u8 {\n    arena { fix a = new #[Item { p: nil, n: 0 }; 3]\n      arena { fix t = new Node { v: 2 }\n        a.[0]#p = t } }\n    return 0 }";
     let error = suz::compile(source).unwrap_err();
     assert_eq!(error.rule(), "arena.store", "{error}");
 }
@@ -546,13 +546,13 @@ fn main() -> u8 {
 #[test]
 fn array_views_and_iteration_keep_the_original_storage_lifetime() {
     for update in [
-        "fix row = a.[0]\nrow#[0] = new Node { n: 1, next: null }",
-        "fix view = a.[0:1]\nview.[0]#[0] = new Node { n: 1, next: null }",
-        "for row in a { row#[0] = new Node { n: 1, next: null } }",
-        "fix row = a.[0]\nfor p in row { let found = p { found#next = new Node { n: 1, next: null } } }",
+        "fix row = a.[0]\nrow#[0] = new Node { n: 1, next: nil }",
+        "fix view = a.[0:1]\nview.[0]#[0] = new Node { n: 1, next: nil }",
+        "for row in a { row#[0] = new Node { n: 1, next: nil } }",
+        "fix row = a.[0]\nfor p in row { let found = p { found#next = new Node { n: 1, next: nil } } }",
     ] {
         let source = format!(
-            "struct Node {{ n: i64, next: mut? Node }}\nfn main() -> u8 {{ fix node = new Node {{ n: 0, next: null }}\nfix a: #[mut? Node; _, _] = new #[node; 1, 2]\narena {{ {update} }}\nreturn 0 }}"
+            "struct Node {{ n: i64, next: mut? Node }}\nfn main() -> u8 {{ fix node = new Node {{ n: 0, next: nil }}\nfix a: #[mut? Node; _, _] = new #[node; 1, 2]\narena {{ {update} }}\nreturn 0 }}"
         );
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.rule(), "arena.store", "{update}: {error}");
@@ -562,7 +562,7 @@ fn array_views_and_iteration_keep_the_original_storage_lifetime() {
         "fix a = new #[1; 3]\nresult = a.[:]",
     ] {
         let source = format!(
-            "fn main() -> u8 {{ var result: #[i64]? = null\narena {{ {body} }}\nreturn 0 }}"
+            "fn main() -> u8 {{ var result: #[i64]? = nil\narena {{ {body} }}\nreturn 0 }}"
         );
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.rule(), "arena.store", "{body}: {error}");
@@ -632,11 +632,11 @@ struct Node {{ n: i64 }}
 struct Holder {{ p: mut? Node }}
 fnshape Read(#[mut? Node]) -> mut? Node
 fn get(a: #[mut? Node]) -> mut? Node {{
-    fix p = a.[0] or return null
+    fix p = a.[0] or return nil
     return p
 }}
 fn main() -> u8 {{
-    fix h = new Holder {{ p: null }}
+    fix h = new Holder {{ p: nil }}
     arena {{
         fix a: #[mut? Node] = new #[new Node {{ n: 1 }}]
         fix fs: #[static fn Read; _, _] = new #[fn get; 1, 1]
@@ -955,7 +955,7 @@ fn a_sub(v: .[i32]) -> .[i32] { return v }
 }
 
 #[test]
-fn nullable_readonly_arrays_support_let_conversions_branches_generics_and_nested_pointers() {
+fn nilable_readonly_arrays_support_let_conversions_branches_generics_and_nested_pointers() {
     let source = r#"
 fn first_or[T](a: .[T]?, fallback: T) -> T {
     let items = a {
@@ -968,20 +968,20 @@ fn maybe_view(flag: bool, rw: #[i32], opt_rw: #[i32]?) -> .[i32]? {
     return opt_rw
 }
 fn main() -> u8 {
-    // 空配列とnullを区別する。
+    // 空配列とnilを区別する。
     fix empty_opt: .[i32]? = .[]
     let e = empty_opt {
         if len e != 0 { return 1 }
     } else { return 2 }
 
-    fix absent: .[i32]? = null
+    fix absent: .[i32]? = nil
     let found = absent { return 3 }
 
     // .[T] -> .[T]?, #[T] -> .[T]?, #[T]? -> .[T]? を初期化・代入・引数・戻り値・分岐・型推論で揃える。
     fix ro: .[i32] = .[11, 22]
     fix rw: #[i32] = new #[33, 44]
     fix rw_opt: #[i32]? = rw
-    fix rw_null: #[i32]? = null
+    fix rw_nil: #[i32]? = nil
 
     var cur: .[i32]? = ro
     if first_or(cur, 0) != 11 { return 4 }
@@ -989,18 +989,18 @@ fn main() -> u8 {
     if first_or(cur, 0) != 33 { return 5 }
     cur = rw_opt
     if first_or(cur, 0) != 33 { return 6 }
-    cur = rw_null
+    cur = rw_nil
     if first_or(cur, 99) != 99 { return 7 }
 
-    if first_or(maybe_view(true, rw, rw_null), 0) != 33 { return 8 }
-    if first_or(maybe_view(false, rw, rw_null), 88) != 88 { return 9 }
+    if first_or(maybe_view(true, rw, rw_nil), 0) != 33 { return 8 }
+    if first_or(maybe_view(false, rw, rw_nil), 88) != 88 { return 9 }
 
-    // 分岐の型合わせ: .[i32] と null -> .[i32]?、#[i32]? と .[i32] -> .[i32]?
-    fix b1 = ifexpr true { ro } else { null }
+    // 分岐の型合わせ: .[i32] と nil -> .[i32]?、#[i32]? と .[i32] -> .[i32]?
+    fix b1 = ifexpr true { ro } else { nil }
     if first_or(b1, 0) != 11 { return 10 }
     fix b2 = ifexpr false { rw_opt } else { ro }
     if first_or(b2, 0) != 11 { return 11 }
-    fix b3 = ifexpr true { rw_null } else { ro }
+    fix b3 = ifexpr true { rw_nil } else { ro }
     if first_or(b3, 77) != 77 { return 12 }
 
     // mut? .[T], mut .[T]?, mut? .[T]? の区別と、letが最外側だけを外すことの確認。
@@ -1011,25 +1011,25 @@ fn main() -> u8 {
     } else { return 14 }
 
     fix both_opt: mut? .[i32]? = slot_opt_inner
-    let nonnull_slot = both_opt {
-        #nonnull_slot = null
-        let inner_val = .nonnull_slot { return 15 }
+    let nonnil_slot = both_opt {
+        #nonnil_slot = nil
+        let inner_val = .nonnil_slot { return 15 }
     } else { return 16 }
 
     return 0
 }
 "#;
-    let output = compile_and_run_c23(source, "nullable-readonly-array.suz");
+    let output = compile_and_run_c23(source, "nilable-readonly-array.suz");
     assert_eq!(output.status.code(), Some(0), "{output:?}");
 
     // 未確認の .[T]? への直接アクセスは拒否する。
     for (bad, rule) in [
         (
-            "fn main() -> u8 {\n    fix a: .[i32]? = null\n    fix n = len a\n    return 0\n}",
+            "fn main() -> u8 {\n    fix a: .[i32]? = nil\n    fix n = len a\n    return 0\n}",
             "len.targets",
         ),
         (
-            "fn main() -> u8 {\n    fix a: .[i32]? = null\n    fix n = a.[0] or 0\n    return 0\n}",
+            "fn main() -> u8 {\n    fix a: .[i32]? = nil\n    fix n = a.[0] or 0\n    return 0\n}",
             "array.value",
         ),
     ] {
@@ -1038,19 +1038,15 @@ fn main() -> u8 {
     }
 
     // mut? .[i32]? をletで確認しても内側の ? は外れない。
-    let inner_still_null = suz::compile(
-        b"fn main() -> u8 {\n    fix a: .[i32]? = null\n    fix p: mut? .[i32]? = new a\n    let q = p {\n        fix x: .[i32] = .q\n    }\n    return 0\n}",
+    let inner_still_nil = suz::compile(
+        b"fn main() -> u8 {\n    fix a: .[i32]? = nil\n    fix p: mut? .[i32]? = new a\n    let q = p {\n        fix x: .[i32] = .q\n    }\n    return 0\n}",
     )
     .unwrap_err();
-    assert_eq!(
-        inner_still_null.rule(),
-        "type.expected",
-        "{inner_still_null}"
-    );
+    assert_eq!(inner_still_nil.rule(), "type.expected", "{inner_still_nil}");
 
     // 寿命検査: 内側arenaの .[T]? を外側へ保存できない。
     let escape = suz::compile(
-        b"fn main() -> u8 {\n    var saved: .[i32]? = null\n    arena {\n        fix inner: #[i32] = new #[1]\n        saved = inner\n    }\n    return 0\n}",
+        b"fn main() -> u8 {\n    var saved: .[i32]? = nil\n    arena {\n        fix inner: #[i32] = new #[1]\n        saved = inner\n    }\n    return 0\n}",
     )
     .unwrap_err();
     assert_eq!(escape.rule(), "arena.store", "{escape}");
@@ -1262,34 +1258,34 @@ fn main() -> u8 {
 }
 
 #[test]
-fn top_level_constants_and_constant_arrays_support_nullable_readonly_arrays_and_null() {
+fn top_level_constants_and_constant_arrays_support_nilable_readonly_arrays_and_nil() {
     let source = r#"
 struct Opt { xs: .[i32]? }
 struct Node { value: i32, next: mut? Node }
 struct Wrap { d: .[#[i32]]? }
 fix A: .[i32] = .[1, 2]
 fix N1: .[i32]? = .[1, 2]
-fix N2: .[i32]? = null
+fix N2: .[i32]? = nil
 fix N3: .[i32]? = A
 fix N4: .[i32]? = N2
-fix P1: mut? i32 = null
+fix P1: mut? i32 = nil
 fix P2: ref? i32 = P1
-fix W1: #[i32]? = null
+fix W1: #[i32]? = nil
 fix W2: .[i32]? = W1
 fix O1 = Opt { xs: .[1, 2] }
-fix O2 = Opt { xs: null }
+fix O2 = Opt { xs: nil }
 fix O3 = Opt { xs: A }
-fix O4 = O1 with { xs: null }
+fix O4 = O1 with { xs: nil }
 fix O5 = O2 with { xs: .[7, 8] }
-fix EMPTY = Node { value: 9, next: null }
-fix NA: .[.[i32]?] = .[.[1, 2], null]
-fix N5: .[i32]? = NA.[5] or null
-fix REP: .[.[i32]?] = .[null; 3]
-fix PTRS: .[mut? i32] = .[null, P1]
-fix WRS: .[#[i32]?] = .[null, W1]
-fix RW_OPT_ARR: .[.[#[i32]]?] = .[null]
-fix WRAPS: .[Wrap] = .[Wrap { d: null }]
-fix OS: .[Opt] = .[Opt { xs: .[1, 2] }, Opt { xs: null }]
+fix EMPTY = Node { value: 9, next: nil }
+fix NA: .[.[i32]?] = .[.[1, 2], nil]
+fix N5: .[i32]? = NA.[5] or nil
+fix REP: .[.[i32]?] = .[nil; 3]
+fix PTRS: .[mut? i32] = .[nil, P1]
+fix WRS: .[#[i32]?] = .[nil, W1]
+fix RW_OPT_ARR: .[.[#[i32]]?] = .[nil]
+fix WRAPS: .[Wrap] = .[Wrap { d: nil }]
+fix OS: .[Opt] = .[Opt { xs: .[1, 2] }, Opt { xs: nil }]
 fix NODES: .[Node] = .[EMPTY]
 
 fn main() -> u8 {
@@ -1323,10 +1319,10 @@ fn main() -> u8 {
     return 0
 }
 "#;
-    let output = compile_and_run_c23(source, "const-nullable-readonly.suz");
+    let output = compile_and_run_c23(source, "const-nilable-readonly.suz");
     assert_eq!(output.status.code(), Some(0), "{output:?}");
 
-    // 同じ内容の定数配列は非null・null許容で静的データを共有する。
+    // 同じ内容の定数配列は非nil・nil許容で静的データを共有する。
     let dedup = suz::compile(
         b"fix A: .[i32] = .[1, 2]\nfix N: .[i32]? = .[1, 2]\nfn main() -> u8 {\n    let a = N { if A.[0] + a.[1] != 3 { return 1 } }\n    return 0\n}",
     )

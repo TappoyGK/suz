@@ -29,7 +29,7 @@ fn generic_recursive_structs_use_the_existing_arena_rules() {
     let output = compile_and_run_c23(
         r#"
 struct Node[T] { value: T, next: mut? Node[T] }
-fn node[T](value: T) -> mut Node[T] { return new Node[T] { value: value, next: null } }
+fn node[T](value: T) -> mut Node[T] { return new Node[T] { value: value, next: nil } }
 fn main() -> u8 {
     arena {
         fix first = node[i32](3)
@@ -99,7 +99,7 @@ fn generic_struct_field_stores_reject_shorter_arena_lifetimes() {
 struct Box[T] { value: T }
 fn main() -> u8 {
     arena {
-        var saved = Box[mut? i32] { value: null }
+        var saved = Box[mut? i32] { value: nil }
         arena {
             fix p = new (1 as i32)
             saved#value = p
@@ -158,7 +158,7 @@ fnshape Update(mut? i32) -> void
 fn apply(f: fn Update, p: mut? i32) -> void {{ f(p) }}
 fn main() -> u8 {{
     arena {{
-        var saved = Box[mut? i32] {{ value: null }}
+        var saved = Box[mut? i32] {{ value: nil }}
         arena {{
             fix p = new (1 as i32)
             {invoke}
@@ -282,11 +282,11 @@ fn main() -> u8 {
 fn generic_struct_recursion_checks_concrete_transitions() {
     for ty in ["i32", "mut i32"] {
         let source = format!(
-            "struct Down[T] {{ next: mut? Down[i32] }}\nfn main() -> u8 {{ fix d = Down[{ty}] {{ next: null }}\nreturn 0 }}"
+            "struct Down[T] {{ next: mut? Down[i32] }}\nfn main() -> u8 {{ fix d = Down[{ty}] {{ next: nil }}\nreturn 0 }}"
         );
         suz::compile(source.as_bytes()).unwrap();
     }
-    let source = "struct Down[T] { next: mut? Down[i32] }\nfn main() -> u8 { fix d = Down[u8] { next: null }\nreturn 0 }";
+    let source = "struct Down[T] { next: mut? Down[i32] }\nfn main() -> u8 { fix d = Down[u8] { next: nil }\nreturn 0 }";
     let error = suz::compile(source.as_bytes()).unwrap_err().to_string();
     assert!(error.contains("generic.recursion"), "{error}");
     assert!(error.contains("[u8] to [i32]"), "{error}");
@@ -328,17 +328,17 @@ fn generic_struct_recursion_reports_use_and_definition_locations() {
             6,
         ),
         (
-            "fn main() -> u8 {\n    fix x = Down[u8] { next: null }\n    return 0\n}",
+            "fn main() -> u8 {\n    fix x = Down[u8] { next: nil }\n    return 0\n}",
             5,
             13,
         ),
         (
-            "fn a() -> Down[u8] { return Down[u8] { next: null } }\nfn main() -> u8 { return 0 }",
+            "fn a() -> Down[u8] { return Down[u8] { next: nil } }\nfn main() -> u8 { return 0 }",
             4,
             4,
         ),
         (
-            "fn main() -> u8 {\n    fix x: Down[u8] = Down[u8] { next: null }\n    return 0\n}",
+            "fn main() -> u8 {\n    fix x: Down[u8] = Down[u8] { next: nil }\n    return 0\n}",
             5,
             9,
         ),

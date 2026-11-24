@@ -67,7 +67,7 @@ fn lifetime(index: usize, invalid: bool) -> String {
         _ => format!("for row in a {{ row#[0] = {pointer} }}"),
     };
     format!(
-        "struct Node {{ value: i64 }}\nfn main() -> u8 {{ fix outer = new Node {{ value: 7 }}\nfix a: #[mut? Node; _, _] = new #[null; 1, 1]\narena {{ fix inner = new Node {{ value: 9 }}\n{update} }}\nlet p = a.[0].[0] {{ if p.value != 7 {{ return 1 }} }} else {{ return 2 }}\nreturn 0 }}"
+        "struct Node {{ value: i64 }}\nfn main() -> u8 {{ fix outer = new Node {{ value: 7 }}\nfix a: #[mut? Node; _, _] = new #[nil; 1, 1]\narena {{ fix inner = new Node {{ value: 9 }}\n{update} }}\nlet p = a.[0].[0] {{ if p.value != 7 {{ return 1 }} }} else {{ return 2 }}\nreturn 0 }}"
     )
 }
 

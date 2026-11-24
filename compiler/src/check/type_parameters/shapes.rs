@@ -92,7 +92,7 @@ impl Shapes {
                 .normalize(inner)
                 .pointer()
                 .with_readonly(ty.is_readonly_pointer())
-                .with_nullable(ty.is_nullable());
+                .with_nilable(ty.is_nilable());
         }
         match ty {
             Type::StaticFunction(id) => Type::StaticFunction(self.canonical_id(id)),

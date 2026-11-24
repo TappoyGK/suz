@@ -1,7 +1,7 @@
 //! 確保先だけでなく、反復外への到達と関数内部の一時確保を区別する。
 fn warnings(extra: &str, body: &str) -> Vec<suz::Warning> {
     let source = format!(
-        "struct Node {{ value: i32, next: mut? Node }}\nfn make() -> mut Node {{ return new Node {{ value: 1, next: null }} }}\n{extra}\nfn main() -> u8 {{ {body}\nreturn 0 }}"
+        "struct Node {{ value: i32, next: mut? Node }}\nfn make() -> mut Node {{ return new Node {{ value: 1, next: nil }} }}\n{extra}\nfn main() -> u8 {{ {body}\nreturn 0 }}"
     );
     suz::check_source(source.as_bytes(), suz::ArithmeticMode::Default)
         .unwrap_or_else(|error| panic!("{error}\n{source}"))
@@ -17,15 +17,15 @@ fn iteration_lifetime_is_distinct_from_allocation_arena() {
         ("arena { loop { fix p = make()\nbreak } }", 1),
         ("loop { arena { fix p = make() }\nbreak }", 0),
         (
-            "loop { fix p = new Node { value: 1, next: null }\nbreak }",
+            "loop { fix p = new Node { value: 1, next: nil }\nbreak }",
             1,
         ),
         (
-            "var head: mut? Node = null\nloop { head = make()\nbreak }",
+            "var head: mut? Node = nil\nloop { head = make()\nbreak }",
             0,
         ),
         (
-            "var head: mut? Node = null\nloop { fix p = make()\nhead = new Node { value: 2, next: p }\nbreak }",
+            "var head: mut? Node = nil\nloop { fix p = make()\nhead = new Node { value: 2, next: p }\nbreak }",
             0,
         ),
         (
@@ -68,12 +68,12 @@ fn summaries_separate_temporary_allocations_from_retained_results() {
         ),
         (
             "fn work() -> mut Node { fix scratch = make()\nreturn make() }",
-            "var head: mut? Node = null\nloop { head = work()\nbreak }",
+            "var head: mut? Node = nil\nloop { head = work()\nbreak }",
             1,
         ),
         (
             "fn work() -> mut Node { return make() }",
-            "var head: mut? Node = null\nloop { head = work()\nbreak }",
+            "var head: mut? Node = nil\nloop { head = work()\nbreak }",
             0,
         ),
         (
@@ -100,7 +100,7 @@ fn callback_and_capture_effects_reach_loop_warnings() {
             1,
         ),
         (
-            "var p: mut? Node = null\nloop { p = invoke(fn make)\nbreak }",
+            "var p: mut? Node = nil\nloop { p = invoke(fn make)\nbreak }",
             0,
         ),
     ] {
@@ -143,12 +143,12 @@ fn loop_conditions_captures_and_nested_arenas_preserve_escape_routes() {
         ),
         (
             "fnshape Act() -> void\nfn run(f: fn Act) -> void { f() }",
-            "var p: mut? Node = null\nloop { run(fn [var p]() -> void { p = make() })\nbreak }",
+            "var p: mut? Node = nil\nloop { run(fn [var p]() -> void { p = make() })\nbreak }",
             0,
         ),
         (
             "fnshape Act() -> void\nfn run(f: fn Act) -> void { f() }",
-            "loop { var p: mut? Node = null\nrun(fn [var p]() -> void { p = make() })\nbreak }",
+            "loop { var p: mut? Node = nil\nrun(fn [var p]() -> void { p = make() })\nbreak }",
             1,
         ),
         (

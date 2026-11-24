@@ -24,11 +24,11 @@ fn main() -> u8 {
 
 | 前提・ソース | 期待結果・主根拠 |
 |---|---|
-| `fix a: #[i32] = new #[]` | 受理。長さ0の非null配列。[array.initializer-type] |
+| `fix a: #[i32] = new #[]` | 受理。長さ0の非nil配列。[array.initializer-type] |
 | `fix a = new #[]` | 拒否。要素型を決定できない。[array.initializer-type] |
 | `new #[[1, 2], [3]]` | 拒否。行の長さが不一致。[array.enumeration] |
 | `new #[0; -1]` | 拒否。定数の長さが負。[array.layout] |
-| `a: #[i32]?`に対する`len a` | 拒否。非null確認が必要。[array.value] |
+| `a: #[i32]?`に対する`len a` | 拒否。非nil確認が必要。[array.value] |
 | 仮引数`a: #[i32; n]`に対する`a.[0] or 7` | 受理。nは0かもしれないため失敗処理が必要。[array.access-handler] |
 | 同じ仮引数に対する`a.[0]` | 拒否。範囲保証がない。[array.access-handler] |
 | `fix a = new #[1, 2]`の後の`a.[0] or 7` | 拒否。既知の長さに対する成功保証あり。[array.bounds-proof] |
@@ -51,12 +51,12 @@ fn clear_rows(grid: #[u8; h, w]) -> void {
 }
 ```
 
-次は配列要素への短命な参照の保存であり、[array.lifetime]・[arena.store]で拒否する。代入を`slots#[0] = null`にすると受理する。
+次は配列要素への短命な参照の保存であり、[array.lifetime]・[arena.store]で拒否する。代入を`slots#[0] = nil`にすると受理する。
 
 ```suz
 struct Node { value: i32 }
 fn main() -> u8 {
-    fix slots: #[mut? Node] = new #[null; 1]
+    fix slots: #[mut? Node] = new #[nil; 1]
     arena {
         fix inner = new Node { value: 1 }
         slots#[0] = inner
@@ -65,7 +65,7 @@ fn main() -> u8 {
 }
 ```
 
-### array-001 空配列はnullではない
+### array-001 空配列はnilではない
 
 主根拠：`[array.value]`。
 
@@ -920,7 +920,7 @@ fn main() -> u8 {
 struct Item { value: i32 }
 fn first(a: .[mut Item]) -> mut Item { return a.[0] or panic `empty` }
 fn main() -> u8 {
-    var saved: mut? Item = null
+    var saved: mut? Item = nil
     arena {
         fix a = new #[new Item { value: 1 }]
         saved = first(a)
@@ -1025,7 +1025,7 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | `[type.expected]` | 3 | 21 |
 
-### array-033 null許容の配列参照を直接読み取り専用にしない
+### array-033 nil許容の配列参照を直接読み取り専用にしない
 
 主根拠：`[array.readonly-conversion]`。
 
@@ -1094,16 +1094,16 @@ fn main() -> u8 {
 fn main() -> u8 {
     arena {
         fix arr: #[i32] = new #[10, 20]
-        fix outer_null: mut? #[i32] = new arr
-        let p = outer_null {
+        fix outer_nil: mut? #[i32] = new arr
+        let p = outer_nil {
             (.p)#[0] = 30
         } else {
             return 1
         }
-        fix opt: #[i32]? = null
-        fix inner_null: mut #[i32]? = new opt
-        #inner_null = arr
-        let q = .inner_null {
+        fix opt: #[i32]? = nil
+        fix inner_nil: mut #[i32]? = new opt
+        #inner_nil = arr
+        let q = .inner_nil {
             if (q.[0] or 0) != 30 { return 2 }
         } else {
             return 3
@@ -1156,7 +1156,7 @@ fn main() -> u8 {
 
 ```suz
 fn main() -> u8 {
-    var escaped: .[i32]? = null
+    var escaped: .[i32]? = nil
     arena {
         fix x: i32 = 3
         escaped = new .[x, 4]
@@ -1177,11 +1177,11 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | `[arena.store]` | 5 | 9 |
 
-### array-038 null許容の読み取り専用配列をnullとletで扱う
+### array-038 nil許容の読み取り専用配列をnilとletで扱う
 
 主根拠：`[array.type]`。
 
-補助根拠：`[arena.null]`・`[arena.let]`。
+補助根拠：`[arena.nil]`・`[arena.let]`。
 
 **ソース：**
 
@@ -1194,7 +1194,7 @@ fn first_or_zero(a: .[i32]?) -> i32 {
     }
 }
 fn main() -> u8 {
-    fix empty: .[i32]? = null
+    fix empty: .[i32]? = nil
     fix nums: .[i32]? = .[9, 10]
     if first_or_zero(empty) != 0 { return 1 }
     if first_or_zero(nums) != 9 { return 2 }
@@ -1208,7 +1208,7 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | 正常終了 | 0 | 0 |
 
-### array-039 未確認のnull許容読み取り専用配列へ直接アクセスできない
+### array-039 未確認のnil許容読み取り専用配列へ直接アクセスできない
 
 主根拠：`[array.value]`。
 
@@ -1514,11 +1514,11 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | `[array.access-handler]` | 4 | 23 |
 
-### array-050 null許容の参照とnullをトップレベル定数と定数配列で使う
+### array-050 nil許容の参照とnilをトップレベル定数と定数配列で使う
 
 主根拠：`[const.expression]`。
 
-補助根拠：`[array.constant]`・`[arena.ptr-conversion]`・`[array.readonly-conversion]`・`[arena.null]`。
+補助根拠：`[array.constant]`・`[arena.ptr-conversion]`・`[array.readonly-conversion]`・`[arena.nil]`。
 
 **ソース：**
 
@@ -1527,16 +1527,16 @@ struct Opt { xs: .[i32]? }
 struct Node { value: i32, next: mut? Node }
 fix A: .[i32] = .[1, 2]
 fix N1: .[i32]? = .[1, 2]
-fix N2: .[i32]? = null
+fix N2: .[i32]? = nil
 fix N3: .[i32]? = A
-fix P: mut? i32 = null
+fix P: mut? i32 = nil
 fix R: ref? i32 = P
-fix W: #[i32]? = null
+fix W: #[i32]? = nil
 fix O1 = Opt { xs: .[1, 2] }
-fix O2 = Opt { xs: null }
+fix O2 = Opt { xs: nil }
 fix O3 = Opt { xs: A }
-fix EMPTY = Node { value: 7, next: null }
-fix TABLE: .[.[i32]?] = .[.[3, 4], null]
+fix EMPTY = Node { value: 7, next: nil }
+fix TABLE: .[.[i32]?] = .[.[3, 4], nil]
 fix OPTS: .[Opt] = .[O1, O2]
 fix NODES: .[Node] = .[EMPTY]
 

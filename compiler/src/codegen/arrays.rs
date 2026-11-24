@@ -464,7 +464,7 @@ fn access_parts(
 }
 
 /// 表現が全ビット0と分かるスカラーだけを一括初期化する。
-/// nullポインタ・構造体のパディング・負の浮動小数点ゼロには適用しない。
+/// NULLポインタ・構造体のパディング・負の浮動小数点ゼロには適用しない。
 fn zero_bits(value: &CheckedExpression) -> bool {
     match &value.value {
         Value::Integer { value: 0, .. } | Value::Bool(false) | Value::Float(0) => true,
@@ -588,7 +588,7 @@ pub(super) fn constant(value: &CheckedExpression, context: &mut ExpressionContex
     let count = *metadata.constant_counts.last().unwrap();
     let key = format!(
         "{:?}:{lengths}:{repeated}:{}",
-        value.ty.with_nullable(false),
+        value.ty.with_nilable(false),
         initial
             .iter()
             .map(|(text, _)| text.as_str())

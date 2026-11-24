@@ -341,7 +341,7 @@ fn check_for(statement: &Statement, context: &mut StatementContext<'_>) -> Resul
     } else {
         super::ranges::check_references(start, context.bindings)?;
         let value = expression(start, None, context.bindings)?;
-        let ty = if let Some(id) = value.ty.array_id().filter(|_| !value.ty.is_nullable()) {
+        let ty = if let Some(id) = value.ty.array_id().filter(|_| !value.ty.is_nilable()) {
             let array = context.bindings.structs.arrays.borrow().get(id);
             if array.rank == 1 {
                 array.element
@@ -361,7 +361,7 @@ fn check_for(statement: &Statement, context: &mut StatementContext<'_>) -> Resul
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(
                     "char.for-type",
-                    "iteration without a range requires text or a nonnull array"
+                    "iteration without a range requires text or a non-nil array"
                 ),
             ));
         };

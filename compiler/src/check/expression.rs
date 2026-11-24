@@ -127,7 +127,7 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
             }
         }),
         ExpressionKind::Deref(value) => operand_type(value, bindings).and_then(Type::pointee),
-        ExpressionKind::Null => None,
+        ExpressionKind::Nil => None,
         ExpressionKind::CBytes(_) => Some(Type::CPointer),
         ExpressionKind::CByteLen(_) => Some(Type::CInteger(crate::ast::CIntegerType::Size)),
         ExpressionKind::Len(inner) => {
@@ -648,7 +648,7 @@ fn expression_checked(
             ExpressionKind::Block { statements, value } => {
                 blocks::check(statements, value, inference_hint, bindings)?
             }
-            ExpressionKind::New(_) | ExpressionKind::Deref(_) | ExpressionKind::Null => {
+            ExpressionKind::New(_) | ExpressionKind::Deref(_) | ExpressionKind::Nil => {
                 super::arena::expression(expr, required, bindings)?
             }
             ExpressionKind::CBytes(inner) | ExpressionKind::CByteLen(inner) => {
@@ -657,7 +657,7 @@ fn expression_checked(
             ExpressionKind::Len(inner) => {
                 let operand = expression(inner, None, bindings)?;
                 if !operand.ty.is_text()
-                    && !(!operand.ty.is_nullable() && operand.ty.array_id().is_some())
+                    && !(!operand.ty.is_nilable() && operand.ty.array_id().is_some())
                 {
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
@@ -888,22 +888,22 @@ fn allocation_type(value: &Expression, bindings: &Scope) -> Option<Type> {
     }
 }
 
-fn has_null_branch(value: &Expression) -> bool {
+fn has_nil_branch(value: &Expression) -> bool {
     match &value.kind {
-        ExpressionKind::Null => true,
+        ExpressionKind::Nil => true,
         ExpressionKind::Group(inner) | ExpressionKind::Block { value: inner, .. } => {
-            has_null_branch(inner)
+            has_nil_branch(inner)
         }
         ExpressionKind::If {
             branches,
             otherwise,
-        } => branches.iter().any(|(_, v)| has_null_branch(v)) || has_null_branch(otherwise),
-        ExpressionKind::Match { arms, .. } => arms.iter().any(|a| has_null_branch(&a.body)),
+        } => branches.iter().any(|(_, v)| has_nil_branch(v)) || has_nil_branch(otherwise),
+        ExpressionKind::Match { arms, .. } => arms.iter().any(|a| has_nil_branch(&a.body)),
         _ => false,
     }
 }
 
-// nullの分岐には、他の分岐から決めた参照先の型を要求する。
+// nilの分岐には、他の分岐から決めた参照先の型を要求する。
 fn branch_type<'a>(
     values: impl Iterator<Item = &'a Expression> + Clone,
     bindings: &Scope,
@@ -918,11 +918,11 @@ fn branch_type<'a>(
         }
         result
     })?;
-    if ty.is_reference() && values.clone().any(has_null_branch) {
+    if ty.is_reference() && values.clone().any(has_nil_branch) {
         if matches!(ty, Type::Pointer { shape, .. } if shape.depth() > 256) {
             return None;
         }
-        Some(ty.with_nullable(true))
+        Some(ty.with_nilable(true))
     } else {
         Some(ty)
     }
@@ -943,18 +943,18 @@ fn joined_or_first(a: Type, b: Type) -> Type {
     {
         return a
             .with_readonly(a.is_readonly_pointer() || b.is_readonly_pointer())
-            .with_nullable(a.is_nullable() || b.is_nullable());
+            .with_nilable(a.is_nilable() || b.is_nilable());
     }
     if let (
         Type::ArrayRef {
             id: a_id,
             mutable: a_mut,
-            nullable: a_null,
+            nilable: a_nil,
         },
         Type::ArrayRef {
             id: b_id,
             mutable: b_mut,
-            nullable: b_null,
+            nilable: b_nil,
         },
     ) = (a, b)
         && a_id == b_id
@@ -962,7 +962,7 @@ fn joined_or_first(a: Type, b: Type) -> Type {
         return Type::ArrayRef {
             id: a_id,
             mutable: a_mut && b_mut,
-            nullable: a_null || b_null,
+            nilable: a_nil || b_nil,
         };
     }
     if a.lifts_to(b) {

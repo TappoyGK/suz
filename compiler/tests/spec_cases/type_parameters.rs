@@ -148,7 +148,7 @@ fn named_generics_preserve_lifetimes_and_bound_recursive_instantiation() {
 fn identity[T](value: T) -> T { return value }
 fn main() -> u8 {
     arena {
-        var escaped: mut? i32 = null
+        var escaped: mut? i32 = nil
         arena {
             fix p = new (1 as i32)
             escaped = identity[mut i32](p)
@@ -189,7 +189,7 @@ fn substituted_requirements_and_call_only_types_cannot_hide_invalid_signatures()
         "fnshape Action() -> void\nfn local[T]() -> void { fix p: mut T = panic `stop` }\nfn main() -> u8 { local[fn Action]()\nreturn 0 }",
         "fnshape Action() -> void\nfn local[T]() -> void { fix p: T = panic `stop` }\nfn main() -> u8 { local[fn Action]()\nreturn 0 }",
         "fnshape Action() -> void\nfn exit_now[T]() -> T { return panic `stop` }\nfn main() -> u8 { exit_now[fn Action]()\nreturn 0 }",
-        "fnshape Action() -> void\nfn unused[T](p: mut? T) -> void {}\nfn forward(f: fn Action) -> void { unused[fn Action](null) }\nfn main() -> u8 { return 0 }",
+        "fnshape Action() -> void\nfn unused[T](p: mut? T) -> void {}\nfn forward(f: fn Action) -> void { unused[fn Action](nil) }\nfn main() -> u8 { return 0 }",
     ] {
         assert!(suz::compile(source.as_bytes()).is_err(), "{source}");
     }
@@ -323,7 +323,7 @@ fn inferred_types_follow_nested_structures_pointers_and_forwarded_requirements()
 struct Box[T] { value: T }
 fn unbox[T](box: Box[T]) -> T { return box.value }
 fn read[T](p: mut T) -> T { return .p }
-fn nullable[T](p: mut? T, value: T) -> T { let q = p { return .q }
+fn nilable[T](p: mut? T, value: T) -> T { let q = p { return .q }
 return value }
 @needs T: +(T) -> T
 fn add[T](a: T, b: T) -> T { return a + b }
@@ -337,8 +337,8 @@ fn main() -> u8 {
     arena {
         fix p = new n
         if read(p) != 3 { return 3 }
-        if nullable(null, n) != 3 { return 4 }
-        if nullable(p, n) != 3 { return 5 }
+        if nilable(nil, n) != 3 { return 4 }
+        if nilable(p, n) != 3 { return 5 }
         if read(new 4) != 4 { return 6 }
     }
     return 0
@@ -379,7 +379,7 @@ fn inference_requires_evidence_and_preserves_explicit_arguments() {
         ("fn empty[T]() -> void {}", "empty()", "generic.inference"),
         (
             "fn identity[T](a: T) -> T { return a }",
-            "fix n: mut? i32 = identity(null)",
+            "fix n: mut? i32 = identity(nil)",
             "generic.inference",
         ),
         (
@@ -413,7 +413,7 @@ fn inference_requires_evidence_and_preserves_explicit_arguments() {
 #[test]
 fn inferred_calls_preserve_lifetimes_and_function_value_restrictions() {
     for source in [
-        "fn identity[T](value: T) -> T { return value }\nfn main() -> u8 { arena { var saved: mut? i32 = null\narena { fix p = new (1 as i32)\nsaved = identity(p) } }\nreturn 0 }",
+        "fn identity[T](value: T) -> T { return value }\nfn main() -> u8 { arena { var saved: mut? i32 = nil\narena { fix p = new (1 as i32)\nsaved = identity(p) } }\nreturn 0 }",
         "fn identity[T](value: T) -> T { return value }\nfn main() -> u8 { identity(fn [](n: i32) -> i32 { return n })\nreturn 0 }",
         "fn nothing() -> void {}\nfn consume[T](v: T) -> void {}\nfn main() -> u8 { consume(nothing())\nreturn 0 }",
     ] {
@@ -530,7 +530,7 @@ fn inference_diagnostics_name_the_callee_type_parameters() {
         ),
         (
             "fn accept[Element](p: mut? Element) -> void {}",
-            "accept(null)",
+            "accept(nil)",
             "cannot infer type parameter Element; specify all type arguments explicitly",
         ),
         (

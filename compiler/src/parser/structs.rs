@@ -382,8 +382,8 @@ pub(crate) fn validate_layout_range<'a>(
         return Ok(());
     }
     for include_pointers in [false, true] {
-        // 先に値だけの循環を調べ、その後に非nullポインタを含む初期化の循環を調べる。
-        // nullableの辺は初期化をnullで打ち切れるため、後者の依存から除く。
+        // 先に値だけの循環を調べ、その後に非nilポインタを含む初期化の循環を調べる。
+        // nilableの辺は初期化をnilで打ち切れるため、後者の依存から除く。
         let dependencies: Vec<Vec<_>> = (start..end)
             .map(|id| {
                 let decl = declaration(id);
@@ -394,12 +394,12 @@ pub(crate) fn validate_layout_range<'a>(
                         if include_pointers {
                             loop {
                                 if let Some(inner) = ty.pointee() {
-                                    if ty.is_nullable() {
+                                    if ty.is_nilable() {
                                         return None;
                                     }
                                     ty = inner;
-                                } else if let Type::ArrayRef { id, nullable, .. } = ty {
-                                    if nullable {
+                                } else if let Type::ArrayRef { id, nilable, .. } = ty {
+                                    if nilable {
                                         return None;
                                     }
                                     let array = arrays.get(id);
@@ -463,7 +463,7 @@ pub(crate) fn validate_layout_range<'a>(
                         ErrorKind::InvalidSource,
                         crate::diagnostic!(
                             "arena.recursive-struct",
-                            "non-null initialization cycle: {}",
+                            "non-nil initialization cycle: {}",
                             fields
                         ),
                     ));

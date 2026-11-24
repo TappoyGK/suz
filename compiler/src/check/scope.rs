@@ -278,12 +278,12 @@ impl Scope {
             Type::ArrayRef {
                 id,
                 mutable,
-                nullable,
+                nilable,
             } => {
                 let array = self.structs.arrays.borrow().get(id);
                 let element = self.type_name(array.element);
                 let prefix = if mutable { "#" } else { "." };
-                let suffix = if nullable { "?" } else { "" };
+                let suffix = if nilable { "?" } else { "" };
                 if array.rank == 1 {
                     format!("{prefix}[{element}]{suffix}")
                 } else {
@@ -305,7 +305,7 @@ impl Scope {
                 } else {
                     "mut"
                 },
-                if ty.is_nullable() { "?" } else { "" },
+                if ty.is_nilable() { "?" } else { "" },
                 self.type_name(ty.pointee().unwrap())
             ),
             Type::Enum(ty) => self.enums[ty.id].name.clone(),

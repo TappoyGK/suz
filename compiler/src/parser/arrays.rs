@@ -53,7 +53,7 @@ impl Parser<'_, '_> {
                             dimensions.push(crate::ast::arrays::Dimension { name: name.into(), index: rank, location });
                         }
                         _ => return Err(parser.error(ErrorKind::InvalidSource, crate::diagnostic!(
-                            "array.dimension-bind", "dimension names require a nonnull array parameter or fix annotation; use _ here"
+                            "array.dimension-bind", "dimension names require a non-nil array parameter or fix annotation; use _ here"
                         ))),
                     }
                     parser.cursor += 1;
@@ -83,14 +83,14 @@ impl Parser<'_, '_> {
                 }
             }
             parser.expect(FixedToken::Symbol("]"))?;
-            let nullable = parser.token().kind == Kind::Symbol("?");
-            if nullable {
+            let nilable = parser.token().kind == Kind::Symbol("?");
+            if nilable {
                 if !dimensions.is_empty() {
                     return Err(parser.error(
                         ErrorKind::InvalidSource,
                         crate::diagnostic!(
                             "array.dimension-bind",
-                            "dimension names require a nonnull array type; use _ here"
+                            "dimension names require a non-nil array type; use _ here"
                         ),
                     ));
                 }
@@ -104,7 +104,7 @@ impl Parser<'_, '_> {
                 Type::ArrayRef {
                     id,
                     mutable,
-                    nullable,
+                    nilable,
                 },
                 dimensions,
             ))

@@ -447,9 +447,9 @@ impl Parser<'_, '_> {
                 self.cursor += 1;
                 self.value_block()?.0.kind
             }
-            Kind::Keyword("null") => {
+            Kind::Keyword("nil") => {
                 self.cursor += 1;
-                ExpressionKind::Null
+                ExpressionKind::Nil
             }
             Kind::Keyword("true" | "false") => {
                 let value = self.token().kind == Kind::Keyword("true");

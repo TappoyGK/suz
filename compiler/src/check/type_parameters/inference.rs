@@ -258,7 +258,7 @@ impl Constraints<'_, '_> {
     }
 }
 
-/// 型ヒントのない式にも、既存の数値の既定型を適用する。nullには型を作らない。
+/// 型ヒントのない式にも、既存の数値の既定型を適用する。nilには型を作らない。
 fn defaulted(expr: &Expression, scope: &Scope) -> Option<Type> {
     if let Some(ty) = known_type(expr, scope) {
         return Some(ty);

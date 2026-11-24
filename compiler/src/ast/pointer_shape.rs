@@ -1,10 +1,10 @@
-//! ポインタの段数と各段のnull許容性・読み取り専用性。通常の型まで大きくして検査を遅くしないため、
+//! ポインタの段数と各段のnil許容性・読み取り専用性。通常の型まで大きくして検査を遅くしないため、
 //! 31段までは1語に収め、それを超えた場合だけ不変の形状を共通化する。
 
 use std::collections::BTreeMap;
 use std::sync::{OnceLock, RwLock};
 
-/// 下位ビットから2ビットずつ（偶数ビットがnull許容性、奇数ビットが読み取り専用性）、
+/// 下位ビットから2ビットずつ（偶数ビットがnil許容性、奇数ビットが読み取り専用性）、
 /// その上の1が段数の目印。最上位ビットが1なら深い形状の表番号。浅い型は表もロックも使わない。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct PointerShape(u64);
@@ -12,7 +12,7 @@ pub(crate) struct PointerShape(u64);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct DeepShape {
     depth: usize,
-    nullable: [u64; 4],
+    nilable: [u64; 4],
     readonly: [u64; 4],
 }
 
@@ -49,11 +49,11 @@ impl PointerShape {
         if self.0 & TABLE == 0 {
             let depth = self.depth();
             let payload = self.0 ^ (1 << (2 * depth));
-            let mut nullable = 0u64;
+            let mut nilable = 0u64;
             let mut readonly = 0u64;
             for i in 0..depth {
                 if payload & (1 << (2 * i)) != 0 {
-                    nullable |= 1 << i;
+                    nilable |= 1 << i;
                 }
                 if payload & (1 << (2 * i + 1)) != 0 {
                     readonly |= 1 << i;
@@ -61,7 +61,7 @@ impl PointerShape {
             }
             DeepShape {
                 depth,
-                nullable: [nullable, 0, 0, 0],
+                nilable: [nilable, 0, 0, 0],
                 readonly: [readonly, 0, 0, 0],
             }
         } else {
@@ -73,7 +73,7 @@ impl PointerShape {
         if value.depth <= INLINE_MAX_DEPTH {
             let mut bits = 1u64 << (2 * value.depth);
             for i in 0..value.depth {
-                if value.nullable[0] & (1 << i) != 0 {
+                if value.nilable[0] & (1 << i) != 0 {
                     bits |= 1 << (2 * i);
                 }
                 if value.readonly[0] & (1 << i) != 0 {
@@ -96,13 +96,13 @@ impl PointerShape {
         Self(TABLE | index)
     }
 
-    pub fn is_nullable(self) -> bool {
+    pub fn is_nilable(self) -> bool {
         if self.0 & TABLE == 0 {
             return self.0 & (1 << (2 * (self.depth() - 1))) != 0;
         }
         let value = self.expanded();
         value.depth <= 256
-            && value.nullable[(value.depth - 1) / 64] & (1 << ((value.depth - 1) % 64)) != 0
+            && value.nilable[(value.depth - 1) / 64] & (1 << ((value.depth - 1) % 64)) != 0
     }
 
     pub fn is_readonly(self) -> bool {
@@ -114,7 +114,7 @@ impl PointerShape {
             && value.readonly[(value.depth - 1) / 64] & (1 << ((value.depth - 1) % 64)) != 0
     }
 
-    pub fn with_nullable(self, enabled: bool) -> Self {
+    pub fn with_nilable(self, enabled: bool) -> Self {
         if self.0 & TABLE == 0 {
             let bit = 1 << (2 * (self.depth() - 1));
             return Self(if enabled { self.0 | bit } else { self.0 & !bit });
@@ -122,14 +122,14 @@ impl PointerShape {
         let mut value = self.expanded();
         assert!(
             value.depth <= 256 || !enabled,
-            "nullable pointer nesting is checked before construction"
+            "nilable pointer nesting is checked before construction"
         );
         if value.depth <= 256 {
             let bit = 1 << ((value.depth - 1) % 64);
             if enabled {
-                value.nullable[(value.depth - 1) / 64] |= bit;
+                value.nilable[(value.depth - 1) / 64] |= bit;
             } else {
-                value.nullable[(value.depth - 1) / 64] &= !bit;
+                value.nilable[(value.depth - 1) / 64] &= !bit;
             }
         }
         Self::from_expanded(value)
@@ -168,7 +168,7 @@ impl PointerShape {
     }
 
     pub fn pop(self) -> Self {
-        let shape = self.with_nullable(false).with_readonly(false);
+        let shape = self.with_nilable(false).with_readonly(false);
         if shape.0 & TABLE == 0 {
             let sentinel = 1 << (2 * shape.depth());
             return Self((shape.0 ^ sentinel) | (sentinel >> 2));
@@ -183,10 +183,10 @@ impl PointerShape {
 mod tests {
     use super::*;
     #[test]
-    fn different_nullable_and_readonly_layers_remain_distinct_across_storage_boundaries() {
-        // 段は末端から数える。表現が切り替わる31/32段でも、違う段のnull許容性・読み取り専用性を混同しない。
+    fn different_nilable_and_readonly_layers_remain_distinct_across_storage_boundaries() {
+        // 段は末端から数える。表現が切り替わる31/32段でも、違う段のnil許容性・読み取り専用性を混同しない。
         for depth in [30, 31, 32, 33, 64, 128, 256] {
-            let mut layers = vec![0, 1, 31, 32, depth]; // 0は全段が非null・可変の形。
+            let mut layers = vec![0, 1, 31, 32, depth]; // 0は全段が非nil・可変の形。
             layers.retain(|&layer| layer <= depth);
             layers.sort_unstable();
             layers.dedup();
@@ -200,7 +200,7 @@ mod tests {
                                 shape = shape.push();
                             }
                             if layer == marked_layer {
-                                shape = shape.with_nullable(!readonly_only);
+                                shape = shape.with_nilable(!readonly_only);
                                 shape = shape.with_readonly(readonly_only);
                             }
                         }
@@ -221,12 +221,12 @@ mod tests {
     }
 
     #[test]
-    fn nullability_and_readonly_survive_deep_pointer_round_trips() {
+    fn nilability_and_readonly_survive_deep_pointer_round_trips() {
         let mut shape = PointerShape::new();
         let mut levels = Vec::new();
         for depth in 1..=256 {
             shape = shape
-                .with_nullable(depth % 3 == 0)
+                .with_nilable(depth % 3 == 0)
                 .with_readonly(depth % 5 == 0);
             levels.push(shape);
             shape = shape.push();
@@ -235,11 +235,11 @@ mod tests {
         for expected in levels.into_iter().rev() {
             shape = shape.pop();
             assert_eq!(shape, expected);
-            assert_eq!(shape.is_nullable(), shape.depth().is_multiple_of(3));
+            assert_eq!(shape.is_nilable(), shape.depth().is_multiple_of(3));
             assert_eq!(shape.is_readonly(), shape.depth().is_multiple_of(5));
             assert_eq!(
-                shape.with_nullable(true).with_nullable(false),
-                shape.with_nullable(false)
+                shape.with_nilable(true).with_nilable(false),
+                shape.with_nilable(false)
             );
             assert_eq!(
                 shape.with_readonly(true).with_readonly(false),
