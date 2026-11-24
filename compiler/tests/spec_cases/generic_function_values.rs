@@ -165,7 +165,7 @@ fn main() -> u8 {
         "fn main() -> u8 { fix f: fn Identity[i32] = fn identity[i32]\nreturn 0 }",
         "fn bad[T](f: fn Identity[T]) -> static fn Identity[T] { return f }\nfn main() -> u8 { return 0 }",
         "fn bad[T](f: fn Identity[T]) -> void { fix saved = f }\nfn main() -> u8 { return 0 }",
-        "fn main() -> u8 { arena { var saved: mut? i32 = null\narena { fix p = new (1 as i32)\nsaved = (fn identity[mut i32])(p) } }\nreturn 0 }",
+        "fn main() -> u8 { arena { var saved: mut? i32 = nil\narena { fix p = new (1 as i32)\nsaved = (fn identity[mut i32])(p) } }\nreturn 0 }",
     ] {
         let source = format!("{prefix}{body}");
         assert!(suz::compile(source.as_bytes()).is_err(), "{source}");

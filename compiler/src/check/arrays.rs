@@ -225,7 +225,7 @@ fn access(expr: &Expression, scope: &Scope) -> Result<(CheckedExpression, bool),
         if target.ty.is_nullable() {
             return Err(expr.location.error(
                 ErrorKind::InvalidSource,
-                crate::diagnostic!("array.value", "use let before accessing a nullable array"),
+                crate::diagnostic!("array.value", "use let before accessing a nilable array"),
             ));
         }
         let array = scope.structs.arrays.borrow().get(id);
@@ -523,7 +523,7 @@ pub(super) fn constant_initializer(
             ErrorKind::InvalidSource,
             crate::diagnostic!(
                 "array.constant",
-                "constant arrays cannot contain non-null pointers, non-null writable arrays, or function values"
+                "constant arrays cannot contain non-nil pointers, non-nil writable arrays, or function values"
             ),
         ));
     }

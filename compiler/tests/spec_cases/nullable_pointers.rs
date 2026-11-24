@@ -11,7 +11,7 @@ fn read(holder: Holder) -> i32 { return holder.state.value }
 fnshape Read() -> i32
 fn invoke(f: fn Read) -> i32 { return f() }
 fn identity(value: mut int) -> mut int { return value }
-fn clear(slot: mut mut? i32) -> void { #slot = null }
+fn clear(slot: mut mut? i32) -> void { #slot = nil }
 fn main() -> u8 {
     arena {
         var state = new State { value: 1 }
@@ -45,26 +45,26 @@ struct Node { value: i32, next: mut? Node }
 fn read(p: mut Node) -> i32 { return p.value }
 fn main() -> u8 {
     arena {
-        fix a = new Node { value: 7, next: null }
-        fix all = ifexpr true { a } else { new Node { value: 1, next: null } }
+        fix a = new Node { value: 7, next: nil }
+        fix all = ifexpr true { a } else { new Node { value: 1, next: nil } }
         if read(all) != 7 { return 1 }
-        fix left = ifexpr true { a } else { null }
-        fix right = ifexpr false { null } else { a }
+        fix left = ifexpr true { a } else { nil }
+        fix right = ifexpr false { nil } else { a }
         fix field = ifexpr false { a.next } else { a }
         fix matched = matchexpr true { true => a
-            false => null }
-        fix nested = ifexpr true { a } else { ifexpr true { null } else { null } }
+            false => nil }
+        fix nested = ifexpr true { a } else { ifexpr true { nil } else { nil } }
         let p = left { if p.value != 7 { return 2 } } else { return 3 }
         let p = right { if p.value != 7 { return 4 } } else { return 5 }
         let p = field { if p.value != 7 { return 6 } } else { return 7 }
         let p = matched { if p.value != 7 { return 8 } } else { return 9 }
         let p = nested { if p.value != 7 { return 10 } } else { return 11 }
-        fix literal = ifexpr true { new 42 } else { null }
+        fix literal = ifexpr true { new 42 } else { nil }
         let p = literal { if .p != 42 { return 13 } } else { return 14 }
         fix narrow = new (7 as u8)
         fix inferred = ifexpr true { new 3 } else { narrow }
         if .inferred != 3 { return 15 }
-        fix empty: mut? Node = ifexpr true { null } else { null }
+        fix empty: mut? Node = ifexpr true { nil } else { nil }
         let p = empty { return 12 }
     }
     return 0
@@ -77,20 +77,20 @@ fn main() -> u8 {
 
 #[test]
 fn pointer_type_errors_cannot_be_bypassed_by_aliases_or_objection() {
-    let prefix = "struct Node { value: i32 }\nfn take(p: mut Node) -> void { return }\nfn clear(p: mut mut? Node) -> void { #p = null }\n";
+    let prefix = "struct Node { value: i32 }\nfn take(p: mut Node) -> void { return }\nfn clear(p: mut mut? Node) -> void { #p = nil }\n";
     for body in [
-        "fix p: mut Node = null",
-        "var p = new Node { value: 1 }\np = null",
-        "take(null)",
+        "fix p: mut Node = nil",
+        "var p = new Node { value: 1 }\np = nil",
+        "take(nil)",
         "fix p: mut? Node = new Node { value: 1 }\ntake(p)",
         "fix p: mut? Node = new Node { value: 1 }\nfix n = p.value",
         "fix p = new Node { value: 1 }\nfix slot = new p\nclear(slot)",
         "fix p = new Node { value: 1 }\nfix slot = new p\nfix alias: mut? mut? Node = slot",
         "fix p = new Node { value: 1 }\nfix q: mut? Node = p\nfix a = new p\nfix b = new q\nfix mixed = ifexpr true { a } else { b }",
-        "fix p = ifexpr true { null } else { null }",
+        "fix p = ifexpr true { nil } else { nil }",
         "fix p = ifexpr true { new 1 } else { new 2.0 }",
         "fix p = ifexpr true { new 2.0 } else { new 1 }",
-        "fix p: mut Node = ifexpr true { null } else { new Node { value: 1 } }",
+        "fix p: mut Node = ifexpr true { nil } else { new Node { value: 1 } }",
         "fix p: mut? Node = new Node { value: 1 }\nobjection [known nonnull] { take(p) }",
     ] {
         let source = format!("{prefix}fn main() -> u8 {{ arena {{ {body} }}\nreturn 0 }}");
@@ -272,15 +272,15 @@ fn main() -> u8 {
         fix mo: mut? Node = m
         fix ro2: ref? Node = mo
         fix ro3: ref? Node = r
-        fix ro_null: ref? Node = null
+        fix ro_null: ref? Node = nil
         if read_opt(ro1) != 10 || read_opt(ro2) != 10 || read_opt(ro3) != 10 { return 4 }
         if read_opt(ro_null) != -1 { return 5 }
 
-        // 分岐合流: mut? + ref -> ref?, mut + ref -> ref, ref + null -> ref?
+        // 分岐合流: mut? + ref -> ref?, mut + ref -> ref, ref + nil -> ref?
         fix j1 = ifexpr true { mo } else { r }
         fix j2 = ifexpr false { r } else { mo }
         fix j3 = ifexpr true { m } else { r }
-        fix j4 = ifexpr false { r } else { null }
+        fix j4 = ifexpr false { r } else { nil }
         let p = j1 { if p.value != 10 { return 6 } } else { return 7 }
         let p = j2 { if p.value != 10 { return 8 } } else { return 9 }
         if j3.value != 10 { return 10 }
@@ -352,7 +352,7 @@ fn take_mut_opt(p: mut? Node) -> void { let q = p { q#value += 1 } }
         ),
         (
             "fix p: ref? Node = new Node { value: 1, inner: Inner { x: 2 } }\nfix n = p.value",
-            "arena.null-deref",
+            "arena.nil-deref",
         ),
         (
             "fix a = new Node { value: 1, inner: Inner { x: 2 } }\nfix b = new a\nfix c: mut ref Node = b",
@@ -366,5 +366,75 @@ fn take_mut_opt(p: mut? Node) -> void { let q = p { q#value += 1 } }
         let source = format!("{prefix}fn main() -> u8 {{ arena {{ {body} }}\nreturn 0 }}");
         let error = suz::check_source(source.as_bytes(), suz::ArithmeticMode::Default).unwrap_err();
         assert_eq!(error.rule(), rule, "{body}: {error}");
+    }
+}
+
+#[test]
+fn null_is_a_regular_identifier_and_diagnostics_use_nil_terms() {
+    let output = compile_and_run_c23(
+        r#"
+struct Holder { null: i32, next: mut? Holder }
+
+fn inc(null: i32) -> i32 {
+    return null + 1
+}
+
+fn main() -> u8 {
+    arena {
+        fix null: i32 = 4
+        fix h = new Holder { null: null, next: nil }
+        fix v = inc(h.null)
+        let n = h.next {
+            return 1
+        }
+        if v != 5 { return 2 }
+    }
+    return 0
+}
+"#,
+        "null-ident.suz",
+    );
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+
+    for (source, rule, expected) in [
+        (
+            "fn main() -> u8 { fix p = nil\nreturn 0 }",
+            "arena.nil",
+            "nil requires an expected nilable reference type",
+        ),
+        (
+            "fn main() -> u8 { fix p: mut i32 = nil\nreturn 0 }",
+            "arena.nil",
+            "nil requires a nilable reference type",
+        ),
+        (
+            "fn main() -> u8 { fix p: mut? i32 = nil\nfix x = .p\nreturn 0 }",
+            "arena.nil-deref",
+            "use let before dereferencing a possibly nil pointer",
+        ),
+        (
+            "fn main() -> u8 { fix a: .[i32]? = nil\nfix x = a.[0] or 0\nreturn 0 }",
+            "array.value",
+            "use let before accessing a nilable array",
+        ),
+        (
+            "fn main() -> u8 { fix a: .[i32]? = nil\nfor x in a { }\nreturn 0 }",
+            "char.for-type",
+            "iteration without a range requires text or a non-nil array",
+        ),
+        (
+            "fix BAD: .[mut i32] = .[]\nfn main() -> u8 { return 0 }",
+            "array.constant",
+            "constant arrays cannot contain non-nil pointers, non-nil writable arrays, or function values",
+        ),
+        (
+            "struct Node { next: mut Node }\nfn main() -> u8 { return 0 }",
+            "arena.recursive-struct",
+            "non-nil initialization cycle:",
+        ),
+    ] {
+        let error = suz::check_source(source.as_bytes(), suz::ArithmeticMode::Default).unwrap_err();
+        assert_eq!(error.rule(), rule, "{source}\n{error}");
+        assert!(error.message().contains(expected), "{source}\n{error}");
     }
 }

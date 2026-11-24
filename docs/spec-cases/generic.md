@@ -1102,7 +1102,7 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | `[generic.needs-expand]` | 1 | 1 |
 
-### generic-018 型引数の内側のnullableを暗黙変換しない
+### generic-018 型引数の内側のnilableを暗黙変換しない
 
 主根拠：`[generic.invariance]`。
 

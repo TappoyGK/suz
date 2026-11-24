@@ -510,7 +510,7 @@ impl Type {
                 mutable: false,
                 nullable: true,
                 ..
-            } => "nullable readonly array",
+            } => "nilable readonly array",
             Self::ArrayRef {
                 mutable: true,
                 nullable: false,
@@ -520,7 +520,7 @@ impl Type {
                 mutable: true,
                 nullable: true,
                 ..
-            } => "nullable array",
+            } => "nilable array",
             Self::Array(_) => "array",
             Self::CPointer => "*const void",
             Self::CInteger(ty) => ty.name(),

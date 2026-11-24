@@ -15,7 +15,7 @@ const KEYWORDS: &[&str] = &[
     "textbuf",
     "ref",
     "mut",
-    "null",
+    "nil",
     "let",
     "extern",
     "c_bytes",

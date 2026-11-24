@@ -146,7 +146,7 @@ fn c_pointer_calls_reject_wrong_types_nullability_and_untrusted_calls() {
             "fix p: mut? Sample = new Sample { value: 0 }\ntrusted { take(p) }",
             "type.expected",
         ),
-        ("trusted { take(null) }", "arena.null"),
+        ("trusted { take(nil) }", "arena.nil"),
         ("trusted { take(Sample { value: 0 }) }", "type.expected"),
         (
             "fix p = new Local { value: 0 }\ntrusted { take(p) }",
@@ -318,13 +318,13 @@ fn keep_preserves_call_type_trusted_and_suz_lifetime_checks() {
             "fix p: mut? i32 = new 1\ntrusted { attach(p) }",
             "type.expected",
         ),
-        ("trusted { attach(null) }", "arena.null"),
+        ("trusted { attach(nil) }", "arena.nil"),
         (
             "fix p = new (1 as u32)\ntrusted { attach(p) }",
             "type.expected",
         ),
         (
-            "var p: mut? i32 = null\ntrusted { arena { p = new (1 as i32)\nlet q = p { attach(q) } } }",
+            "var p: mut? i32 = nil\ntrusted { arena { p = new (1 as i32)\nlet q = p { attach(q) } } }",
             "arena.store",
         ),
     ] {

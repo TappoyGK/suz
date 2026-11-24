@@ -56,7 +56,7 @@ fn methods_reject_invalid_receivers_names_and_writes() {
         (
             "",
             "arena { fix p: mut? Counter = new Counter { value: 1 }\np#add(1) }",
-            "arena.null-deref",
+            "arena.nil-deref",
         ),
         (
             "",
@@ -80,9 +80,9 @@ fn methods_reject_invalid_receivers_names_and_writes() {
 #[test]
 fn method_receivers_keep_lifetimes_capture_and_range_restrictions() {
     for (declarations, body, rule) in [
-        ("fn Node#clear() -> void { self#next = null }", "", "accept"),
+        ("fn Node#clear() -> void { self#next = nil }", "", "accept"),
         (
-            "fn Node#clear() -> void { self = Node { value: 0, next: null } }",
+            "fn Node#clear() -> void { self = Node { value: 0, next: nil } }",
             "",
             "accept",
         ),
@@ -109,28 +109,28 @@ fn method_receivers_keep_lifetimes_capture_and_range_restrictions() {
         ("", "fix f = fn Node.count", "method.no-fn-value"),
         (
             "",
-            "fix n = Node { value: 1, next: null }\nfix f = fn n.count",
+            "fix n = Node { value: 1, next: nil }\nfix f = fn n.count",
             "method.no-fn-value",
         ),
         (
             "",
-            "var n = Node { value: 1, next: null }\nfor i in 0..<n.count() {}\nn#bump()",
+            "var n = Node { value: 1, next: nil }\nfor i in 0..<n.count() {}\nn#bump()",
             "for.bound-reference",
         ),
         (
             "",
-            "var n = Node { value: 1, next: null }\nfor i in 0..<n#bump() {}",
+            "var n = Node { value: 1, next: nil }\nfor i in 0..<n#bump() {}",
             "for.bound-reference",
         ),
         (
             "",
-            "arena { fix outer = new Node { value: 1, next: null }\narena { outer#append() } }",
+            "arena { fix outer = new Node { value: 1, next: nil }\narena { outer#append() } }",
             "arena.store",
         ),
         ("fn Node .bad() -> void {}", "", "method.decl"),
     ] {
         let source = format!(
-            "struct Node {{ value: i32, next: mut? Node }}\nfnshape Read() -> i32\nfn invoke(f: fn Read) -> i32 {{ return f() }}\nfn Node.count() -> i32 {{ return self.value }}\nfn Node#bump() -> i32 {{ self#value += 1\nreturn self.value }}\nfn Node#append() -> void {{ self#next = new Node {{ value: 2, next: null }} }}\n{declarations}\nfn main() -> u8 {{ {body}\nreturn 0 }}"
+            "struct Node {{ value: i32, next: mut? Node }}\nfnshape Read() -> i32\nfn invoke(f: fn Read) -> i32 {{ return f() }}\nfn Node.count() -> i32 {{ return self.value }}\nfn Node#bump() -> i32 {{ self#value += 1\nreturn self.value }}\nfn Node#append() -> void {{ self#next = new Node {{ value: 2, next: nil }} }}\n{declarations}\nfn main() -> u8 {{ {body}\nreturn 0 }}"
         );
         if rule == "accept" {
             suz::compile(source.as_bytes()).unwrap();

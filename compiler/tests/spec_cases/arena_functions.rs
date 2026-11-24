@@ -12,12 +12,12 @@ fn calls_accept_older_inputs_but_reject_saving_shorter_references() {
         let source = format!(
             r#"struct Node {{ v: i32, next: mut? Node }}
 struct Holder {{ node: mut? Node }}
-fn mk(v: i32) -> mut? Node {{ return new Node {{ v: v, next: null }} }}
+fn mk(v: i32) -> mut? Node {{ return new Node {{ v: v, next: nil }} }}
 fn link(a: mut? Node, b: mut? Node) -> void {{ let x = a {{ x#next = b }} }}
 fn hold(n: mut? Node) -> mut? Holder {{ return new Holder {{ node: n }} }}
 fn first(h: Holder) -> mut? Node {{ return h.node }}
 fn from_pointer(h: mut? Holder) -> mut? Node {{ let p = h {{ return p.node }}
-    return null }}
+    return nil }}
 fn main() -> u8 {{
     arena {{
         fix o = mk(1)
@@ -68,18 +68,18 @@ fn main() -> u8 {
     );
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     for body in [
-        "fix p: mut? Node = null\ncall(fn [p]() -> i64 { return p.v })",
-        "var p: mut? Node = new Node { v: 1 }\ncall(fn [p]() -> i64 { return p.v })\np = null",
-        "var p: mut? Node = new Node { v: 1 }\ncall(fn [var p]() -> i64 { return p.v })\np = null",
+        "fix p: mut? Node = nil\ncall(fn [p]() -> i64 { return p.v })",
+        "var p: mut? Node = new Node { v: 1 }\ncall(fn [p]() -> i64 { return p.v })\np = nil",
+        "var p: mut? Node = new Node { v: 1 }\ncall(fn [var p]() -> i64 { return p.v })\np = nil",
         // 外側の非nullのローカル番号0と、クロージャの通常の仮引数番号0を混同しない。
         "fix p = new Node { v: 1 }\nborrow(fn [p](q: mut? Node) -> i64 { return q.v })",
     ] {
         let source = format!(
-            "struct Node {{ v: i64 }}\nfnshape Act() -> i64\nfnshape Borrow(mut? Node) -> i64\nfn call(f: fn Act) -> i64 {{ return f() }}\nfn borrow(f: fn Borrow) -> i64 {{ return f(null) }}\nfn main() -> u8 {{ arena {{ {body}\n}}\nreturn 0 }}"
+            "struct Node {{ v: i64 }}\nfnshape Act() -> i64\nfnshape Borrow(mut? Node) -> i64\nfn call(f: fn Act) -> i64 {{ return f() }}\nfn borrow(f: fn Borrow) -> i64 {{ return f(nil) }}\nfn main() -> u8 {{ arena {{ {body}\n}}\nreturn 0 }}"
         );
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert!(
-            error.to_string().contains("[arena.null-deref]"),
+            error.to_string().contains("[arena.nil-deref]"),
             "{body}: {error}"
         );
     }
@@ -134,12 +134,12 @@ fn make(value: i32, tail: mut? Node) -> mut? Node {
 fn append(p: mut? Node, n: i32) -> void {
     let q = p {
         let next = q.next { append(next, n) }
-        else { q#next = make(n, null) }
+        else { q#next = make(n, nil) }
     }
 }
 fn boxed(p: mut? Node) -> Box {
     arena { fix scratch = new (99 as i32)
-        if .scratch != 99 { return Box { p: null } }
+        if .scratch != 99 { return Box { p: nil } }
     }
     return Box { p: make(3, p) }
 }
@@ -149,9 +149,9 @@ fn sum(p: mut? Node) -> i32 {
 }
 fn main() -> u8 {
     arena {
-        fix root = make(1, null)
+        fix root = make(1, nil)
         arena {
-            fix temporary = make(11, null)
+            fix temporary = make(11, nil)
             if sum(temporary) != 11 { return 5 }
         }
         append(root, 2)
@@ -177,10 +177,10 @@ fn main() -> u8 {
 fn parameter_stores_are_checked_by_lifetime_instead_of_blanket_prohibition() {
     for body in [
         "let q = p { q#next = p }",
-        "let q = p { q#next = null }",
-        "let q = p { #q = Node { next: null } }",
+        "let q = p { q#next = nil }",
+        "let q = p { #q = Node { next: nil } }",
         "let q = p { let r = q.next { r#next = p } }",
-        "let q = p { arena { q#next = new Node { next: null } } }",
+        "let q = p { arena { q#next = new Node { next: nil } } }",
     ] {
         let source = format!(
             "struct Node {{ next: mut? Node }}\nfn change(p: mut? Node) -> void {{ {body} }}\nfn main() -> u8 {{ return 0 }}"
@@ -194,9 +194,9 @@ fn parameter_stores_are_checked_by_lifetime_instead_of_blanket_prohibition() {
     }
     for result in ["mut? i32", "Box"] {
         let value = if result == "Box" {
-            "Box { p: null }"
+            "Box { p: nil }"
         } else {
-            "null"
+            "nil"
         };
         let source = format!(
             "struct Box {{ p: mut? i32 }}\nfn bad() -> {result} {{ return {value} }}\nfn main() -> u8 {{ return 0 }}"
@@ -207,28 +207,28 @@ fn parameter_stores_are_checked_by_lifetime_instead_of_blanket_prohibition() {
 
 #[test]
 fn arena_calls_check_transitive_regions_and_effects_of_callee_allocations() {
-    let definitions = "struct Node { next: mut? Node }\nstruct Box { p: mut? Node }\nfn attach(p: mut? Box) -> mut? Node { fix n = new Node { next: null }\nlet q = p { q#p = n }\nreturn n }\n";
+    let definitions = "struct Node { next: mut? Node }\nstruct Box { p: mut? Node }\nfn attach(p: mut? Box) -> mut? Node { fix n = new Node { next: nil }\nlet q = p { q#p = n }\nreturn n }\n";
     for (body, rule) in [
-        ("attach(null)", "accept"),
+        ("attach(nil)", "accept"),
         (
-            "arena { fix outer = new Node { next: null }\narena { fix b = new Box { p: outer }\nattach(b) } }",
+            "arena { fix outer = new Node { next: nil }\narena { fix b = new Box { p: outer }\nattach(b) } }",
             "accept",
         ),
         (
-            "arena { fix outer = new Box { p: null }\narena { attach(outer) } }",
+            "arena { fix outer = new Box { p: nil }\narena { attach(outer) } }",
             "arena.store",
         ),
         (
-            "arena { var saved: mut? Node = null\narena { saved = attach(null) } }",
+            "arena { var saved: mut? Node = nil\narena { saved = attach(nil) } }",
             "arena.store",
         ),
         (
-            "arena { var saved: mut? Node = null\narena { fix b = new Box { p: null }\nattach(b)\nsaved = b.p } }",
+            "arena { var saved: mut? Node = nil\narena { fix b = new Box { p: nil }\nattach(b)\nsaved = b.p } }",
             "arena.store",
         ),
         // 後の更新も候補集合に含むため、呼び出し前のnullだけで安全とは判定しない。
         (
-            "arena { fix outer = new Node { next: null }\narena { fix b = new Box { p: null }\nattach(b)\nb#p = outer } }",
+            "arena { fix outer = new Node { next: nil }\narena { fix b = new Box { p: nil }\nattach(b)\nb#p = outer } }",
             "accept",
         ),
     ] {
@@ -245,11 +245,11 @@ fn arena_calls_check_transitive_regions_and_effects_of_callee_allocations() {
 #[test]
 fn arena_function_cannot_return_or_store_inner_references() {
     for body in [
-        "arena { return new Node { next: null } }",
-        "arena { let q = p { q#next = new Node { next: null } } }\nreturn p",
-        "arena { fix inner = new Node { next: null }\nfix n = failed() or return inner\nreturn p }",
-        "arena { fix inner = new Node { next: null }\nfix n = (300 as i32) as u8 or return inner\nreturn p }",
-        "arena { fix inner = new Node { next: null }\nvar n: u8 = 255\nn = n + 1 or return inner\nreturn p }",
+        "arena { return new Node { next: nil } }",
+        "arena { let q = p { q#next = new Node { next: nil } } }\nreturn p",
+        "arena { fix inner = new Node { next: nil }\nfix n = failed() or return inner\nreturn p }",
+        "arena { fix inner = new Node { next: nil }\nfix n = (300 as i32) as u8 or return inner\nreturn p }",
+        "arena { fix inner = new Node { next: nil }\nvar n: u8 = 255\nn = n + 1 or return inner\nreturn p }",
     ] {
         let source = format!(
             "struct Node {{ next: mut? Node }}\nerror Err {{ Bad }}\nfn failed() -> i32 or Err {{ fail Err.Bad }}\nfn bad(p: mut? Node) -> mut? Node {{ {body} }}\nfn main() -> u8 {{ return 0 }}"
@@ -321,7 +321,7 @@ fn maybe(ok: bool) -> mut? i32 or Err {
     fail Err.Bad
 }
 fn recover_pointer() -> mut? i32 {
-    fix p = maybe(false) or error { _ => { fix fallback = maybe(true) or return null
+    fix p = maybe(false) or error { _ => { fix fallback = maybe(true) or return nil
 recover fallback } }
     return p
 }
@@ -352,10 +352,10 @@ fn main() -> u8 {
 
 #[test]
 fn reference_captures_and_pointer_chains_allow_safe_stores() {
-    let source = b"fnshape Change() -> void\nfn invoke(f: fn Change) -> void { f() }\nfn main() -> u8 { arena { var p: mut? i32 = null\ninvoke(fn [var p]() -> void { p = null }) }\nreturn 0 }";
+    let source = b"fnshape Change() -> void\nfn invoke(f: fn Change) -> void { f() }\nfn main() -> u8 { arena { var p: mut? i32 = nil\ninvoke(fn [var p]() -> void { p = nil }) }\nreturn 0 }";
     suz::compile(source).unwrap();
     for source in [
-        "fn change(p: mut? mut? i32) -> void { let q = p { #q = null } }\nfn main() -> u8 { return 0 }",
+        "fn change(p: mut? mut? i32) -> void { let q = p { #q = nil } }\nfn main() -> u8 { return 0 }",
         "fn change(p: mut? mut? i32) -> void { return }\nfn main() -> u8 { arena { fix outer = new (1 as i32)\narena { fix inner = new outer\nchange(inner) } }\nreturn 0 }",
     ] {
         if source.contains("change(inner)") {
@@ -420,7 +420,7 @@ fn main() -> u8 {
         let p = select(count, value) {
             if .p != 7 { return 1 }
         } else { return 2 }
-        let p = select(count, null) { return 3 }
+        let p = select(count, nil) { return 3 }
         else { if .count != 2 { return 4 } }
     }
     return 0
@@ -437,10 +437,10 @@ fn main() -> u8 {
 #[test]
 fn returned_allocation_keeps_proven_store_diagnostics_inside_objection() {
     let source = b"struct Node { v: i32, next: mut? Node }
-fn mk(v: i32) -> mut Node { return new Node { v: v, next: null } }
+fn mk(v: i32) -> mut Node { return new Node { v: v, next: nil } }
 fn main() -> u8 {
     arena {
-        fix a = new Node { v: 1, next: null }
+        fix a = new Node { v: 1, next: nil }
         arena {
             fix t = mk(2)
             objection [test] { a#next = t }
@@ -475,7 +475,7 @@ fn main() -> u8 {
 fn unified_arena_named_functions_allocate_without_an_explicit_block() {
     let source = r#"
 struct Node { v: i32, next: mut? Node }
-fn make(v: i32) -> mut Node { return new Node { v: v, next: null } }
+fn make(v: i32) -> mut Node { return new Node { v: v, next: nil } }
 fn identity(p: mut Node) -> mut Node { return p }
 fn read(p: mut Node) -> i32 { return p.v }
 fn main() -> u8 {
@@ -502,7 +502,7 @@ fn attach(p: mut Node, q: mut Node) -> void { p#next = q }
         ("saved = identity(outer)", "arena.return-lifetime"),
     ] {
         let source = format!(
-            "{prefix}\nfn main() -> u8 {{\nfix outer = new Node {{ v: 1, next: null }}\nvar saved: mut? Node = null\nsaved = outer\narena {{\nfix inner = new Node {{ v: 2, next: null }}\n{operation}\n}}\nreturn 0\n}}"
+            "{prefix}\nfn main() -> u8 {{\nfix outer = new Node {{ v: 1, next: nil }}\nvar saved: mut? Node = nil\nsaved = outer\narena {{\nfix inner = new Node {{ v: 2, next: nil }}\n{operation}\n}}\nreturn 0\n}}"
         );
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert!(
@@ -531,11 +531,11 @@ fn apply(f: fn Link, a: mut Node, b: mut Node) -> void { f(a, b) }
 fn read(a: mut Node, b: mut Node) -> void { if a.v == b.v { return } }
 fn link(a: mut Node, b: mut Node) -> void { a#next = b }
 fn main() -> u8 {
-    fix outer = new Node { v: 1, next: null }
-    fix peer = new Node { v: 2, next: null }
+    fix outer = new Node { v: 1, next: nil }
+    fix peer = new Node { v: 2, next: nil }
     apply(fn link, outer, peer)
     arena {
-        fix inner = new Node { v: 3, next: null }
+        fix inner = new Node { v: 3, next: nil }
         apply(fn read, outer, inner)
     }
     return 0
@@ -557,7 +557,7 @@ struct Node { v: i32 }
 fnshape Act() -> void
 fn run(f: fn Act) -> void { f() }
 fn main() -> u8 {
-    var p: mut? Node = null
+    var p: mut? Node = nil
     run(fn [var p]() -> void { p = new Node { v: 7 } })
     let n = p { if n.v != 7 { return 1 } } else { return 2 }
     return 0
@@ -580,9 +580,9 @@ struct Node { v: i32, next: mut? Node }
 fnshape Get() -> mut Node
 fn run(f: fn Get) -> mut Node { return f() }
 fn main() -> u8 {
-    fix outer = new Node { v: 1, next: null }
+    fix outer = new Node { v: 1, next: nil }
     arena {
-        fix inner = new Node { v: 2, next: null }
+        fix inner = new Node { v: 2, next: nil }
         fix returned = run(fn [outer]() -> mut Node { return outer })
         returned#next = inner
     }
@@ -611,9 +611,9 @@ fn link(a: mut Node, b: mut Node) -> void { a#next = b }
 fn main() -> u8 {
     fix a = BoxA { cb: fn link }
     fix b = BoxB { cb: fn read }
-    fix outer = new Node { v: 1, next: null }
+    fix outer = new Node { v: 1, next: nil }
     arena {
-        fix inner = new Node { v: 2, next: null }
+        fix inner = new Node { v: 2, next: nil }
         b.cb(outer, inner)
     }
     return 0
@@ -639,9 +639,9 @@ fn relay(f: fn Get) -> mut Node {
     return invoke(fn [f]() -> mut Node { return f() })
 }
 fn main() -> u8 {
-    fix outer = new Node { v: 1, next: null }
+    fix outer = new Node { v: 1, next: nil }
     arena {
-        fix inner = new Node { v: 2, next: null }
+        fix inner = new Node { v: 2, next: nil }
         fix p = relay(fn [outer]() -> mut Node { return outer })
         p#next = inner
     }
@@ -673,7 +673,7 @@ fn apply(f: static fn Link, a: mut Node, b: mut Node) -> void { f(a, b) }
         "apply(fn read, outer, inner)\napply(fn write, inner, inner)",
     ] {
         let source = format!(
-            "{prefix}\nfn main() -> u8 {{\nfix outer = new Node {{ v: 1, next: null }}\narena {{\nfix inner = new Node {{ v: 2, next: null }}\n{operation}\n}}\nreturn 0\n}}"
+            "{prefix}\nfn main() -> u8 {{\nfix outer = new Node {{ v: 1, next: nil }}\narena {{\nfix inner = new Node {{ v: 2, next: nil }}\n{operation}\n}}\nreturn 0\n}}"
         );
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.rule(), "arena.store", "{error}");
@@ -751,9 +751,9 @@ fn main() -> u8 {
     fix unrelated = new (fn write)
     fix chosen = new (fn read)
     fix alias = chosen
-    fix outer = new Node { next: null }
+    fix outer = new Node { next: nil }
     arena {
-        fix inner = new Node { next: null }
+        fix inner = new Node { next: nil }
         (.chosen)(outer, inner)
     }
     #alias = fn read
@@ -789,8 +789,8 @@ fn main() -> u8 {
 #[test]
 fn callee_objection_cannot_override_a_proven_call_store() {
     for body in [
-        "n#next = new Node { v: 2, next: null }",
-        "objection [locally assumed safe] { n#next = new Node { v: 2, next: null } }",
+        "n#next = new Node { v: 2, next: nil }",
+        "objection [locally assumed safe] { n#next = new Node { v: 2, next: nil } }",
     ] {
         for call in [
             "attach(n)",
@@ -815,7 +815,7 @@ fn cycle(n: mut Node, flag: bool) -> void {{ if flag {{ back(n) }} else {{ attac
 fn back(n: mut Node) -> void {{ cycle(n, false) }}
 fn generic[T](n: mut Node) -> void {{ attach(n) }}
 fn main() -> u8 {{
-    fix n = new Node {{ v: 1, next: null }}
+    fix n = new Node {{ v: 1, next: nil }}
     arena {{ {call} }}
     return 0
 }}

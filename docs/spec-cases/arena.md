@@ -68,17 +68,17 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | `[type.name]` | 2 | 12 |
 
-### arena-004 型のあるnullableポインタをnullから更新する
+### arena-004 型のあるnilableポインタをnilから更新する
 
-主根拠：`[arena.null]`。
+主根拠：`[arena.nil]`。
 
 **ソース：**
 
 ```suz
 struct Node { value: i32, next: mut? Node }
 fn main() -> u8 {
-    var p: mut? Node = null
-    p = new Node { value: 2, next: null }
+    var p: mut? Node = nil
+    p = new Node { value: 2, next: nil }
     let n = p { if n.value != 2 { return 1 } } else { return 2 }
     return 0
 }
@@ -90,15 +90,15 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | 正常終了 | 0 | 0 |
 
-### arena-005 nullだけでは参照先の型を決められない
+### arena-005 nilだけでは参照先の型を決められない
 
-主根拠：`[arena.null]`。
+主根拠：`[arena.nil]`。
 
 **ソース：**
 
 ```suz
 fn main() -> u8 {
-    fix p = null
+    fix p = nil
     return 0
 }
 ```
@@ -113,18 +113,18 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[arena.null]` | 2 | 13 |
+| 通常 | `[arena.nil]` | 2 | 13 |
 
-### arena-006 非null型へnullを代入できない
+### arena-006 非nil型へnilを代入できない
 
-主根拠：`[arena.null]`。
+主根拠：`[arena.nil]`。
 
 **ソース：**
 
 ```suz
 struct Node { value: i32, next: mut? Node }
 fn main() -> u8 {
-    fix p: mut Node = null
+    fix p: mut Node = nil
     return 0
 }
 ```
@@ -139,11 +139,11 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[arena.null]` | 3 | 23 |
+| 通常 | `[arena.nil]` | 3 | 23 |
 
-### arena-007 nullableポインタは確認前に読めない
+### arena-007 nilableポインタは確認前に読めない
 
-主根拠：`[arena.null-deref]`。
+主根拠：`[arena.nil-deref]`。
 
 **ソース：**
 
@@ -165,7 +165,7 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[arena.null-deref]` | 1 | 38 |
+| 通常 | `[arena.nil-deref]` | 1 | 38 |
 
 ### arena-008 letで得た参照から実体を更新する
 
@@ -176,7 +176,7 @@ fn main() -> u8 {
 ```suz
 struct Node { value: i32, next: mut? Node }
 fn main() -> u8 {
-    fix tail = new Node { value: 1, next: null }
+    fix tail = new Node { value: 1, next: nil }
     fix a = new Node { value: 0, next: tail }
     let n = a.next { n#value += 1 }
     if tail.value != 2 { return 1 }
@@ -190,7 +190,7 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | 正常終了 | 0 | 0 |
 
-### arena-009 非null参照をnullableへ渡す
+### arena-009 非nil参照をnilableへ渡す
 
 主根拠：`[arena.ptr-conversion]`。
 
@@ -240,7 +240,7 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | `[type.expected]` | 5 | 10 |
 
-### arena-011 参照とnullの分岐はnullableになる
+### arena-011 参照とnilの分岐はnilableになる
 
 主根拠：`[arena.ptr-join]`。
 
@@ -248,9 +248,9 @@ fn main() -> u8 {
 
 ```suz
 struct Node { value: i32, next: mut? Node }
-fn choose(ready: bool, a: mut Node) -> mut? Node { return ifexpr ready { a } else { null } }
+fn choose(ready: bool, a: mut Node) -> mut? Node { return ifexpr ready { a } else { nil } }
 fn main() -> u8 {
-    fix p = new Node { value: 3, next: null }
+    fix p = new Node { value: 3, next: nil }
     let n = choose(true, p) { if n.value != 3 { return 1 } } else { return 2 }
     let n = choose(false, p) { return 3 }
     return 0
@@ -289,7 +289,7 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | `[arena.recursive-struct]` | 1 | 15 |
 
-### arena-013 nullableの再帰ポインタを終端にする
+### arena-013 nilableの再帰ポインタを終端にする
 
 主根拠：`[arena.recursive-struct]`。
 
@@ -298,7 +298,7 @@ fn main() -> u8 {
 ```suz
 struct Node { value: i32, next: mut? Node }
 fn main() -> u8 {
-    fix p = new Node { value: 3, next: null }
+    fix p = new Node { value: 3, next: nil }
     if p.value != 3 { return 1 }
     return 0
 }
@@ -339,7 +339,7 @@ fn main() -> u8 {
 
 ```suz
 fn main() -> u8 {
-    var saved: mut? i32 = null
+    var saved: mut? i32 = nil
     arena { saved = new (1 as i32) }
     return 0
 }
@@ -368,8 +368,8 @@ struct Node { value: i32, next: mut? Node }
 struct Holder { item: mut? Node }
 struct Outer { holder: Holder }
 fn main() -> u8 {
-    fix outer = new Outer { holder: Holder { item: null } }
-    arena { fix inner = new Node { value: 1, next: null }
+    fix outer = new Outer { holder: Holder { item: nil } }
+    arena { fix inner = new Node { value: 1, next: nil }
         outer#holder = Holder { item: inner } }
     return 0
 }
@@ -397,7 +397,7 @@ fn main() -> u8 {
 struct Node { value: i32, next: mut? Node }
 fn prepend(value: i32, tail: mut? Node) -> mut Node { return new Node { value: value, next: tail } }
 fn main() -> u8 {
-    fix head = prepend(2, prepend(1, null))
+    fix head = prepend(2, prepend(1, nil))
     let n = head.next { if n.value != 1 { return 1 } } else { return 2 }
     return 0
 }
@@ -440,9 +440,9 @@ fn main() -> u8 {
 ```suz
 struct Node { value: i32, next: mut? Node }
 fn connect(flag: bool) -> void {
-    fix outer = new Node { value: 1, next: null }
+    fix outer = new Node { value: 1, next: nil }
     arena {
-        fix inner = new Node { value: 2, next: null }
+        fix inner = new Node { value: 2, next: nil }
         fix destination = ifexpr flag { outer } else { inner }
         fix source = ifexpr flag { outer } else { inner }
         objection [両方とも同じ条件で同じ実体を選ぶ] {
@@ -472,8 +472,8 @@ fn main() -> u8 {
 ```suz
 struct Node { value: i32, next: mut? Node }
 fn main() -> u8 {
-    fix outer = new Node { value: 1, next: null }
-    arena { fix inner = new Node { value: 2, next: null }
+    fix outer = new Node { value: 1, next: nil }
+    arena { fix inner = new Node { value: 2, next: nil }
         objection [参照先の寿命を保証する] { outer#next = inner } }
     return 0
 }

@@ -361,7 +361,7 @@ fn check_for(statement: &Statement, context: &mut StatementContext<'_>) -> Resul
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(
                     "char.for-type",
-                    "iteration without a range requires text or a nonnull array"
+                    "iteration without a range requires text or a non-nil array"
                 ),
             ));
         };

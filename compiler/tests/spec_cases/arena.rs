@@ -301,7 +301,7 @@ struct Node { value: i32, next: mut? Node }
 struct Holder { node: mut? Node }
 fn main() -> u8 {
     arena {
-        fix a = new Node { value: 1, next: null }
+        fix a = new Node { value: 1, next: nil }
         fix b = new Node { value: 2, next: a }
         a#next = b
         b#value += 3
@@ -321,7 +321,7 @@ fn main() -> u8 {
         fix indirect = new count
         let inner = .indirect { #inner = 9 }
         if .count != 9 { return 5 }
-        var holder = Holder { node: null }
+        var holder = Holder { node: nil }
         arena {
             fix alias = a
             holder = Holder { node: alias }
@@ -342,11 +342,11 @@ fn main() -> u8 {
 #[test]
 fn arena_rejects_escaping_references_through_aliases_and_copies() {
     for body in [
-        "var saved: mut? Node = null\narena { saved = new Node { next: null } }",
-        "arena { fix outer = new Node { next: null }\narena { fix alias = outer\nalias#next = new Node { next: null } } }",
-        "arena { fix outer = new Node { next: null }\narena { fix inner = new Node { next: null }\n#outer = Node { next: inner } } }",
-        "arena { var box = Box { node: null }\narena { fix inner = new Node { next: null }\nfix copy = Box { node: inner }\nbox = copy } }",
-        "var saved: mut? Node = null\nfor i in 0..<3 { arena { saved = new Node { next: null } } }",
+        "var saved: mut? Node = nil\narena { saved = new Node { next: nil } }",
+        "arena { fix outer = new Node { next: nil }\narena { fix alias = outer\nalias#next = new Node { next: nil } } }",
+        "arena { fix outer = new Node { next: nil }\narena { fix inner = new Node { next: nil }\n#outer = Node { next: inner } } }",
+        "arena { var box = Box { node: nil }\narena { fix inner = new Node { next: nil }\nfix copy = Box { node: inner }\nbox = copy } }",
+        "var saved: mut? Node = nil\nfor i in 0..<3 { arena { saved = new Node { next: nil } } }",
     ] {
         let source = format!(
             "struct Node {{ next: mut? Node }}\nstruct Box {{ node: mut? Node }}\nfn main() -> u8 {{ {body}\nreturn 0 }}"
@@ -363,15 +363,15 @@ fn arena_rejects_escaping_references_through_aliases_and_copies() {
 #[test]
 fn arena_rejects_invalid_pointer_operations_and_function_boundaries() {
     for (body, rule) in [
-        ("fix p = null", "arena.null"),
+        ("fix p = nil", "arena.nil"),
         ("arena { fix p: ptr i32 = new 1 }", "type.name"),
         (
             "arena { var p: mut? i64 = new 1\nfix n = .p }",
-            "arena.null-deref",
+            "arena.nil-deref",
         ),
         (
-            "arena { fix p: mut? i32 = null\nfix n = .p }",
-            "arena.null-deref",
+            "arena { fix p: mut? i32 = nil\nfix n = .p }",
+            "arena.nil-deref",
         ),
         ("arena { fix p = new 1\np = new 2 }", "var.fix-assign"),
     ] {
@@ -623,8 +623,8 @@ fn arena_rejects_pointer_conversions_captures_and_aggregate_operations() {
     for source in [
         "struct Node { next: Node }\nfn main() -> u8 { return 0 }",
         "struct Node { next: mut? int }\nfn main() -> u8 { return 0 }",
-        "fn main() -> u8 { fix p: mut? int = null\nreturn 0 }",
-        "fn main() -> u8 { fix p: mut? void = null\nreturn 0 }",
+        "fn main() -> u8 { fix p: mut? int = nil\nreturn 0 }",
+        "fn main() -> u8 { fix p: mut? void = nil\nreturn 0 }",
         "fix PTR: mut i32 = new (1 as i32)\nfn main() -> u8 { return 0 }",
         "extern \"x.h\" { fn take(p: ptr? i32) -> void }\nfn main() -> u8 { return 0 }",
     ] {
@@ -638,9 +638,9 @@ fn arena_tracks_branch_union_field_loads_and_member_diagnostics() {
 struct Box { head: mut? Node }
 fn main() -> u8 {
     arena {
-        fix outer = new Node { next: null }
+        fix outer = new Node { next: nil }
         arena {
-            fix inner = new Node { next: null }
+            fix inner = new Node { next: nil }
             fix head = new Box { head: inner }
             fix copy = (.head) with { head: head.head }
             fix selected = ifexpr true { outer } else { inner }
@@ -671,7 +671,7 @@ fn generic(value: int) -> int {
 }
 fn main() -> u8 {
     arena {
-        fix first = new First { other: null }
+        fix first = new First { other: nil }
         fix second = new Second { other: first }
         first#other = second
         fix n = new (7 as i32)
@@ -716,8 +716,8 @@ fn pointer_access_syntax_rejects_read_targets_and_write_values() {
         ("(.holder).value = p", "arena.ptr-operations"),
         ("##pp = 2", "arena.ptr-operations"),
         ("#holder#value = p", "arena.ptr-operations"),
-        ("#optional = 2", "arena.null-deref"),
-        ("fix n = .optional", "arena.null-deref"),
+        ("#optional = 2", "arena.nil-deref"),
+        ("fix n = .optional", "arena.nil-deref"),
     ] {
         let source = format!(
             "struct Holder {{ value: mut i32 }}\nfn main() -> u8 {{ arena {{\nfix p = new (1 as i32)\nfix optional: mut? i32 = p\nfix holder = new Holder {{ value: p }}\n{body}\n}}\nreturn 0 }}"

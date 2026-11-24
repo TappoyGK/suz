@@ -463,7 +463,7 @@ pub(crate) fn validate_layout_range<'a>(
                         ErrorKind::InvalidSource,
                         crate::diagnostic!(
                             "arena.recursive-struct",
-                            "non-null initialization cycle: {}",
+                            "non-nil initialization cycle: {}",
                             fields
                         ),
                     ));

@@ -6,9 +6,9 @@ fn objection_handles_correlated_source_and_destination_choices() {
 struct Node { next: mut? Node }
 fn connect(flag: bool) -> void {
     arena {
-        fix outer = new Node { next: null }
+        fix outer = new Node { next: nil }
         arena {
-            fix inner = new Node { next: null }
+            fix inner = new Node { next: nil }
             fix destination = ifexpr flag { outer } else { inner }
             fix source = ifexpr flag { outer } else { inner }
             objection [both choices use the same flag and therefore the same object] {
@@ -33,9 +33,9 @@ fn objection_accepts_a_safe_overwrite_without_changing_runtime_lifetimes() {
 struct Node { v: i32, next: mut? Node }
 fn main() -> u8 {
     arena {
-        fix outer = new Node { v: 1, next: null }
+        fix outer = new Node { v: 1, next: nil }
         arena {
-            fix inner = new Node { v: 2, next: null }
+            fix inner = new Node { v: 2, next: nil }
             var selected = outer
             selected = inner
             objection [selected was replaced by inner] {
@@ -71,17 +71,17 @@ fn objection_never_removes_proven_lifetime_violations() {
         "saved = inner",
         "fix copy = inner\nsaved = copy",
         "fix maybe: mut? Node = inner\nlet p = maybe { saved = p }",
-        "saved = new Node { next: null }",
-        "saved = ifexpr true { inner } else { new Node { next: null } }",
+        "saved = new Node { next: nil }",
+        "saved = ifexpr true { inner } else { new Node { next: nil } }",
         "outer#next = inner",
     ] {
         let source = format!(
-            "struct Node {{ next: mut? Node }}\nfn main() -> u8 {{ arena {{ var saved: mut? Node = null\nfix outer = new Node {{ next: null }}\narena {{ fix inner = new Node {{ next: null }}\nobjection [claimed safety] {{ {operation} }}\n}}\n}}\nreturn 0 }}"
+            "struct Node {{ next: mut? Node }}\nfn main() -> u8 {{ arena {{ var saved: mut? Node = nil\nfix outer = new Node {{ next: nil }}\narena {{ fix inner = new Node {{ next: nil }}\nobjection [claimed safety] {{ {operation} }}\n}}\n}}\nreturn 0 }}"
         );
         // savedを使わない例でもvarの再代入規則を満たす。
         let source = source.replace(
-            "var saved: mut? Node = null",
-            "var saved: mut? Node = null\nsaved = null",
+            "var saved: mut? Node = nil",
+            "var saved: mut? Node = nil\nsaved = nil",
         );
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert!(
@@ -109,11 +109,11 @@ fn a_nullable_source_is_not_a_proven_violation() {
 struct Node { next: mut? Node }
 fn main() -> u8 {
     arena {
-        var saved: mut? Node = null
+        var saved: mut? Node = nil
         arena {
-            fix inner = new Node { next: null }
-            fix maybe: mut? Node = ifexpr true { null } else { inner }
-            objection [the true branch yields null] { saved = maybe }
+            fix inner = new Node { next: nil }
+            fix maybe: mut? Node = ifexpr true { nil } else { inner }
+            objection [the true branch yields nil] { saved = maybe }
         }
     }
     return 0
@@ -123,7 +123,7 @@ fn main() -> u8 {
         compile_and_run_c23(source, "nullable.suz").status.code(),
         Some(0)
     );
-    let source = source.replace("objection [the true branch yields null]", "");
+    let source = source.replace("objection [the true branch yields nil]", "");
     let error = suz::compile(source.as_bytes()).unwrap_err();
     assert!(error.to_string().contains("[arena.store]"), "{error}");
     assert!(!error.message().contains("proven"), "{error}");
@@ -134,10 +134,10 @@ fn objection_effects_remain_visible_and_permission_ends_at_the_block() {
     let source = r#"struct Node { next: mut? Node }
 fn main() -> u8 {
     arena {
-        var saved: mut? Node = null
-        fix outer = new Node { next: null }
+        var saved: mut? Node = nil
+        fix outer = new Node { next: nil }
         arena {
-            fix inner = new Node { next: null }
+            fix inner = new Node { next: nil }
             var selected = outer
             selected = inner
             objection [selected is inner] {
@@ -159,15 +159,15 @@ fn main() -> u8 {
 fn objection_does_not_override_explicit_contracts_or_callee_checks() {
     for (source, rule) in [
         (
-            "fn main() -> u8 { objection [claim] { fix p: mut? i32 = null\nfix n = .p }\nreturn 0 }",
-            "arena.null-deref",
+            "fn main() -> u8 { objection [claim] { fix p: mut? i32 = nil\nfix n = .p }\nreturn 0 }",
+            "arena.nil-deref",
         ),
         (
-            "fn bad(flag: bool) -> mut? i32 { arena { fix p: mut? i32 = ifexpr flag { new (1 as i32) } else { null }\nreturn p } }\nfn main() -> u8 { arena { objection [caller guarantee] { bad(false) } }\nreturn 0 }",
+            "fn bad(flag: bool) -> mut? i32 { arena { fix p: mut? i32 = ifexpr flag { new (1 as i32) } else { nil }\nreturn p } }\nfn main() -> u8 { arena { objection [caller guarantee] { bad(false) } }\nreturn 0 }",
             "arena.store",
         ),
         (
-            "fnshape Act() -> void\nfn run(f: fn Act) -> void { f() }\nfn main() -> u8 { objection [caller guarantee] { run(fn []() -> void { arena { var saved: mut? i32 = null\narena { fix p: mut? i32 = ifexpr true { null } else { new (1 as i32) }\nsaved = p } } }) }\nreturn 0 }",
+            "fnshape Act() -> void\nfn run(f: fn Act) -> void { f() }\nfn main() -> u8 { objection [caller guarantee] { run(fn []() -> void { arena { var saved: mut? i32 = nil\narena { fix p: mut? i32 = ifexpr true { nil } else { new (1 as i32) }\nsaved = p } } }) }\nreturn 0 }",
             "arena.store",
         ),
     ] {

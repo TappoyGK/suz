@@ -95,7 +95,7 @@ fn main() -> u8 {
 struct Node { next: mut? Node, value: i32 }
 error Trouble { Empty }
 fn Node#append(value: i32) -> mut Node {
-    fix child = new Node { next: null, value }
+    fix child = new Node { next: nil, value }
     self#next = child
     return child
 }
@@ -104,7 +104,7 @@ fn Node.read() -> i32 or Trouble {
     if self.value == 0 { fail Trouble.Empty }
     return self.value
 }
-fn make() -> mut Node { return new Node { next: null, value: 0 } }
+fn make() -> mut Node { return new Node { next: nil, value: 0 } }
 fn main() -> u8 {
     arena {
         fix p = make()

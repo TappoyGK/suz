@@ -117,8 +117,8 @@ pub(super) fn deref(
         return Err(location.error(
             ErrorKind::InvalidSource,
             crate::diagnostic!(
-                "arena.null-deref",
-                "use let before dereferencing a possibly null pointer"
+                "arena.nil-deref",
+                "use let before dereferencing a possibly nil pointer"
             ),
         ));
     }
@@ -139,15 +139,15 @@ pub(super) fn expression(
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
                     crate::diagnostic!(
-                        "arena.null",
-                        "null requires an expected nullable reference type"
+                        "arena.nil",
+                        "nil requires an expected nilable reference type"
                     ),
                 ));
             };
             if !ty.is_nullable() {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
-                    crate::diagnostic!("arena.null", "null requires a nullable reference type"),
+                    crate::diagnostic!("arena.nil", "nil requires a nilable reference type"),
                 ));
             }
             Ok(CheckedExpression {

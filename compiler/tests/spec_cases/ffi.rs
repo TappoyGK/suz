@@ -129,7 +129,7 @@ fn old_unsafe_block_points_to_trusted_without_reserving_the_name() {
 #[test]
 fn trusted_does_not_override_arena_lifetimes() {
     let error = suz::compile(
-        b"fn main() -> u8 { arena {\nvar p: mut? i32 = null\ntrusted { arena { p = new 1 } }\n}\nreturn 0 }",
+        b"fn main() -> u8 { arena {\nvar p: mut? i32 = nil\ntrusted { arena { p = new 1 } }\n}\nreturn 0 }",
     )
     .unwrap_err();
     assert_eq!(error.rule(), "arena.store", "{error}");

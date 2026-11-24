@@ -7,7 +7,7 @@ fn top_level_var_is_rejected_even_with_allow_or_assignments() {
         "var N = 1",
         "var N: i32 = 1",
         "var N = 1 allow [diagnostic.global-var: process state]",
-        "var p: mut? i32 = null",
+        "var p: mut? i32 = nil",
     ] {
         let source = format!(
             "{declaration}\nfn unused() -> void {{ N = 2 }}\nfn main() -> u8 {{ return 0 }}"
