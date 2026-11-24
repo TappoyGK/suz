@@ -1158,6 +1158,8 @@ fn main() -> u8 {
     for i in 0..<len CFG.xs { sum += CFG.xs.[i] }
     if sum != 33 { return 5 }
     if (JAGGED.[1].[5] or 9) != 9 { return 6 }
+    if (JAGGED.[5] or .[9]).[0] != 9 { return 7 }
+    if (CFG.xs.[0:5] or CFG.xs).[1] != 20 { return 8 }
     return 0
 }
 "#;
@@ -1167,6 +1169,10 @@ fn main() -> u8 {
     for (code, rule) in [
         (
             "fix JAGGED: .[.[i32]] = .[.[1, 2], .[3]]\nfn main() -> u8 {\n    fix x: i32 = JAGGED.[1].[0] or 0\n    return 0\n}",
+            "array.access-handler",
+        ),
+        (
+            "fix JAGGED: .[.[i32]] = .[.[1, 2], .[3]]\nfn main() -> u8 {\n    fix x: i32 = (JAGGED.[5] or .[9]).[0] or 7\n    return 0\n}",
             "array.access-handler",
         ),
         (
@@ -1192,5 +1198,21 @@ fn main() -> u8 {
     ] {
         let err = suz::compile(code.as_bytes()).unwrap_err();
         assert_eq!(err.rule(), rule, "{code}\n{err}");
+    }
+
+    // トップレベルの定数配列への書き込みは、連鎖や構造体フィールドを経ても [array.readonly] で拒否する。
+    for body in [
+        "A#[0] = 5",
+        "A#[0] += 5",
+        "JAGGED.[0]#[0] = 5",
+        "JAGGED#[0] = .[5]",
+        "CFG.xs#[0] = 5",
+        "G.[0]#[1] = 5",
+    ] {
+        let source = format!(
+            "struct Cfg {{ xs: .[i32] }}\nfix A: .[i32] = .[1, 2]\nfix JAGGED: .[.[i32]] = .[.[1, 2], .[3]]\nfix G: .[i32; _, _] = .[[1, 2], [3, 4]]\nfix CFG = Cfg {{ xs: .[1, 2] }}\nfn main() -> u8 {{\n    {body}\n    return 0\n}}"
+        );
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(error.rule(), "array.readonly", "{body}: {error}");
     }
 }

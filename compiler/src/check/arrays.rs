@@ -169,7 +169,10 @@ fn access(expr: &Expression, scope: &Scope) -> Result<(CheckedExpression, bool),
         }
     );
     let mut target = expression::expression(root, None, scope)?;
-    target = constants::evaluate(&target)?.unwrap_or(target);
+    // 定数名の根は、検査の時点で定数配列の値になっている。畳み直すと、利用箇所ごとに全要素を評価し直す。
+    if !matches!(target.value, Value::Array { .. }) {
+        target = constants::evaluate(&target)?.unwrap_or(target);
+    }
     let mut position = 0;
     let mut fallible = false;
     while position < steps.len() {
@@ -230,10 +233,11 @@ fn access(expr: &Expression, scope: &Scope) -> Result<(CheckedExpression, bool),
                     handler: None,
                 },
             };
-            if !fallible {
+            position += array.rank;
+            // 最後の段は畳まない。読み出しはread_or_textが畳み、書き込みは要素の位置をそのまま使う。
+            if !fallible && position < steps.len() {
                 target = constants::evaluate(&target)?.unwrap_or(target);
             }
-            position += array.rank;
         } else {
             let step = steps[position];
             let ExpressionKind::Slice {
@@ -291,10 +295,10 @@ fn access(expr: &Expression, scope: &Scope) -> Result<(CheckedExpression, bool),
                     handler: None,
                 },
             };
-            if !fallible {
+            position += 1;
+            if !fallible && position < steps.len() {
                 target = constants::evaluate(&target)?.unwrap_or(target);
             }
-            position += 1;
         }
     }
     Ok((target, fallible))
