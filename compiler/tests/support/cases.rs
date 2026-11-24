@@ -161,6 +161,7 @@ fn source(lines: &[&str]) -> Result<Source> {
                 | "diagnostic.constant-comparison"
                 | "diagnostic.integer-division-to-float"
                 | "arena.loop-allocation"
+                | "array.redundant-handler"
         ) {
             return Err("expected a supported warning rule".into());
         }

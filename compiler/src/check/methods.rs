@@ -96,6 +96,17 @@ pub(super) fn call(
     scope.type_hints.borrow_mut().clear();
     scope.float_hints.borrow_mut().clear();
     let result = call_inner(expr, expected, scope, handler);
+    if result.is_ok() {
+        if let ExpressionKind::MethodCall {
+            target,
+            mutable: true,
+            ..
+        } = &expr.kind
+        {
+            super::arrays::bounds::forget_mutable_receiver(target, scope);
+        }
+        super::arrays::bounds::forget_call(scope);
+    }
     scope.type_hints.borrow_mut().clear();
     scope.float_hints.borrow_mut().clear();
     result

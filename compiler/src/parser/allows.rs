@@ -82,6 +82,7 @@ impl Parser<'_, '_> {
                     | "diagnostic.constant-comparison"
                     | "diagnostic.integer-division-to-float"
                     | "arena.loop-allocation"
+                    | "array.redundant-handler"
             ) || items.iter().any(|item| item.rule == rule)
             {
                 return Err(location.error(

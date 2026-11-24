@@ -25,6 +25,8 @@ pub(crate) struct CheckedProgram {
     pub division_warnings: Vec<Location>,
     /// 反復の外へ残らず、外側のArenaへ蓄積する確保。
     pub arena_warnings: Vec<(Location, String, Vec<crate::Diagnostic>)>,
+    /// 保証済みの配列アクセスに付いた不要なorハンドラの警告候補。
+    pub array_handler_warnings: Vec<(Location, Vec<crate::Diagnostic>)>,
     /// 定数として決まる比較の位置と結果。
     pub comparison_warnings: Vec<(Location, bool)>,
     /// 実行開始時に登録する文字列定数。

@@ -20,6 +20,7 @@ pub(crate) fn check(expr: &Expression, bindings: &Scope) -> Result<CheckedExpres
         end,
         index,
         fallback,
+        ..
     } = &expr.kind
     else {
         unreachable!()

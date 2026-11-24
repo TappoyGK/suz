@@ -1091,6 +1091,7 @@ pub(crate) enum ExpressionKind {
         end: Option<Box<Expression>>,
         index: bool,
         fallback: Option<FailureHandler>,
+        fallback_location: Option<Location>,
     },
     Char(u32),
     Template(Vec<TemplatePart<Expression>>),

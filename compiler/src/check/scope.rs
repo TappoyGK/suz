@@ -32,12 +32,15 @@ impl Signature {
     }
 }
 
+type RedundantHandlers = BTreeMap<(usize, usize), Vec<crate::Diagnostic>>;
+
 // 診断とランタイム定数の出力先を、字句スコープ間で共有する。
 #[derive(Clone, Default)]
 pub(super) struct Outputs {
     pub divisions: Rc<std::cell::RefCell<std::collections::BTreeSet<(usize, usize)>>>,
     pub comparisons: Rc<std::cell::RefCell<BTreeMap<(usize, usize), bool>>>,
     pub constant_texts: Rc<std::cell::RefCell<std::collections::BTreeSet<String>>>,
+    pub redundant_array_handlers: Rc<std::cell::RefCell<RedundantHandlers>>,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -124,6 +127,7 @@ pub(super) struct NamedTypes {
 #[derive(Clone)]
 pub(super) struct Scope {
     pub array_bounds: super::arrays::bounds::State,
+    pub ref_captured: Rc<std::cell::RefCell<std::collections::BTreeSet<usize>>>,
     pub named: Rc<NamedTypes>,
 
     // 定義のないプログラムでは、演算子用の型ヒント取得を省く。
@@ -385,6 +389,7 @@ impl Default for Scope {
             generic_calls: None,
             instances: Rc::default(),
             array_bounds: Default::default(),
+            ref_captured: Default::default(),
             type_hints: Rc::default(),
             hint_depth: Rc::default(),
             float_hints: Rc::default(),

@@ -2,6 +2,7 @@
 //! 利用元: 式・代入の意味検査。定数配列は[array.constant]、書き込み可否は[array.readonly]に従う。
 pub(super) mod bounds;
 pub(super) mod dimensions;
+pub(super) mod facts;
 
 use super::{
     constants, expression,
@@ -195,7 +196,10 @@ fn bound(expr: &Expression, scope: &Scope) -> Result<CheckedExpression, Diagnost
     Ok(value)
 }
 
-fn access(expr: &Expression, scope: &Scope) -> Result<(CheckedExpression, bool), Diagnostic> {
+fn access(
+    expr: &Expression,
+    scope: &Scope,
+) -> Result<(CheckedExpression, bool, bounds::Proof), Diagnostic> {
     let mut steps = Vec::new();
     let root = chain(expr, &mut steps, true);
     let has_handler = matches!(
@@ -215,6 +219,7 @@ fn access(expr: &Expression, scope: &Scope) -> Result<(CheckedExpression, bool),
     }
     let mut position = 0;
     let mut fallible = false;
+    let mut proof = bounds::Proof::default();
     while position < steps.len() {
         let id = target.ty.array_id().ok_or_else(|| {
             expr.location.error(
@@ -252,8 +257,10 @@ fn access(expr: &Expression, scope: &Scope) -> Result<(CheckedExpression, bool),
                         ),
                     ));
                 }
-                let proven = bounds::index(&target, &value, checked.len(), scope);
-                if proven {
+                let step_proof = bounds::index(&target, &value, checked.len(), scope);
+                let proven = step_proof.is_some();
+                if let Some(p) = step_proof {
+                    proof.merge(p);
                     bounds::narrow(&mut value, scope);
                 }
                 fallible |= !proven;
@@ -317,11 +324,15 @@ fn access(expr: &Expression, scope: &Scope) -> Result<(CheckedExpression, bool),
                     ),
                 ));
             }
-            let proven = if *index {
+            let step_proof = if *index {
                 bounds::index(&target, start.as_ref().unwrap(), 0, scope)
             } else {
                 bounds::slice(&target, start.as_deref(), end.as_deref(), scope)
             };
+            let proven = step_proof.is_some();
+            if let Some(p) = step_proof {
+                proof.merge(p);
+            }
             fallible |= !proven;
             target = CheckedExpression {
                 ty,
@@ -341,11 +352,11 @@ fn access(expr: &Expression, scope: &Scope) -> Result<(CheckedExpression, bool),
             }
         }
     }
-    Ok((target, fallible))
+    Ok((target, fallible, proof))
 }
 
 fn address(expr: &Expression, scope: &Scope) -> Result<CheckedExpression, Diagnostic> {
-    let (value, _) = access(expr, scope)?;
+    let (value, _, _) = access(expr, scope)?;
     if let Value::ArrayRead {
         address,
         handler: None,
@@ -379,7 +390,10 @@ pub(super) fn read_or_text(
     scope: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
     let ExpressionKind::Slice {
-        target, fallback, ..
+        target,
+        fallback,
+        fallback_location,
+        ..
     } = &expr.kind
     else {
         unreachable!()
@@ -392,16 +406,31 @@ pub(super) fn read_or_text(
     {
         return expression::slices::check(expr, scope);
     }
-    let (mut result, fallible) = access(expr, scope)?;
+    let (mut result, fallible, proof) = access(expr, scope)?;
     if !fallible {
-        if fallback.is_some() {
-            return Err(expr.location.error(
-                ErrorKind::InvalidSource,
-                crate::diagnostic!(
-                    "array.access-handler",
-                    "statically proven array access does not accept or"
-                ),
-            ));
+        if let Some(fb) = fallback {
+            // 保証済みのアクセスに付いたorでも代替式の型と形式は通常どおり検査し、警告を報告する。
+            match fb {
+                FailureHandler::Value(v) => {
+                    let _ = expression::coerced(v, Some(result.ty), scope)?;
+                }
+                FailureHandler::Return { value, .. } => {
+                    let _ = super::functions::return_value(value, scope)?;
+                }
+                _ => {
+                    return Err(expr.location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!("array.access-handler", "invalid array failure handler"),
+                    ));
+                }
+            }
+            let warn_loc = fallback_location.unwrap_or(expr.location);
+            scope
+                .outputs
+                .redundant_array_handlers
+                .borrow_mut()
+                .entry((warn_loc.line, warn_loc.column))
+                .or_insert_with(|| proof.related_diagnostics());
         }
         return Ok(constants::evaluate(&result)?.unwrap_or(result));
     }

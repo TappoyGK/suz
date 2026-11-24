@@ -246,6 +246,15 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     Ok(CheckedProgram {
         arrays: globals.structs.arrays.borrow().clone(),
         arena_warnings,
+        array_handler_warnings: globals
+            .outputs
+            .redundant_array_handlers
+            .borrow()
+            .iter()
+            .map(|(&(line, column), related)| {
+                (crate::ast::Location { line, column }, related.clone())
+            })
+            .collect(),
         externs: program.externs.clone(),
         external_base: program.functions.len(),
         function_types: globals.function_types.borrow().clone(),
@@ -454,6 +463,7 @@ pub(super) fn check_function(
     id: usize,
 ) -> Result<(CheckedFunction, Vec<crate::ast::Location>), Diagnostic> {
     scope.array_bounds = Default::default();
+    scope.ref_captured = Default::default();
     let mut references = BTreeMap::new();
     if let Some(method) = function.method.filter(|m| m.mutable) {
         references.insert(
@@ -513,6 +523,7 @@ pub(super) fn check_with_captures(
             let mut binding = binding.clone();
             binding.id = parameter_id;
             binding.ty = parameter_type;
+            scope.ref_captured.borrow_mut().insert(parameter_id);
             scope.locals.insert(parameter.name.clone(), binding);
             continue;
         }
@@ -675,7 +686,7 @@ pub(super) fn call(
     } else {
         signature.id
     };
-    super::errors::finish(
+    let result = super::errors::finish(
         CheckedExpression {
             ty: concrete(signature.result),
             value: Value::Call {
@@ -688,7 +699,9 @@ pub(super) fn call(
         handler,
         expr,
         scope,
-    )
+    )?;
+    super::arrays::bounds::forget_call(scope);
+    Ok(result)
 }
 
 pub(super) fn return_value(

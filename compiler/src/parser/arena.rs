@@ -86,6 +86,7 @@ impl Parser<'_, '_> {
                         end: None,
                         index: true,
                         fallback: None,
+                        fallback_location: None,
                     },
                     location,
                 )?;

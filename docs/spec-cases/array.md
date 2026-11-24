@@ -775,7 +775,7 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | `[array.value]` | 5 | 10 |
 
-### array-025 別の定数配列に長さの関係を移さない
+### array-025 別の配列に長さの関係を移さない
 
 主根拠：`[array.dimension-origin]`。
 
@@ -784,10 +784,10 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
-fix A: .[i32] = .[1, 2]
-fix B: .[i32] = .[1, 2]
 fn main() -> u8 {
-    for i in 0..<len A { fix v = B.[i] }
+    fix a: #[i32] = new #[1, 2]
+    fix b: #[i32] = new #[1, 2]
+    for i in 0..<len a { fix v = b.[i] }
     return 0
 }
 ```
@@ -1592,3 +1592,121 @@ fn main() -> u8 {
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
 | 通常 | `[const.expression]` | 1 | 18 |
+
+### array-052 判定済みの条件と合流による添字・切り出しの範囲保証
+
+主根拠：`[array.bounds-proof]`。
+
+補助根拠：`[array.index]`・`[array.slice]`・`[array.access-handler]`。
+
+**ソース：**
+
+```suz
+fn color(palette: .[i32; _], n: i32) -> i32 {
+    if 0 <= n < len palette {
+        return palette.[n]
+    }
+    return 16
+}
+
+fn joined(a: .[i32; n], flag: bool, i: i64) -> i32 {
+    if flag {
+        if not (0 <= i < n) { return 0 }
+    } else {
+        if not (0 <= i < n - 1) { return 0 }
+    }
+    return a.[i]
+}
+
+fn main() -> u8 {
+    fix pal: .[i32] = .[10, 20, 30]
+    if color(pal, 1) != 20 || color(pal, 5) != 16 { return 1 }
+    if joined(pal, true, 2) != 30 || joined(pal, false, 1) != 20 { return 2 }
+    var i: i64 = 0
+    var sum: i32 = 0
+    while 0 <= i < len pal {
+        sum += pal.[i]
+        i += 1
+    }
+    if sum != 60 { return 3 }
+    fix s: i64 = 1
+    fix e: i64 = 3
+    if 0 <= s <= e <= len pal {
+        if len pal.[s:e] != 2 { return 4 }
+    }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### array-053 合流点では片方の経路だけで成り立つ強い条件を残さない
+
+主根拠：`[array.bounds-proof]`。
+
+補助根拠：`[array.access-handler]`。
+
+**ソース：**
+
+```suz
+fn f(a: .[i32; n], flag: bool, i: i64) -> i32 {
+    if flag {
+        if not (0 <= i < n) { return 0 }
+    } else {
+        if not (0 <= i < n - 1) { return 0 }
+    }
+    return a.[i + 1]
+}
+fn main() -> u8 {
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[array.access-handler]` | 7 | 13 |
+
+### array-054 保証済みのアクセスへのorは警告になる
+
+主根拠：`[array.redundant-handler]`。
+
+補助根拠：`[array.bounds-proof]`・`[array.access-handler]`。
+
+**ソース：**
+
+```suz
+fn color(palette: .[i32; _], n: i32) -> i32 {
+    if 0 <= n < len palette {
+        return palette.[n] or 16
+    }
+    return 16
+}
+fn main() -> u8 {
+    if color(.[10, 20], 1) != 20 { return 1 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 1 |
+
+**警告：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[array.redundant-handler]` | 3 | 28 |

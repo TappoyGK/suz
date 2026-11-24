@@ -740,17 +740,18 @@ impl Parser<'_, '_> {
                     None
                 };
                 self.expect(FixedToken::Symbol("]"))?;
-                let fallback = if self.token().kind == Kind::Keyword("or") {
+                let (fallback, fallback_location) = if self.token().kind == Kind::Keyword("or") {
+                    let or_location = self.location();
                     let height = result
                         .height
                         .max(start.as_ref().map_or(0, |v| v.height))
                         .max(end.as_ref().map_or(0, |v| v.height));
-                    self.check_height(height + 1, self.location())?;
-                    self.limit_location = Some(self.location());
+                    self.check_height(height + 1, or_location)?;
+                    self.limit_location = Some(or_location);
                     self.cursor += 1;
-                    Some(self.failure_handler()?)
+                    (Some(self.failure_handler()?), Some(or_location))
                 } else {
-                    None
+                    (None, None)
                 };
                 self.limit_location = previous_limit;
                 result = self.primary_node(
@@ -760,6 +761,7 @@ impl Parser<'_, '_> {
                         end,
                         index,
                         fallback,
+                        fallback_location,
                     },
                     location,
                 )?;

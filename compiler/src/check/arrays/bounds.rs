@@ -1,11 +1,21 @@
-//! 仕様で定めた形だけを範囲保証に使う。長さの由来は値の一致とは区別する。
-use super::super::{
-    exact::{Exact, ExactKind},
-    ir::{CheckedExpression, CheckedHandler, IntegerOperation, Value},
-    scope::Scope,
+//! 仕様で定めた条件の覚え方・忘れ方・組み合わせ方だけを範囲保証に使う。
+//! 長さの由来は値の一致とは区別し、判定済みの条件は差分制約系で管理する。
+use super::{
+    super::{
+        exact::{Exact, ExactKind},
+        ir::{CheckedExpression, CheckedHandler, CheckedStatement, IntegerOperation, Value},
+        scope::Scope,
+    },
+    facts::{Affine, Facts, Term},
 };
-use crate::ast::{BinaryOperator, Location, Type};
-use std::collections::BTreeMap;
+use crate::{
+    Diagnostic, ErrorKind,
+    ast::{
+        BinaryOperator, ComparisonOperator, Expression, ExpressionKind, Location, LogicalOperator,
+        Statement, Type,
+    },
+};
+use std::{cell::RefCell, collections::BTreeMap};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(in crate::check) enum Dimension {
@@ -22,17 +32,47 @@ impl Dimension {
         }
     }
 }
+
 #[derive(Clone, Default)]
 pub(in crate::check) struct State {
     pub arrays: BTreeMap<usize, Vec<Option<Dimension>>>,
     pub names: BTreeMap<usize, Dimension>,
     pub loops: BTreeMap<usize, Loop>,
+    pub facts: RefCell<Facts>,
+    pub loop_breaks: RefCell<Vec<Vec<Facts>>>,
 }
+
 #[derive(Clone)]
 pub(in crate::check) struct Loop {
     length: Dimension,
     start: i128,
     margin: i128,
+}
+
+/// 範囲保証の根拠となった条件のソース位置群。
+#[derive(Clone, Default)]
+pub(super) struct Proof {
+    pub origins: Vec<Location>,
+}
+
+impl Proof {
+    pub fn merge(&mut self, other: Proof) {
+        self.origins.extend(other.origins);
+        self.origins.sort_by_key(|l| (l.line, l.column));
+        self.origins.dedup();
+    }
+
+    pub fn related_diagnostics(&self) -> Vec<Diagnostic> {
+        self.origins
+            .iter()
+            .map(|location| {
+                location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("array.bounds-proof", "proven by condition checked here"),
+                )
+            })
+            .collect()
+    }
 }
 
 fn constant(v: &CheckedExpression) -> Option<i128> {
@@ -190,7 +230,7 @@ fn exact_constant(v: &Exact) -> Option<i128> {
     .to_i128()
 }
 
-/// i+c、i-cだけを分離する。入れ子の算術の代数変形は行わない。
+/// `i + c`、`i - c` だけを分離する。入れ子の算術や `or` 付きの算術は対象にしない。
 fn offset(v: &CheckedExpression) -> Option<(&CheckedExpression, i128)> {
     match &v.value {
         Value::IntegerArithmetic {
@@ -215,7 +255,106 @@ fn offset(v: &CheckedExpression) -> Option<(&CheckedExpression, i128)> {
             }
             _ => None,
         },
+        Value::Exact(e) => match &e.kind {
+            ExactKind::Leaf(v) => Some((v, 0)),
+            ExactKind::Binary(op @ (BinaryOperator::Add | BinaryOperator::Subtract), a, b) => {
+                let ExactKind::Leaf(a) = &a.kind else {
+                    return None;
+                };
+                let n = exact_constant(b)?;
+                Some((
+                    a,
+                    if matches!(op, BinaryOperator::Subtract) {
+                        n.checked_neg()?
+                    } else {
+                        n
+                    },
+                ))
+            }
+            _ => None,
+        },
         _ => Some((v, 0)),
+    }
+}
+
+fn dim_to_affine(dim: Dimension) -> Affine {
+    match dim {
+        Dimension::Constant(n) | Dimension::Static(_, _, n) => Affine::constant(n),
+        Dimension::Source(id, axis, _) => Affine::term(Term::Dim(id, axis)),
+    }
+}
+
+/// 配列参照 `target` が値経路（ローカル束縛または構造体値フィールド連鎖）であれば `(root_id, fields)` を返す。
+/// ポインタの参照解除や非定数配列の要素読み出しを経由する場合は `None` を返す。
+fn array_value_path(target: &CheckedExpression) -> Option<(usize, Vec<usize>)> {
+    let mut fields = Vec::new();
+    let mut cur = target;
+    loop {
+        match &cur.value {
+            Value::Cast(inner) => cur = inner,
+            Value::Local(id) => {
+                fields.reverse();
+                return Some((*id, fields));
+            }
+            Value::Field { target, index } if matches!(target.ty, Type::Struct(_)) => {
+                fields.push(*index);
+                cur = target;
+            }
+            _ => return None,
+        }
+    }
+}
+
+/// 配列参照 `target` の `axis` 番目の次元の長さを、仕様 1.1 の項として抽出する。
+fn target_dim_affine(target: &CheckedExpression, axis: usize, scope: &Scope) -> Option<Affine> {
+    if let Some(dim) = shape(target, scope).get(axis).copied().flatten() {
+        return Some(dim_to_affine(dim));
+    }
+    let (root, fields) = array_value_path(target)?;
+    Some(Affine::term(Term::PathDim(root, fields, axis)))
+}
+
+/// 仕様 1.1 の項（整数束縛・`len a`・寸法名・定数式、およびそれぞれへの定数加減算）を抽出する。
+pub(in crate::check) fn affine(expr: &CheckedExpression, scope: &Scope) -> Option<Affine> {
+    if let Some(n) = constant(expr) {
+        return Some(Affine::constant(n));
+    }
+    let (base, delta) = offset(expr)?;
+    let base_affine = base_affine(base, scope)?;
+    base_affine.shifted(delta)
+}
+
+fn base_affine(expr: &CheckedExpression, scope: &Scope) -> Option<Affine> {
+    if let Some(n) = constant(expr) {
+        return Some(Affine::constant(n));
+    }
+    match &expr.value {
+        Value::Local(id) => {
+            if let Some(&dim) = scope.array_bounds.names.get(id) {
+                Some(dim_to_affine(dim))
+            } else if expr.ty.is_integer() {
+                Some(Affine::term(Term::Local(*id)))
+            } else {
+                None
+            }
+        }
+        Value::Len(target) => target_dim_affine(target, 0, scope),
+        Value::ArrayLength { target, dimension } => target_dim_affine(target, *dimension, scope),
+        Value::Cast(inner) if expr.ty.is_integer() && inner.ty.is_integer() => {
+            // 暗黙の拡大変換など、元の整数値を変えないキャストのみ透過する。
+            let (Some((f_min, f_max)), Some((t_min, t_max))) =
+                (inner.ty.integer_bounds(), expr.ty.integer_bounds())
+            else {
+                return None;
+            };
+            if f_min >= t_min && f_max <= t_max {
+                affine(inner, scope)
+            } else {
+                None
+            }
+        }
+        Value::Exact(_) => affine(expr, scope),
+        _ => None,
     }
 }
 
@@ -224,8 +363,31 @@ pub(in crate::check) fn loop_bound(
     start: &CheckedExpression,
     end: &CheckedExpression,
     inclusive: bool,
+    location: Location,
     scope: &mut Scope,
 ) {
+    let i_term = Affine::term(Term::Local(id));
+    if let Some(s) = affine(start, scope) {
+        scope.array_bounds.facts.borrow_mut().add_comparison(
+            &s,
+            ComparisonOperator::LessEqual,
+            &i_term,
+            false,
+            location,
+        );
+    }
+    if let Some(e) = affine(end, scope) {
+        let op = if inclusive {
+            ComparisonOperator::LessEqual
+        } else {
+            ComparisonOperator::Less
+        };
+        scope
+            .array_bounds
+            .facts
+            .borrow_mut()
+            .add_comparison(&i_term, op, &e, false, location);
+    }
     if inclusive {
         return;
     }
@@ -251,50 +413,53 @@ pub(in crate::check) fn loop_bound(
     );
 }
 
+pub(in crate::check) fn record_match_arm(
+    target: &CheckedExpression,
+    pattern: &CheckedExpression,
+    location: Location,
+    scope: &Scope,
+) {
+    let Some(t) = affine(target, scope) else {
+        return;
+    };
+    let Some(c) = constant(pattern) else {
+        return;
+    };
+    scope.array_bounds.facts.borrow_mut().add_comparison(
+        &t,
+        ComparisonOperator::Equal,
+        &Affine::constant(c),
+        false,
+        location,
+    );
+}
+
 pub(super) fn index(
     target: &CheckedExpression,
     value: &CheckedExpression,
     axis: usize,
     scope: &Scope,
-) -> bool {
-    let Some(dimension) = shape(target, scope).get(axis).copied().flatten() else {
-        return false;
-    };
-    if let (Some(n), Some(i)) = (dimension.known(), constant(value)) {
-        return 0 <= i && i < n;
+) -> Option<Proof> {
+    // 既知の定数長と定数添字の組（new #[0; 3] の a.[0] 等）。
+    if let Some(n) = shape(target, scope)
+        .get(axis)
+        .copied()
+        .flatten()
+        .and_then(Dimension::known)
+        && let Some(i) = constant(value)
+        && 0 <= i
+        && i < n
+    {
+        return Some(Proof::default());
     }
-    let Some((base, c)) = offset(value) else {
-        return false;
-    };
-    let Value::Local(id) = base.value else {
-        return false;
-    };
-    let Some(bound) = scope
-        .array_bounds
-        .loops
-        .get(&id)
-        .filter(|b| b.length == dimension)
-    else {
-        return false;
-    };
-    let Some(low) = bound.start.checked_add(c).filter(|n| *n >= 0) else {
-        return false;
-    };
-    if c > bound.margin {
-        return false;
-    }
-    let max_length = dimension.known().unwrap_or(i32::MAX as i128);
-    let Some(high) = max_length
-        .checked_sub(bound.margin)
-        .and_then(|n| n.checked_sub(1))
-        .and_then(|n| n.checked_add(c))
-    else {
-        return false;
-    };
-    value
-        .ty
-        .integer_bounds()
-        .is_some_and(|(min, max)| low >= min && high <= max)
+    let dim = target_dim_affine(target, axis, scope)?;
+    let idx = affine(value, scope)?;
+    let facts = scope.array_bounds.facts.borrow();
+    let low = facts.proves_le(&Affine::constant(0), &idx)?;
+    let high = facts.proves_lt(&idx, &dim)?;
+    let mut proof = Proof { origins: low };
+    proof.merge(Proof { origins: high });
+    Some(proof)
 }
 
 pub(super) fn slice(
@@ -302,25 +467,40 @@ pub(super) fn slice(
     start: Option<&CheckedExpression>,
     end: Option<&CheckedExpression>,
     scope: &Scope,
-) -> bool {
+) -> Option<Proof> {
     if start.is_none() && end.is_none() {
-        return true;
+        return Some(Proof::default());
     }
-    let Some(n) = shape(target, scope)
+    if let Some(n) = shape(target, scope)
         .first()
         .copied()
         .flatten()
         .and_then(Dimension::known)
-    else {
-        return false;
+        && let Some(a) = start.map_or(Some(0), constant)
+        && let Some(b) = end.map_or(Some(n), constant)
+        && 0 <= a
+        && a <= b
+        && b <= n
+    {
+        return Some(Proof::default());
+    }
+    let dim = target_dim_affine(target, 0, scope)?;
+    let s = match start {
+        None => Affine::constant(0),
+        Some(expr) => affine(expr, scope)?,
     };
-    let Some(a) = start.map_or(Some(0), constant) else {
-        return false;
+    let e = match end {
+        None => dim.clone(),
+        Some(expr) => affine(expr, scope)?,
     };
-    let Some(b) = end.map_or(Some(n), constant) else {
-        return false;
-    };
-    0 <= a && a <= b && b <= n
+    let facts = scope.array_bounds.facts.borrow();
+    let o1 = facts.proves_le(&Affine::constant(0), &s)?;
+    let o2 = facts.proves_le(&s, &e)?;
+    let o3 = facts.proves_le(&e, &dim)?;
+    let mut proof = Proof { origins: o1 };
+    proof.merge(Proof { origins: o2 });
+    proof.merge(Proof { origins: o3 });
+    Some(proof)
 }
 
 /// 保証済みの添字に限り、C生成用の中間値域を反復区間まで狭める。
@@ -351,7 +531,7 @@ pub(super) fn narrow(value: &mut CheckedExpression, scope: &Scope) {
     }
 }
 
-/// 値キャプチャーは参照と寸法名の関係を保つ。外側のローカル番号を本体の番号と混同しない。
+/// 値キャプチャーは参照・寸法名・条件を引き継ぐ。参照キャプチャーの var を含む条件は引き継がない。
 pub(in crate::check) fn captures(
     values: &[crate::check::ir::CheckedCapture],
     offset: usize,
@@ -359,13 +539,17 @@ pub(in crate::check) fn captures(
 ) -> State {
     let mut state = State::default();
     let mut origins = BTreeMap::new();
+    let mut dim_map: BTreeMap<(usize, usize), (usize, usize)> = BTreeMap::new();
+    let mut local_map: BTreeMap<usize, usize> = BTreeMap::new();
     let mut rename = |dimension| match dimension {
         Dimension::Constant(n) => Dimension::Constant(n),
         Dimension::Static(..) => dimension,
         Dimension::Source(id, axis, known) => {
             let next = origins.len();
             let number = *origins.entry((id, axis)).or_insert(next);
-            Dimension::Source(usize::MAX - number, 0, known)
+            let mapped = (usize::MAX - number, 0);
+            dim_map.insert((id, axis), mapped);
+            Dimension::Source(mapped.0, mapped.1, known)
         }
     };
     for (index, capture) in values.iter().enumerate() {
@@ -373,6 +557,9 @@ pub(in crate::check) fn captures(
             continue;
         }
         let id = offset + index;
+        if let Value::Local(old) = capture.value.value {
+            local_map.insert(old, id);
+        }
         if capture.value.ty.array_id().is_some() {
             state.arrays.insert(
                 id,
@@ -398,6 +585,21 @@ pub(in crate::check) fn captures(
             state.names.insert(id, rename(dimension));
         }
     }
+    let projected = outer
+        .array_bounds
+        .facts
+        .borrow()
+        .project_captures(|term| match term {
+            Term::Zero => Some(Term::Zero),
+            Term::Local(old) => local_map.get(old).map(|&new_id| Term::Local(new_id)),
+            Term::Dim(id, axis) => dim_map
+                .get(&(*id, *axis))
+                .map(|&(new_id, new_axis)| Term::Dim(new_id, new_axis)),
+            Term::PathDim(old_root, fields, axis) => local_map
+                .get(old_root)
+                .map(|&new_root| Term::PathDim(new_root, fields.clone(), *axis)),
+        });
+    state.facts = RefCell::new(projected);
     state
 }
 
@@ -417,4 +619,557 @@ pub(super) fn invalid_constant_index(
                 .and_then(Dimension::known),
         )
         .is_some_and(|(index, length)| !(0..length).contains(&index))
+}
+
+/// 関数呼び出しにより書き換わりうる、参照キャプチャー済みの var の条件を忘れる。
+pub(in crate::check) fn forget_call(scope: &Scope) {
+    let captured = scope.ref_captured.borrow();
+    if captured.is_empty() {
+        return;
+    }
+    let mut facts = scope.array_bounds.facts.borrow_mut();
+    for &id in captured.iter() {
+        facts.forget_local(id);
+    }
+}
+
+/// `#` メソッドの受け手が `var` 変数またはそのフィールド経路であれば、その条件を忘れる。
+pub(in crate::check) fn forget_mutable_receiver(receiver: &Expression, scope: &Scope) {
+    if let Some((id, fields)) = mutable_ast_path(receiver, scope) {
+        scope
+            .array_bounds
+            .facts
+            .borrow_mut()
+            .forget_path(id, &fields);
+    }
+}
+
+fn mutable_ast_path(expr: &Expression, scope: &Scope) -> Option<(usize, Vec<usize>)> {
+    let mut names = Vec::new();
+    let mut cur = expr;
+    loop {
+        match &cur.kind {
+            ExpressionKind::Group(inner) => cur = inner,
+            ExpressionKind::Field { target, name } => {
+                names.push(name.as_str());
+                cur = target;
+            }
+            ExpressionKind::Name(name) => {
+                let binding = scope.locals.get(name)?;
+                if !binding.mutable {
+                    return None;
+                }
+                names.reverse();
+                let mut ty = binding.ty;
+                let mut indices = Vec::new();
+                for field_name in names {
+                    let Type::Struct(sid) = ty else {
+                        return None;
+                    };
+                    let s = scope.structs.get(sid);
+                    let idx = s.fields.iter().position(|f| f.name == field_name)?;
+                    ty = s.fields[idx].ty;
+                    indices.push(idx);
+                }
+                return Some((binding.id, indices));
+            }
+            _ => return None,
+        }
+    }
+}
+
+/// ループ本体（および `while` 条件）で書き換わりうる項を事前走査してループ先頭で忘れる。
+pub(in crate::check) fn forget_loop_writes(
+    statements: &[Statement],
+    extra_expr: Option<&Expression>,
+    scope: &Scope,
+) {
+    let mut facts = scope.array_bounds.facts.borrow_mut();
+    if facts.is_empty() {
+        return;
+    }
+    if let Some(expr) = extra_expr {
+        forget_expr_writes_into(expr, scope, &mut facts);
+    }
+    for stmt in statements {
+        forget_stmt_writes_into(stmt, scope, &mut facts);
+    }
+}
+
+fn forget_stmt_writes_into(stmt: &Statement, scope: &Scope, facts: &mut Facts) {
+    match stmt {
+        Statement::Assign {
+            name,
+            fields,
+            value,
+            ..
+        } => {
+            if let Some(binding) = scope.locals.get(name)
+                && binding.mutable
+            {
+                let mut ty = binding.ty;
+                let mut indices = Vec::new();
+                let mut ok = true;
+                for field_name in fields {
+                    if let Type::Struct(sid) = ty
+                        && let Some(idx) = scope
+                            .structs
+                            .get(sid)
+                            .fields
+                            .iter()
+                            .position(|f| f.name == *field_name)
+                    {
+                        ty = scope.structs.get(sid).fields[idx].ty;
+                        indices.push(idx);
+                    } else {
+                        ok = false;
+                        break;
+                    }
+                }
+                if ok {
+                    facts.forget_path(binding.id, &indices);
+                } else {
+                    facts.forget_local(binding.id);
+                }
+            }
+            forget_expr_writes_into(value, scope, facts);
+        }
+        Statement::Binding { initializer, .. } => {
+            forget_expr_writes_into(initializer, scope, facts)
+        }
+        Statement::Expression(e)
+        | Statement::Return(e)
+        | Statement::Fail(e)
+        | Statement::Recover(e) => forget_expr_writes_into(e, scope, facts),
+        Statement::Store { target, value, .. } => {
+            forget_expr_writes_into(target, scope, facts);
+            forget_expr_writes_into(value, scope, facts);
+        }
+        Statement::Log { parts, .. } => {
+            for part in parts {
+                if let crate::ast::TemplatePart::Value(e) = part {
+                    forget_expr_writes_into(e, scope, facts);
+                }
+            }
+        }
+        Statement::If {
+            branches,
+            otherwise,
+        } => {
+            for (cond, body) in branches {
+                forget_expr_writes_into(cond, scope, facts);
+                for s in body {
+                    forget_stmt_writes_into(s, scope, facts);
+                }
+            }
+            if let Some(body) = otherwise {
+                for s in body {
+                    forget_stmt_writes_into(s, scope, facts);
+                }
+            }
+        }
+        Statement::Loop { condition, body } => {
+            if let Some(c) = condition {
+                forget_expr_writes_into(c, scope, facts);
+            }
+            for s in body {
+                forget_stmt_writes_into(s, scope, facts);
+            }
+        }
+        Statement::For {
+            start, end, body, ..
+        } => {
+            forget_expr_writes_into(start, scope, facts);
+            if let Some(e) = end {
+                forget_expr_writes_into(e, scope, facts);
+            }
+            for s in body {
+                forget_stmt_writes_into(s, scope, facts);
+            }
+        }
+        Statement::Match { target, arms, .. } => {
+            forget_expr_writes_into(target, scope, facts);
+            for arm in arms {
+                for s in &arm.body {
+                    forget_stmt_writes_into(s, scope, facts);
+                }
+            }
+        }
+        Statement::Let {
+            value,
+            body,
+            otherwise,
+            ..
+        } => {
+            forget_expr_writes_into(value, scope, facts);
+            for s in body {
+                forget_stmt_writes_into(s, scope, facts);
+            }
+            for s in otherwise {
+                forget_stmt_writes_into(s, scope, facts);
+            }
+        }
+        Statement::Block(body)
+        | Statement::Trusted(body)
+        | Statement::Objection(body)
+        | Statement::Arena { body, .. } => {
+            for s in body {
+                forget_stmt_writes_into(s, scope, facts);
+            }
+        }
+        Statement::Break(_) | Statement::Continue(_) | Statement::Ignore(_) => {}
+    }
+}
+
+fn forget_expr_writes_into(expr: &Expression, scope: &Scope, facts: &mut Facts) {
+    match &expr.kind {
+        ExpressionKind::Call { arguments, .. } => {
+            for arg in arguments {
+                forget_expr_writes_into(arg, scope, facts);
+            }
+            for &id in scope.ref_captured.borrow().iter() {
+                facts.forget_local(id);
+            }
+        }
+        ExpressionKind::Invoke {
+            target, arguments, ..
+        } => {
+            forget_expr_writes_into(target, scope, facts);
+            for arg in arguments {
+                forget_expr_writes_into(arg, scope, facts);
+            }
+            for &id in scope.ref_captured.borrow().iter() {
+                facts.forget_local(id);
+            }
+        }
+        ExpressionKind::MethodCall {
+            target,
+            mutable,
+            arguments,
+            ..
+        } => {
+            forget_expr_writes_into(target, scope, facts);
+            for arg in arguments {
+                forget_expr_writes_into(arg, scope, facts);
+            }
+            if *mutable && let Some((id, fields)) = mutable_ast_path(target, scope) {
+                facts.forget_path(id, &fields);
+            }
+            for &id in scope.ref_captured.borrow().iter() {
+                facts.forget_local(id);
+            }
+        }
+        ExpressionKind::Closure(closure) => {
+            for cap in &closure.captures {
+                if cap.by_reference
+                    && let Some(binding) = scope.locals.get(&cap.name)
+                {
+                    facts.forget_local(binding.id);
+                }
+            }
+        }
+        ExpressionKind::Block { statements, value } => {
+            for s in statements {
+                forget_stmt_writes_into(s, scope, facts);
+            }
+            forget_expr_writes_into(value, scope, facts);
+        }
+        ExpressionKind::Group(e)
+        | ExpressionKind::Negate(e)
+        | ExpressionKind::BitNot(e)
+        | ExpressionKind::Not(e)
+        | ExpressionKind::New(e)
+        | ExpressionKind::Deref(e)
+        | ExpressionKind::Len(e)
+        | ExpressionKind::CBytes(e)
+        | ExpressionKind::CByteLen(e)
+        | ExpressionKind::Field { target: e, .. } => forget_expr_writes_into(e, scope, facts),
+        ExpressionKind::Cast {
+            operand, fallback, ..
+        }
+        | ExpressionKind::ArithmeticHandler { operand, fallback } => {
+            forget_expr_writes_into(operand, scope, facts);
+            if let Some(fb) = fallback {
+                forget_handler_writes_into(fb, scope, facts);
+            }
+        }
+        ExpressionKind::TextAppend { left, right }
+        | ExpressionKind::Binary { left, right, .. }
+        | ExpressionKind::Logical { left, right, .. } => {
+            forget_expr_writes_into(left, scope, facts);
+            forget_expr_writes_into(right, scope, facts);
+        }
+        ExpressionKind::TextBuffer { capacity, value } => {
+            if let Some(cap) = capacity {
+                forget_expr_writes_into(cap, scope, facts);
+            }
+            forget_expr_writes_into(value, scope, facts);
+        }
+        ExpressionKind::Comparison { operands, .. } => {
+            for o in operands {
+                forget_expr_writes_into(o, scope, facts);
+            }
+        }
+        ExpressionKind::Slice {
+            target,
+            start,
+            end,
+            fallback,
+            ..
+        } => {
+            forget_expr_writes_into(target, scope, facts);
+            if let Some(s) = start {
+                forget_expr_writes_into(s, scope, facts);
+            }
+            if let Some(e) = end {
+                forget_expr_writes_into(e, scope, facts);
+            }
+            if let Some(fb) = fallback {
+                forget_handler_writes_into(fb, scope, facts);
+            }
+        }
+        ExpressionKind::If {
+            branches,
+            otherwise,
+        } => {
+            for (c, v) in branches {
+                forget_expr_writes_into(c, scope, facts);
+                forget_expr_writes_into(v, scope, facts);
+            }
+            forget_expr_writes_into(otherwise, scope, facts);
+        }
+        ExpressionKind::Match { target, arms } => {
+            forget_expr_writes_into(target, scope, facts);
+            for arm in arms {
+                forget_expr_writes_into(&arm.body, scope, facts);
+            }
+        }
+        ExpressionKind::Struct { fields, .. } => {
+            for f in fields {
+                forget_expr_writes_into(&f.value, scope, facts);
+            }
+        }
+        ExpressionKind::With { target, fields } => {
+            forget_expr_writes_into(target, scope, facts);
+            for f in fields {
+                forget_expr_writes_into(&f.value, scope, facts);
+            }
+        }
+        ExpressionKind::ArrayInit {
+            values, lengths, ..
+        } => {
+            for v in values {
+                forget_expr_writes_into(v, scope, facts);
+            }
+            for l in lengths {
+                forget_expr_writes_into(l, scope, facts);
+            }
+        }
+        ExpressionKind::Template(parts) | ExpressionKind::Panic(parts) => {
+            for part in parts {
+                if let crate::ast::TemplatePart::Value(e) = part {
+                    forget_expr_writes_into(e, scope, facts);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn forget_handler_writes_into(
+    handler: &crate::ast::FailureHandler,
+    scope: &Scope,
+    facts: &mut Facts,
+) {
+    match handler {
+        crate::ast::FailureHandler::Value(e)
+        | crate::ast::FailureHandler::Return { value: e, .. } => {
+            forget_expr_writes_into(e, scope, facts)
+        }
+        crate::ast::FailureHandler::Fail { value: Some(e), .. } => {
+            forget_expr_writes_into(e, scope, facts)
+        }
+        crate::ast::FailureHandler::Errors(err) => {
+            for arm in &err.arms {
+                match &arm.body {
+                    crate::ast::ErrorArmBody::Value(e) => forget_expr_writes_into(e, scope, facts),
+                    crate::ast::ErrorArmBody::Statements { body, .. } => {
+                        for s in body {
+                            forget_stmt_writes_into(s, scope, facts);
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// 論理式・比較式を評価順（短絡評価・比較連鎖を含む）で検査し、
+/// 真の側・偽の側で成り立つ `Facts` をそれぞれ返す。
+pub(in crate::check) fn eval_condition(
+    expr: &Expression,
+    scope: &Scope,
+) -> Result<(CheckedExpression, Facts, Facts), Diagnostic> {
+    match &expr.kind {
+        ExpressionKind::Group(inner) => eval_condition(inner, scope),
+        ExpressionKind::Not(inner) => {
+            // ユーザー定義の not 演算子メソッドの場合は通常の式として扱う。
+            if scope.has_operator_methods
+                && super::super::operator_methods::unary_name("not", inner, scope)
+                    .is_some_and(|name| scope.functions.contains_key(&name))
+            {
+                let checked = super::super::expression::expression(expr, None, scope)?;
+                let after = scope.array_bounds.facts.borrow().clone();
+                return Ok((checked, after.clone(), after));
+            }
+            let (operand, t, f) = eval_condition(inner, scope)?;
+            if operand.ty != Type::Bool {
+                return Err(expr.location.error(
+                    ErrorKind::InvalidSource,
+                    if matches!(operand.ty, Type::Struct(_) | Type::Enum(_)) {
+                        crate::diagnostic!(
+                            "operator.unary",
+                            "no unary operator not defined for this type"
+                        )
+                    } else {
+                        crate::diagnostic!("expr.not", "not requires a bool operand")
+                    },
+                ));
+            }
+            Ok((
+                CheckedExpression {
+                    ty: Type::Bool,
+                    value: Value::Not(Box::new(operand)),
+                },
+                f,
+                t,
+            ))
+        }
+        ExpressionKind::Logical {
+            operator,
+            left,
+            right,
+        } => {
+            let (checked_left, left_t, left_f) = eval_condition(left, scope)?;
+            if checked_left.ty != Type::Bool {
+                return Err(expr.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "expr.operator-types",
+                        "{} requires bool operands",
+                        operator.symbol()
+                    ),
+                ));
+            }
+            let saved = scope.array_bounds.facts.borrow().clone();
+            let (checked_right, right_t, right_f) = match operator {
+                LogicalOperator::And => {
+                    *scope.array_bounds.facts.borrow_mut() = left_t.clone();
+                    eval_condition(right, scope)?
+                }
+                LogicalOperator::Or => {
+                    *scope.array_bounds.facts.borrow_mut() = left_f.clone();
+                    eval_condition(right, scope)?
+                }
+            };
+            *scope.array_bounds.facts.borrow_mut() = saved;
+            if checked_right.ty != Type::Bool {
+                return Err(expr.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "expr.operator-types",
+                        "{} requires bool operands",
+                        operator.symbol()
+                    ),
+                ));
+            }
+            let (true_facts, false_facts) = match operator {
+                LogicalOperator::And => (right_t, Facts::join_all(&[left_f, right_f])),
+                LogicalOperator::Or => (Facts::join_all(&[left_t, right_t]), right_f),
+            };
+            Ok((
+                CheckedExpression {
+                    ty: Type::Bool,
+                    value: Value::Logical {
+                        operator: *operator,
+                        left: Box::new(checked_left),
+                        right: Box::new(checked_right),
+                    },
+                },
+                true_facts,
+                false_facts,
+            ))
+        }
+        ExpressionKind::Comparison {
+            locations,
+            operators,
+            operands: ast_operands,
+        } => {
+            let checked = super::super::expression::expression(expr, None, scope)?;
+            let after = scope.array_bounds.facts.borrow().clone();
+            let mut true_facts = after.clone();
+            let mut false_facts = after;
+            if let Value::Comparison {
+                operands: checked_operands,
+                ..
+            } = &checked.value
+            {
+                let affines: Vec<Option<Affine>> =
+                    checked_operands.iter().map(|o| affine(o, scope)).collect();
+                for k in 0..operators.len() {
+                    if let (Some(l), Some(r)) = (&affines[k], &affines[k + 1]) {
+                        true_facts.add_comparison(l, operators[k], r, false, locations[k]);
+                    }
+                    // 比較連鎖の後半オペランドに副作用があれば、直前の比較で覚えた項のうち変わるものを忘れる。
+                    for later in &ast_operands[k + 1..] {
+                        forget_expr_writes_into(later, scope, &mut true_facts);
+                    }
+                }
+                if operators.len() == 1
+                    && let (Some(l), Some(r)) = (&affines[0], &affines[1])
+                {
+                    false_facts.add_comparison(l, operators[0], r, true, locations[0]);
+                    forget_expr_writes_into(&ast_operands[1], scope, &mut false_facts);
+                }
+            }
+            Ok((checked, true_facts, false_facts))
+        }
+        _ => {
+            let checked = super::super::expression::expression(expr, None, scope)?;
+            let after = scope.array_bounds.facts.borrow().clone();
+            Ok((checked, after.clone(), after))
+        }
+    }
+}
+
+/// ブロックが必ず return / fail / break / continue / panic で抜けるかを判定する。
+pub(in crate::check) fn block_exits(statements: &[CheckedStatement]) -> bool {
+    for stmt in statements {
+        if statement_exits(stmt) {
+            return true;
+        }
+    }
+    false
+}
+
+fn statement_exits(stmt: &CheckedStatement) -> bool {
+    match stmt {
+        CheckedStatement::Return { .. }
+        | CheckedStatement::Fail(_)
+        | CheckedStatement::Break
+        | CheckedStatement::Continue => true,
+        CheckedStatement::Expression(e) => matches!(e.value, Value::Panic { .. }),
+        CheckedStatement::Block(body)
+        | CheckedStatement::Arena { body, .. }
+        | CheckedStatement::Objection(body) => block_exits(body),
+        CheckedStatement::If {
+            branches,
+            otherwise: Some(otherwise),
+        } => branches.iter().all(|(_, b)| block_exits(b)) && block_exits(otherwise),
+        CheckedStatement::Match { arms, .. } => {
+            !arms.is_empty() && arms.iter().all(|(_, b)| block_exits(b))
+        }
+        _ => false,
+    }
 }

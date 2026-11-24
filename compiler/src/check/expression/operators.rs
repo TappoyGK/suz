@@ -327,31 +327,12 @@ pub(super) fn check(
                 value: Value::Not(Box::new(operand)),
             }
         }
-        ExpressionKind::Logical {
-            operator,
-            left,
-            right,
-        } => {
-            let left = expression(left, None, bindings)?;
-            let right = expression(right, None, bindings)?;
-            if left.ty != Type::Bool || right.ty != Type::Bool {
-                return Err(expr.location.error(
-                    ErrorKind::InvalidSource,
-                    crate::diagnostic!(
-                        "expr.operator-types",
-                        "{} requires bool operands",
-                        operator.symbol()
-                    ),
-                ));
-            }
-            CheckedExpression {
-                ty: Type::Bool,
-                value: Value::Logical {
-                    operator: *operator,
-                    left: Box::new(left),
-                    right: Box::new(right),
-                },
-            }
+        ExpressionKind::Logical { .. } => {
+            let (checked, true_facts, false_facts) =
+                super::super::arrays::bounds::eval_condition(expr, bindings)?;
+            *bindings.array_bounds.facts.borrow_mut() =
+                super::super::arrays::facts::Facts::join_all(&[true_facts, false_facts]);
+            checked
         }
         ExpressionKind::Comparison {
             locations,
