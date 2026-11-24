@@ -147,6 +147,43 @@ fn chain<'a>(expr: &'a Expression, steps: &mut Vec<&'a Expression>, outer: bool)
     }
 }
 
+// 定数名から構造体のフィールドだけをたどった式か。値は評価済みの定数で、副作用も未評価の部分もない。
+fn constant_path(expr: &Expression, scope: &Scope) -> bool {
+    match &expr.kind {
+        ExpressionKind::Group(v) => constant_path(v, scope),
+        ExpressionKind::Field { target, .. } => constant_path(target, scope),
+        ExpressionKind::Name(name) => {
+            !scope.locals.contains_key(name) && scope.constants.contains_key(name)
+        }
+        _ => false,
+    }
+}
+
+// 定数の構造体のフィールド参照から、フィールドの値を取り出す。構造体の全体は評価し直さない。
+fn constant_field(expr: CheckedExpression) -> CheckedExpression {
+    let CheckedExpression { ty, value } = expr;
+    let Value::Field { target, index } = value else {
+        return CheckedExpression { ty, value };
+    };
+    let inner = constant_field(*target);
+    match inner.value {
+        Value::Struct { mut fields } if fields.iter().any(|(id, _)| *id == index) => {
+            let position = fields.iter().position(|(id, _)| *id == index).unwrap();
+            fields.swap_remove(position).1
+        }
+        value => CheckedExpression {
+            ty,
+            value: Value::Field {
+                target: Box::new(CheckedExpression {
+                    ty: inner.ty,
+                    value,
+                }),
+                index,
+            },
+        },
+    }
+}
+
 fn bound(expr: &Expression, scope: &Scope) -> Result<CheckedExpression, Diagnostic> {
     let value = expression::expression(expr, None, scope)?;
     if !value.ty.is_integer() {
@@ -169,7 +206,10 @@ fn access(expr: &Expression, scope: &Scope) -> Result<(CheckedExpression, bool),
         }
     );
     let mut target = expression::expression(root, None, scope)?;
-    // 定数名の根は、検査の時点で定数配列の値になっている。畳み直すと、利用箇所ごとに全要素を評価し直す。
+    // 定数名とそのフィールドの根は、検査の時点で評価済みの値になっている。畳み直すと、利用箇所ごとに全要素を評価し直す。
+    if constant_path(root, scope) {
+        target = constant_field(target);
+    }
     if !matches!(target.value, Value::Array { .. }) {
         target = constants::evaluate(&target)?.unwrap_or(target);
     }

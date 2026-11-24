@@ -1215,4 +1215,48 @@ fn main() -> u8 {
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.rule(), "array.readonly", "{body}: {error}");
     }
+
+    // 途中の段が範囲外になる連鎖の定数式・リテラル根・定数参照の同一性を検証する。
+    let extra_ok = r#"
+struct Cfg { xs: .[i32] }
+fix A: .[i32] = .[1, 2]
+fix JAGGED: .[.[i32]] = .[.[1, 2], .[3]]
+fix CFG = Cfg { xs: .[10, 20] }
+fix T: .[.[i32]] = .[A, A]
+fix K: i64 = 7
+fix V: i32 = JAGGED.[5].[0] or 9
+fix W: i32 = A.[0:5].[0] or 8
+fix R: .[i32] = JAGGED.[5].[0:1] or A
+
+fn main() -> u8 {
+    if V != 9 || W != 8 || R.[1] != 2 { return 1 }
+    fix arr: .[i32] = .[0; JAGGED.[5].[0] or 2]
+    if len arr != 2 { return 2 }
+    if (JAGGED.[5].[0:1] or A).[1] != 2 { return 3 }
+    if .[.[K], .[1 + 2, 3]].[1].[0] != 3 { return 4 }
+    var t: i32 = 0
+    for i in 0..<len CFG.xs { t += CFG.xs.[i] }
+    for i in 0..<len T.[0] { t += T.[1].[i] }
+    for i in 0..<len JAGGED.[0:1].[0] { t += JAGGED.[0:1].[0].[i] }
+    for i in 0..<len A.[:] { t += A.[:].[i] }
+    if t != 39 { return 5 }
+    return 0
+}
+"#;
+    let output = compile_and_run_c23(extra_ok, "const-array-ref-extra.suz");
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+
+    for (code, rule) in [
+        (
+            "fix A: .[i32] = .[1, 2]\nfn main() -> u8 {\n    var t: i32 = 0\n    for i in 0..<len A.[0:2] { t += A.[0:2].[i] }\n    return 0\n}",
+            "array.access-handler",
+        ),
+        (
+            "fix K: i64 = 7\nfn main() -> u8 {\n    fix x = .[.[K], .[1 + 2, 4]].[0].[1]\n    return 0\n}",
+            "array.constant-index",
+        ),
+    ] {
+        let err = suz::compile(code.as_bytes()).unwrap_err();
+        assert_eq!(err.rule(), rule, "{code}\n{err}");
+    }
 }
