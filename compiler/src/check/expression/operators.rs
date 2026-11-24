@@ -105,25 +105,33 @@ pub(super) fn check(
                     ),
                 ));
             }
-            *handler =
-                Some(match fallback.as_ref().unwrap() {
-                    FailureHandler::Ignore(ignore) => {
-                        return Err(crate::check::errors::invalid_handler(ignore.location));
-                    }
-                    FailureHandler::Errors(handler) => {
-                        return Err(crate::check::errors::invalid_handler(handler.location));
-                    }
-                    FailureHandler::Fail { location, .. } => {
-                        return Err(super::super::errors::invalid_handler(*location));
-                    }
-                    FailureHandler::Value(value) => CheckedHandler::Value(Box::new(
-                        super::coerced(value, Some(checked.ty), bindings)?,
-                    )),
-                    FailureHandler::Return { value, location } => CheckedHandler::Return {
-                        value: Box::new(crate::check::functions::return_value(value, bindings)?),
-                        location: *location,
-                    },
-                });
+            *handler = Some(match fallback.as_ref().unwrap() {
+                FailureHandler::Ignore(ignore) => {
+                    return Err(crate::check::errors::invalid_handler(ignore.location));
+                }
+                FailureHandler::Errors(handler) => {
+                    return Err(crate::check::errors::invalid_handler(handler.location));
+                }
+                FailureHandler::Fail { location, .. } => {
+                    return Err(super::super::errors::invalid_handler(*location));
+                }
+                FailureHandler::Value(value) => {
+                    let exits = matches!(value.kind, ExpressionKind::Panic(_));
+                    CheckedHandler::Value(Box::new(super::super::arrays::bounds::with_fallback(
+                        bindings,
+                        exits,
+                        || super::coerced(value, Some(checked.ty), bindings),
+                    )?))
+                }
+                FailureHandler::Return { value, location } => CheckedHandler::Return {
+                    value: Box::new(super::super::arrays::bounds::with_fallback(
+                        bindings,
+                        true,
+                        || crate::check::functions::return_value(value, bindings),
+                    )?),
+                    location: *location,
+                },
+            });
             checked
         }
         ExpressionKind::BitNot(_) | ExpressionKind::Negate(_) | ExpressionKind::Binary { .. } => {
@@ -327,31 +335,12 @@ pub(super) fn check(
                 value: Value::Not(Box::new(operand)),
             }
         }
-        ExpressionKind::Logical {
-            operator,
-            left,
-            right,
-        } => {
-            let left = expression(left, None, bindings)?;
-            let right = expression(right, None, bindings)?;
-            if left.ty != Type::Bool || right.ty != Type::Bool {
-                return Err(expr.location.error(
-                    ErrorKind::InvalidSource,
-                    crate::diagnostic!(
-                        "expr.operator-types",
-                        "{} requires bool operands",
-                        operator.symbol()
-                    ),
-                ));
-            }
-            CheckedExpression {
-                ty: Type::Bool,
-                value: Value::Logical {
-                    operator: *operator,
-                    left: Box::new(left),
-                    right: Box::new(right),
-                },
-            }
+        ExpressionKind::Logical { .. } => {
+            let (checked, true_facts, false_facts) =
+                super::super::arrays::bounds::eval_condition(expr, bindings)?;
+            *bindings.array_bounds.facts.borrow_mut() =
+                super::super::arrays::facts::Facts::join_all(&[true_facts, false_facts]);
+            checked
         }
         ExpressionKind::Comparison {
             locations,

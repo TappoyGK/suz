@@ -113,6 +113,7 @@ pub(super) fn check(
             binding.assigned.set(true);
         }
     }
+    *bindings.array_bounds.facts.borrow_mut() = local.array_bounds.facts.into_inner();
     Ok(CheckedExpression {
         ty: value.ty,
         value: Value::Block {

@@ -251,6 +251,7 @@ pub(super) fn statement(
             );
             let dimensions = super::arrays::bounds::shape(&value, context.bindings);
             super::arrays::bounds::register(id, ty, false, dimensions, context.bindings);
+            let after_value = context.bindings.array_bounds.facts.borrow().clone();
             let body = statements::block_with_bindings(
                 body,
                 context.bindings,
@@ -258,12 +259,22 @@ pub(super) fn statement(
                 context.loop_depth,
                 vec![name.clone()],
             )?;
+            let mut exits = Vec::new();
+            if !super::arrays::bounds::block_exits(&body) {
+                exits.push(context.bindings.array_bounds.facts.borrow().clone());
+            }
+            *context.bindings.array_bounds.facts.borrow_mut() = after_value;
             let otherwise = statements::block(
                 otherwise,
                 context.bindings,
                 context.next_id,
                 context.loop_depth,
             )?;
+            if !nonnil && !super::arrays::bounds::block_exits(&otherwise) {
+                exits.push(context.bindings.array_bounds.facts.borrow().clone());
+            }
+            *context.bindings.array_bounds.facts.borrow_mut() =
+                super::arrays::facts::Facts::join_all(&exits);
             context.output.push(CheckedStatement::Block(vec![
                 CheckedStatement::Binding {
                     location: *location,

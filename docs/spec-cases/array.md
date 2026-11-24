@@ -31,8 +31,8 @@ fn main() -> u8 {
 | `a: #[i32]?`に対する`len a` | 拒否。非nil確認が必要。[array.value] |
 | 仮引数`a: #[i32; n]`に対する`a.[0] or 7` | 受理。nは0かもしれないため失敗処理が必要。[array.access-handler] |
 | 同じ仮引数に対する`a.[0]` | 拒否。範囲保証がない。[array.access-handler] |
-| `fix a = new #[1, 2]`の後の`a.[0] or 7` | 拒否。既知の長さに対する成功保証あり。[array.bounds-proof] |
-| `a: #[i32; n]`の`for i in 0..<n`内で`a.[i] or 0` | 拒否。仕様上成功する添字へのor。[array.bounds-proof] |
+| `fix a = new #[1, 2]`の後の`a.[0] or 7` | 受理（警告）。既知の長さに対する成功保証あり。[array.redundant-handler] |
+| `a: #[i32; n]`の`for i in 0..<n`内で`a.[i] or 0` | 受理（警告）。仕様上成功する添字へのor。[array.redundant-handler] |
 | 同じループで、別寸法mを持つ`b: #[i32; m]`の`b.[i]` | 拒否。寸法の一致条件がない。[array.dimension-origin] |
 | 既知の長さ2のaに対する`a.[2] or 7` | 受理。結果は7。範囲外の読取りは失敗処理へ進む。[array.access-handler] |
 | 長さ0のaに対する`a#[0] = 1` | 実行時パニック。書き込み先の範囲外。[rt.array-bounds] |
@@ -323,7 +323,7 @@ fn main() -> u8 {
 fix PALETTE: .[i32] = .[17, 18, 19]
 fix COUNT = len PALETTE
 fix FIRST = PALETTE.[0]
-fn color(n: u32) -> i32 { return PALETTE.[n % len PALETTE] or 16 }
+fn color(n: u32) -> i32 { return PALETTE.[n % len PALETTE] }
 fn first[T](a: .[T]) -> T { return a.[0] or panic `empty array` }
 fnshape Reader(.[i32], u32) -> i32
 fn read(a: .[i32; n], i: u32) -> i32 { return a.[i] or -1 }
@@ -775,7 +775,7 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | `[array.value]` | 5 | 10 |
 
-### array-025 別の定数配列に長さの関係を移さない
+### array-025 同じ長さの定数配列同士は整数の定数式として扱う
 
 主根拠：`[array.dimension-origin]`。
 
@@ -787,7 +787,9 @@ fn main() -> u8 {
 fix A: .[i32] = .[1, 2]
 fix B: .[i32] = .[1, 2]
 fn main() -> u8 {
-    for i in 0..<len A { fix v = B.[i] }
+    var sum: i32 = 0
+    for i in 0..<len A { sum += B.[i] }
+    if sum != 3 { return 1 }
     return 0
 }
 ```
@@ -796,13 +798,7 @@ fn main() -> u8 {
 
 | 設定 | 結果 | 終了コード | 警告数 |
 |---|---|---:|---:|
-| 通常 | コンパイルエラー | — | 0 |
-
-**コンパイル診断：**
-
-| 設定 | 規則 | 行 | 列 |
-|---|---|---:|---:|
-| 通常 | `[array.access-handler]` | 4 | 35 |
+| 通常 | 正常終了 | 0 | 0 |
 
 ### array-026 書き込み可能な配列を読み取り専用の参照として使う
 
@@ -1592,3 +1588,193 @@ fn main() -> u8 {
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
 | 通常 | `[const.expression]` | 1 | 18 |
+
+### array-052 判定済みの条件と合流による添字・切り出しの範囲保証
+
+主根拠：`[array.bounds-proof]`。
+
+補助根拠：`[array.index]`・`[array.slice]`・`[array.access-handler]`。
+
+**ソース：**
+
+```suz
+fn color(palette: .[i32; _], n: i32) -> i32 {
+    if 0 <= n < len palette {
+        return palette.[n]
+    }
+    return 16
+}
+
+fn joined(a: .[i32; n], flag: bool, i: i64) -> i32 {
+    if flag {
+        if not (0 <= i < n) { return 0 }
+    } else {
+        if not (0 <= i < n - 1) { return 0 }
+    }
+    return a.[i]
+}
+
+fn main() -> u8 {
+    fix pal: .[i32] = .[10, 20, 30]
+    if color(pal, 1) != 20 || color(pal, 5) != 16 { return 1 }
+    if joined(pal, true, 2) != 30 || joined(pal, false, 1) != 20 { return 2 }
+    var i: i64 = 0
+    var sum: i32 = 0
+    while 0 <= i < len pal {
+        sum += pal.[i]
+        i += 1
+    }
+    if sum != 60 { return 3 }
+    fix s: i64 = 1
+    fix e: i64 = 3
+    if 0 <= s <= e <= len pal {
+        if len pal.[s:e] != 2 { return 4 }
+    }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### array-053 合流点では片方の経路だけで成り立つ強い条件を残さない
+
+主根拠：`[array.bounds-proof]`。
+
+補助根拠：`[array.access-handler]`。
+
+**ソース：**
+
+```suz
+fn f(a: .[i32; n], flag: bool, i: i64) -> i32 {
+    if flag {
+        if not (0 <= i < n) { return 0 }
+    } else {
+        if not (0 <= i < n - 1) { return 0 }
+    }
+    return a.[i + 1]
+}
+fn main() -> u8 {
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[array.access-handler]` | 7 | 13 |
+
+### array-054 保証済みのアクセスへのorは警告になる
+
+主根拠：`[array.redundant-handler]`。
+
+補助根拠：`[array.bounds-proof]`・`[array.access-handler]`。
+
+**ソース：**
+
+```suz
+fn color(palette: .[i32; _], n: i32) -> i32 {
+    if 0 <= n < len palette {
+        return palette.[n] or 16
+    }
+    return 16
+}
+fn main() -> u8 {
+    if color(.[10, 20], 1) != 20 { return 1 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 1 |
+
+**警告：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[array.redundant-handler]` | 3 | 28 |
+
+### array-055 範囲外で抜ける読み出しの後・符号なし型・剰余による範囲保証
+
+主根拠：`[array.bounds-proof]`。
+
+補助根拠：`[array.index]`・`[array.access-handler]`。
+
+**ソース：**
+
+```suz
+fn read_twice(a: .[i32], i: i64) -> i32 {
+    fix v = a.[i] or return -1
+    return v + a.[i]
+}
+
+fn sum_len_t(a: .[i32]) -> i32 {
+    var i: len_t = 0
+    var total: i32 = 0
+    while i < len a {
+        total += a.[i]
+        i += 1
+    }
+    return total
+}
+
+fn pick_u32(palette: .[i32], n: u32) -> i32 {
+    return palette.[n % len palette]
+}
+
+fn main() -> u8 {
+    fix pal: .[i32] = .[10, 20, 30]
+    if read_twice(pal, 1) != 40 || read_twice(pal, 5) != -1 { return 1 }
+    if sum_len_t(pal) != 60 { return 2 }
+    if pick_u32(pal, 5) != 30 { return 3 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### array-056 符号付き整数の0以上を確認しない剰余は範囲保証しない
+
+主根拠：`[array.bounds-proof]`。
+
+補助根拠：`[array.access-handler]`。
+
+**ソース：**
+
+```suz
+fn pick(palette: .[i32], n: i32) -> i32 {
+    return palette.[n % len palette]
+}
+fn main() -> u8 {
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[array.access-handler]` | 2 | 19 |

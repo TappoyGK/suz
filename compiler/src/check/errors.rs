@@ -98,15 +98,24 @@ pub(super) fn finish(
                     ),
                 ));
             }
-            CallHandler::Value(expression::coerced(value, Some(call.ty), scope)?)
+            let exits = matches!(value.kind, crate::ast::ExpressionKind::Panic(_));
+            CallHandler::Value(super::arrays::bounds::with_fallback(scope, exits, || {
+                expression::coerced(value, Some(call.ty), scope)
+            })?)
         }
         FailureHandler::Return { value, .. } => CallHandler::Return {
-            value: functions::return_value(value, scope)?,
+            value: super::arrays::bounds::with_fallback(scope, true, || {
+                functions::return_value(value, scope)
+            })?,
             location: value.location,
         },
         FailureHandler::Fail {
             value: Some(value), ..
-        } => CallHandler::Fail(Some(fail(value, scope)?)),
+        } => CallHandler::Fail(Some(super::arrays::bounds::with_fallback(
+            scope,
+            true,
+            || fail(value, scope),
+        )?)),
         FailureHandler::Fail { value: None, .. } => {
             if !errors.iter().all(|e| scope.errors.contains(e)) {
                 return Err(location.error(

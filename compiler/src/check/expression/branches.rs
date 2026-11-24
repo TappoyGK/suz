@@ -5,7 +5,6 @@
 
 use super::super::ir::{CheckedExpression, Value};
 use super::super::matches;
-use super::expression;
 use super::{default_type, operand_type};
 use crate::check::scope::Scope;
 use crate::{
@@ -41,9 +40,23 @@ pub(super) fn check(
                 ));
             }
             let mut checked = Vec::new();
+            let base_facts = bindings.array_bounds.facts.borrow().clone();
+            let mut exits = Vec::new();
             for (arm, pattern) in arms.iter().zip(patterns.values) {
+                *bindings.array_bounds.facts.borrow_mut() = base_facts.clone();
+                if let Some(pat) = &pattern {
+                    super::super::arrays::bounds::record_match_arm(
+                        &target,
+                        pat,
+                        arm.location,
+                        bindings,
+                    );
+                }
                 checked.push((pattern, super::coerced(&arm.body, Some(ty), bindings)?));
+                exits.push(bindings.array_bounds.facts.borrow().clone());
             }
+            *bindings.array_bounds.facts.borrow_mut() =
+                super::super::arrays::facts::Facts::join_all(&exits);
             CheckedExpression {
                 ty,
                 value: Value::Match {
@@ -67,8 +80,12 @@ pub(super) fn check(
                 ));
             }
             let mut checked = Vec::new();
+            let mut fallthrough = bindings.array_bounds.facts.borrow().clone();
+            let mut exits = Vec::new();
             for (condition, value) in branches {
-                let checked_condition = expression(condition, None, bindings)?;
+                *bindings.array_bounds.facts.borrow_mut() = fallthrough;
+                let (checked_condition, true_facts, false_facts) =
+                    super::super::arrays::bounds::eval_condition(condition, bindings)?;
                 if checked_condition.ty != Type::Bool {
                     return Err(condition.location.error(
                         ErrorKind::InvalidSource,
@@ -78,16 +95,24 @@ pub(super) fn check(
                         ),
                     ));
                 }
+                *bindings.array_bounds.facts.borrow_mut() = true_facts;
                 checked.push((
                     checked_condition,
                     super::coerced(value, Some(ty), bindings)?,
                 ));
+                exits.push(bindings.array_bounds.facts.borrow().clone());
+                fallthrough = false_facts;
             }
+            *bindings.array_bounds.facts.borrow_mut() = fallthrough;
+            let checked_otherwise = super::coerced(otherwise, Some(ty), bindings)?;
+            exits.push(bindings.array_bounds.facts.borrow().clone());
+            *bindings.array_bounds.facts.borrow_mut() =
+                super::super::arrays::facts::Facts::join_all(&exits);
             CheckedExpression {
                 ty,
                 value: Value::If {
                     branches: checked,
-                    otherwise: Box::new(super::coerced(otherwise, Some(ty), bindings)?),
+                    otherwise: Box::new(checked_otherwise),
                 },
             }
         }

@@ -71,6 +71,14 @@ pub(crate) fn collect(
             (*location, "arena.loop-allocation", message.clone(), true)
         }),
     );
+    candidates.extend(checked.array_handler_warnings.iter().map(|(location, _)| {
+        (
+            *location,
+            "array.redundant-handler",
+            "statically proven array access does not need or".to_string(),
+            true,
+        )
+    }));
     candidates.sort_by_key(|(location, ..)| position(*location));
     for scope in scopes {
         for item in &scope.items {
@@ -130,6 +138,12 @@ pub(crate) fn collect(
                         .arena_warnings
                         .binary_search_by_key(&location, |warning| warning.0)
                         .map(|index| checked.arena_warnings[index].2.clone())
+                        .unwrap_or_default()
+                } else if rule == "array.redundant-handler" {
+                    checked
+                        .array_handler_warnings
+                        .binary_search_by_key(&location, |warning| warning.0)
+                        .map(|index| checked.array_handler_warnings[index].1.clone())
                         .unwrap_or_default()
                 } else {
                     Vec::new()

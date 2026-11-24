@@ -574,8 +574,6 @@ fn array_views_reject_missing_or_redundant_handlers_and_whole_view_writes() {
     for (body, rule) in [
         ("fix row = a.[2]", "array.access-handler"),
         ("fix slice = a.[0:3]", "array.access-handler"),
-        ("fix full = a.[:] or a", "array.access-handler"),
-        ("fix full = a.[:].[:] or a", "array.access-handler"),
         ("a#[0] = a.[0]", "array.write"),
         ("a#[0:1] = a", "array.write"),
         ("a#[:] = a", "array.write"),
@@ -589,6 +587,12 @@ fn array_views_reject_missing_or_redundant_handlers_and_whole_view_writes() {
         let source = format!("fn main() -> u8 {{ fix a = new #[0; 2, 3]\n{body}\nreturn 0 }}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.rule(), rule, "{body}: {error}");
+    }
+    for body in ["fix full = a.[:] or a", "fix full = a.[:].[:] or a"] {
+        let source = format!("fn main() -> u8 {{ fix a = new #[0; 2, 3]\n{body}\nreturn 0 }}");
+        let warnings = suz::check_source(source.as_bytes(), suz::ArithmeticMode::Default).unwrap();
+        assert_eq!(warnings.len(), 1, "{body}: {warnings:?}");
+        assert_eq!(warnings[0].rule(), "array.redundant-handler");
     }
 }
 
@@ -1162,19 +1166,18 @@ fn main() -> u8 {
     let output = compile_and_run_c23(source, "const-array-ref-bounds.suz");
     assert_eq!(output.status.code(), Some(0), "{output:?}");
 
+    for code in [
+        "fix JAGGED: .[.[i32]] = .[.[1, 2], .[3]]\nfn main() -> u8 {\n    fix x: i32 = JAGGED.[1].[0] or 0\n    return 0\n}",
+        "fix JAGGED: .[.[i32]] = .[.[1, 2], .[3]]\nfn main() -> u8 {\n    fix r = JAGGED.[1]\n    fix x: i32 = r.[0] or 0\n    return 0\n}",
+        "fix JAGGED: .[.[i32]] = .[.[1, 2], .[3]]\nfn main() -> u8 {\n    fix x: i32 = (JAGGED.[5] or .[9]).[0] or 7\n    return 0\n}",
+        "struct Cfg { xs: .[i32] }\nfix CFG = Cfg { xs: .[1, 2] }\nfn main() -> u8 {\n    fix x: i32 = CFG.xs.[1] or 0\n    return 0\n}",
+    ] {
+        let warnings = suz::check_source(code.as_bytes(), suz::ArithmeticMode::Default).unwrap();
+        assert_eq!(warnings.len(), 1, "{code}\n{warnings:?}");
+        assert_eq!(warnings[0].rule(), "array.redundant-handler", "{code}");
+    }
+
     for (code, rule) in [
-        (
-            "fix JAGGED: .[.[i32]] = .[.[1, 2], .[3]]\nfn main() -> u8 {\n    fix x: i32 = JAGGED.[1].[0] or 0\n    return 0\n}",
-            "array.access-handler",
-        ),
-        (
-            "fix JAGGED: .[.[i32]] = .[.[1, 2], .[3]]\nfn main() -> u8 {\n    fix x: i32 = (JAGGED.[5] or .[9]).[0] or 7\n    return 0\n}",
-            "array.access-handler",
-        ),
-        (
-            "struct Cfg { xs: .[i32] }\nfix CFG = Cfg { xs: .[1, 2] }\nfn main() -> u8 {\n    fix x: i32 = CFG.xs.[1] or 0\n    return 0\n}",
-            "array.access-handler",
-        ),
         (
             "fix JAGGED: .[.[i32]] = .[.[1, 2], .[3]]\nfn main() -> u8 {\n    fix x: i32 = JAGGED.[1].[5]\n    return 0\n}",
             "array.constant-index",
@@ -1235,26 +1238,17 @@ fn main() -> u8 {
     for i in 0..<len T.[0] { t += T.[1].[i] }
     for i in 0..<len JAGGED.[0:1].[0] { t += JAGGED.[0:1].[0].[i] }
     for i in 0..<len A.[:] { t += A.[:].[i] }
-    if t != 39 { return 5 }
+    for i in 0..<len A.[0:2] { t += A.[0:2].[i] }
+    if t != 42 { return 5 }
     return 0
 }
 "#;
     let output = compile_and_run_c23(extra_ok, "const-array-ref-extra.suz");
     assert_eq!(output.status.code(), Some(0), "{output:?}");
 
-    for (code, rule) in [
-        (
-            "fix A: .[i32] = .[1, 2]\nfn main() -> u8 {\n    var t: i32 = 0\n    for i in 0..<len A.[0:2] { t += A.[0:2].[i] }\n    return 0\n}",
-            "array.access-handler",
-        ),
-        (
-            "fix K: i64 = 7\nfn main() -> u8 {\n    fix x = .[.[K], .[1 + 2, 4]].[0].[1]\n    return 0\n}",
-            "array.constant-index",
-        ),
-    ] {
-        let err = suz::compile(code.as_bytes()).unwrap_err();
-        assert_eq!(err.rule(), rule, "{code}\n{err}");
-    }
+    let code = "fix K: i64 = 7\nfn main() -> u8 {\n    fix x = .[.[K], .[1 + 2, 4]].[0].[1]\n    return 0\n}";
+    let err = suz::compile(code.as_bytes()).unwrap_err();
+    assert_eq!(err.rule(), "array.constant-index", "{code}\n{err}");
 }
 
 #[test]

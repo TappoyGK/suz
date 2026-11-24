@@ -205,7 +205,7 @@ pub(super) fn invoke(
         .zip(signature.parameters)
         .map(|(a, ty)| argument(a, ty, scope))
         .collect::<Result<_, _>>()?;
-    super::errors::finish(
+    let result = super::errors::finish(
         CheckedExpression {
             ty: signature.result,
             value: Value::Invoke {
@@ -218,7 +218,9 @@ pub(super) fn invoke(
         handler,
         expr,
         scope,
-    )
+    )?;
+    super::arrays::bounds::forget_call(scope);
+    Ok(result)
 }
 
 /// 外側の型要求がない分岐から、兄弟の型を使って汎用関数を具体化しない。

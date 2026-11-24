@@ -243,7 +243,12 @@ pub(in crate::check) fn check(
                     return Err(crate::check::errors::invalid_handler(*location));
                 }
                 Some(FailureHandler::Value(value)) => {
-                    Some(super::coerced(value, Some(target), bindings)?)
+                    let exits = matches!(value.kind, crate::ast::ExpressionKind::Panic(_));
+                    Some(super::super::arrays::bounds::with_fallback(
+                        bindings,
+                        exits,
+                        || super::coerced(value, Some(target), bindings),
+                    )?)
                 }
                 None => None,
                 _ => unreachable!(),
