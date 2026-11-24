@@ -244,7 +244,7 @@ fn check_statement(
                 .array_bounds
                 .loop_breaks
                 .borrow_mut()
-                .push(Vec::new());
+                .push(Some(Vec::new()));
             let (condition, false_facts) = if let Some(expr) = condition {
                 let (value, true_facts, false_facts) =
                     super::arrays::bounds::eval_condition(expr, context.bindings)?;
@@ -272,6 +272,7 @@ fn check_statement(
                 .loop_breaks
                 .borrow_mut()
                 .pop()
+                .flatten()
                 .unwrap_or_default();
             let body = body?;
             if let Some(f) = false_facts {
@@ -294,7 +295,7 @@ fn check_statement(
                 ));
             }
             if matches!(statement, Statement::Break(_))
-                && let Some(top) = context
+                && let Some(Some(top)) = context
                     .bindings
                     .array_bounds
                     .loop_breaks
@@ -476,6 +477,12 @@ fn check_for(statement: &Statement, context: &mut StatementContext<'_>) -> Resul
             super::arrays::bounds::register(id, variable_type, false, Vec::new(), context.bindings);
         }
     }
+    context
+        .bindings
+        .array_bounds
+        .loop_breaks
+        .borrow_mut()
+        .push(None);
     let mut declared = vec![name.clone()];
     let body = check_statements(
         body,
@@ -484,6 +491,7 @@ fn check_for(statement: &Statement, context: &mut StatementContext<'_>) -> Resul
         context.loop_depth + 1,
         &mut declared,
     );
+    context.bindings.array_bounds.loop_breaks.borrow_mut().pop();
     match pre_loop {
         None => context
             .bindings

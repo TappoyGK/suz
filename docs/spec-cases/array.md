@@ -31,8 +31,8 @@ fn main() -> u8 {
 | `a: #[i32]?`に対する`len a` | 拒否。非nil確認が必要。[array.value] |
 | 仮引数`a: #[i32; n]`に対する`a.[0] or 7` | 受理。nは0かもしれないため失敗処理が必要。[array.access-handler] |
 | 同じ仮引数に対する`a.[0]` | 拒否。範囲保証がない。[array.access-handler] |
-| `fix a = new #[1, 2]`の後の`a.[0] or 7` | 拒否。既知の長さに対する成功保証あり。[array.bounds-proof] |
-| `a: #[i32; n]`の`for i in 0..<n`内で`a.[i] or 0` | 拒否。仕様上成功する添字へのor。[array.bounds-proof] |
+| `fix a = new #[1, 2]`の後の`a.[0] or 7` | 受理（警告）。既知の長さに対する成功保証あり。[array.redundant-handler] |
+| `a: #[i32; n]`の`for i in 0..<n`内で`a.[i] or 0` | 受理（警告）。仕様上成功する添字へのor。[array.redundant-handler] |
 | 同じループで、別寸法mを持つ`b: #[i32; m]`の`b.[i]` | 拒否。寸法の一致条件がない。[array.dimension-origin] |
 | 既知の長さ2のaに対する`a.[2] or 7` | 受理。結果は7。範囲外の読取りは失敗処理へ進む。[array.access-handler] |
 | 長さ0のaに対する`a#[0] = 1` | 実行時パニック。書き込み先の範囲外。[rt.array-bounds] |

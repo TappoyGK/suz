@@ -39,7 +39,7 @@ pub(in crate::check) struct State {
     pub names: BTreeMap<usize, Dimension>,
     pub loops: BTreeMap<usize, Loop>,
     pub facts: RefCell<Facts>,
-    pub loop_breaks: RefCell<Vec<Vec<Facts>>>,
+    pub loop_breaks: RefCell<Vec<Option<Vec<Facts>>>>,
 }
 
 #[derive(Clone)]

@@ -625,4 +625,35 @@ fn main() -> u8 {
         String::from_utf8_lossy(&write_oob.stderr).contains("[rt.array-bounds]"),
         "{write_oob:?}"
     );
+
+    // 指摘 1（F22）: 内側の for の break が外側の while / loop の後ろの条件を消さない。
+    let nested_break = compile_and_run_c23(
+        r#"
+fn f_while(a: .[i32], c: bool) -> i32 {
+    var i: i64 = 5
+    while i < 0 || i >= len a {
+        for k in 0..<3 { if c { break } }
+        i -= 1
+    }
+    return a.[i]
+}
+fn f_loop(a: .[i32], c: bool) -> i32 {
+    var i: i64 = 5
+    loop {
+        for k in 0..<3 { if c { break } }
+        if 0 <= i < len a { break }
+        i -= 1
+    }
+    return a.[i]
+}
+fn main() -> u8 {
+    fix p: .[i32] = .[10, 20, 30]
+    if f_while(p, true) != 30 { return 1 }
+    if f_loop(p, true) != 30 { return 2 }
+    return 0
+}
+"#,
+        "nested-for-break-outer-loop.suz",
+    );
+    assert_eq!(nested_break.status.code(), Some(0), "{nested_break:?}");
 }
