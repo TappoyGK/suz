@@ -643,27 +643,48 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
             Value::Function { .. } => expr.value.clone(),
             _ => return None,
         },
-        Type::ArrayRef {
-            mutable: false,
-            nullable: false,
-            ..
-        } => {
-            let Value::Array {
+        Type::ArrayRef { mutable: false, .. } => match &expr.value {
+            Value::Null => Value::Null,
+            Value::Cast(inner) => {
+                let mut value = evaluate_raw(inner)?;
+                value.ty = expr.ty;
+                return Some(value);
+            }
+            Value::Array {
                 metadata,
                 values,
                 lengths,
                 repeated,
-            } = &expr.value
-            else {
-                return None;
-            };
-            Value::Array {
+            } => Value::Array {
                 metadata: metadata.clone(),
                 values: values.iter().map(evaluate_raw).collect::<Option<_>>()?,
                 lengths: lengths.iter().map(evaluate_raw).collect::<Option<_>>()?,
                 repeated: *repeated,
+            },
+            _ => return None,
+        },
+        Type::ArrayRef {
+            mutable: true,
+            nullable: true,
+            ..
+        } => match &expr.value {
+            Value::Null => Value::Null,
+            Value::Cast(inner) => {
+                let mut value = evaluate_raw(inner)?;
+                value.ty = expr.ty;
+                return Some(value);
             }
-        }
+            _ => return None,
+        },
+        Type::Pointer { .. } if expr.ty.is_nullable() => match &expr.value {
+            Value::Null => Value::Null,
+            Value::Cast(inner) => {
+                let mut value = evaluate_raw(inner)?;
+                value.ty = expr.ty;
+                return Some(value);
+            }
+            _ => return None,
+        },
         Type::ArrayRef { .. }
         | Type::Array(_)
         | Type::Pointer { .. }

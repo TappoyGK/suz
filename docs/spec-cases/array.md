@@ -1513,3 +1513,82 @@ fn main() -> u8 {
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
 | 通常 | `[array.access-handler]` | 4 | 23 |
+
+### array-050 null許容の参照とnullをトップレベル定数と定数配列で使う
+
+主根拠：`[const.expression]`。
+
+補助根拠：`[array.constant]`・`[arena.ptr-conversion]`・`[array.readonly-conversion]`・`[arena.null]`。
+
+**ソース：**
+
+```suz
+struct Opt { xs: .[i32]? }
+struct Node { value: i32, next: mut? Node }
+fix A: .[i32] = .[1, 2]
+fix N1: .[i32]? = .[1, 2]
+fix N2: .[i32]? = null
+fix N3: .[i32]? = A
+fix P: mut? i32 = null
+fix R: ref? i32 = P
+fix W: #[i32]? = null
+fix O1 = Opt { xs: .[1, 2] }
+fix O2 = Opt { xs: null }
+fix O3 = Opt { xs: A }
+fix EMPTY = Node { value: 7, next: null }
+fix TABLE: .[.[i32]?] = .[.[3, 4], null]
+fix OPTS: .[Opt] = .[O1, O2]
+fix NODES: .[Node] = .[EMPTY]
+
+fn main() -> u8 {
+    let a = N1 { if a.[1] != 2 { return 1 } } else { return 2 }
+    let a = N2 { return 3 }
+    let a = N3 { if a.[0] != 1 { return 4 } } else { return 5 }
+    let p = P { return 6 }
+    let r = R { return 7 }
+    let w = W { return 8 }
+    let a = O1.xs { if a.[1] != 2 { return 9 } } else { return 10 }
+    let a = O2.xs { return 11 }
+    let a = O3.xs { if a.[0] != 1 { return 12 } } else { return 13 }
+    if EMPTY.value != 7 { return 14 }
+    let n = EMPTY.next { return 15 }
+    let a = TABLE.[0] { if a.[1] != 4 { return 16 } } else { return 17 }
+    let a = TABLE.[1] { return 18 }
+    let a = OPTS.[0].xs { if a.[0] != 1 { return 19 } } else { return 20 }
+    let a = OPTS.[1].xs { return 21 }
+    if NODES.[0].value != 7 { return 22 }
+    let n = NODES.[0].next { return 23 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### array-051 newで確保する配列はトップレベル定数にできない
+
+主根拠：`[const.expression]`。
+
+**ソース：**
+
+```suz
+fix W: #[i32]? = new #[1]
+fn main() -> u8 {
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[const.expression]` | 1 | 18 |

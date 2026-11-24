@@ -1260,3 +1260,128 @@ fn main() -> u8 {
         assert_eq!(err.rule(), rule, "{code}\n{err}");
     }
 }
+
+#[test]
+fn top_level_constants_and_constant_arrays_support_nullable_readonly_arrays_and_null() {
+    let source = r#"
+struct Opt { xs: .[i32]? }
+struct Node { value: i32, next: mut? Node }
+struct Wrap { d: .[#[i32]]? }
+fix A: .[i32] = .[1, 2]
+fix N1: .[i32]? = .[1, 2]
+fix N2: .[i32]? = null
+fix N3: .[i32]? = A
+fix N4: .[i32]? = N2
+fix P1: mut? i32 = null
+fix P2: ref? i32 = P1
+fix W1: #[i32]? = null
+fix W2: .[i32]? = W1
+fix O1 = Opt { xs: .[1, 2] }
+fix O2 = Opt { xs: null }
+fix O3 = Opt { xs: A }
+fix O4 = O1 with { xs: null }
+fix O5 = O2 with { xs: .[7, 8] }
+fix EMPTY = Node { value: 9, next: null }
+fix NA: .[.[i32]?] = .[.[1, 2], null]
+fix N5: .[i32]? = NA.[5] or null
+fix REP: .[.[i32]?] = .[null; 3]
+fix PTRS: .[mut? i32] = .[null, P1]
+fix WRS: .[#[i32]?] = .[null, W1]
+fix RW_OPT_ARR: .[.[#[i32]]?] = .[null]
+fix WRAPS: .[Wrap] = .[Wrap { d: null }]
+fix OS: .[Opt] = .[Opt { xs: .[1, 2] }, Opt { xs: null }]
+fix NODES: .[Node] = .[EMPTY]
+
+fn main() -> u8 {
+    let a = N1 { if a.[1] != 2 { return 1 } } else { return 2 }
+    let a = N2 { return 3 }
+    let a = N3 { if a.[0] != 1 { return 4 } } else { return 5 }
+    let a = N4 { return 6 }
+    let a = N5 { return 7 }
+    let p = P1 { return 23 }
+    let p = P2 { return 24 }
+    let w = W1 { return 25 }
+    let w = W2 { return 26 }
+    let a = O1.xs { if a.[1] != 2 { return 8 } } else { return 9 }
+    let a = O2.xs { return 10 }
+    let a = O3.xs { if a.[0] != 1 { return 11 } } else { return 12 }
+    let a = O4.xs { return 13 }
+    let a = O5.xs { if a.[1] != 8 { return 14 } } else { return 15 }
+    if EMPTY.value != 9 { return 27 }
+    let n = EMPTY.next { return 28 }
+    let a = NA.[0] { if a.[1] != 2 { return 16 } } else { return 17 }
+    let a = NA.[1] { return 18 }
+    let a = REP.[2] { return 19 }
+    let p = PTRS.[1] { return 29 }
+    let w = WRS.[1] { return 30 }
+    let r = RW_OPT_ARR.[0] { return 33 }
+    let d = WRAPS.[0].d { return 34 }
+    let a = OS.[0].xs { if a.[0] != 1 { return 20 } } else { return 21 }
+    let a = OS.[1].xs { return 22 }
+    if NODES.[0].value != 9 { return 31 }
+    let n = NODES.[0].next { return 32 }
+    return 0
+}
+"#;
+    let output = compile_and_run_c23(source, "const-nullable-readonly.suz");
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+
+    // 同じ内容の定数配列は非null・null許容で静的データを共有する。
+    let dedup = suz::compile(
+        b"fix A: .[i32] = .[1, 2]\nfix N: .[i32]? = .[1, 2]\nfn main() -> u8 {\n    let a = N { if A.[0] + a.[1] != 3 { return 1 } }\n    return 0\n}",
+    )
+    .unwrap();
+    assert_eq!(
+        dedup
+            .matches("static int32_t const suz_constant_array_")
+            .count(),
+        1,
+        "{dedup}"
+    );
+
+    for (code, rule) in [
+        (
+            "fix N: .[i32]? = .[1, 2]\nfn main() -> u8 { fix x = N.[0] or 0\nreturn 0 }",
+            "array.value",
+        ),
+        (
+            "fix N: .[i32]? = .[1, 2]\nfn main() -> u8 { fix x = len N\nreturn 0 }",
+            "len.targets",
+        ),
+        (
+            "fix N: .[i32]? = .[1, 2]\nfix A: .[i32] = N\nfn main() -> u8 { return 0 }",
+            "type.expected",
+        ),
+        (
+            "fix P: mut? i32 = new (1 as i32)\nfn main() -> u8 { return 0 }",
+            "const.expression",
+        ),
+        (
+            "fix R: ref? i32 = new (1 as i32)\nfn main() -> u8 { return 0 }",
+            "const.expression",
+        ),
+        (
+            "fix W: #[i32]? = new #[1]\nfn main() -> u8 { return 0 }",
+            "const.expression",
+        ),
+        (
+            "fix BAD: .[#[i32]] = .[]\nfn main() -> u8 { return 0 }",
+            "array.constant",
+        ),
+        (
+            "fix BAD: .[mut i32] = .[]\nfn main() -> u8 { return 0 }",
+            "array.constant",
+        ),
+        (
+            "fix BAD: .[.[#[i32]]?] = .[.[]]\nfn main() -> u8 { return 0 }",
+            "array.constant",
+        ),
+        (
+            "struct Wrap { d: .[#[i32]]? }\nfix BAD: .[Wrap] = .[Wrap { d: .[] }]\nfn main() -> u8 { return 0 }",
+            "array.constant",
+        ),
+    ] {
+        let err = suz::compile(code.as_bytes()).unwrap_err();
+        assert_eq!(err.rule(), rule, "{code}\n{err}");
+    }
+}

@@ -588,7 +588,7 @@ pub(super) fn constant(value: &CheckedExpression, context: &mut ExpressionContex
     let count = *metadata.constant_counts.last().unwrap();
     let key = format!(
         "{:?}:{lengths}:{repeated}:{}",
-        value.ty,
+        value.ty.with_nullable(false),
         initial
             .iter()
             .map(|(text, _)| text.as_str())

@@ -625,7 +625,7 @@ fn arena_rejects_pointer_conversions_captures_and_aggregate_operations() {
         "struct Node { next: mut? int }\nfn main() -> u8 { return 0 }",
         "fn main() -> u8 { fix p: mut? int = null\nreturn 0 }",
         "fn main() -> u8 { fix p: mut? void = null\nreturn 0 }",
-        "fix Ptr: mut? i32 = null\nfn main() -> u8 { return 0 }",
+        "fix PTR: mut i32 = new (1 as i32)\nfn main() -> u8 { return 0 }",
         "extern \"x.h\" { fn take(p: ptr? i32) -> void }\nfn main() -> u8 { return 0 }",
     ] {
         assert!(suz::compile(source.as_bytes()).is_err(), "{source}");
