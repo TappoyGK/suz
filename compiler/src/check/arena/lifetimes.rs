@@ -611,6 +611,7 @@ impl Analysis {
             | Value::Negate(v)
             | Value::Truncate(v)
             | Value::BitNot(v)
+            | Value::WrapNegate(v)
             | Value::Not(v)
             | Value::Intern { operand: v, .. } => {
                 self.expr(v, region, arena);

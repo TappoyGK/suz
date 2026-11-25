@@ -114,6 +114,16 @@ bool suz_try_shr_i64(int64_t a, uint64_t count, unsigned width, int64_t *result)
     return true;
 }
 
+bool suz_try_lshr_i64(int64_t a, uint64_t count, unsigned width, int64_t *result) {
+    if (count >= width) return false;
+    /* 対象ビット幅の下位ビットを符号なしとして論理右シフトし、2の補数へ戻す。 */
+    uint64_t mask = UINT64_MAX >> (64 - width);
+    uint64_t bits = ((uint64_t)a & mask) >> count;
+    uint64_t max_signed = mask >> 1;
+    *result = bits <= max_signed ? (int64_t)bits : -INT64_C(1) - (int64_t)(mask ^ bits);
+    return true;
+}
+
 bool suz_try_shl_u64(uint64_t a, uint64_t count, unsigned width, uint64_t *result) {
     if (count >= width) return false;
     uint64_t max = UINT64_MAX >> (64 - width);

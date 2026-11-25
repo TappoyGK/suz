@@ -982,17 +982,24 @@ fn main() -> u8 {
 
 主根拠：`[operator.compound]`。
 
+補助根拠：`[operator.method]`、`[operator.unary]`。
+
 **ソース：**
 
 ```suz
 struct Vec2 { x: f32, y: f32 }
 fn Vec2.+(other: Vec2) -> Vec2 { return Vec2 { x: self.x + other.x, y: self.y + other.y } }
 fn Vec2.*(scale: f32) -> Vec2 { return Vec2 { x: self.x * scale, y: self.y * scale } }
+struct Phase { raw: u8 }
+fn Phase.+%(other: Phase) -> Phase { return Phase { raw: self.raw +% other.raw } }
+fn Phase.-%() -> Phase { return Phase { raw: -%self.raw } }
 fn main() -> u8 {
     var p = Vec2 { x: 1.0, y: 2.0 }
     p += Vec2 { x: 3.0, y: 4.0 }
     p *= 0.5
-    if p.x != 2.0 || p.y != 3.0 { return 1 }
+    var ph = Phase { raw: 250 }
+    ph +%= Phase { raw: 10 }
+    if p.x != 2.0 || p.y != 3.0 || ph.raw != 4 || (-%ph).raw != 252 { return 1 }
     return 0
 }
 ```

@@ -161,7 +161,23 @@ pub(super) fn supported(op: crate::ast::BinaryOperator) -> bool {
     use crate::ast::BinaryOperator::*;
     matches!(
         op,
-        Add | Subtract | Multiply | Divide | Remainder | And | Or | Xor | ShiftLeft | ShiftRight
+        Add | Subtract
+            | Multiply
+            | Divide
+            | Remainder
+            | EuclideanRemainder
+            | WrapAdd
+            | WrapSubtract
+            | WrapMultiply
+            | And
+            | Or
+            | Xor
+            | ShiftLeft
+            | ShiftRight
+            | LogicalShiftRight
+            | WrapShiftLeft
+            | WrapShiftRight
+            | WrapLogicalShiftRight
     )
 }
 
@@ -205,6 +221,7 @@ pub(super) fn hint(op: &str, left: &Expression, right: &Expression, scope: &Scop
 pub(super) fn unary(expr: &Expression) -> Option<(&'static str, &Expression)> {
     match &expr.kind {
         ExpressionKind::Negate(inner) => Some(("-", inner)),
+        ExpressionKind::WrapNegate(inner) => Some(("-%", inner)),
         ExpressionKind::BitNot(inner) => Some(("~", inner)),
         ExpressionKind::Not(inner) => Some(("not", inner)),
         ExpressionKind::Len(inner) => Some(("len", inner)),
@@ -306,7 +323,7 @@ pub(super) fn compound(
         } = &expr.kind
         && supported(*operator)
     {
-        let name = resolve(operator.c_symbol(), left, right, scope)?;
+        let name = resolve(operator.symbol(), left, right, scope)?;
         let signature = &scope.functions[name];
         let result = scope.substitute(
             signature.result,
@@ -319,7 +336,7 @@ pub(super) fn compound(
                 crate::diagnostic!(
                     "operator.compound",
                     "operator {}= requires a result of type {}, found {}",
-                    operator.c_symbol(),
+                    operator.symbol(),
                     scope.type_name(target),
                     scope.type_name(result)
                 ),

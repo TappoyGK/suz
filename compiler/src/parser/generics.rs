@@ -207,8 +207,9 @@ impl Parser<'_, '_> {
                 }
             }
             Kind::Symbol(
-                op @ ("+" | "-" | "*" | "/" | "%" | "~" | "&" | "|" | "^" | "<<" | ">>" | "=="
-                | "!=" | "<" | "<=" | ">" | ">="),
+                op @ ("+" | "-" | "*" | "/" | "%" | "%%" | "+%" | "-%" | "*%" | "~" | "&" | "|"
+                | "^" | "<<" | ">>" | ">>>" | "<<%" | ">>%" | ">>>%" | "==" | "!=" | "<"
+                | "<=" | ">" | ">="),
             )
             | Kind::Keyword(op @ ("len" | "not")) => {
                 self.cursor += 1;
@@ -221,7 +222,7 @@ impl Parser<'_, '_> {
                         .unwrap_or_else(|| {
                             crate::ast::BinaryOperator::from_symbol(op)
                                 .unwrap()
-                                .c_symbol()
+                                .symbol()
                         }),
                 })
             }
@@ -251,7 +252,7 @@ impl Parser<'_, '_> {
         if let RequiredOperation::Operator(op) = operation {
             let valid_arity = if matches!(op, "len" | "not" | "~") {
                 parameters.is_empty()
-            } else if op == "-" {
+            } else if matches!(op, "-" | "-%") {
                 parameters.len() <= 1
             } else {
                 parameters.len() == 1

@@ -68,6 +68,15 @@ impl Int {
             self.magnitude.checked_rem(b.magnitude)?,
         ))
     }
+    pub fn rem_euclid(self, b: Self) -> Option<Self> {
+        let r = self.magnitude.checked_rem(b.magnitude)?;
+        let value = if self.negative && r != 0 {
+            b.magnitude - r
+        } else {
+            r
+        };
+        Some(Self::new(false, value))
+    }
     pub fn float(self, single: bool) -> f64 {
         let value = if single {
             (self.magnitude as f32) as f64
@@ -191,7 +200,10 @@ impl Range {
     }
     pub fn binary(self, op: crate::ast::BinaryOperator, b: Self) -> Result<Option<Self>, ()> {
         use crate::ast::BinaryOperator::*;
-        if matches!(op, Divide | Remainder) && b.min == Int::ZERO && b.max == Int::ZERO {
+        if matches!(op, Divide | Remainder | EuclideanRemainder)
+            && b.min == Int::ZERO
+            && b.max == Int::ZERO
+        {
             return Ok(None);
         }
         let mut values = Vec::new();
@@ -200,6 +212,18 @@ impl Range {
             return Ok(Some(Self {
                 min: self.min.min(Int::ZERO).max(Int::new(true, m)),
                 max: self.max.max(Int::ZERO).min(Int::new(false, m)),
+            }));
+        }
+        if matches!(op, EuclideanRemainder) {
+            let m = b.min.magnitude.max(b.max.magnitude) - 1;
+            let max = if self.min >= Int::ZERO {
+                self.max.min(Int::new(false, m))
+            } else {
+                Int::new(false, m)
+            };
+            return Ok(Some(Self {
+                min: Int::ZERO,
+                max,
             }));
         }
         let mut rights = vec![b.min, b.max];

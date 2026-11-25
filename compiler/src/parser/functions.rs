@@ -427,8 +427,9 @@ impl Parser<'_, '_> {
             let (method_name, operator) = match self.token().kind {
                 Kind::Ident(name) => (name, None),
                 Kind::Symbol(
-                    op @ ("+" | "-" | "*" | "/" | "%" | "&" | "|" | "^" | "<<" | ">>" | "~" | "<"
-                    | "<=" | ">" | ">="),
+                    op @ ("+" | "-" | "*" | "/" | "%" | "%%" | "+%" | "-%" | "*%" | "&" | "|" | "^"
+                    | "<<" | ">>" | ">>>" | "<<%" | ">>%" | ">>>%" | "~" | "<" | "<=" | ">"
+                    | ">="),
                 )
                 | Kind::Keyword(op @ ("not" | "len")) => {
                     let symbol = match op {
@@ -437,11 +438,19 @@ impl Parser<'_, '_> {
                         "*" => "*",
                         "/" => "/",
                         "%" => "%",
+                        "%%" => "%%",
+                        "+%" => "+%",
+                        "-%" => "-%",
+                        "*%" => "*%",
                         "&" => "&",
                         "|" => "|",
                         "^" => "^",
                         "<<" => "<<",
                         ">>" => ">>",
+                        ">>>" => ">>>",
+                        "<<%" => "<<%",
+                        ">>%" => ">>%",
+                        ">>>%" => ">>>%",
                         "~" => "~",
                         "not" => "not",
                         "len" => "len",
@@ -585,7 +594,7 @@ impl Parser<'_, '_> {
                 if method.mutable
                     || !match operator {
                         "~" | "not" | "len" => parameters.is_empty(),
-                        "-" => parameters.len() <= 1,
+                        "-" | "-%" => parameters.len() <= 1,
                         _ => parameters.len() == 1,
                     }
                     || result == Type::Void

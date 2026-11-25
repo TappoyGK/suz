@@ -257,6 +257,7 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                             BinaryOperator::Remainder => "remainder",
                             BinaryOperator::ShiftLeft => "left shift",
                             BinaryOperator::ShiftRight => "right shift",
+                            BinaryOperator::LogicalShiftRight => "logical right shift",
                             _ => unreachable!(),
                         },
                         IntegerOperation::Exact(_) => unreachable!(),
@@ -278,23 +279,27 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                     } else if let IntegerOperation::Binary { operator, .. } = operation
                         && operator.is_shift()
                     {
-                        let crate::ast::Type::Integer(ty) = expr.ty else {
-                            unreachable!()
-                        };
-                        let IntegerOperation::Binary { right, .. } = operation else {
-                            unreachable!()
-                        };
-                        let invalid = if right.ty == crate::ast::Type::Exact {
+                        if matches!(operator, BinaryOperator::ShiftLeft) {
+                            let crate::ast::Type::Integer(ty) = expr.ty else {
+                                unreachable!()
+                            };
+                            let IntegerOperation::Binary { right, .. } = operation else {
+                                unreachable!()
+                            };
+                            let invalid = if right.ty == crate::ast::Type::Exact {
+                                format!(
+                                    "suz_cmp_{right_index}.negative || suz_cmp_{right_index}.magnitude >= {}",
+                                    ty.bits()
+                                )
+                            } else {
+                                format!("(uint64_t)suz_cmp_{right_index} >= {}", ty.bits())
+                            };
                             format!(
-                                "suz_cmp_{right_index}.negative || suz_cmp_{right_index}.magnitude >= {}",
-                                ty.bits()
+                                "({invalid}) ? \"shift count out of range [rt.shift-count]\" : \"integer {name} overflow [rt.shift-overflow]\""
                             )
                         } else {
-                            format!("(uint64_t)suz_cmp_{right_index} >= {}", ty.bits())
-                        };
-                        format!(
-                            "({invalid}) ? \"shift count out of range [rt.shift-count]\" : \"integer {name} overflow [rt.shift-overflow]\""
-                        )
+                            "\"shift count out of range [rt.shift-count]\"".into()
+                        }
                     } else {
                         c_string(&format!("integer {name} overflow [rt.int-overflow]"))
                     };
@@ -467,6 +472,17 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                 expression(inner, context)
             )
         }
+        Value::WrapNegate(ref inner) => {
+            let crate::ast::Type::Integer(ty) = expr.ty else {
+                unreachable!()
+            };
+            context.bit_helpers.insert(ty);
+            format!(
+                "suz_bits_{}(UINT64_C(0) - (uint64_t)({}))",
+                ty.name(),
+                expression(inner, context)
+            )
+        }
         Value::Binary {
             operator,
             ref left,
@@ -474,34 +490,121 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
         } => {
             if expr.ty.is_float() && unordered_read(left, context) && unordered_read(right, context)
             {
-                return format!(
-                    "({})(({}) {} ({}))",
-                    expr.ty.c_name(),
-                    expression(left, context),
-                    operator.c_symbol(),
-                    expression(right, context)
-                );
+                let crate::ast::Type::Float(ty) = expr.ty else {
+                    unreachable!()
+                };
+                return match operator {
+                    crate::ast::BinaryOperator::Remainder => {
+                        context.uses_float_rem = true;
+                        let fmod_fn = match ty {
+                            crate::ast::FloatType::F32 => "fmodf",
+                            crate::ast::FloatType::F64 => "fmod",
+                        };
+                        format!(
+                            "{fmod_fn}(({}), ({}))",
+                            expression(left, context),
+                            expression(right, context)
+                        )
+                    }
+                    crate::ast::BinaryOperator::EuclideanRemainder => {
+                        context.float_euclid.insert(ty);
+                        format!(
+                            "suz_euclid_{}(({}), ({}))",
+                            ty.name(),
+                            expression(left, context),
+                            expression(right, context)
+                        )
+                    }
+                    _ => format!(
+                        "({})(({}) {} ({}))",
+                        expr.ty.c_name(),
+                        expression(left, context),
+                        operator.c_symbol(),
+                        expression(right, context)
+                    ),
+                };
             }
             let index = context.temporaries.len();
             context.temporaries.extend([left.ty, right.ty]);
+            let right_is_exact = right.ty == crate::ast::Type::Exact;
             let left = expression(left, context);
             let right = expression(right, context);
             let result = match expr.ty {
                 crate::ast::Type::Integer(ty) => {
-                    context.bit_helpers.insert(ty);
-                    format!(
-                        "suz_bits_{}((uint64_t)suz_cmp_{index} {} (uint64_t)suz_cmp_{})",
-                        ty.name(),
+                    use crate::ast::BinaryOperator;
+                    let bits = ty.bits();
+                    let shift_mask = bits - 1;
+                    let shift_count = if right_is_exact {
+                        format!("(suz_exact_bits(suz_cmp_{}) & {shift_mask})", index + 1)
+                    } else {
+                        format!("((uint64_t)suz_cmp_{} & {shift_mask})", index + 1)
+                    };
+                    match operator {
+                        BinaryOperator::WrapShiftLeft => {
+                            context.bit_helpers.insert(ty);
+                            format!(
+                                "suz_bits_{}((uint64_t)suz_cmp_{index} << {shift_count})",
+                                ty.name()
+                            )
+                        }
+                        BinaryOperator::WrapShiftRight => {
+                            if ty.bounds().0 < 0 {
+                                format!(
+                                    "(suz_cmp_{index} < 0 ? ({})(-INT64_C(1) - (int64_t)((uint64_t)(-(int64_t)(suz_cmp_{index} + 1)) >> {shift_count})) : ({})((uint64_t)(int64_t)suz_cmp_{index} >> {shift_count}))",
+                                    ty.c_name(),
+                                    ty.c_name(),
+                                )
+                            } else {
+                                context.bit_helpers.insert(ty);
+                                format!(
+                                    "suz_bits_{}((uint64_t)suz_cmp_{index} >> {shift_count})",
+                                    ty.name()
+                                )
+                            }
+                        }
+                        BinaryOperator::WrapLogicalShiftRight => {
+                            context.bit_helpers.insert(ty);
+                            let value_mask = u64::MAX >> (64 - bits);
+                            format!(
+                                "suz_bits_{}(((uint64_t)suz_cmp_{index} & UINT64_C({value_mask})) >> {shift_count})",
+                                ty.name()
+                            )
+                        }
+                        _ => {
+                            context.bit_helpers.insert(ty);
+                            format!(
+                                "suz_bits_{}((uint64_t)suz_cmp_{index} {} (uint64_t)suz_cmp_{})",
+                                ty.name(),
+                                operator.c_symbol(),
+                                index + 1
+                            )
+                        }
+                    }
+                }
+                crate::ast::Type::Float(ty) => match operator {
+                    crate::ast::BinaryOperator::Remainder => {
+                        context.uses_float_rem = true;
+                        let fmod_fn = match ty {
+                            crate::ast::FloatType::F32 => "fmodf",
+                            crate::ast::FloatType::F64 => "fmod",
+                        };
+                        format!("{fmod_fn}(suz_cmp_{index}, suz_cmp_{})", index + 1)
+                    }
+                    crate::ast::BinaryOperator::EuclideanRemainder => {
+                        context.float_euclid.insert(ty);
+                        format!(
+                            "suz_euclid_{}(suz_cmp_{index}, suz_cmp_{})",
+                            ty.name(),
+                            index + 1
+                        )
+                    }
+                    _ => format!(
+                        "({})(suz_cmp_{index} {} suz_cmp_{})",
+                        ty.c_name(),
                         operator.c_symbol(),
                         index + 1
-                    )
-                }
-                crate::ast::Type::Float(ty) => format!(
-                    "({})(suz_cmp_{index} {} suz_cmp_{})",
-                    ty.c_name(),
-                    operator.c_symbol(),
-                    index + 1
-                ),
+                    ),
+                },
                 _ => unreachable!(),
             };
             format!(

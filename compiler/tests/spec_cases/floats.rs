@@ -357,3 +357,112 @@ int main(void) {
         assert!(result.stdout.is_empty() && result.stderr.is_empty());
     }
 }
+
+#[test]
+fn float_remainder_and_euclidean_remainder_work_at_runtime_and_compile_time() {
+    let source = r#"fix C_F64_REM: f64 = -7.5 % 2.0
+fix C_F32_REM: f32 = -7.5 % 2.0
+fix C_F64_EUC: f64 = -0.25 %% 1.0
+fix C_F32_EUC: f32 = -0.25 %% 1.0
+fix C_F64_TINY: f64 = -1.0e-20 %% 1.0
+fix C_F32_TINY: f32 = -1.0e-10 %% 1.0
+fix C_F64_NEG_DIV: f64 = -0.25 %% -1.0
+fix C_F64_INF: f64 = 1.0 %% inf
+fix C_F64_NEG_INF: f64 = -1.0 %% -inf
+fix C_F32_INF: f32 = 1.0 %% inf
+fix C_F32_NEG_INF: f32 = -1.0 %% -inf
+fix C_I8_EUC: i8 = -7 %% 3
+fix C_I8_EUC_NEG_DIV: i8 = -7 %% -3
+fix C_I8_MIN_EUC: i8 = (-128 as i8) %% -1
+fix C_LEN_EUC: len_t = (10 as len_t) %% 3
+
+fn main() -> u8 {
+    if C_F64_REM != -1.5 || C_F32_REM != -1.5 { return 1 }
+    if C_F64_EUC != 0.75 || C_F32_EUC != 0.75 { return 2 }
+    if C_F64_TINY != 0.0 || C_F32_TINY != 0.0 { return 3 }
+    if C_F64_NEG_DIV != 0.75 { return 4 }
+    if C_F64_INF == C_F64_INF || C_F64_NEG_INF == C_F64_NEG_INF { return 15 }
+    if C_F32_INF == C_F32_INF || C_F32_NEG_INF == C_F32_NEG_INF { return 16 }
+    if C_I8_EUC != 2 || C_I8_EUC_NEG_DIV != 2 || C_I8_MIN_EUC != 0 || C_LEN_EUC != 1 { return 5 }
+
+    var phase: f64 = -0.25
+    phase %%= 1.0
+    if phase != 0.75 { return 6 }
+
+    var f32_val: f32 = -7.5
+    f32_val %= 2.0
+    if f32_val != -1.5 { return 7 }
+
+    var tiny64: f64 = -1.0e-20
+    tiny64 %%= 1.0
+    if tiny64 != 0.0 { return 8 }
+
+    var tiny32: f32 = -1.0e-10
+    tiny32 %%= 1.0
+    if tiny32 != 0.0 { return 9 }
+
+    // 浮動小数点の 0 除算および右辺 inf/-inf はパニックせず NaN になる
+    fix zero64: f64 = 0.0
+    fix pinf64: f64 = 1.0 / zero64
+    fix ninf64: f64 = 0.0 - pinf64
+    fix one64: f64 = 1.0
+    fix neg64: f64 = -1.0
+    fix nan_rem = 1.0 % zero64
+    fix nan_euc = 1.0 %% zero64
+    fix nan_inf1 = one64 %% pinf64
+    fix nan_inf2 = neg64 %% pinf64
+    fix nan_inf3 = one64 %% ninf64
+    fix nan_inf4 = neg64 %% ninf64
+    if nan_rem == nan_rem || nan_euc == nan_euc { return 10 }
+    if nan_inf1 == nan_inf1 || nan_inf2 == nan_inf2 || nan_inf3 == nan_inf3 || nan_inf4 == nan_inf4 { return 17 }
+    fix zero32: f32 = 0.0
+    fix pinf32: f32 = 1.0 / zero32
+    fix ninf32: f32 = 0.0 - pinf32
+    fix one32: f32 = 1.0
+    fix neg32: f32 = -1.0
+    fix nan32_1 = one32 %% pinf32
+    fix nan32_2 = neg32 %% pinf32
+    fix nan32_3 = one32 %% ninf32
+    fix nan32_4 = neg32 %% ninf32
+    if nan32_1 == nan32_1 || nan32_2 == nan32_2 || nan32_3 == nan32_3 || nan32_4 == nan32_4 { return 18 }
+
+    // 整数の %% と %%= および 0 除算の or ハンドラ（2のべき乗最適化・i64最小値境界を含む）
+    var idx: i32 = -1
+    idx %%= 10
+    if idx != 9 { return 11 }
+    fix i64_min: i64 = -9223372036854775808
+    fix ring_wrap: i64 = (i64_min - 1) %% 1024
+    if ring_wrap != 1023 { return 19 }
+    fix zero_i32: i32 = 0
+    fix fallback: i32 = (7 %% zero_i32) or 42
+    if fallback != 42 { return 12 }
+
+    // 整数と浮動小数点の混在（[arith.mix]）
+    fix n: i16 = -7
+    fix mixed_rem: f64 = n % 2.0
+    fix mixed_euc: f64 = n %% 2.0
+    if mixed_rem != -1.0 || mixed_euc != 1.0 { return 13 }
+
+    // -0.0 %% 1.0 は +0.0（文字列表示が "0.0"）
+    fix neg_zero: f64 = -0.0
+    fix pos_zero = neg_zero %% 1.0
+    if textbuf `${pos_zero}` != `0.0` { return 14 }
+
+    return 0
+}
+"#;
+    let directory = TemporaryDirectory::new();
+    let path = directory.0.join("float-rem.c");
+    fs::write(&path, suz::compile(source.as_bytes()).unwrap()).unwrap();
+    let output = build_and_run_c(&path, &directory.0.join("float-rem"));
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stdout.is_empty() && output.stderr.is_empty());
+
+    // 整数の定数ゼロ除算（[arith.div-zero-always]）
+    let bad = b"fn main() -> u8 {\n    fix x: i32 = 7\n    fix y: i32 = x %% 0\n    return 0\n}\n";
+    let error = suz::compile(bad).unwrap_err();
+    assert!(
+        error.message().contains("arith.div-zero-always"),
+        "{error:?}"
+    );
+}

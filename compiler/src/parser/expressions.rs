@@ -538,10 +538,12 @@ impl Parser<'_, '_> {
                 self.cursor += 2;
                 ExpressionKind::New(Box::new(self.array_initializer(readonly)?))
             }
-            Kind::Symbol("~") | Kind::Keyword("len" | "not" | "c_bytes" | "c_byte_len" | "new") => {
+            Kind::Symbol("~" | "-%")
+            | Kind::Keyword("len" | "not" | "c_bytes" | "c_byte_len" | "new") => {
                 let constructor: fn(Box<Expression>) -> ExpressionKind = match self.token().kind {
                     Kind::Keyword("new") => ExpressionKind::New,
                     Kind::Symbol("~") => ExpressionKind::BitNot,
+                    Kind::Symbol("-%") => ExpressionKind::WrapNegate,
                     Kind::Keyword("len") => ExpressionKind::Len,
                     Kind::Keyword("not") => ExpressionKind::Not,
                     Kind::Keyword("c_bytes") => ExpressionKind::CBytes,

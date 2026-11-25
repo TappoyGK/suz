@@ -134,7 +134,10 @@ pub(super) fn check(
             });
             checked
         }
-        ExpressionKind::BitNot(_) | ExpressionKind::Negate(_) | ExpressionKind::Binary { .. } => {
+        ExpressionKind::BitNot(_)
+        | ExpressionKind::WrapNegate(_)
+        | ExpressionKind::Negate(_)
+        | ExpressionKind::Binary { .. } => {
             let ty = expected
                 .or_else(|| operand_type(expr, bindings))
                 .unwrap_or_else(|| default_type(expr, bindings));
@@ -154,9 +157,9 @@ pub(super) fn check(
             let integer_only = matches!(
                 &expr.kind,
                 ExpressionKind::Binary {
-                    operator: BinaryOperator::Remainder
-                        | BinaryOperator::ShiftLeft
-                        | BinaryOperator::ShiftRight,
+                    operator: BinaryOperator::ShiftLeft
+                        | BinaryOperator::ShiftRight
+                        | BinaryOperator::LogicalShiftRight,
                     ..
                 }
             );
@@ -164,7 +167,7 @@ pub(super) fn check(
                 ExpressionKind::Binary { operator, .. }
                     if super::super::operator_methods::supported(*operator) =>
                 {
-                    Some(operator.c_symbol())
+                    Some(operator.symbol())
                 }
                 _ => None,
             };
@@ -201,7 +204,9 @@ pub(super) fn check(
                             Type::Struct(_) | Type::Enum(_)
                                 if matches!(
                                     &expr.kind,
-                                    ExpressionKind::Negate(_) | ExpressionKind::BitNot(_)
+                                    ExpressionKind::Negate(_)
+                                        | ExpressionKind::WrapNegate(_)
+                                        | ExpressionKind::BitNot(_)
                                 ) =>
                             {
                                 crate::diagnostic!(
@@ -260,6 +265,12 @@ pub(super) fn check(
                         same_width(operand_type(inner, bindings), ty, inner.location, bindings)?;
                     }
                     Value::BitNot(Box::new(expression(inner, Some(ty), bindings)?))
+                }
+                ExpressionKind::WrapNegate(inner) => {
+                    if !super::super::exact::is_operator(inner) {
+                        same_width(operand_type(inner, bindings), ty, inner.location, bindings)?;
+                    }
+                    Value::WrapNegate(Box::new(expression(inner, Some(ty), bindings)?))
                 }
                 ExpressionKind::Binary {
                     operator,

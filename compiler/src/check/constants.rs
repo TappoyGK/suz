@@ -23,6 +23,9 @@ fn integer_result(operator: BinaryOperator, a: i128, b: i128, ty: IntegerType) -
     {
         return None;
     }
+    if matches!(operator, BinaryOperator::EuclideanRemainder) && b == 0 {
+        return None;
+    }
     if operator.is_shift() && !(0..i128::from(ty.bits())).contains(&b) {
         return None;
     }
@@ -32,8 +35,23 @@ fn integer_result(operator: BinaryOperator, a: i128, b: i128, ty: IntegerType) -
         BinaryOperator::Multiply => a.checked_mul(b),
         BinaryOperator::Divide => a.checked_div(b),
         BinaryOperator::Remainder => a.checked_rem(b),
+        BinaryOperator::EuclideanRemainder => Int::from_i128(a)
+            .rem_euclid(Int::from_i128(b))
+            .and_then(Int::to_i128),
         BinaryOperator::ShiftLeft => a.checked_mul(1_i128 << b),
         BinaryOperator::ShiftRight => Some(a >> b),
+        BinaryOperator::LogicalShiftRight => {
+            let bits = ty.bits();
+            let mask = (1_u128 << bits) - 1;
+            let shifted = ((a as u128) & mask) >> (b as u32);
+            let (min, max) = ty.bounds();
+            let value = if min < 0 && shifted > (max as u128) {
+                (shifted as i128) - (1_i128 << bits)
+            } else {
+                shifted as i128
+            };
+            Some(value)
+        }
         _ => unreachable!(),
     }?;
     let (min, max) = ty.bounds();
@@ -153,6 +171,7 @@ fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
             _ => None,
         },
         Value::BitNot(inner) => Some(wrap(!constant_integer_raw(inner)?)),
+        Value::WrapNegate(inner) => Some(wrap(-constant_integer_raw(inner)?)),
         Value::Binary {
             operator,
             left,
@@ -165,6 +184,23 @@ fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
                 BinaryOperator::WrapSubtract => left - right,
                 // 整数のラップ変換の結果に影響するのは下位64ビットだけ。
                 BinaryOperator::WrapMultiply => (left as u64).wrapping_mul(right as u64) as i128,
+                BinaryOperator::WrapShiftLeft => {
+                    let shift = (right as u64) as u32 & (ty.bits() - 1);
+                    ((left as u64) << shift) as i128
+                }
+                BinaryOperator::WrapShiftRight => {
+                    let shift = (right as u64) as u32 & (ty.bits() - 1);
+                    if ty.bounds().0 < 0 {
+                        left >> shift
+                    } else {
+                        ((left as u64) >> shift) as i128
+                    }
+                }
+                BinaryOperator::WrapLogicalShiftRight => {
+                    let shift = (right as u64) as u32 & (ty.bits() - 1);
+                    let mask = (1_u128 << ty.bits()) - 1;
+                    (((left as u128) & mask) >> shift) as i128
+                }
                 BinaryOperator::And => left & right,
                 BinaryOperator::Or => left | right,
                 BinaryOperator::Xor => left ^ right,
@@ -260,6 +296,23 @@ fn constant_float_raw(expr: &CheckedExpression) -> Option<f64> {
                         BinaryOperator::Subtract => left - right,
                         BinaryOperator::Multiply => left * right,
                         BinaryOperator::Divide => left / right,
+                        BinaryOperator::Remainder => left % right,
+                        BinaryOperator::EuclideanRemainder => {
+                            if !right.is_finite() {
+                                f32::NAN
+                            } else {
+                                let r = left % right;
+                                let abs_b = right.abs();
+                                if r < 0.0 {
+                                    let adjusted = r + abs_b;
+                                    if adjusted >= abs_b { 0.0 } else { adjusted }
+                                } else if r == 0.0 {
+                                    0.0
+                                } else {
+                                    r
+                                }
+                            }
+                        }
                         _ => return None,
                     } as f64);
                 }
@@ -268,6 +321,23 @@ fn constant_float_raw(expr: &CheckedExpression) -> Option<f64> {
                     BinaryOperator::Subtract => left - right,
                     BinaryOperator::Multiply => left * right,
                     BinaryOperator::Divide => left / right,
+                    BinaryOperator::Remainder => left % right,
+                    BinaryOperator::EuclideanRemainder => {
+                        if !right.is_finite() {
+                            f64::NAN
+                        } else {
+                            let r = left % right;
+                            let abs_b = right.abs();
+                            if r < 0.0 {
+                                let adjusted = r + abs_b;
+                                if adjusted >= abs_b { 0.0 } else { adjusted }
+                            } else if r == 0.0 {
+                                0.0
+                            } else {
+                                r
+                            }
+                        }
+                    }
                     _ => return None,
                 },
             }
@@ -953,6 +1023,7 @@ fn validate_evaluation(expr: &CheckedExpression) -> Result<(), Diagnostic> {
         | Value::Negate(inner)
         | Value::Truncate(inner)
         | Value::BitNot(inner)
+        | Value::WrapNegate(inner)
         | Value::Not(inner) => validate_evaluation(inner)?,
         Value::CheckedCast {
             operand,

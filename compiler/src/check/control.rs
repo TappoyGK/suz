@@ -187,6 +187,7 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
             | ExpressionKind::CByteLen(inner)
             | ExpressionKind::Len(inner)
             | ExpressionKind::BitNot(inner)
+            | ExpressionKind::WrapNegate(inner)
             | ExpressionKind::Not(inner) => visit(inner, false, in_value)?,
             ExpressionKind::TextAppend { left, right }
             | ExpressionKind::Binary { left, right, .. }
