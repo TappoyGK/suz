@@ -279,23 +279,27 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                     } else if let IntegerOperation::Binary { operator, .. } = operation
                         && operator.is_shift()
                     {
-                        let crate::ast::Type::Integer(ty) = expr.ty else {
-                            unreachable!()
-                        };
-                        let IntegerOperation::Binary { right, .. } = operation else {
-                            unreachable!()
-                        };
-                        let invalid = if right.ty == crate::ast::Type::Exact {
+                        if matches!(operator, BinaryOperator::ShiftLeft) {
+                            let crate::ast::Type::Integer(ty) = expr.ty else {
+                                unreachable!()
+                            };
+                            let IntegerOperation::Binary { right, .. } = operation else {
+                                unreachable!()
+                            };
+                            let invalid = if right.ty == crate::ast::Type::Exact {
+                                format!(
+                                    "suz_cmp_{right_index}.negative || suz_cmp_{right_index}.magnitude >= {}",
+                                    ty.bits()
+                                )
+                            } else {
+                                format!("(uint64_t)suz_cmp_{right_index} >= {}", ty.bits())
+                            };
                             format!(
-                                "suz_cmp_{right_index}.negative || suz_cmp_{right_index}.magnitude >= {}",
-                                ty.bits()
+                                "({invalid}) ? \"shift count out of range [rt.shift-count]\" : \"integer {name} overflow [rt.shift-overflow]\""
                             )
                         } else {
-                            format!("(uint64_t)suz_cmp_{right_index} >= {}", ty.bits())
-                        };
-                        format!(
-                            "({invalid}) ? \"shift count out of range [rt.shift-count]\" : \"integer {name} overflow [rt.shift-overflow]\""
-                        )
+                            "\"shift count out of range [rt.shift-count]\"".into()
+                        }
                     } else {
                         c_string(&format!("integer {name} overflow [rt.int-overflow]"))
                     };

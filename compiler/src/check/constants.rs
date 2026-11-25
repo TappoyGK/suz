@@ -298,15 +298,19 @@ fn constant_float_raw(expr: &CheckedExpression) -> Option<f64> {
                         BinaryOperator::Divide => left / right,
                         BinaryOperator::Remainder => left % right,
                         BinaryOperator::EuclideanRemainder => {
-                            let r = left % right;
-                            let abs_b = right.abs();
-                            if r < 0.0 {
-                                let adjusted = r + abs_b;
-                                if adjusted >= abs_b { 0.0 } else { adjusted }
-                            } else if r == 0.0 {
-                                0.0
+                            if !right.is_finite() {
+                                f32::NAN
                             } else {
-                                r
+                                let r = left % right;
+                                let abs_b = right.abs();
+                                if r < 0.0 {
+                                    let adjusted = r + abs_b;
+                                    if adjusted >= abs_b { 0.0 } else { adjusted }
+                                } else if r == 0.0 {
+                                    0.0
+                                } else {
+                                    r
+                                }
                             }
                         }
                         _ => return None,
@@ -319,15 +323,19 @@ fn constant_float_raw(expr: &CheckedExpression) -> Option<f64> {
                     BinaryOperator::Divide => left / right,
                     BinaryOperator::Remainder => left % right,
                     BinaryOperator::EuclideanRemainder => {
-                        let r = left % right;
-                        let abs_b = right.abs();
-                        if r < 0.0 {
-                            let adjusted = r + abs_b;
-                            if adjusted >= abs_b { 0.0 } else { adjusted }
-                        } else if r == 0.0 {
-                            0.0
+                        if !right.is_finite() {
+                            f64::NAN
                         } else {
-                            r
+                            let r = left % right;
+                            let abs_b = right.abs();
+                            if r < 0.0 {
+                                let adjusted = r + abs_b;
+                                if adjusted >= abs_b { 0.0 } else { adjusted }
+                            } else if r == 0.0 {
+                                0.0
+                            } else {
+                                r
+                            }
                         }
                     }
                     _ => return None,

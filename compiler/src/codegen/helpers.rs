@@ -50,7 +50,7 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
         };
         writeln!(
             c,
-            "static inline {c_type} suz_euclid_{}({c_type} a, {c_type} b) {{\n    {c_type} r = {fmod_fn}(a, b);\n    {c_type} abs_b = {fabs_fn}(b);\n    if (r < {zero}) {{\n        {c_type} adjusted = r + abs_b;\n        return adjusted >= abs_b ? {zero} : adjusted;\n    }}\n    return r == {zero} ? {zero} : r;\n}}\n",
+            "static inline {c_type} suz_euclid_{}({c_type} a, {c_type} b) {{\n    if (!isfinite(b)) return ({c_type})NAN;\n    {c_type} abs_b = {fabs_fn}(b);\n    if (a >= {zero} && a < abs_b) return a == {zero} ? {zero} : a;\n    if (a >= abs_b && a - abs_b < abs_b) return a - abs_b;\n    {c_type} r = {fmod_fn}(a, b);\n    if (r < {zero}) {{\n        {c_type} adjusted = r + abs_b;\n        return adjusted >= abs_b ? {zero} : adjusted;\n    }}\n    return r == {zero} ? {zero} : r;\n}}\n",
             ty.name()
         )
         .unwrap();
