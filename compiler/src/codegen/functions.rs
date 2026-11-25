@@ -9,9 +9,73 @@ use crate::{
 };
 use std::fmt::Write;
 
-/// 構造体の値仮引数はCでは読み取り専用ポインタで受け取る。
-pub(super) fn parameter_type(ty: Type) -> String {
-    if matches!(ty, Type::Struct(_)) {
+/// 64-bit ABI（AAPCS64 / System V x86-64）では 16 バイト以下の構造体はレジスタ 2 本で値渡しされる。
+/// 16 バイトを超える構造体だけをポインタ渡しにして、小さな構造体の再帰等での速度低下を避ける。
+const SMALL_STRUCT_VALUE_LIMIT_BYTES: usize = 16;
+
+fn align_up(offset: usize, align: usize) -> usize {
+    let align = align.max(1);
+    (offset + (align - 1)) & !(align - 1)
+}
+
+fn type_layout(ty: Type, context: &ExpressionContext) -> (usize, usize) {
+    use crate::ast::{CIntegerType, FloatType, IntegerType};
+    match ty {
+        Type::Bool => (1, 1),
+        Type::Char => (4, 4),
+        Type::Integer(t) => match t {
+            IntegerType::I8 | IntegerType::U8 => (1, 1),
+            IntegerType::I16 | IntegerType::U16 => (2, 2),
+            IntegerType::I32 | IntegerType::U32 | IntegerType::Len => (4, 4),
+            IntegerType::I64 | IntegerType::U64 => (8, 8),
+        },
+        Type::Float(FloatType::F32) => (4, 4),
+        Type::Float(FloatType::F64) => (8, 8),
+        Type::Enum(e) => type_layout(Type::Integer(e.base), context),
+        Type::CInteger(t) => match t {
+            CIntegerType::Char => (1, 1),
+            CIntegerType::Int | CIntegerType::Uint => (4, 4),
+            CIntegerType::Long | CIntegerType::Ulong | CIntegerType::Size => (8, 8),
+        },
+        Type::Pointer { .. } | Type::CPointer | Type::Symbol | Type::StaticFunction(_) => (8, 8),
+        Type::Function(_) => (16, 8),
+        Type::Text => (32, 8),
+        Type::ArrayRef { id, .. } => {
+            let rank = context.arrays.get(id).rank;
+            (align_up(8 + 4 * rank, 8), 8)
+        }
+        Type::Exact => (32, 16),
+        Type::Struct(id) => {
+            let mut offset = 0usize;
+            let mut align = 1usize;
+            for field in &context.structs[id].fields {
+                let (field_size, field_align) = type_layout(field.ty, context);
+                offset = align_up(offset, field_align);
+                offset += field_size;
+                align = align.max(field_align);
+            }
+            (align_up(offset, align), align)
+        }
+        Type::Void
+        | Type::Array(_)
+        | Type::Parameter(_)
+        | Type::Application(_)
+        | Type::StaticShape(_)
+        | Type::Shape(_)
+        | Type::GenericInt
+        | Type::GenericFloat
+        | Type::Numeric(_) => (0, 1),
+    }
+}
+
+/// 構造体の値仮引数を C の読み取り専用ポインタで渡すべきか（16 バイト超の構造体のみ）。
+pub(super) fn pass_struct_by_pointer(ty: Type, context: &ExpressionContext) -> bool {
+    matches!(ty, Type::Struct(_)) && type_layout(ty, context).0 > SMALL_STRUCT_VALUE_LIMIT_BYTES
+}
+
+/// 16 バイト超の構造体の値仮引数は C では読み取り専用ポインタで受け取る。
+pub(super) fn parameter_type(ty: Type, context: &ExpressionContext) -> String {
+    if pass_struct_by_pointer(ty, context) {
         format!("const {} *restrict", ty.c_name())
     } else {
         ty.c_name()
@@ -38,7 +102,7 @@ pub(super) fn immutable_struct_place(
     }
 }
 
-pub(super) fn declaration(function: &CheckedFunction) -> String {
+pub(super) fn declaration(function: &CheckedFunction, context: &ExpressionContext) -> String {
     let mut parameters = function
         .parameters
         .iter()
@@ -46,7 +110,7 @@ pub(super) fn declaration(function: &CheckedFunction) -> String {
         .map(|(id, ty)| {
             if id == 0 && function.mutable_receiver {
                 format!("{} *const suz_ref_0", ty.c_name())
-            } else if matches!(ty, Type::Struct(_)) {
+            } else if pass_struct_by_pointer(*ty, context) {
                 format!("const {} *restrict suz_ref_{id}", ty.c_name())
             } else {
                 format!("const {} suz_local_{id}", ty.c_name())
@@ -86,7 +150,7 @@ pub(super) fn emit(function: &CheckedFunction, context: &mut ExpressionContext) 
         context.references.insert(0);
     }
     for (id, ty) in function.parameters.iter().enumerate() {
-        if !(id == 0 && function.mutable_receiver) && matches!(ty, Type::Struct(_)) {
+        if !(id == 0 && function.mutable_receiver) && pass_struct_by_pointer(*ty, context) {
             context.references.insert(id);
         }
     }
@@ -107,7 +171,7 @@ pub(super) fn emit(function: &CheckedFunction, context: &mut ExpressionContext) 
         String::new()
     };
     statements::emit_block(&mut body, &function.statements, 1, &mut 0, context);
-    let mut c = format!("{} {{\n", declaration(function));
+    let mut c = format!("{} {{\n", declaration(function, context));
     for (id, &ty) in function.parameters.iter().enumerate() {
         // Suzでは未使用の引数を認めるため、Cコンパイラの警告を抑える。
         writeln!(c, "    (void){};", context.local(id)).unwrap();
@@ -137,7 +201,7 @@ fn emit_argument(
         argument.value,
         crate::check::ir::Value::Receiver { mutable: true, .. }
     );
-    if !external && !by_reference && matches!(argument.ty, Type::Struct(_)) {
+    if !external && !by_reference && pass_struct_by_pointer(argument.ty, context) {
         if immutable_struct_place(argument, context) {
             let value = expression(argument, context);
             names.push(format!("&({value})"));
@@ -260,7 +324,7 @@ pub(super) fn type_declarations(c: &mut String, context: &ExpressionContext) {
         } else {
             ty.parameters
                 .iter()
-                .map(|t| parameter_type(*t))
+                .map(|t| parameter_type(*t, context))
                 .collect::<Vec<_>>()
                 .join(", ")
         };
@@ -280,7 +344,7 @@ pub(super) fn type_declarations(c: &mut String, context: &ExpressionContext) {
         .unwrap();
         if context.call_only_types.contains(&id) {
             let mut arguments = vec!["void *".to_owned()];
-            arguments.extend(ty.parameters.iter().map(|ty| parameter_type(*ty)));
+            arguments.extend(ty.parameters.iter().map(|ty| parameter_type(*ty, context)));
             if !ty.errors.is_empty() {
                 arguments.push("uint64_t *".into());
             }
@@ -321,7 +385,7 @@ pub(super) fn call_only_declarations(c: &mut String, context: &ExpressionContext
             .parameters
             .iter()
             .enumerate()
-            .map(|(i, ty)| format!("{} argument_{i}", parameter_type(*ty)))
+            .map(|(i, ty)| format!("{} argument_{i}", parameter_type(*ty, context)))
             .collect();
         let mut with_environment = vec!["void *environment".to_owned()];
         with_environment.extend(parameters);

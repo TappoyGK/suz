@@ -553,12 +553,16 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                 })
                 .collect();
             // 宣言には評価の副作用がない。代入は式の中に残し、論理演算の短絡評価とループの再評価を保つ。
-            // 演算子メソッドへ渡す不変の構造体は一時変数へコピーせず、直接アドレスを渡す。
+            // 演算子メソッドへポインタ渡しする不変の構造体は一時変数へコピーせず、直接アドレスを渡す。
+            let pointer_struct: Vec<bool> = operands
+                .iter()
+                .map(|operand| super::functions::pass_struct_by_pointer(operand.ty, context))
+                .collect();
             let direct_struct: Vec<bool> = operands
                 .iter()
                 .enumerate()
                 .map(|(index, operand)| {
-                    if !matches!(operand.ty, Type::Struct(_))
+                    if !pointer_struct[index]
                         || !super::functions::immutable_struct_place(operand, context)
                     {
                         return false;
@@ -590,7 +594,7 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             let method_argument = |i: usize| -> String {
                 if direct_struct[i] {
                     format!("&({})", values[i])
-                } else if matches!(operands[i].ty, Type::Struct(_)) {
+                } else if pointer_struct[i] {
                     format!("&{}", names[i])
                 } else {
                     names[i].clone()

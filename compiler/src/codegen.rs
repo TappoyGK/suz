@@ -183,7 +183,7 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
     functions::call_only_declarations(&mut c, &context);
     text_structure::emit(&mut c, &context);
     for function in &program.functions {
-        writeln!(c, "{};", functions::declaration(function)).unwrap();
+        writeln!(c, "{};", functions::declaration(function, &context)).unwrap();
     }
     c.push_str(&context.constant_array_data);
     c.push_str(&context.functions);

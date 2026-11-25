@@ -1,5 +1,5 @@
-//! 構造体の値仮引数のポインタ渡し（`[codegen.struct-param]`）と、
-//! 実引数のコピー有無（`[codegen.struct-arg]`）が生成Cに反映されることを検証する。
+//! 16 バイト超の構造体の値仮引数のポインタ渡し（`[codegen.struct-param]`）と、
+//! 実引数のコピー有無（`[codegen.struct-arg]`）、および 16 バイト以下の構造体が値渡しのままであることを検証する。
 use super::generate;
 
 fn compile_c(source: &str) -> String {
@@ -17,40 +17,51 @@ fn compile_c(source: &str) -> String {
 }
 
 #[test]
-fn struct_value_parameters_use_const_restrict_pointers_across_all_callables() {
-    let source = r#"struct Inner { x: i64 }
-struct Outer { inner: Inner, y: i64 }
+fn struct_value_parameters_use_const_restrict_pointers_above_16_bytes_only() {
+    let source = r#"struct Small { x: i64, y: i64 }
+struct Inner { x: i64, y: i64, z: i64 }
+struct Outer { inner: Inner, w: i64 }
 fnshape ReadOuter(Outer) -> i64
+fnshape ReadSmall(Small) -> i64
 fn Outer.get() -> i64 { return self.inner.x }
-fn Outer#bump() -> void { self#y = self.y + 1 }
-fn Outer.<(other: Outer) -> bool { return self.y < other.y }
-fn take(a: Outer, arr: .[Outer]) -> i64 { return a.y + (len arr as i64) }
+fn Outer#bump() -> void { self#w = self.w + 1 }
+fn Outer.<(other: Outer) -> bool { return self.w < other.w }
+fn take(a: Outer, arr: .[Outer]) -> i64 { return a.w + (len arr as i64) }
 fn generic[T](v: T) -> T { return v }
 fn apply_static(f: static fn ReadOuter, a: Outer) -> i64 { return f(a) }
 fn apply_fn(f: fn ReadOuter, a: Outer) -> i64 { return f(a) }
-fn read_outer(a: Outer) -> i64 { return a.y }
+fn read_outer(a: Outer) -> i64 { return a.w }
+fn read_small(s: Small) -> i64 { return s.x + s.y }
+fn apply_small(f: fn ReadSmall, s: Small) -> i64 { return f(s) }
 fn main() -> u8 {
-    fix a = Outer { inner: Inner { x: 1 }, y: 2 }
+    fix s = Small { x: 1, y: 2 }
+    fix a = Outer { inner: Inner { x: 1, y: 2, z: 3 }, w: 4 }
     var b = a
     b#bump()
-    fix arr: .[Outer] = .[Outer { inner: Inner { x: 1 }, y: 2 }]
+    fix arr: .[Outer] = .[Outer { inner: Inner { x: 1, y: 2, z: 3 }, w: 4 }]
     fix c = generic(a)
-    fix s = apply_static(fn read_outer, a)
+    fix st = apply_static(fn read_outer, a)
     fix f1 = apply_fn(fn read_outer, a)
-    fix f2 = apply_fn(fn [a](p: Outer) -> i64 { return p.inner.x + a.y }, a)
-    if a.get() + take(c, arr) + s + f1 + f2 > 0 && a < b { return 0 }
+    fix f2 = apply_fn(fn [a](p: Outer) -> i64 { return p.inner.x + a.w }, a)
+    fix sm = read_small(s) + apply_small(fn [s](p: Small) -> i64 { return p.x + s.y }, s)
+    if a.get() + take(c, arr) + st + f1 + f2 + sm > 0 && a < b { return 0 }
     return 1
 }
 "#;
     let c = compile_c(source);
-    // 関数・メソッド・演算子・ジェネリック具体化・関数型・アダプタ・クロージャの構造体仮引数は const T *restrict。
+    // 16 バイト超の構造体（Outer = suz_struct_2, 32 バイト）は const T *restrict。
     assert!(
-        c.contains("const suz_struct_1 *restrict suz_ref_0"),
-        "missing struct value parameter pointer:\n{c}"
+        c.contains("const suz_struct_2 *restrict suz_ref_0"),
+        "missing large struct value parameter pointer:\n{c}"
+    );
+    // 16 バイト以下の構造体（Small = suz_struct_0, 16 バイト）は値渡しのまま。
+    assert!(
+        c.contains("const suz_struct_0 suz_local_0") && !c.contains("const suz_struct_0 *restrict"),
+        "small struct (<= 16 bytes) should remain passed by value:\n{c}"
     );
     // # メソッドのレシーバは従来どおり非 const ポインタ。
     assert!(
-        c.contains("suz_struct_1 *const suz_ref_0"),
+        c.contains("suz_struct_2 *const suz_ref_0"),
         "missing mutable receiver pointer:\n{c}"
     );
     // 配列参照は構造体の値仮引数ではないため値渡しのまま。
@@ -58,56 +69,62 @@ fn main() -> u8 {
         c.contains("const suz_readonly_array_0 suz_local_1"),
         "array reference parameter should remain by-value:\n{c}"
     );
-    // static fn / fn / アダプタ / クロージャの署名。
+    // static fn / fn / アダプタ / クロージャの署名（16 バイト超）。
     assert!(
-        c.contains("typedef int64_t (*suz_fntype_0)(const suz_struct_1 *restrict);"),
+        c.contains("typedef int64_t (*suz_fntype_0)(const suz_struct_2 *restrict);"),
         "missing fntype pointer param:\n{c}"
     );
     assert!(
-        c.contains("int64_t (*call)(void *, const suz_struct_1 *restrict)"),
+        c.contains("int64_t (*call)(void *, const suz_struct_2 *restrict)"),
         "missing callback pointer param:\n{c}"
     );
     assert!(
-        c.contains("suz_adapt_0(void *environment, const suz_struct_1 *restrict argument_0)"),
+        c.contains("suz_adapt_0(void *environment, const suz_struct_2 *restrict argument_0)"),
         "missing adapt pointer param:\n{c}"
     );
     assert!(
-        c.contains("suz_closure_0(void *environment, const suz_struct_1 *restrict suz_ref_0)"),
+        c.contains("suz_closure_0(void *environment, const suz_struct_2 *restrict suz_ref_0)"),
         "missing closure pointer param:\n{c}"
     );
-    // 値キャプチャーした構造体もクロージャ入口でコピーせずポインタで束縛する。
+    // 値キャプチャーした 16 バイト超の構造体もクロージャ入口でコピーせずポインタで束縛する。
     assert!(
-        c.contains("const suz_struct_1 *const suz_ref_1 = &((const suz_closure_env_0 *)environment)->capture_0;"),
-        "value-captured struct should be bound by const pointer:\n{c}"
+        c.contains("const suz_struct_2 *const suz_ref_1 = &((const suz_closure_env_0 *)environment)->capture_0;"),
+        "value-captured large struct should be bound by const pointer:\n{c}"
+    );
+    // 16 バイト以下の構造体の fnshape / クロージャは値渡しのまま。
+    assert!(
+        c.contains("typedef int64_t (*suz_fntype_1)(suz_struct_0);")
+            && c.contains("suz_closure_1(void *environment, const suz_struct_0 suz_local_0)"),
+        "small struct fnshape and closure should remain by-value:\n{c}"
     );
 }
 
 #[test]
 fn struct_arguments_avoid_copies_for_immutable_places_and_copy_mutable_sources() {
-    let source = r#"struct Inner { x: i64 }
-struct Outer { inner: Inner, y: i64 }
-fn read_outer(a: Outer) -> i64 { return a.y }
+    let source = r#"struct Inner { x: i64, y: i64, z: i64 }
+struct Outer { inner: Inner, w: i64 }
+fn read_outer(a: Outer) -> i64 { return a.w }
 fn read_inner(a: Inner) -> i64 { return a.x }
-fn Outer.sum() -> i64 { return self.inner.x + self.y }
-fn Outer.<(other: Outer) -> bool { return self.y < other.y }
+fn Outer.sum() -> i64 { return self.inner.x + self.w }
+fn Outer.<(other: Outer) -> bool { return self.w < other.w }
 fn Outer#pass_self() -> i64 { return read_outer(self) }
-fn make() -> Outer { return Outer { inner: Inner { x: 1 }, y: 2 } }
+fn make() -> Outer { return Outer { inner: Inner { x: 1, y: 2, z: 3 }, w: 4 } }
 fn from_param(p: Outer) -> i64 {
     return read_outer(p) + read_inner(p.inner)
 }
 fn from_fix() -> i64 {
-    fix a = Outer { inner: Inner { x: 1 }, y: 2 }
-    fix b = Outer { inner: Inner { x: 3 }, y: 4 }
+    fix a = Outer { inner: Inner { x: 1, y: 2, z: 3 }, w: 4 }
+    fix b = Outer { inner: Inner { x: 5, y: 6, z: 7 }, w: 8 }
     fix ok = a < b
     return read_outer(a) + read_inner(a.inner) + a.sum() + (ifexpr ok { 1 } else { 0 })
 }
 fn from_var() -> i64 {
-    var v = Outer { inner: Inner { x: 1 }, y: 2 }
-    v#y = 3
+    var v = Outer { inner: Inner { x: 1, y: 2, z: 3 }, w: 4 }
+    v#w = 9
     return read_outer(v) + read_inner(v.inner)
 }
 fn from_deref() -> i64 {
-    fix p = new Outer { inner: Inner { x: 1 }, y: 2 }
+    fix p = new Outer { inner: Inner { x: 1, y: 2, z: 3 }, w: 4 }
     return read_outer(.p) + read_inner(p.inner)
 }
 fn from_rvalue() -> i64 {
@@ -121,7 +138,6 @@ fn main() -> u8 {
 "#;
     let c = compile_c(source);
 
-    // 関数本体を抜き出す簡易ヘルパー。
     let body_of = |index: usize| -> &str {
         let marker = format!(" suz_fn_{index}(");
         let mut search = c.as_str();
