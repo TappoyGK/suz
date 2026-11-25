@@ -156,7 +156,8 @@ pub(super) fn check(
                 ExpressionKind::Binary {
                     operator: BinaryOperator::Remainder
                         | BinaryOperator::ShiftLeft
-                        | BinaryOperator::ShiftRight,
+                        | BinaryOperator::ShiftRight
+                        | BinaryOperator::LogicalShiftRight,
                     ..
                 }
             );
@@ -164,7 +165,7 @@ pub(super) fn check(
                 ExpressionKind::Binary { operator, .. }
                     if super::super::operator_methods::supported(*operator) =>
                 {
-                    Some(operator.c_symbol())
+                    Some(operator.symbol())
                 }
                 _ => None,
             };

@@ -99,6 +99,7 @@ bool suz_try_rem_u64(uint64_t a, uint64_t b, uint64_t max, uint64_t *result);
    それ以外は結果を書いてtrueを返す。resultは書き込み可能でなければならない。 */
 bool suz_try_shl_i64(int64_t a, uint64_t count, unsigned width, int64_t *result);
 bool suz_try_shr_i64(int64_t a, uint64_t count, unsigned width, int64_t *result);
+bool suz_try_lshr_i64(int64_t a, uint64_t count, unsigned width, int64_t *result);
 bool suz_try_shl_u64(uint64_t a, uint64_t count, unsigned width, uint64_t *result);
 bool suz_try_shr_u64(uint64_t a, uint64_t count, unsigned width, uint64_t *result);
 

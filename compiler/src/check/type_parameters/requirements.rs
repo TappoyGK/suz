@@ -126,7 +126,7 @@ pub(in crate::check) fn hint(expr: &Expression, scope: &Scope) -> Option<Type> {
             .and_then(|n| scope.resolve_type_at(n.result, expr.location).ok());
     }
     match &expr.kind {
-        ExpressionKind::Binary { operator, left, right } => find(target(left, scope)?, operator.c_symbol(), std::slice::from_ref(right), scope).and_then(|n| scope.resolve_type_at(n.result, expr.location).ok()),
+        ExpressionKind::Binary { operator, left, right } => find(target(left, scope)?, operator.symbol(), std::slice::from_ref(right), scope).and_then(|n| scope.resolve_type_at(n.result, expr.location).ok()),
         ExpressionKind::MethodCall { target: receiver, name, mutable, arguments } => method_target(receiver, scope).and_then(|parameter| scope.named.needs.candidates(parameter, true, name).find(|n| {
             n.parameters.len() == arguments.len()
                 && matches!(&n.operation, RequiredOperation::Method { mutable: write, .. } if mutable == write)
@@ -222,20 +222,15 @@ pub(in crate::check) fn operation(
                 return Err(missing(expr.location));
             }
             let args = std::slice::from_ref(right.as_ref());
-            let need = find(
-                target(left, scope).unwrap(),
-                operator.c_symbol(),
-                args,
-                scope,
-            )
-            .ok_or_else(|| {
-                missing_operator(
-                    expr.location,
-                    target(left, scope).unwrap(),
-                    operator.c_symbol(),
-                    scope,
-                )
-            })?;
+            let need = find(target(left, scope).unwrap(), operator.symbol(), args, scope)
+                .ok_or_else(|| {
+                    missing_operator(
+                        expr.location,
+                        target(left, scope).unwrap(),
+                        operator.symbol(),
+                        scope,
+                    )
+                })?;
             invoke(need, left, args, expr, scope, None).map(Some)
         }
         ExpressionKind::MethodCall {

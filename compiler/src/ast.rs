@@ -929,16 +929,28 @@ pub(crate) enum BinaryOperator {
     Remainder,
     ShiftLeft,
     ShiftRight,
+    LogicalShiftRight,
     WrapAdd,
     WrapSubtract,
     WrapMultiply,
+    WrapShiftLeft,
+    WrapShiftRight,
+    WrapLogicalShiftRight,
     Or,
     Xor,
     And,
 }
 impl BinaryOperator {
     pub fn is_shift(self) -> bool {
-        matches!(self, Self::ShiftLeft | Self::ShiftRight)
+        matches!(
+            self,
+            Self::ShiftLeft
+                | Self::ShiftRight
+                | Self::LogicalShiftRight
+                | Self::WrapShiftLeft
+                | Self::WrapShiftRight
+                | Self::WrapLogicalShiftRight
+        )
     }
     pub fn is_arithmetic(self) -> bool {
         matches!(
@@ -950,6 +962,7 @@ impl BinaryOperator {
                 | Self::Remainder
                 | Self::ShiftLeft
                 | Self::ShiftRight
+                | Self::LogicalShiftRight
         )
     }
     pub fn from_symbol(symbol: &str) -> Option<Self> {
@@ -961,13 +974,38 @@ impl BinaryOperator {
             "%" => Some(Self::Remainder),
             "<<" => Some(Self::ShiftLeft),
             ">>" => Some(Self::ShiftRight),
+            ">>>" => Some(Self::LogicalShiftRight),
             "|" => Some(Self::Or),
             "^" => Some(Self::Xor),
             "&" => Some(Self::And),
             "+%" => Some(Self::WrapAdd),
             "-%" => Some(Self::WrapSubtract),
             "*%" => Some(Self::WrapMultiply),
+            "<<%" => Some(Self::WrapShiftLeft),
+            ">>%" => Some(Self::WrapShiftRight),
+            ">>>%" => Some(Self::WrapLogicalShiftRight),
             _ => None,
+        }
+    }
+    pub fn symbol(self) -> &'static str {
+        match self {
+            Self::Add => "+",
+            Self::Subtract => "-",
+            Self::Multiply => "*",
+            Self::Divide => "/",
+            Self::Remainder => "%",
+            Self::ShiftLeft => "<<",
+            Self::ShiftRight => ">>",
+            Self::LogicalShiftRight => ">>>",
+            Self::WrapAdd => "+%",
+            Self::WrapSubtract => "-%",
+            Self::WrapMultiply => "*%",
+            Self::WrapShiftLeft => "<<%",
+            Self::WrapShiftRight => ">>%",
+            Self::WrapLogicalShiftRight => ">>>%",
+            Self::Or => "|",
+            Self::Xor => "^",
+            Self::And => "&",
         }
     }
     // 値が大きいほど強く結合する。加算と減算は同じ優先順位。
@@ -976,7 +1014,12 @@ impl BinaryOperator {
             Self::Or => 0,
             Self::Xor => 1,
             Self::And => 2,
-            Self::ShiftLeft | Self::ShiftRight => 3,
+            Self::ShiftLeft
+            | Self::ShiftRight
+            | Self::LogicalShiftRight
+            | Self::WrapShiftLeft
+            | Self::WrapShiftRight
+            | Self::WrapLogicalShiftRight => 3,
             Self::WrapAdd | Self::WrapSubtract | Self::Add | Self::Subtract => 4,
             Self::WrapMultiply | Self::Multiply | Self::Divide | Self::Remainder => 5,
         }
@@ -985,8 +1028,11 @@ impl BinaryOperator {
         match self {
             Self::Divide => "/",
             Self::Remainder => "%",
-            Self::ShiftLeft => "<<",
-            Self::ShiftRight => ">>",
+            Self::ShiftLeft | Self::WrapShiftLeft => "<<",
+            Self::ShiftRight
+            | Self::LogicalShiftRight
+            | Self::WrapShiftRight
+            | Self::WrapLogicalShiftRight => ">>",
             Self::Or => "|",
             Self::Xor => "^",
             Self::And => "&",

@@ -257,6 +257,7 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                             BinaryOperator::Remainder => "remainder",
                             BinaryOperator::ShiftLeft => "left shift",
                             BinaryOperator::ShiftRight => "right shift",
+                            BinaryOperator::LogicalShiftRight => "logical right shift",
                             _ => unreachable!(),
                         },
                         IntegerOperation::Exact(_) => unreachable!(),
@@ -484,17 +485,60 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             }
             let index = context.temporaries.len();
             context.temporaries.extend([left.ty, right.ty]);
+            let right_is_exact = right.ty == crate::ast::Type::Exact;
             let left = expression(left, context);
             let right = expression(right, context);
             let result = match expr.ty {
                 crate::ast::Type::Integer(ty) => {
-                    context.bit_helpers.insert(ty);
-                    format!(
-                        "suz_bits_{}((uint64_t)suz_cmp_{index} {} (uint64_t)suz_cmp_{})",
-                        ty.name(),
-                        operator.c_symbol(),
-                        index + 1
-                    )
+                    use crate::ast::BinaryOperator;
+                    let bits = ty.bits();
+                    let shift_mask = bits - 1;
+                    let shift_count = if right_is_exact {
+                        format!("(suz_exact_bits(suz_cmp_{}) & {shift_mask})", index + 1)
+                    } else {
+                        format!("((uint64_t)suz_cmp_{} & {shift_mask})", index + 1)
+                    };
+                    match operator {
+                        BinaryOperator::WrapShiftLeft => {
+                            context.bit_helpers.insert(ty);
+                            format!(
+                                "suz_bits_{}((uint64_t)suz_cmp_{index} << {shift_count})",
+                                ty.name()
+                            )
+                        }
+                        BinaryOperator::WrapShiftRight => {
+                            if ty.bounds().0 < 0 {
+                                format!(
+                                    "(suz_cmp_{index} < 0 ? ({})(-INT64_C(1) - (int64_t)((uint64_t)(-(int64_t)(suz_cmp_{index} + 1)) >> {shift_count})) : ({})((uint64_t)(int64_t)suz_cmp_{index} >> {shift_count}))",
+                                    ty.c_name(),
+                                    ty.c_name(),
+                                )
+                            } else {
+                                context.bit_helpers.insert(ty);
+                                format!(
+                                    "suz_bits_{}((uint64_t)suz_cmp_{index} >> {shift_count})",
+                                    ty.name()
+                                )
+                            }
+                        }
+                        BinaryOperator::WrapLogicalShiftRight => {
+                            context.bit_helpers.insert(ty);
+                            let value_mask = u64::MAX >> (64 - bits);
+                            format!(
+                                "suz_bits_{}(((uint64_t)suz_cmp_{index} & UINT64_C({value_mask})) >> {shift_count})",
+                                ty.name()
+                            )
+                        }
+                        _ => {
+                            context.bit_helpers.insert(ty);
+                            format!(
+                                "suz_bits_{}((uint64_t)suz_cmp_{index} {} (uint64_t)suz_cmp_{})",
+                                ty.name(),
+                                operator.c_symbol(),
+                                index + 1
+                            )
+                        }
+                    }
                 }
                 crate::ast::Type::Float(ty) => format!(
                     "({})(suz_cmp_{index} {} suz_cmp_{})",

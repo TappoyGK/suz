@@ -231,7 +231,7 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
                 && super::operator_methods::supported(*operator)
                 && matches!(a, Some(Type::Struct(_) | Type::Enum(_)))
             {
-                return super::operator_methods::hint(operator.c_symbol(), left, right, bindings);
+                return super::operator_methods::hint(operator.symbol(), left, right, bindings);
             }
             let b = operand_type(right, bindings);
             if operator.is_shift() {
@@ -338,7 +338,7 @@ fn has_float_source_inner<const OPERATOR_METHODS: bool>(
                 && super::operator_methods::supported(*operator)
                 && super::operator_methods::owner(left, bindings).is_some()
             {
-                return super::operator_methods::hint(operator.c_symbol(), left, right, bindings)
+                return super::operator_methods::hint(operator.symbol(), left, right, bindings)
                     .is_some_and(Type::is_float);
             }
             float_source::<OPERATOR_METHODS>(left, bindings)
@@ -556,7 +556,7 @@ fn expression_checked(
     {
         super::operator_methods::call(
             expr,
-            operator.c_symbol(),
+            operator.symbol(),
             left,
             right,
             inference_hint,

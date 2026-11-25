@@ -107,3 +107,125 @@ fn main() -> u8 {
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stdout.is_empty() && output.stderr.is_empty());
 }
+
+#[test]
+fn logical_and_wrapping_shifts_work_at_runtime_and_compile_time() {
+    // 論理右シフト >>>（検査あり）と、マスク・パニックなしの <<%・>>%・>>>%（および複合代入）
+    let source = br#"fix C_LSHR_I8: i8 = (-2 as i8) >>> 1
+fix C_LSHR_I8_ZERO: i8 = (-128 as i8) >>> 0
+fix C_LSHR_U8: u8 = (240 as u8) >>> 4
+fix C_WSHL_U8: u8 = (129 as u8) <<% 1
+fix C_WSHL_I8: i8 = (64 as i8) <<% 1
+fix C_WSHL_MASK: u8 = (1 as u8) <<% 9
+fix C_WSHL_NEG: u8 = (1 as u8) <<% -1
+fix C_WSHR_I8: i8 = (-7 as i8) >>% 1
+fix C_WSHR_I8_MASK: i8 = (-7 as i8) >>% 9
+fix C_WSHR_U8: u8 = (240 as u8) >>% 4
+fix C_WLSHR_I8: i8 = (-2 as i8) >>>% 1
+fix C_WLSHR_I8_MASK: i8 = (-2 as i8) >>>% 9
+fix C_WLSHR_I8_ZERO: i8 = (-128 as i8) >>>% 8
+fix C_WLSHR_I64: i64 = (-1 as i64) >>>% 63
+
+fn main() -> u8 {
+    if C_LSHR_I8 != 127 || C_LSHR_I8_ZERO != -128 || C_LSHR_U8 != 15 { return 1 }
+    if C_WSHL_U8 != 2 || C_WSHL_I8 != -128 || C_WSHL_MASK != 2 || C_WSHL_NEG != 128 { return 2 }
+    if C_WSHR_I8 != -4 || C_WSHR_I8_MASK != -4 || C_WSHR_U8 != 15 { return 3 }
+    if C_WLSHR_I8 != 127 || C_WLSHR_I8_MASK != 127 || C_WLSHR_I8_ZERO != -128 || C_WLSHR_I64 != 1 { return 4 }
+
+    var s8: i8 = -2
+    if (s8 >>> 1) != 127 || (s8 >>> 0) != -2 || (s8 >>> 8 or 7) != 7 || (s8 >>> -1 or 7) != 7 { return 5 }
+    s8 >>>= 1
+    if s8 != 127 { return 6 }
+
+    var u: u8 = 129
+    u <<%= 9
+    if u != 2 { return 7 }
+    u <<%= -1
+    if u != 0 { return 8 }
+
+    var neg: i8 = -128
+    if (neg >>% 0) != -128 || (neg >>% 8) != -128 || (neg >>% 1) != -64 || (neg >>% 7) != -1 { return 9 }
+    neg >>%= 1
+    if neg != -64 { return 10 }
+
+    var lneg: i8 = -2
+    lneg >>>%= 9
+    if lneg != 127 { return 11 }
+
+    fix big: i64 = -1
+    if (big >>> 63) != 1 || (big >>>% 63) != 1 || (big >>>% 127) != 1 { return 12 }
+    if (big <<% 63) != (-1 << 63) { return 13 }
+
+    // exact arithmetic expression as shift count
+    fix a: i32 = 10
+    fix b: i32 = 1
+    fix exact_wshl: u8 = (1 as u8) <<% (a - b)
+    if exact_wshl != 2 { return 14 }
+    fix exact_wlshr: i8 = (-2 as i8) >>>% (a - b)
+    if exact_wlshr != 127 { return 15 }
+
+    return 0
+}
+"#;
+    let directory = TemporaryDirectory::new();
+    let path = directory.0.join("extended-shifts.c");
+    fs::write(&path, suz::compile(source).unwrap()).unwrap();
+    let output = build_and_run_c(&path, &directory.0.join("extended-shifts"));
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stdout.is_empty() && output.stderr.is_empty());
+
+    // % 付きシフトは --deny-unhandled-arithmetic 下でも or 不要
+    let no_warn = br#"fn main() -> u8 {
+    var x: u32 = 1
+    x <<%= 13
+    x >>%= 17
+    x >>>%= 5
+    fix y: i32 = 0 -% 2
+    fix z = (y <<% 1) +% (y >>% 1) +% (y >>>% 1)
+    return ifexpr x == 0 && z != 0 { 0 } else { 1 }
+}
+"#;
+    suz::compile_with_mode(no_warn, suz::ArithmeticMode::Deny).unwrap();
+
+    // >>> は --deny-unhandled-arithmetic の診断対象
+    let warn_lshr =
+        b"fn main() -> u8 {\n    fix x: i8 = -2\n    fix y = x >>> 1\n    return 0\n}\n";
+    assert!(suz::compile_with_mode(warn_lshr, suz::ArithmeticMode::Deny).is_err());
+
+    // % 付きシフトへの or 付与はコンパイルエラー
+    for expr in ["(x <<% 1) or 0", "(x >>% 1) or 0", "(x >>>% 1) or 0"] {
+        let bad = format!(
+            "fn main() -> u8 {{\n    fix x: u8 = 1\n    fix y = {expr}\n    return y\n}}\n"
+        );
+        let error = suz::compile(bad.as_bytes()).unwrap_err();
+        assert!(
+            error.message().contains("expr.arithmetic-handler"),
+            "{expr}: {error:?}"
+        );
+    }
+
+    // len_t は左辺に使えない
+    for op in [">>>", "<<%", ">>%", ">>>%"] {
+        let bad = format!(
+            "fn main() -> u8 {{\n    fix n: len_t = 4\n    fix y = n {op} 1\n    return 0\n}}\n"
+        );
+        let error = suz::compile(bad.as_bytes()).unwrap_err();
+        assert!(
+            error.message().contains("expr.operator-types"),
+            "{op}: {error:?}"
+        );
+    }
+
+    // 定数式での >>> 範囲外は const.evaluation エラー
+    for decl in [
+        "fix V: i8 = (-2 as i8) >>> 8",
+        "fix V: i8 = (-2 as i8) >>> -1",
+    ] {
+        let bad = format!("{decl}\nfn main() -> u8 {{ return 0 }}\n");
+        let error = suz::compile(bad.as_bytes()).unwrap_err();
+        assert!(
+            error.message().contains("const.evaluation"),
+            "{decl}: {error:?}"
+        );
+    }
+}

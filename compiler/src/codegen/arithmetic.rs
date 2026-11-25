@@ -61,8 +61,10 @@ pub(super) fn integer_parts(
     };
     // 有効なリテラルのシフト量は失敗しない。この頻出する符号なしシフトはCで行い、
     // ループの各反復で検査付きランタイムを呼ぶのを避ける。
-    if matches!(operator, BinaryOperator::ShiftRight)
-        && ty.bounds().0 == 0
+    if matches!(
+        operator,
+        BinaryOperator::ShiftRight | BinaryOperator::LogicalShiftRight
+    ) && ty.bounds().0 == 0
         && let Value::Integer { value: count, .. } = right.value
         && (0..i128::from(ty.bits())).contains(&count)
     {
@@ -75,6 +77,7 @@ pub(super) fn integer_parts(
             format!("({})(suz_cmp_{index} >> {count})", ty.c_name()),
         );
     }
+    let signed = ty.bounds().0 < 0;
     let op = match operator {
         BinaryOperator::Add => "add",
         BinaryOperator::Subtract => "sub",
@@ -83,9 +86,10 @@ pub(super) fn integer_parts(
         BinaryOperator::Remainder => "rem",
         BinaryOperator::ShiftLeft => "shl",
         BinaryOperator::ShiftRight => "shr",
+        BinaryOperator::LogicalShiftRight if signed => "lshr",
+        BinaryOperator::LogicalShiftRight => "shr",
         _ => unreachable!(),
     };
-    let signed = ty.bounds().0 < 0;
     let wide = if signed {
         IntegerType::I64
     } else {

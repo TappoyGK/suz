@@ -34,6 +34,18 @@ fn integer_result(operator: BinaryOperator, a: i128, b: i128, ty: IntegerType) -
         BinaryOperator::Remainder => a.checked_rem(b),
         BinaryOperator::ShiftLeft => a.checked_mul(1_i128 << b),
         BinaryOperator::ShiftRight => Some(a >> b),
+        BinaryOperator::LogicalShiftRight => {
+            let bits = ty.bits();
+            let mask = (1_u128 << bits) - 1;
+            let shifted = ((a as u128) & mask) >> (b as u32);
+            let (min, max) = ty.bounds();
+            let value = if min < 0 && shifted > (max as u128) {
+                (shifted as i128) - (1_i128 << bits)
+            } else {
+                shifted as i128
+            };
+            Some(value)
+        }
         _ => unreachable!(),
     }?;
     let (min, max) = ty.bounds();
@@ -165,6 +177,23 @@ fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
                 BinaryOperator::WrapSubtract => left - right,
                 // 整数のラップ変換の結果に影響するのは下位64ビットだけ。
                 BinaryOperator::WrapMultiply => (left as u64).wrapping_mul(right as u64) as i128,
+                BinaryOperator::WrapShiftLeft => {
+                    let shift = (right as u64) as u32 & (ty.bits() - 1);
+                    ((left as u64) << shift) as i128
+                }
+                BinaryOperator::WrapShiftRight => {
+                    let shift = (right as u64) as u32 & (ty.bits() - 1);
+                    if ty.bounds().0 < 0 {
+                        left >> shift
+                    } else {
+                        ((left as u64) >> shift) as i128
+                    }
+                }
+                BinaryOperator::WrapLogicalShiftRight => {
+                    let shift = (right as u64) as u32 & (ty.bits() - 1);
+                    let mask = (1_u128 << ty.bits()) - 1;
+                    (((left as u128) & mask) >> shift) as i128
+                }
                 BinaryOperator::And => left & right,
                 BinaryOperator::Or => left | right,
                 BinaryOperator::Xor => left ^ right,

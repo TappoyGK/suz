@@ -221,7 +221,7 @@ impl Parser<'_, '_> {
                         .unwrap_or_else(|| {
                             crate::ast::BinaryOperator::from_symbol(op)
                                 .unwrap()
-                                .c_symbol()
+                                .symbol()
                         }),
                 })
             }

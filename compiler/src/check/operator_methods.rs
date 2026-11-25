@@ -306,7 +306,7 @@ pub(super) fn compound(
         } = &expr.kind
         && supported(*operator)
     {
-        let name = resolve(operator.c_symbol(), left, right, scope)?;
+        let name = resolve(operator.symbol(), left, right, scope)?;
         let signature = &scope.functions[name];
         let result = scope.substitute(
             signature.result,
@@ -319,7 +319,7 @@ pub(super) fn compound(
                 crate::diagnostic!(
                     "operator.compound",
                     "operator {}= requires a result of type {}, found {}",
-                    operator.c_symbol(),
+                    operator.symbol(),
                     scope.type_name(target),
                     scope.type_name(result)
                 ),
