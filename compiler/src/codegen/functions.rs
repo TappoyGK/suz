@@ -207,6 +207,26 @@ fn emit_argument(
             names.push(format!("&({value})"));
             return;
         }
+        let unwrapped = match &argument.value {
+            crate::check::ir::Value::Receiver {
+                mutable: false,
+                target,
+            } => target.as_ref(),
+            _ => argument,
+        };
+        if let crate::check::ir::Value::With { target, fields } = &unwrapped.value {
+            let index = context.temporaries.len();
+            context.temporaries.push(argument.ty);
+            let destination = format!("suz_cmp_{index}");
+            setup.extend(super::structs::with_into(
+                &destination,
+                target,
+                fields,
+                context,
+            ));
+            names.push(format!("&{destination}"));
+            return;
+        }
         let index = context.temporaries.len();
         context.temporaries.push(argument.ty);
         let value = expression(argument, context);

@@ -42,6 +42,32 @@ pub(super) fn literal(
     format!("({})", setup.join(", "))
 }
 
+pub(super) fn with_into(
+    destination: &str,
+    target: &CheckedExpression,
+    fields: &[(usize, CheckedExpression)],
+    context: &mut ExpressionContext,
+) -> Vec<String> {
+    // 初期値の呼び出しがコピー元を書き換える前に、構造体全体を保存する。
+    let mut setup = if let crate::check::ir::Value::With {
+        target: inner_target,
+        fields: inner_fields,
+    } = &target.value
+    {
+        with_into(destination, inner_target, inner_fields, context)
+    } else {
+        vec![format!("{destination} = {}", expression(target, context))]
+    };
+    for (field, value) in fields {
+        let name = field_name(target.ty, *field, context);
+        setup.push(format!(
+            "{destination}.{name} = {}",
+            expression(value, context)
+        ));
+    }
+    setup
+}
+
 pub(super) fn with(
     target: &CheckedExpression,
     fields: &[(usize, CheckedExpression)],
@@ -49,16 +75,9 @@ pub(super) fn with(
 ) -> String {
     let index = context.temporaries.len();
     context.temporaries.push(target.ty);
-    // 初期値の呼び出しがコピー元を書き換える前に、構造体全体を保存する。
-    let mut setup = vec![format!("suz_cmp_{index} = {}", expression(target, context))];
-    for (field, value) in fields {
-        let name = field_name(target.ty, *field, context);
-        setup.push(format!(
-            "suz_cmp_{index}.{name} = {}",
-            expression(value, context)
-        ));
-    }
-    setup.push(format!("suz_cmp_{index}"));
+    let destination = format!("suz_cmp_{index}");
+    let mut setup = with_into(&destination, target, fields, context);
+    setup.push(destination);
     format!("({})", setup.join(", "))
 }
 

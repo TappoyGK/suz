@@ -130,9 +130,12 @@ fn from_deref() -> i64 {
 fn from_rvalue() -> i64 {
     return read_outer(make())
 }
+fn from_with(a: Outer) -> i64 {
+    return read_outer(a with { w: 9 }) + (a with { w: 10 }).sum()
+}
 fn main() -> u8 {
     var m = make()
-    fix total = from_param(make()) + from_fix() + from_var() + from_deref() + from_rvalue() + m#pass_self()
+    fix total = from_param(make()) + from_fix() + from_var() + from_deref() + from_rvalue() + from_with(make()) + m#pass_self()
     return ifexpr total > 0 { 0 } else { 1 }
 }
 "#;
@@ -206,5 +209,17 @@ fn main() -> u8 {
         from_rvalue.contains("suz_struct_1 suz_cmp_0;")
             && from_rvalue.contains("suz_cmp_0 = suz_fn_5(), suz_fn_0(&suz_cmp_0)"),
         "from_rvalue should store return value once and pass its address:\n{from_rvalue}"
+    );
+
+    // from_with (id 11): with の作業用一時変数のアドレスを直接渡し、構造体を 2 回代入しない。
+    let from_with = body_of(11);
+    assert!(
+        from_with
+            .contains("suz_cmp_3 = (*suz_ref_0), suz_cmp_3.suz_field_1 = 9, suz_fn_0(&suz_cmp_3)")
+            && from_with.contains(
+                "suz_cmp_4 = (*suz_ref_0), suz_cmp_4.suz_field_1 = 10, suz_fn_2(&suz_cmp_4)"
+            )
+            && from_with.matches("suz_struct_1 suz_cmp_").count() == 2,
+        "from_with should build directly into argument temporary without a second copy:\n{from_with}"
     );
 }
