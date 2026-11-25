@@ -395,3 +395,5 @@ return result != {expected} || trace != {trace};
 
 #[path = "tests/array_bounds.rs"]
 mod array_bounds;
+#[path = "tests/struct_params.rs"]
+mod struct_params;

@@ -51,6 +51,7 @@ struct ExpressionContext {
     text_literals: std::collections::BTreeMap<String, usize>,
     uses_text: bool,
     structs: Vec<crate::ast::StructDeclaration>,
+    external_ids: std::ops::Range<usize>,
     function_types: Vec<crate::ast::FunctionType>,
     call_only_types: BTreeSet<usize>,
     function_adapters: BTreeSet<usize>,
@@ -123,6 +124,7 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
         source_name: source_name.into(),
         enums: program.enums.clone(),
         structs: program.structs.clone(),
+        external_ids: program.external_base..program.external_base + program.externs.len(),
         function_types: program.function_types.clone(),
         // 未使用のfnshapeもCへ宣言するため、その仮引数が参照する組の型も用意する。
         call_only_types: program
@@ -181,7 +183,7 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
     functions::call_only_declarations(&mut c, &context);
     text_structure::emit(&mut c, &context);
     for function in &program.functions {
-        writeln!(c, "{};", functions::declaration(function)).unwrap();
+        writeln!(c, "{};", functions::declaration(function, &context)).unwrap();
     }
     c.push_str(&context.constant_array_data);
     c.push_str(&context.functions);

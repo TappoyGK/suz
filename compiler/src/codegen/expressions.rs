@@ -553,21 +553,60 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                 })
                 .collect();
             // 宣言には評価の副作用がない。代入は式の中に残し、論理演算の短絡評価とループの再評価を保つ。
+            // 演算子メソッドへポインタ渡しする不変の構造体は一時変数へコピーせず、直接アドレスを渡す。
+            let pointer_struct: Vec<bool> = operands
+                .iter()
+                .map(|operand| super::functions::pass_struct_by_pointer(operand.ty, context))
+                .collect();
+            let direct_struct: Vec<bool> = operands
+                .iter()
+                .enumerate()
+                .map(|(index, operand)| {
+                    if !pointer_struct[index]
+                        || !super::functions::immutable_struct_place(operand, context)
+                    {
+                        return false;
+                    }
+                    let left_method =
+                        index == 0 || methods.get(index - 1).is_some_and(Option::is_some);
+                    let right_method =
+                        index >= operators.len() || methods.get(index).is_some_and(Option::is_some);
+                    left_method && right_method
+                })
+                .collect();
             let names: Vec<_> = operands
                 .iter()
-                .map(|operand| {
-                    let index = context.temporaries.len();
-                    context.temporaries.push(operand.ty);
-                    format!("suz_cmp_{index}")
+                .enumerate()
+                .map(|(i, operand)| {
+                    if direct_struct[i] {
+                        String::new()
+                    } else {
+                        let index = context.temporaries.len();
+                        context.temporaries.push(operand.ty);
+                        format!("suz_cmp_{index}")
+                    }
                 })
                 .collect();
             let values: Vec<_> = operands
                 .iter()
                 .map(|operand| expression(operand, context))
                 .collect();
+            let method_argument = |i: usize| -> String {
+                if direct_struct[i] {
+                    format!("&({})", values[i])
+                } else if pointer_struct[i] {
+                    format!("&{}", names[i])
+                } else {
+                    names[i].clone()
+                }
+            };
             let mut compare = |index: usize| {
                 if let Some(Some(id)) = methods.get(index) {
-                    return format!("suz_fn_{id}({}, {})", names[index], names[index + 1]);
+                    return format!(
+                        "suz_fn_{id}({}, {})",
+                        method_argument(index),
+                        method_argument(index + 1)
+                    );
                 }
                 let unsigned = operands[index]
                     .ty
@@ -663,23 +702,28 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                     operators[index].symbol()
                 )
             };
-            let mut result = format!(
-                "({} = {}, {} = {}, {}",
-                names[0],
-                values[0],
-                names[1],
-                values[1],
-                compare(0)
-            );
+            let mut first = Vec::new();
+            if !direct_struct[0] {
+                first.push(format!("{} = {}", names[0], values[0]));
+            }
+            if !direct_struct[1] {
+                first.push(format!("{} = {}", names[1], values[1]));
+            }
+            first.push(compare(0));
+            let mut result = format!("({}", first.join(", "));
             for index in 1..operators.len() {
-                write!(
-                    result,
-                    " && ({} = {}, {})",
-                    names[index + 1],
-                    values[index + 1],
-                    compare(index)
-                )
-                .unwrap();
+                if direct_struct[index + 1] {
+                    write!(result, " && ({})", compare(index)).unwrap();
+                } else {
+                    write!(
+                        result,
+                        " && ({} = {}, {})",
+                        names[index + 1],
+                        values[index + 1],
+                        compare(index)
+                    )
+                    .unwrap();
+                }
             }
             result.push(')');
             result

@@ -47,12 +47,22 @@ pub(super) fn emit(closure: &CheckedClosure, ty: Type, context: &mut ExpressionC
     let saved_environments = std::mem::take(&mut context.closure_environments);
     let saved_references = std::mem::take(&mut context.references);
     // 値ブロックと同じ参照表現を使い、読み書きと再キャプチャーが外側の変数へ届くようにする。
-    context.references = closure
-        .captures
+    // 16 バイト超の構造体の値仮引数と値キャプチャーもポインタ経由で読み、呼び出し時のコピーを避ける。
+    context.references = function.parameters[..parameter_count]
         .iter()
         .enumerate()
-        .filter(|(_, c)| c.by_reference)
-        .map(|(i, _)| parameter_count + i)
+        .filter(|(_, ty)| super::functions::pass_struct_by_pointer(**ty, context))
+        .map(|(index, _)| index)
+        .chain(
+            closure
+                .captures
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| {
+                    c.by_reference || super::functions::pass_struct_by_pointer(c.value.ty, context)
+                })
+                .map(|(i, _)| parameter_count + i),
+        )
         .collect();
     let saved_result = context.function_result.replace(function.result);
     let mut body = if function.fallible {
@@ -80,7 +90,11 @@ pub(super) fn emit(closure: &CheckedClosure, ty: Type, context: &mut ExpressionC
         if let Type::Function(shape) = ty {
             context.call_only_types.insert(*shape);
         }
-        parameters.push(format!("const {} suz_local_{index}", ty.c_name()));
+        if super::functions::pass_struct_by_pointer(*ty, context) {
+            parameters.push(format!("const {} *restrict suz_ref_{index}", ty.c_name()));
+        } else {
+            parameters.push(format!("const {} suz_local_{index}", ty.c_name()));
+        }
     }
     if function.fallible {
         parameters.push("uint64_t *suz_error".into());
@@ -97,6 +111,8 @@ pub(super) fn emit(closure: &CheckedClosure, ty: Type, context: &mut ExpressionC
         let local = parameter_count + index;
         if capture.by_reference {
             writeln!(definition, "    {} *const suz_ref_{local} = ((const suz_closure_env_{id} *)environment)->capture_{index};", capture.value.ty.c_name()).unwrap();
+        } else if super::functions::pass_struct_by_pointer(capture.value.ty, context) {
+            writeln!(definition, "    const {} *const suz_ref_{local} = &((const suz_closure_env_{id} *)environment)->capture_{index};", capture.value.ty.c_name()).unwrap();
         } else {
             writeln!(definition, "    const {} suz_local_{local} = ((const suz_closure_env_{id} *)environment)->capture_{index};", capture.value.ty.c_name()).unwrap();
         }

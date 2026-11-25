@@ -365,3 +365,134 @@ fn struct_fields_reject_invalid_declarations_access_and_overlapping_writes() {
         );
     }
 }
+
+#[test]
+fn struct_value_parameters_preserve_copy_semantics_under_aliasing_and_mutation() {
+    let source = r#"struct Inner { x: i64, y: i64 }
+struct Big { a: Inner, b: i64, c: i64, d: i64 }
+fnshape Mutate() -> void
+fnshape SumSame(Big, Big) -> i64
+fnshape ReadBig(Big) -> i64
+fnshape Once() -> i64
+
+fn mutate_and_read_ptr(v: Big, p: mut Big) -> i64 {
+    p#b = 999
+    p.a#x = 888
+    return v.a.x + v.b
+}
+
+fn mutate_via_closure(v: Big, mutate: fn Mutate) -> i64 {
+    mutate()
+    return v.a.x + v.b
+}
+
+fn mutate_inner_via_closure(v: Inner, mutate: fn Mutate) -> i64 {
+    mutate()
+    return v.x + v.y
+}
+
+fn run_once(f: fn Once) -> i64 {
+    return f()
+}
+
+fn sum_same(a: Big, b: Big) -> i64 {
+    return a.a.x + b.b + a.c + b.d
+}
+
+fn Big#check_self_copy(mutate: fn Mutate) -> i64 {
+    return mutate_via_closure(self, mutate)
+}
+
+fn Big#mutate_in_place() -> void {
+    self#b = 777
+    self.a#x = 666
+}
+
+fn apply_static(f: static fn SumSame, a: Big, b: Big) -> i64 {
+    return f(a, b)
+}
+
+fn apply_fn(f: fn ReadBig, a: Big) -> i64 {
+    return f(a)
+}
+
+fn identity[T](v: T) -> T {
+    return v
+}
+
+fn Big.score() -> i64 {
+    return self.a.x + self.b
+}
+
+fn Big.+(other: Big) -> Big {
+    return Big {
+        a: Inner { x: self.a.x + other.a.x, y: self.a.y + other.a.y },
+        b: self.b + other.b,
+        c: self.c + other.c,
+        d: self.d + other.d,
+    }
+}
+
+fn Big.<(other: Big) -> bool {
+    return self.b < other.b
+}
+
+fn main() -> u8 {
+    // 1. ポインタ参照外し + 同じ領域の mut ポインタを同時渡し。
+    fix p = new Big { a: Inner { x: 10, y: 20 }, b: 30, c: 40, d: 50 }
+    fix r: ref Big = p
+    if mutate_and_read_ptr(.p, p) != 40 { return 1 }
+    if p.a.x != 888 || p.b != 999 { return 2 }
+    // ref ポインタ経由の参照外しでも、別名の mut ポインタで書き換わらない。
+    p.a#x = 11
+    p#b = 22
+    if mutate_and_read_ptr(.r, p) != 33 { return 3 }
+
+    // 2. var 束縛とそのフィールドを、参照キャプチャーで書き換えるクロージャと同時に渡す。
+    var v = Big { a: Inner { x: 1, y: 2 }, b: 3, c: 4, d: 5 }
+    if mutate_via_closure(v, fn [var v]() -> void {
+        v#b = 100
+        v.a#x = 200
+    }) != 4 { return 4 }
+    if v.a.x != 200 || v.b != 100 { return 5 }
+
+    if mutate_inner_via_closure(v.a, fn [var v]() -> void {
+        v.a#x = 500
+        v.a#y = 600
+    }) != 202 { return 6 }
+
+    // 3. 参照キャプチャーした var 構造体をクロージャの中から値渡しする。
+    var cap = Big { a: Inner { x: 7, y: 8 }, b: 9, c: 1, d: 2 }
+    if run_once(fn [var cap]() -> i64 {
+        return mutate_via_closure(cap, fn [var cap]() -> void {
+            cap#b = 50
+            cap.a#x = 60
+        })
+    }) != 16 { return 7 }
+    if cap.a.x != 60 || cap.b != 50 { return 8 }
+
+    // 4. # メソッドの self を値仮引数へ渡した後に self が書き換わる。
+    var target = Big { a: Inner { x: 5, y: 6 }, b: 7, c: 8, d: 9 }
+    fix before = target#check_self_copy(fn [var target]() -> void {
+        target#mutate_in_place()
+    })
+    if before != 12 { return 9 }
+    if target.a.x != 666 || target.b != 777 { return 10 }
+
+    // 5. 同じ fix 構造体を 2 つの仮引数へ同時渡し（const T *restrict の読み取り専用エイリアス）。
+    fix fixed = Big { a: Inner { x: 1, y: 2 }, b: 3, c: 4, d: 5 }
+    if sum_same(fixed, fixed) != 13 { return 11 }
+    if apply_static(fn sum_same, fixed, fixed) != 13 { return 12 }
+    if apply_fn(fn [fixed](x: Big) -> i64 { return x.score() + fixed.b }, fixed) != 7 { return 13 }
+
+    // 6. ジェネリック具体化・.メソッド・演算子メソッド（+ と <）。
+    fix copy = identity(fixed)
+    fix doubled = copy + fixed
+    if not (fixed < doubled) || doubled.score() != 8 { return 14 }
+    return 0
+}
+"#;
+    let output = compile_and_run_c23(source, "struct-params.suz");
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(output.stdout.is_empty() && output.stderr.is_empty());
+}
