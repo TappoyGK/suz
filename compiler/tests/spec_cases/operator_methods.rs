@@ -760,7 +760,7 @@ fn operator_methods_enforce_eligibility_and_unary_contracts() {
             "operator.overload",
         ),
         (
-            "fn Num.+%(k: Num) -> Num { return self }",
+            "fn Num.as%(k: Num) -> Num { return self }",
             "",
             "operator.method",
         ),
@@ -792,7 +792,7 @@ fn missing_unary_operator_diagnostics_distinguish_user_types_from_builtins() {
     ] {
         // 定義の有無によって変わる検査経路の両方で、同じ診断を要求する。
         for extra in ["", "fn Num.+(n: Num) -> Num { return n }"] {
-            for op in ["-", "~", "not", "len"] {
+            for op in ["-", "-%", "~", "not", "len"] {
                 let source = format!(
                     "{declaration}\n{extra}\nfn main() -> u8 {{ fix a = {value}\nfix b = {op} a\nreturn 0 }}"
                 );
@@ -821,4 +821,77 @@ fn missing_unary_operator_diagnostics_distinguish_user_types_from_builtins() {
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.rule(), rule, "{source}\n{error}");
     }
+}
+
+#[test]
+fn wrapping_shift_and_euclid_operator_methods_and_needs_work() {
+    let output = compile_and_run_c23(
+        r#"struct Phase { raw: u8 }
+
+fn Phase.+%(other: Phase) -> Phase { return Phase { raw: self.raw +% other.raw } }
+fn Phase.-%(other: Phase) -> Phase { return Phase { raw: self.raw -% other.raw } }
+fn Phase.-%() -> Phase { return Phase { raw: -%self.raw } }
+fn Phase.*%(k: u8) -> Phase { return Phase { raw: self.raw *% k } }
+fn Phase.%%(period: u8) -> Phase { return Phase { raw: self.raw %% period or 0 } }
+fn Phase.<<%(n: u8) -> Phase { return Phase { raw: self.raw <<% n } }
+fn Phase.>>%(n: u8) -> Phase { return Phase { raw: self.raw >>% n } }
+fn Phase.>>>(n: u8) -> Phase { return Phase { raw: self.raw >>> n or 0 } }
+fn Phase.>>>%(n: u8) -> Phase { return Phase { raw: self.raw >>>% n } }
+
+@needs T: +%(T) -> T
+@needs T: -%() -> T
+fn wrap_add_neg[T](a: T, b: T) -> T {
+    return a +% (-%b)
+}
+
+@needs T: <<%(u8) -> T
+@needs T: >>>%(u8) -> T
+fn wrap_roundtrip[T](x: T) -> T {
+    return (x <<% 1) >>>% 1
+}
+
+@needs T: %%(T) -> T
+fn euclid_mod[T](a: T, b: T) -> T {
+    return a %% b
+}
+
+fn main() -> u8 {
+    var p = Phase { raw: 250 }
+    p +%= Phase { raw: 10 }
+    if p.raw != 4 { return 1 }
+    p -%= Phase { raw: 10 }
+    if p.raw != 250 { return 2 }
+    if (-%p).raw != 6 { return 3 }
+    p *%= 2
+    if p.raw != 244 { return 4 }
+    p %%= 10
+    if p.raw != 4 { return 5 }
+    p <<%= 2
+    if p.raw != 16 { return 6 }
+    p >>%= 1
+    if p.raw != 8 { return 7 }
+    p >>>= 1
+    if p.raw != 4 { return 8 }
+    p >>>%= 9
+    if p.raw != 2 { return 9 }
+
+    // 構造体と組み込み型の両方で @needs が機能する
+    fix g_phase = wrap_add_neg(Phase { raw: 10 }, Phase { raw: 15 })
+    if g_phase.raw != 251 { return 10 }
+    fix g_u8: u8 = wrap_add_neg(10 as u8, 15 as u8)
+    if g_u8 != 251 { return 11 }
+    fix g_rt_phase = wrap_roundtrip(Phase { raw: 129 })
+    if g_rt_phase.raw != 1 { return 12 }
+    fix g_rt_i8: i8 = wrap_roundtrip(-127 as i8)
+    if g_rt_i8 != 1 { return 13 }
+    fix g_euc_f64: f64 = euclid_mod(-0.25, 1.0)
+    if g_euc_f64 != 0.75 { return 14 }
+
+    return 0
+}
+"#,
+        "wrap-op-methods",
+    );
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stdout.is_empty() && output.stderr.is_empty());
 }

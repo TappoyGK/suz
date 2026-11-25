@@ -2,11 +2,11 @@
 
 [目次と書式](../spec-cases.md)
 
-### expr-001 ラップする算術と切り詰め
+### expr-001 ラップする算術・シフトと切り詰め
 
 主根拠：`[expr.wrap]`。
 
-補助根拠：`[expr.as-trunc]`。
+補助根拠：`[expr.as-trunc]`、`[expr.shift]`。
 
 **ソース：**
 
@@ -16,8 +16,13 @@ fn main() -> u8 {
     fix wrapped = top +% 1
     fix down: u8 = 0 -% 1
     fix product: u8 = 128 *% 2
+    fix neg_min: i8 = -%(-128 as i8)
+    fix shl_wrap: u8 = (129 as u8) <<% 9
+    fix shr_wrap: i8 = (-7 as i8) >>% 9
+    fix lshr_wrap: i8 = (-2 as i8) >>>% 9
     fix truncated = 257 as% u8
-    return ifexpr wrapped == 0 && down == 255 && product == 0 && truncated == 1 { 0 } else { 1 }
+    return ifexpr wrapped == 0 && down == 255 && product == 0 && neg_min == -128 &&
+        shl_wrap == 2 && shr_wrap == -4 && lshr_wrap == 127 && truncated == 1 { 0 } else { 1 }
 }
 ```
 
@@ -840,7 +845,7 @@ fn main() -> u8 {
 
 probeは呼ばれず、ログは出ない。
 
-### expr-029 負数の除算・剰余・右シフト
+### expr-029 負数の除算・剰余・非負剰余・右シフト
 
 主根拠：`[expr.int-division]`。
 
@@ -854,10 +859,15 @@ fn main() -> u8 {
     fix positive: u8 = 249
     fix quotient = negative / 3
     fix remainder = negative % 3
+    fix euclid_int = negative %% 3
+    fix float_rem: f64 = -7.5 % 2.0
+    fix float_euclid: f64 = -0.25 %% 1.0
     fix signed_shift = negative >> 1
+    fix logical_shift = negative >>> 1
     fix unsigned_shift = positive >> 1
-    return ifexpr quotient == -2 && remainder == -1 &&
-        signed_shift == -4 && unsigned_shift == 124 { 0 } else { 1 }
+    return ifexpr quotient == -2 && remainder == -1 && euclid_int == 2 &&
+        float_rem == -1.5 && float_euclid == 0.75 &&
+        signed_shift == -4 && logical_shift == 124 && unsigned_shift == 124 { 0 } else { 1 }
 }
 ```
 
@@ -867,7 +877,7 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | 正常終了 | 0 | 0 |
 
--7 / 3は-2、-7 % 3は-1。符号付きの-7 >> 1は符号ビットで埋めるため-4になる。符号なしの249 >> 1は124になる。
+-7 / 3は-2、-7 % 3は-1、-7 %% 3は2。浮動小数点の-7.5 % 2.0は-1.5、-0.25 %% 1.0は0.75。符号付きの-7 >> 1は符号ビットで埋めるため-4、-7 >>> 1は0で埋めるため124になる。符号なしの249 >> 1は124になる。
 
 ### expr-030 同じ向きの不等号を連鎖させる
 

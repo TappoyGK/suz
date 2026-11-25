@@ -291,7 +291,9 @@ fn symbolic_arithmetic(expr: &Expression, scope: &Scope) -> bool {
                 || symbolic_arithmetic(left, scope)
                 || symbolic_arithmetic(right, scope)
         }
-        ExpressionKind::Negate(inner) | ExpressionKind::BitNot(inner) => {
+        ExpressionKind::Negate(inner)
+        | ExpressionKind::WrapNegate(inner)
+        | ExpressionKind::BitNot(inner) => {
             target(inner, scope).is_some() || symbolic_arithmetic(inner, scope)
         }
         ExpressionKind::Group(inner) => symbolic_arithmetic(inner, scope),
@@ -522,6 +524,7 @@ fn operator(
         let inner = Box::new(receiver);
         return Ok(match op {
             "-" => ExpressionKind::Negate(inner),
+            "-%" => ExpressionKind::WrapNegate(inner),
             "~" => ExpressionKind::BitNot(inner),
             "not" => ExpressionKind::Not(inner),
             "len" => ExpressionKind::Len(inner),

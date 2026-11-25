@@ -206,6 +206,7 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
         ExpressionKind::Integer { .. } | ExpressionKind::Float(_) => None,
         ExpressionKind::Name(name) => bindings.get(name).map(|binding| binding.ty),
         ExpressionKind::Negate(inner)
+        | ExpressionKind::WrapNegate(inner)
         | ExpressionKind::BitNot(inner)
         | ExpressionKind::Not(inner)
             if bindings.has_operator_methods
@@ -315,6 +316,7 @@ fn has_float_source_inner<const OPERATOR_METHODS: bool>(
         }
         ExpressionKind::Float(_) => true,
         ExpressionKind::Negate(inner)
+        | ExpressionKind::WrapNegate(inner)
         | ExpressionKind::BitNot(inner)
         | ExpressionKind::Not(inner)
             if OPERATOR_METHODS && super::operator_methods::owner(inner, bindings).is_some() =>

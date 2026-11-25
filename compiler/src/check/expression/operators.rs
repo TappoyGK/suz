@@ -204,7 +204,9 @@ pub(super) fn check(
                             Type::Struct(_) | Type::Enum(_)
                                 if matches!(
                                     &expr.kind,
-                                    ExpressionKind::Negate(_) | ExpressionKind::BitNot(_)
+                                    ExpressionKind::Negate(_)
+                                        | ExpressionKind::WrapNegate(_)
+                                        | ExpressionKind::BitNot(_)
                                 ) =>
                             {
                                 crate::diagnostic!(
