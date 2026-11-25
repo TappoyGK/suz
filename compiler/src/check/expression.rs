@@ -220,6 +220,7 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
         ExpressionKind::ArithmeticHandler { operand: inner, .. }
         | ExpressionKind::Group(inner)
         | ExpressionKind::BitNot(inner)
+        | ExpressionKind::WrapNegate(inner)
         | ExpressionKind::Negate(inner) => operand_type(inner, bindings),
         ExpressionKind::Binary {
             operator,
@@ -328,6 +329,7 @@ fn has_float_source_inner<const OPERATOR_METHODS: bool>(
         ExpressionKind::ArithmeticHandler { operand: inner, .. }
         | ExpressionKind::Group(inner)
         | ExpressionKind::BitNot(inner)
+        | ExpressionKind::WrapNegate(inner)
         | ExpressionKind::Negate(inner) => float_source::<OPERATOR_METHODS>(inner, bindings),
         ExpressionKind::Binary {
             operator,
@@ -678,6 +680,7 @@ fn expression_checked(
             }
             ExpressionKind::ArithmeticHandler { .. }
             | ExpressionKind::BitNot(_)
+            | ExpressionKind::WrapNegate(_)
             | ExpressionKind::Negate(_)
             | ExpressionKind::Binary { .. }
             | ExpressionKind::Not(_)

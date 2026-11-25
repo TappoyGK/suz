@@ -1199,6 +1199,7 @@ pub(crate) enum ExpressionKind {
         otherwise: Box<Expression>,
     },
     BitNot(Box<Expression>),
+    WrapNegate(Box<Expression>),
     Binary {
         operator: BinaryOperator,
         left: Box<Expression>,

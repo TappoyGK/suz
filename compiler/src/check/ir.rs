@@ -416,6 +416,7 @@ pub(crate) enum Value {
     },
     Truncate(Box<CheckedExpression>),
     BitNot(Box<CheckedExpression>),
+    WrapNegate(Box<CheckedExpression>),
     Binary {
         operator: BinaryOperator,
         left: Box<CheckedExpression>,
@@ -472,7 +473,7 @@ macro_rules! constant_children_visitor {
                     }
                     return handler(h, visit);
                 }
-                Self::ArrayLength { target: v, .. } | Self::Receiver { target: v, .. } | Self::New { value: v, .. } | Self::Deref(v) | Self::NonNil(v) | Self::CBytes(v) | Self::CByteLen { operand: v, .. } | Self::FunctionBorrow(v) | Self::Len(v) | Self::Cast(v) | Self::Negate(v) | Self::Truncate(v) | Self::BitNot(v)
+                Self::ArrayLength { target: v, .. } | Self::Receiver { target: v, .. } | Self::New { value: v, .. } | Self::Deref(v) | Self::NonNil(v) | Self::CBytes(v) | Self::CByteLen { operand: v, .. } | Self::FunctionBorrow(v) | Self::Len(v) | Self::Cast(v) | Self::Negate(v) | Self::Truncate(v) | Self::BitNot(v) | Self::WrapNegate(v)
                 | Self::Not(v) | Self::TextView(v) | Self::Intern { operand: v, .. }
                 | Self::Field { target: v, .. } => visit(v),
                 // constant_structはオペランドの解析から得た具体的なキャッシュであり、ソースのオペランドではない。

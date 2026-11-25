@@ -171,6 +171,7 @@ fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
             _ => None,
         },
         Value::BitNot(inner) => Some(wrap(!constant_integer_raw(inner)?)),
+        Value::WrapNegate(inner) => Some(wrap(-constant_integer_raw(inner)?)),
         Value::Binary {
             operator,
             left,
@@ -1014,6 +1015,7 @@ fn validate_evaluation(expr: &CheckedExpression) -> Result<(), Diagnostic> {
         | Value::Negate(inner)
         | Value::Truncate(inner)
         | Value::BitNot(inner)
+        | Value::WrapNegate(inner)
         | Value::Not(inner) => validate_evaluation(inner)?,
         Value::CheckedCast {
             operand,

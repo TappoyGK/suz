@@ -134,7 +134,10 @@ pub(super) fn check(
             });
             checked
         }
-        ExpressionKind::BitNot(_) | ExpressionKind::Negate(_) | ExpressionKind::Binary { .. } => {
+        ExpressionKind::BitNot(_)
+        | ExpressionKind::WrapNegate(_)
+        | ExpressionKind::Negate(_)
+        | ExpressionKind::Binary { .. } => {
             let ty = expected
                 .or_else(|| operand_type(expr, bindings))
                 .unwrap_or_else(|| default_type(expr, bindings));
@@ -260,6 +263,12 @@ pub(super) fn check(
                         same_width(operand_type(inner, bindings), ty, inner.location, bindings)?;
                     }
                     Value::BitNot(Box::new(expression(inner, Some(ty), bindings)?))
+                }
+                ExpressionKind::WrapNegate(inner) => {
+                    if !super::super::exact::is_operator(inner) {
+                        same_width(operand_type(inner, bindings), ty, inner.location, bindings)?;
+                    }
+                    Value::WrapNegate(Box::new(expression(inner, Some(ty), bindings)?))
                 }
                 ExpressionKind::Binary {
                     operator,

@@ -223,7 +223,7 @@ fn can_end_operand(kind: Option<Kind<'_>>) -> bool {
 fn continues_line(kind: Kind<'_>, previous: Option<Kind<'_>>) -> bool {
     match kind {
         Kind::Keyword("or") => true,
-        Kind::Symbol("-") => can_end_operand(previous),
+        Kind::Symbol("-" | "-%") => can_end_operand(previous),
         Kind::Symbol(symbol) => matches!(
             symbol,
             "=" | "+="
@@ -250,7 +250,6 @@ fn continues_line(kind: Kind<'_>, previous: Option<Kind<'_>>) -> bool {
                 | "%"
                 | "%%"
                 | "+%"
-                | "-%"
                 | "*%"
                 | "&"
                 | "|"

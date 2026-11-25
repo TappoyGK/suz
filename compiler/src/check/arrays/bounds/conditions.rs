@@ -152,7 +152,8 @@ pub(in crate::check) fn is_facts_pure(expr: &Expression) -> bool {
         | ExpressionKind::Variant { .. } => true,
         ExpressionKind::Group(inner)
         | ExpressionKind::Negate(inner)
-        | ExpressionKind::BitNot(inner) => is_facts_pure(inner),
+        | ExpressionKind::BitNot(inner)
+        | ExpressionKind::WrapNegate(inner) => is_facts_pure(inner),
         _ => false,
     }
 }

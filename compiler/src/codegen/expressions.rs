@@ -468,6 +468,17 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                 expression(inner, context)
             )
         }
+        Value::WrapNegate(ref inner) => {
+            let crate::ast::Type::Integer(ty) = expr.ty else {
+                unreachable!()
+            };
+            context.bit_helpers.insert(ty);
+            format!(
+                "suz_bits_{}(UINT64_C(0) - (uint64_t)({}))",
+                ty.name(),
+                expression(inner, context)
+            )
+        }
         Value::Binary {
             operator,
             ref left,
