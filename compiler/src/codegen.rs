@@ -74,6 +74,8 @@ struct ExpressionContext {
     bit_helpers: BTreeSet<crate::ast::IntegerType>,
     float_helpers: BTreeSet<crate::ast::FloatType>,
     float_types: BTreeSet<crate::ast::FloatType>,
+    uses_float_rem: bool,
+    float_euclid: BTreeSet<crate::ast::FloatType>,
     temporaries: Vec<crate::ast::Type>,
 }
 

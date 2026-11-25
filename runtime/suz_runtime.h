@@ -48,6 +48,12 @@ static inline suz_exact suz_exact_divrem(suz_exact a, suz_exact b, bool remainde
     return suz_exact_make(remainder ? a.negative : a.negative != b.negative,
                          remainder ? a.magnitude % b.magnitude : a.magnitude / b.magnitude);
 }
+static inline suz_exact suz_exact_euclid(suz_exact a, suz_exact b, size_t line, size_t column) {
+    if (b.magnitude == 0) return (suz_exact){0, false, true, line, column};
+    unsigned _BitInt(128) r = a.magnitude % b.magnitude;
+    if (a.negative && r != 0) r = b.magnitude - r;
+    return suz_exact_make(false, r);
+}
 static inline bool suz_exact_fits(suz_exact a, bool is_signed, unsigned bits) {
     if (a.failed) return false;
     if (a.negative) return is_signed && a.magnitude <= ((unsigned _BitInt(128))1 << (bits - 1));

@@ -927,6 +927,7 @@ pub(crate) enum BinaryOperator {
     Multiply,
     Divide,
     Remainder,
+    EuclideanRemainder,
     ShiftLeft,
     ShiftRight,
     LogicalShiftRight,
@@ -960,6 +961,7 @@ impl BinaryOperator {
                 | Self::Multiply
                 | Self::Divide
                 | Self::Remainder
+                | Self::EuclideanRemainder
                 | Self::ShiftLeft
                 | Self::ShiftRight
                 | Self::LogicalShiftRight
@@ -972,6 +974,7 @@ impl BinaryOperator {
             "*" => Some(Self::Multiply),
             "/" => Some(Self::Divide),
             "%" => Some(Self::Remainder),
+            "%%" => Some(Self::EuclideanRemainder),
             "<<" => Some(Self::ShiftLeft),
             ">>" => Some(Self::ShiftRight),
             ">>>" => Some(Self::LogicalShiftRight),
@@ -994,6 +997,7 @@ impl BinaryOperator {
             Self::Multiply => "*",
             Self::Divide => "/",
             Self::Remainder => "%",
+            Self::EuclideanRemainder => "%%",
             Self::ShiftLeft => "<<",
             Self::ShiftRight => ">>",
             Self::LogicalShiftRight => ">>>",
@@ -1021,13 +1025,17 @@ impl BinaryOperator {
             | Self::WrapShiftRight
             | Self::WrapLogicalShiftRight => 3,
             Self::WrapAdd | Self::WrapSubtract | Self::Add | Self::Subtract => 4,
-            Self::WrapMultiply | Self::Multiply | Self::Divide | Self::Remainder => 5,
+            Self::WrapMultiply
+            | Self::Multiply
+            | Self::Divide
+            | Self::Remainder
+            | Self::EuclideanRemainder => 5,
         }
     }
     pub fn c_symbol(self) -> &'static str {
         match self {
             Self::Divide => "/",
-            Self::Remainder => "%",
+            Self::Remainder | Self::EuclideanRemainder => "%",
             Self::ShiftLeft | Self::WrapShiftLeft => "<<",
             Self::ShiftRight
             | Self::LogicalShiftRight

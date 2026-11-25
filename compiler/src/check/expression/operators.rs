@@ -154,8 +154,7 @@ pub(super) fn check(
             let integer_only = matches!(
                 &expr.kind,
                 ExpressionKind::Binary {
-                    operator: BinaryOperator::Remainder
-                        | BinaryOperator::ShiftLeft
+                    operator: BinaryOperator::ShiftLeft
                         | BinaryOperator::ShiftRight
                         | BinaryOperator::LogicalShiftRight,
                     ..

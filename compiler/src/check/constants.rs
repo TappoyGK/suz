@@ -23,6 +23,9 @@ fn integer_result(operator: BinaryOperator, a: i128, b: i128, ty: IntegerType) -
     {
         return None;
     }
+    if matches!(operator, BinaryOperator::EuclideanRemainder) && b == 0 {
+        return None;
+    }
     if operator.is_shift() && !(0..i128::from(ty.bits())).contains(&b) {
         return None;
     }
@@ -32,6 +35,9 @@ fn integer_result(operator: BinaryOperator, a: i128, b: i128, ty: IntegerType) -
         BinaryOperator::Multiply => a.checked_mul(b),
         BinaryOperator::Divide => a.checked_div(b),
         BinaryOperator::Remainder => a.checked_rem(b),
+        BinaryOperator::EuclideanRemainder => Int::from_i128(a)
+            .rem_euclid(Int::from_i128(b))
+            .and_then(Int::to_i128),
         BinaryOperator::ShiftLeft => a.checked_mul(1_i128 << b),
         BinaryOperator::ShiftRight => Some(a >> b),
         BinaryOperator::LogicalShiftRight => {
@@ -289,6 +295,19 @@ fn constant_float_raw(expr: &CheckedExpression) -> Option<f64> {
                         BinaryOperator::Subtract => left - right,
                         BinaryOperator::Multiply => left * right,
                         BinaryOperator::Divide => left / right,
+                        BinaryOperator::Remainder => left % right,
+                        BinaryOperator::EuclideanRemainder => {
+                            let r = left % right;
+                            let abs_b = right.abs();
+                            if r < 0.0 {
+                                let adjusted = r + abs_b;
+                                if adjusted >= abs_b { 0.0 } else { adjusted }
+                            } else if r == 0.0 {
+                                0.0
+                            } else {
+                                r
+                            }
+                        }
                         _ => return None,
                     } as f64);
                 }
@@ -297,6 +316,19 @@ fn constant_float_raw(expr: &CheckedExpression) -> Option<f64> {
                     BinaryOperator::Subtract => left - right,
                     BinaryOperator::Multiply => left * right,
                     BinaryOperator::Divide => left / right,
+                    BinaryOperator::Remainder => left % right,
+                    BinaryOperator::EuclideanRemainder => {
+                        let r = left % right;
+                        let abs_b = right.abs();
+                        if r < 0.0 {
+                            let adjusted = r + abs_b;
+                            if adjusted >= abs_b { 0.0 } else { adjusted }
+                        } else if r == 0.0 {
+                            0.0
+                        } else {
+                            r
+                        }
+                    }
                     _ => return None,
                 },
             }

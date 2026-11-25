@@ -475,13 +475,39 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
         } => {
             if expr.ty.is_float() && unordered_read(left, context) && unordered_read(right, context)
             {
-                return format!(
-                    "({})(({}) {} ({}))",
-                    expr.ty.c_name(),
-                    expression(left, context),
-                    operator.c_symbol(),
-                    expression(right, context)
-                );
+                let crate::ast::Type::Float(ty) = expr.ty else {
+                    unreachable!()
+                };
+                return match operator {
+                    crate::ast::BinaryOperator::Remainder => {
+                        context.uses_float_rem = true;
+                        let fmod_fn = match ty {
+                            crate::ast::FloatType::F32 => "fmodf",
+                            crate::ast::FloatType::F64 => "fmod",
+                        };
+                        format!(
+                            "{fmod_fn}(({}), ({}))",
+                            expression(left, context),
+                            expression(right, context)
+                        )
+                    }
+                    crate::ast::BinaryOperator::EuclideanRemainder => {
+                        context.float_euclid.insert(ty);
+                        format!(
+                            "suz_euclid_{}(({}), ({}))",
+                            ty.name(),
+                            expression(left, context),
+                            expression(right, context)
+                        )
+                    }
+                    _ => format!(
+                        "({})(({}) {} ({}))",
+                        expr.ty.c_name(),
+                        expression(left, context),
+                        operator.c_symbol(),
+                        expression(right, context)
+                    ),
+                };
             }
             let index = context.temporaries.len();
             context.temporaries.extend([left.ty, right.ty]);
@@ -540,12 +566,30 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                         }
                     }
                 }
-                crate::ast::Type::Float(ty) => format!(
-                    "({})(suz_cmp_{index} {} suz_cmp_{})",
-                    ty.c_name(),
-                    operator.c_symbol(),
-                    index + 1
-                ),
+                crate::ast::Type::Float(ty) => match operator {
+                    crate::ast::BinaryOperator::Remainder => {
+                        context.uses_float_rem = true;
+                        let fmod_fn = match ty {
+                            crate::ast::FloatType::F32 => "fmodf",
+                            crate::ast::FloatType::F64 => "fmod",
+                        };
+                        format!("{fmod_fn}(suz_cmp_{index}, suz_cmp_{})", index + 1)
+                    }
+                    crate::ast::BinaryOperator::EuclideanRemainder => {
+                        context.float_euclid.insert(ty);
+                        format!(
+                            "suz_euclid_{}(suz_cmp_{index}, suz_cmp_{})",
+                            ty.name(),
+                            index + 1
+                        )
+                    }
+                    _ => format!(
+                        "({})(suz_cmp_{index} {} suz_cmp_{})",
+                        ty.c_name(),
+                        operator.c_symbol(),
+                        index + 1
+                    ),
+                },
                 _ => unreachable!(),
             };
             format!(

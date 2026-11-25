@@ -40,7 +40,9 @@ fn can_fail(e: &Exact) -> bool {
                 || can_fail(b)
                 || (matches!(
                     op,
-                    crate::ast::BinaryOperator::Divide | crate::ast::BinaryOperator::Remainder
+                    crate::ast::BinaryOperator::Divide
+                        | crate::ast::BinaryOperator::Remainder
+                        | crate::ast::BinaryOperator::EuclideanRemainder
                 ) && b
                     .range
                     .is_none_or(|r| r.min <= Int::ZERO && r.max >= Int::ZERO))
@@ -90,6 +92,10 @@ pub(super) fn tree(e: &Exact, c: &mut ExpressionContext) -> String {
                     matches!(op, Remainder),
                     e.location.line,
                     e.location.column
+                ),
+                EuclideanRemainder => format!(
+                    "suz_exact_euclid(suz_cmp_{i}, suz_cmp_{j}, {}, {})",
+                    e.location.line, e.location.column
                 ),
                 _ => unreachable!(),
             };

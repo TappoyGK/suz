@@ -29,6 +29,12 @@ pub(super) fn ty(e: &Exact) -> Option<Type> {
 }
 
 pub(super) fn operation_type(e: &Exact) -> Option<Type> {
+    if matches!(
+        e.kind,
+        ExactKind::Binary(BinaryOperator::EuclideanRemainder, ..)
+    ) {
+        return None;
+    }
     let range = e.range?;
     let operands: Vec<_> = match &e.kind {
         ExactKind::Negate(a) => vec![a.as_ref()],

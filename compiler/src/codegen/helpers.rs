@@ -40,6 +40,21 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
     if !context.float_types.is_empty() {
         c.push_str("#include <string.h>\n\n");
     }
+    if context.uses_float_rem || !context.float_euclid.is_empty() {
+        c.push_str("#include <math.h>\n\n");
+    }
+    for ty in &context.float_euclid {
+        let (c_type, fmod_fn, fabs_fn, zero) = match ty {
+            crate::ast::FloatType::F32 => ("float", "fmodf", "fabsf", "0.0f"),
+            crate::ast::FloatType::F64 => ("double", "fmod", "fabs", "0.0"),
+        };
+        writeln!(
+            c,
+            "static inline {c_type} suz_euclid_{}({c_type} a, {c_type} b) {{\n    {c_type} r = {fmod_fn}(a, b);\n    {c_type} abs_b = {fabs_fn}(b);\n    if (r < {zero}) {{\n        {c_type} adjusted = r + abs_b;\n        return adjusted >= abs_b ? {zero} : adjusted;\n    }}\n    return r == {zero} ? {zero} : r;\n}}\n",
+            ty.name()
+        )
+        .unwrap();
+    }
     if context.narrow_float_check {
         c.push_str(
             r#"// FLT_MAXの上側の中間値は無限大に丸める（偶数丸め）。

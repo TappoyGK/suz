@@ -80,6 +80,7 @@ pub(super) fn is_operator(expr: &Expression) -> bool {
                 | BinaryOperator::Multiply
                 | BinaryOperator::Divide
                 | BinaryOperator::Remainder
+                | BinaryOperator::EuclideanRemainder
         ),
         _ => false,
     }
@@ -405,6 +406,7 @@ pub(super) fn evaluate(e: &Exact) -> Option<Result<Int, Location>> {
                 Multiply => a.mul(b),
                 Divide => a.div(b),
                 Remainder => a.rem(b),
+                EuclideanRemainder => a.rem_euclid(b),
                 _ => unreachable!(),
             }
             .ok_or(e.location)
