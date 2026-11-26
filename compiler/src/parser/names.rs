@@ -13,6 +13,11 @@ pub(super) enum Shape {
     Variant,
 }
 
+pub(crate) fn is_type_spelling(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    bytes.first().is_some_and(u8::is_ascii_uppercase) && bytes.iter().any(u8::is_ascii_lowercase)
+}
+
 pub(super) fn check(shape: Shape, name: &str, location: Location) -> Result<(), Diagnostic> {
     let bytes = name.as_bytes();
     let first = bytes.first().copied().unwrap_or_default();

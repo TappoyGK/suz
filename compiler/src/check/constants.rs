@@ -711,6 +711,7 @@ fn array_step(expr: &CheckedExpression) -> Option<ArrayStep> {
                 metadata: Box::new(super::ir::ArrayMetadata {
                     origins,
                     constant_counts,
+                    slots: Vec::new(),
                 }),
                 values,
                 lengths,
@@ -807,12 +808,25 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
                 values,
                 lengths,
                 repeated,
-            } => Value::Array {
-                metadata: metadata.clone(),
-                values: values.iter().map(evaluate_raw).collect::<Option<_>>()?,
-                lengths: lengths.iter().map(evaluate_raw).collect::<Option<_>>()?,
-                repeated: *repeated,
-            },
+            } => {
+                let mut evaluated: Vec<_> =
+                    values.iter().map(evaluate_raw).collect::<Option<_>>()?;
+                let mut metadata = metadata.clone();
+                if !metadata.slots.is_empty() {
+                    let mut ordered = vec![None; evaluated.len()];
+                    for (value, &slot) in evaluated.into_iter().zip(&metadata.slots) {
+                        ordered[slot] = Some(value);
+                    }
+                    evaluated = ordered.into_iter().map(Option::unwrap).collect();
+                    metadata.slots.clear();
+                }
+                Value::Array {
+                    metadata,
+                    values: evaluated,
+                    lengths: lengths.iter().map(evaluate_raw).collect::<Option<_>>()?,
+                    repeated: *repeated,
+                }
+            }
             _ => return None,
         },
         Type::ArrayRef {

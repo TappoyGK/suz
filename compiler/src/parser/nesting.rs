@@ -186,10 +186,14 @@ fn kind_height(kind: &ExpressionKind) -> usize {
             value.height.max(capacity.as_ref().map_or(0, |v| v.height))
         }
         ArrayInit {
-            values, lengths, ..
+            values,
+            lengths,
+            keys,
+            ..
         } => values
             .iter()
             .chain(lengths)
+            .chain(keys.iter().flatten())
             .map(|v| v.height)
             .max()
             .unwrap_or(0),

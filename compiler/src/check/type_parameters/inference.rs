@@ -148,7 +148,7 @@ impl Constraints<'_, '_> {
             (Type::Array(parameter), Type::Array(actual)) => {
                 let p = self.scope.structs.arrays.borrow().get(parameter);
                 let a = self.scope.structs.arrays.borrow().get(actual);
-                if p.rank == a.rank {
+                if p.rank == a.rank && p.index_enum == a.index_enum {
                     self.apply(p.element, a.element)?;
                 }
             }
@@ -166,7 +166,7 @@ impl Constraints<'_, '_> {
             ) if !p_mut || a_mut => {
                 let p = self.scope.structs.arrays.borrow().get(parameter);
                 let a = self.scope.structs.arrays.borrow().get(actual);
-                if p.rank == a.rank {
+                if p.rank == a.rank && p.index_enum == a.index_enum {
                     self.apply(p.element, a.element)?;
                 }
             }

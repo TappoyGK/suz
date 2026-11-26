@@ -39,8 +39,16 @@ pub(crate) fn walk_expression<V: Visitor + ?Sized>(
             visitor.expression(value)?;
         }
         ExpressionKind::ArrayInit {
-            values, lengths, ..
+            values,
+            lengths,
+            keys,
+            ..
         } => {
+            if let Some(keys) = keys {
+                for key in keys {
+                    visitor.expression(key)?;
+                }
+            }
             for value in values.iter().chain(lengths) {
                 visitor.expression(value)?;
             }

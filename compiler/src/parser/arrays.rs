@@ -40,17 +40,66 @@ impl Parser<'_, '_> {
                 ));
             }
             let mut dimensions = Vec::new();
+            let mut index_enum = None;
             let mut rank = 1;
             if parser.token().kind == Kind::Symbol(";") {
                 parser.cursor += 1;
                 rank = 0;
                 loop {
                     match parser.token().kind {
-                        Kind::Wildcard => {},
+                        Kind::Wildcard => {
+                            if index_enum.is_some() {
+                                return Err(parser.error(
+                                    ErrorKind::InvalidSource,
+                                    crate::diagnostic!(
+                                        "array.enum-type",
+                                        "enum-indexed arrays must be 1-dimensional"
+                                    ),
+                                ));
+                            }
+                        }
+                        Kind::Ident(name) if super::names::is_type_spelling(name) => {
+                            if rank > 0 || index_enum.is_some() {
+                                return Err(parser.error(
+                                    ErrorKind::InvalidSource,
+                                    crate::diagnostic!(
+                                        "array.enum-type",
+                                        "enum-indexed arrays must be 1-dimensional"
+                                    ),
+                                ));
+                            }
+                            let Some(decl) = parser
+                                .enums
+                                .iter()
+                                .find(|d| d.name == name && !d.ty.is_error)
+                            else {
+                                return Err(parser.error(
+                                    ErrorKind::InvalidSource,
+                                    crate::diagnostic!(
+                                        "array.enum-dimension",
+                                        "unknown enum type '{name}' in array dimension"
+                                    ),
+                                ));
+                            };
+                            index_enum = Some(decl.ty);
+                        }
                         Kind::Ident(name) if names => {
+                            if index_enum.is_some() {
+                                return Err(parser.error(
+                                    ErrorKind::InvalidSource,
+                                    crate::diagnostic!(
+                                        "array.enum-type",
+                                        "enum-indexed arrays must be 1-dimensional"
+                                    ),
+                                ));
+                            }
                             let location = parser.location();
                             super::names::check(super::names::Shape::Value, name, location)?;
-                            dimensions.push(crate::ast::arrays::Dimension { name: name.into(), index: rank, location });
+                            dimensions.push(crate::ast::arrays::Dimension {
+                                name: name.into(),
+                                index: rank,
+                                location,
+                            });
                         }
                         _ => return Err(parser.error(ErrorKind::InvalidSource, crate::diagnostic!(
                             "array.dimension-bind", "dimension names require a non-nil array parameter or fix annotation; use _ here"
@@ -96,7 +145,11 @@ impl Parser<'_, '_> {
                 }
                 parser.cursor += 1;
             }
-            let Type::Array(id) = parser.applications.borrow_mut().arrays.intern(element, rank)
+            let Type::Array(id) = parser
+                .applications
+                .borrow_mut()
+                .arrays
+                .intern_indexed(element, rank, index_enum)
             else {
                 unreachable!()
             };
@@ -112,16 +165,51 @@ impl Parser<'_, '_> {
     }
 
     pub(super) fn array_initializer(&mut self, readonly: bool) -> Result<Expression, Diagnostic> {
+        self.array_initializer_inner(readonly, true)
+    }
+
+    fn array_initializer_inner(
+        &mut self,
+        readonly: bool,
+        allow_keys: bool,
+    ) -> Result<Expression, Diagnostic> {
         let location = self.location();
         self.nested(location, |parser| {
             let open = parser.location();
             parser.expect(FixedToken::Symbol("["))?;
             let mut items = Vec::new();
             let mut lengths = Vec::new();
+            let mut keys = Vec::new();
             let mut repeated = false;
+            let mut keyed = false;
             if parser.token().kind != Kind::Symbol("]") {
                 items.push(parser.array_item()?);
-                if parser.token().kind == Kind::Symbol(";") {
+                if parser.token().kind == Kind::Symbol(":") {
+                    if !allow_keys {
+                        return Err(items[0].0.location.error(
+                            ErrorKind::InvalidSource,
+                            crate::diagnostic!(
+                                "array.enumeration",
+                                "nested array rows cannot use enum keys"
+                            ),
+                        ));
+                    }
+                    if items[0].1 {
+                        return Err(location.error(
+                            ErrorKind::InvalidSource,
+                            crate::diagnostic!(
+                                "array.enum-init",
+                                "enum array key must be an enum variant"
+                            ),
+                        ));
+                    }
+                    keyed = true;
+                    let key = items.pop().unwrap().0;
+                    parser.cursor += 1;
+                    let value = parser.expression()?;
+                    keys.push(key);
+                    items.push((value, false));
+                } else if parser.token().kind == Kind::Symbol(";") {
                     if items[0].1 {
                         return Err(location.error(
                             ErrorKind::InvalidSource,
@@ -160,8 +248,41 @@ impl Parser<'_, '_> {
                     }
                     if repeated {
                         lengths.push(parser.expression()?);
+                    } else if keyed {
+                        let key = parser.expression()?;
+                        if parser.token().kind != Kind::Symbol(":") {
+                            return Err(parser.error(
+                                ErrorKind::InvalidSource,
+                                crate::diagnostic!(
+                                    "array.enum-init",
+                                    "expected ':' after enum array key"
+                                ),
+                            ));
+                        }
+                        parser.cursor += 1;
+                        let value = parser.expression()?;
+                        keys.push(key);
+                        items.push((value, false));
                     } else {
                         items.push(parser.array_item()?);
+                        if parser.token().kind == Kind::Symbol(":") {
+                            if !allow_keys {
+                                return Err(items.last().unwrap().0.location.error(
+                                    ErrorKind::InvalidSource,
+                                    crate::diagnostic!(
+                                        "array.enumeration",
+                                        "nested array rows cannot use enum keys"
+                                    ),
+                                ));
+                            }
+                            return Err(parser.error(
+                                ErrorKind::InvalidSource,
+                                crate::diagnostic!(
+                                    "array.enum-init",
+                                    "cannot mix keyed and unkeyed array items"
+                                ),
+                            ));
+                        }
                     }
                 }
             }
@@ -171,6 +292,7 @@ impl Parser<'_, '_> {
                 .iter()
                 .map(|(v, _)| v)
                 .chain(&lengths)
+                .chain(&keys)
                 .map(|v| v.height)
                 .max()
                 .unwrap_or(0);
@@ -195,6 +317,7 @@ impl Parser<'_, '_> {
                             ExpressionKind::ArrayInit {
                                 values,
                                 lengths,
+                                keys: None,
                                 repeated: false,
                                 ..
                             } if !values.is_empty() => {
@@ -252,6 +375,7 @@ impl Parser<'_, '_> {
                 kind: ExpressionKind::ArrayInit {
                     values,
                     lengths,
+                    keys: keyed.then_some(keys),
                     repeated,
                     readonly,
                 },
@@ -262,7 +386,7 @@ impl Parser<'_, '_> {
     }
     fn array_item(&mut self) -> Result<(Expression, bool), Diagnostic> {
         if self.token().kind == Kind::Symbol("[") {
-            Ok((self.array_initializer(false)?, true))
+            Ok((self.array_initializer_inner(false, false)?, true))
         } else {
             Ok((self.expression()?, false))
         }

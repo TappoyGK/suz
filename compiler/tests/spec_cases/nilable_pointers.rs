@@ -425,7 +425,7 @@ fn main() -> u8 {
         (
             "fix BAD: .[mut i32] = .[]\nfn main() -> u8 { return 0 }",
             "array.constant",
-            "constant arrays cannot contain non-nil pointers, non-nil writable arrays, or function values",
+            "constant arrays cannot contain non-nil pointers or non-nil writable arrays",
         ),
         (
             "struct Node { next: mut Node }\nfn main() -> u8 { return 0 }",

@@ -1375,3 +1375,111 @@ fn main() -> u8 {
         assert_eq!(err.rule(), rule, "{code}\n{err}");
     }
 }
+
+#[test]
+fn enum_indexed_arrays_cover_init_access_lifetime_and_rejections() {
+    // 1回評価・共有参照・フィールド更新・nil許容・定数配列の実行検証。
+    let valid = r#"
+enum Wave: u8 { Saw, Square, Triangle }
+struct Boxed { value: i32 }
+fn make_ref(calls: mut i32) -> mut Boxed {
+    #calls = .calls + 1 or 0
+    return new Boxed { value: 10 }
+}
+fn main() -> u8 {
+    fix calls = new (0 as i32)
+    fix refs: #[mut Boxed; Wave] = new #[make_ref(calls); Wave]
+    if .calls != 1 { return 1 }
+    refs.[Wave.Saw]#value = 42
+    if refs.[Wave.Triangle].value != 42 { return 2 }
+
+    fix items: #[Boxed; Wave] = new #[Boxed { value: 1 }; Wave]
+    items.[Wave.Square]#value = 99
+    if items.[Wave.Saw].value != 1 || items.[Wave.Square].value != 99 { return 3 }
+
+    fix maybe: .[Boxed; Wave]? = items
+    let present = maybe {
+        if present.[Wave.Square].value != 99 { return 5 }
+    } else {
+        return 4
+    }
+
+    fix empty_ref: #[i32; Wave]? = nil
+    let p = empty_ref {
+        return 6
+    } else {
+        return 0
+    }
+}
+"#;
+    let output = compile_and_run_c23(valid, "enum-arrays.suz");
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+
+    // 各種拒否ケース。
+    for (code, rule) in [
+        // 整数添字・0..<len a 添字・別列挙型添字
+        (
+            "enum Wave: u8 { Saw, Square }\nfn main() -> u8 {\nfix a = .[1; Wave]\nfix v = a.[0] or 0\nreturn 0\n}",
+            "array.enum-index",
+        ),
+        (
+            "enum Wave: u8 { Saw, Square }\nfn main() -> u8 {\nfix a = .[1; Wave]\nfor i in 0..<len a { fix v = a.[i] or 0 }\nreturn 0\n}",
+            "array.enum-index",
+        ),
+        (
+            "enum Wave: u8 { Saw, Square }\nenum Other: u8 { A, B }\nfn main() -> u8 {\nfix a = .[1; Wave]\nfix v = a.[Other.A]\nreturn 0\n}",
+            "array.enum-index",
+        ),
+        // 異種キー・整数キー・キーなし初期化 (.[0; 2], .[])
+        (
+            "enum Wave: u8 { Saw, Square }\nenum Other: u8 { A, B }\nfn main() -> u8 {\nfix a = .[Wave.Saw: 1, Other.B: 2]\nreturn 0\n}",
+            "array.enum-init",
+        ),
+        (
+            "enum Wave: u8 { Saw, Square }\nfn main() -> u8 {\nfix a = .[0: 1, 1: 2]\nreturn 0\n}",
+            "array.enum-init",
+        ),
+        (
+            "enum Wave: u8 { Saw, Square }\nfn main() -> u8 {\nfix a: .[i32; Wave] = .[0; 2]\nreturn 0\n}",
+            "array.enum-init",
+        ),
+        (
+            "enum Wave: u8 { Saw, Square }\nfn main() -> u8 {\nfix a: .[i32; Wave] = .[]\nreturn 0\n}",
+            "array.enum-init",
+        ),
+        // 要求型と異なる列挙型
+        (
+            "enum Wave: u8 { Saw, Square }\nenum Other: u8 { A, B }\nfn main() -> u8 {\nfix a: .[i32; Wave] = .[0; Other]\nreturn 0\n}",
+            "array.enum-init",
+        ),
+        // error 型や未定義型名・多次元
+        (
+            "error Err { A, B }\nfn main() -> u8 {\nfix a: .[i32; Err] = .[0; Err]\nreturn 0\n}",
+            "array.enum-dimension",
+        ),
+        (
+            "enum Wave: u8 { Saw, Square }\nfn f(a: #[f32; Wave, _]) -> void {}\nfn main() -> u8 { return 0 }",
+            "array.enum-type",
+        ),
+        (
+            "enum Wave: u8 { Saw, Square }\nfn main() -> u8 {\nfix a = new #[0; Wav]\nreturn 0\n}",
+            "array.enum-dimension",
+        ),
+        (
+            "enum Wave: u8 { Saw, Square }\nfn main() -> u8 {\nfix a = new #[0; Wave, 3]\nreturn 0\n}",
+            "array.enum-init",
+        ),
+        (
+            "enum Wave: u8 { Saw, Square }\nfn main() -> u8 {\nfix a = .[[1, Wave.Saw: 2]]\nreturn 0\n}",
+            "array.enumeration",
+        ),
+        // 寿命エスケープ拒否
+        (
+            "enum Wave: u8 { Saw, Square }\nfn main() -> u8 {\nvar out: #[i64; Wave]? = nil\narena {\nfix inner = new #[0; Wave]\nout = inner\n}\nreturn 0\n}",
+            "arena.store",
+        ),
+    ] {
+        let err = suz::compile(code.as_bytes()).unwrap_err();
+        assert_eq!(err.rule(), rule, "{code}\n{err}");
+    }
+}

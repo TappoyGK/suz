@@ -274,7 +274,9 @@ impl Scope {
             Type::Array(id) => {
                 let array = self.structs.arrays.borrow().get(id);
                 let element = self.type_name(array.element);
-                if array.rank == 1 {
+                if let Some(index_enum) = array.index_enum {
+                    format!("[{element}; {}]", self.enums[index_enum.id].name)
+                } else if array.rank == 1 {
                     format!("[{element}]")
                 } else {
                     format!("[{element}; {}]", vec!["_"; array.rank].join(", "))
@@ -289,7 +291,12 @@ impl Scope {
                 let element = self.type_name(array.element);
                 let prefix = if mutable { "#" } else { "." };
                 let suffix = if nilable { "?" } else { "" };
-                if array.rank == 1 {
+                if let Some(index_enum) = array.index_enum {
+                    format!(
+                        "{prefix}[{element}; {}]{suffix}",
+                        self.enums[index_enum.id].name
+                    )
+                } else if array.rank == 1 {
                     format!("{prefix}[{element}]{suffix}")
                 } else {
                     format!(

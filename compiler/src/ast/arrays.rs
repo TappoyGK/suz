@@ -1,11 +1,12 @@
-//! 配列の要素型と次元数を共通化する。寸法の実行時の値は型に含めない。
-use super::Type;
+//! 配列の要素型・次元数・添字列挙型を共通化する。実行時の長さの値は型に含めない。
+use super::{EnumType, Type};
 use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct ArrayType {
     pub element: Type,
     pub rank: usize,
+    pub index_enum: Option<EnumType>,
 }
 
 #[derive(Clone, Default)]
@@ -15,7 +16,19 @@ pub(crate) struct Types {
 }
 impl Types {
     pub fn intern(&mut self, element: Type, rank: usize) -> Type {
-        let array = ArrayType { element, rank };
+        self.intern_indexed(element, rank, None)
+    }
+    pub fn intern_indexed(
+        &mut self,
+        element: Type,
+        rank: usize,
+        index_enum: Option<EnumType>,
+    ) -> Type {
+        let array = ArrayType {
+            element,
+            rank,
+            index_enum,
+        };
         let id = *self.ids.entry(array).or_insert_with(|| {
             let id = self.entries.len();
             self.entries.push(array);
