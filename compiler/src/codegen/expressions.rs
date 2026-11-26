@@ -334,13 +334,25 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             {
                 context.float_types.insert(from);
                 context.float_sat_casts.insert((from, to));
+                if unordered_read(operand, context) {
+                    return format!(
+                        "suz_sat_f2i_{}_{}({}, ({})({}))",
+                        from.name(),
+                        to.name(),
+                        expression(operand, context),
+                        to.c_name(),
+                        expression(fallback, context)
+                    );
+                }
+                let index = context.temporaries.len();
+                context.temporaries.push(operand.ty);
+                let op_code = expression(operand, context);
+                let fb_code = expression(fallback, context);
                 return format!(
-                    "suz_sat_f2i_{}_{}({}, ({})({}))",
+                    "(suz_cmp_{index} = {op_code}, suz_sat_f2i_{}_{}(suz_cmp_{index}, ({})({fb_code})))",
                     from.name(),
                     to.name(),
-                    expression(operand, context),
                     to.c_name(),
-                    expression(fallback, context)
                 );
             }
             let (setup, condition, converted) =

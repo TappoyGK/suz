@@ -200,6 +200,14 @@ fn main() -> u8 {
     fix t_lo: text = `-50`
     fix t_bad: text = `-50z`
     if (t_hi as| u8 or 1) != 255 || (t_lo as| u8 or 1) != 0 || (t_bad as| u8 or 1) != 1 { return 20 }
+
+    fix z0: f64 = 0.0
+    var side: i8 = 3
+    fix ordered: i8 = (expr {
+        side = 7
+        0.0 / z0
+    }) as| i8 or side
+    if ordered != 7 { return 21 }
     return 0
 }
 "#;
