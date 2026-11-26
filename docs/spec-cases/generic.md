@@ -1231,3 +1231,36 @@ fn main() -> u8 {
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
 | 通常 | `[generic.check]` | 4 | 5 |
+
+### generic-023 @needs で飽和演算子を要求する
+
+主根拠：`[generic.needs]`。
+
+補助根拠：`[expr.sat]`、`[operator.method]`。
+
+**ソース：**
+
+```suz
+struct Sample { v: i16 }
+fn Sample.+|(other: Sample) -> Sample { return Sample { v: self.v +| other.v } }
+fn Sample.-|() -> Sample { return Sample { v: -| self.v } }
+
+@needs T: +|(T) -> T
+@needs T: -|() -> T
+fn add_and_neg[T](a: T, b: T) -> T {
+    return -| (a +| b)
+}
+
+fn main() -> u8 {
+    fix s = add_and_neg(Sample { v: -30000 }, Sample { v: -10000 })
+    fix n: i8 = add_and_neg(-100 as i8, -50 as i8)
+    if s.v != 32767 || n != 127 { return 1 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |

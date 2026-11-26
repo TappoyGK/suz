@@ -49,34 +49,50 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
     }) {
         c.push_str("#include <stdckdint.h>\n\n");
     }
-    if context.uses_float_rem
-        || !context.float_euclid.is_empty()
-        || !context.float_sat_casts.is_empty()
-    {
+    if context.uses_float_rem || !context.float_euclid.is_empty() {
         c.push_str("#include <math.h>\n\n");
     }
     for &(from, to) in &context.float_sat_casts {
         let c_from = from.c_name();
         let c_to = to.c_name();
         let (min, max) = to.bounds();
+        let bits = to.bits();
         let limit = to
             .name()
             .to_uppercase()
             .replace('I', "INT")
             .replace('U', "UINT");
-        let lower_check = if min == 0 {
-            format!("if ((double)x <= 0.0) return ({c_to})0;")
+        let min_expr = if min == 0 {
+            format!("({c_to})0")
         } else {
-            format!("if ((double)x <= {min}.0) return {limit}_MIN;")
+            format!("{limit}_MIN")
         };
-        let max_plus_1 = max + 1;
-        writeln!(
-            c,
-            "static inline {c_to} suz_sat_f2i_{}_{}({c_from} x) {{\n    if (isnan(x)) return ({c_to})0;\n    {lower_check}\n    if ((double)x >= {max_plus_1}.0) return {limit}_MAX;\n    return ({c_to})x;\n}}\n",
-            from.name(),
-            to.name(),
-        )
-        .unwrap();
+        if from == crate::ast::FloatType::F32 && bits <= 16 {
+            writeln!(
+                c,
+                "static inline {c_to} suz_sat_f2i_{}_{}({c_from} x) {{\n    float c = x < {min}.0f ? {min}.0f : (x > {max}.0f ? {max}.0f : x);\n    return x != x ? ({c_to})0 : ({c_to})c;\n}}\n",
+                from.name(),
+                to.name(),
+            )
+            .unwrap();
+        } else if bits <= 32 {
+            writeln!(
+                c,
+                "static inline {c_to} suz_sat_f2i_{}_{}({c_from} x) {{\n    double d = (double)x;\n    double c = d < {min}.0 ? {min}.0 : (d > {max}.0 ? {max}.0 : d);\n    return d != d ? ({c_to})0 : ({c_to})c;\n}}\n",
+                from.name(),
+                to.name(),
+            )
+            .unwrap();
+        } else {
+            let max_plus_1 = max + 1;
+            writeln!(
+                c,
+                "static inline {c_to} suz_sat_f2i_{}_{}({c_from} x) {{\n    double d = (double)x;\n    return d != d ? ({c_to})0 : (d <= {min}.0 ? {min_expr} : (d >= {max_plus_1}.0 ? {limit}_MAX : ({c_to})d));\n}}\n",
+                from.name(),
+                to.name(),
+            )
+            .unwrap();
+        }
     }
     for ty in &context.float_euclid {
         let (c_type, fmod_fn, fabs_fn, zero) = match ty {
@@ -192,9 +208,10 @@ static inline _Bool suz_f32_fits(double value) {
                 .unwrap();
             }
             ("mul", _) if signed => {
+                let wide = if bits < 32 { "int32_t" } else { "int64_t" };
                 writeln!(
                     c,
-                    "static inline {c_type} suz_sat_mul_{name}({c_type} a, {c_type} b) {{\n    int64_t r = (int64_t)a * (int64_t)b;\n    return r > {limit}_MAX ? {limit}_MAX : (r < {limit}_MIN ? {limit}_MIN : ({c_type})r);\n}}\n"
+                    "static inline {c_type} suz_sat_mul_{name}({c_type} a, {c_type} b) {{\n    {wide} r = ({wide})a * ({wide})b;\n    return r > {limit}_MAX ? {limit}_MAX : (r < {limit}_MIN ? {limit}_MIN : ({c_type})r);\n}}\n"
                 )
                 .unwrap();
             }
@@ -213,9 +230,10 @@ static inline _Bool suz_f32_fits(double value) {
                 .unwrap();
             }
             ("mul", _) => {
+                let wide = if bits < 32 { "uint32_t" } else { "uint64_t" };
                 writeln!(
                     c,
-                    "static inline {c_type} suz_sat_mul_{name}({c_type} a, {c_type} b) {{\n    uint64_t r = (uint64_t)a * (uint64_t)b;\n    return r > {limit}_MAX ? {limit}_MAX : ({c_type})r;\n}}\n"
+                    "static inline {c_type} suz_sat_mul_{name}({c_type} a, {c_type} b) {{\n    {wide} r = ({wide})a * ({wide})b;\n    return r > {limit}_MAX ? {limit}_MAX : ({c_type})r;\n}}\n"
                 )
                 .unwrap();
             }

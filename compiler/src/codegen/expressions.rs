@@ -673,6 +673,14 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                                 index + 1
                             )
                         }
+                        BinaryOperator::SaturatingShiftLeft => {
+                            context.saturating_helpers.insert(("shl", ty));
+                            format!(
+                                "suz_sat_shl_{}(suz_cmp_{index}, (uint64_t)suz_cmp_{})",
+                                ty.name(),
+                                index + 1
+                            )
+                        }
                         _ => {
                             context.bit_helpers.insert(ty);
                             format!(

@@ -135,7 +135,7 @@ static bool value(reader *r, const suz_parse_type *type, suz_parsed_value *outpu
         bool truth;
         switch (type->kind) {
             case SUZ_PARSE_INTEGER:
-                if (!suz_parse_integer(bytes, length, type->bits, type->signed_integer, 0, &output->bits)) return false;
+                if (!suz_parse_integer(bytes, length, type->bits, type->signed_integer, false, &output->bits)) return false;
                 break;
             case SUZ_PARSE_FLOAT:
                 if (!suz_parse_float_bits(bytes, length, type->bits, &output->bits)) return false;

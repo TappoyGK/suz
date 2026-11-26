@@ -315,7 +315,13 @@ pub(super) fn check(
                             ),
                         ));
                     }
-                    if integer_arithmetic {
+                    let saturating_shift_infallible =
+                        matches!(*operator, BinaryOperator::SaturatingShiftLeft)
+                            && right
+                                .ty
+                                .integer_storage()
+                                .is_some_and(|r| r.bounds().0 == 0);
+                    if integer_arithmetic && !saturating_shift_infallible {
                         Value::IntegerArithmetic {
                             operation: IntegerOperation::Binary {
                                 operator: *operator,

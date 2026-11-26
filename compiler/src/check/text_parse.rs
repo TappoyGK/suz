@@ -17,7 +17,14 @@ pub(super) fn parse(
             length: u64,
             bits: u32,
             signed_target: bool,
-            mode: u8,
+            wrap: bool,
+            output: *mut u64,
+        ) -> bool;
+        fn suz_parse_integer_sat(
+            bytes: *const u8,
+            length: u64,
+            bits: u32,
+            signed_target: bool,
             output: *mut u64,
         ) -> bool;
         fn suz_parse_float_bits(
@@ -40,22 +47,27 @@ pub(super) fn parse(
         Type::Integer(ty) => {
             let mut bits = 0_u64;
             let signed = ty.bounds().0 < 0;
-            let mode = match kind {
-                crate::ast::CastKind::Checked => 0,
-                crate::ast::CastKind::Wrap => 1,
-                crate::ast::CastKind::Saturating => 2,
-            };
             // 呼び出しが終わるまで、バイト列と出力先は生存する。
-            if !unsafe {
-                suz_parse_integer(
-                    text.as_ptr(),
-                    text.len() as u64,
-                    ty.bits(),
-                    signed,
-                    mode,
-                    &mut bits,
-                )
-            } {
+            let ok = unsafe {
+                match kind {
+                    crate::ast::CastKind::Saturating => suz_parse_integer_sat(
+                        text.as_ptr(),
+                        text.len() as u64,
+                        ty.bits(),
+                        signed,
+                        &mut bits,
+                    ),
+                    _ => suz_parse_integer(
+                        text.as_ptr(),
+                        text.len() as u64,
+                        ty.bits(),
+                        signed,
+                        kind == crate::ast::CastKind::Wrap,
+                        &mut bits,
+                    ),
+                }
+            };
+            if !ok {
                 return None;
             }
             integer_value(bits, ty)

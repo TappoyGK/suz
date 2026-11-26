@@ -1040,7 +1040,9 @@ fn main() -> u8 {
 
 ### method-035 飽和演算子メソッドと複合代入
 
-主根拠：`[operator.method]`、`[operator.unary]`、`[operator.compound]`。
+主根拠：`[operator.method]`。
+
+補助根拠：`[operator.unary]`、`[operator.compound]`。
 
 **ソース：**
 

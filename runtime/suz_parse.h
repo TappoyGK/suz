@@ -6,9 +6,11 @@
 #include <stdint.h>
 
 /* バイト列全体を、メモリ確保とロケールへの依存なしで解析する。
-   bitsは8・16・32・64。modeは0=検査あり、1=ラップ、2=飽和。整数の結果は2の補数のビット列で、成功時だけ出力を書き込む。 */
+   bitsは8・16・32・64。整数の結果は2の補数のビット列で、成功時だけ出力を書き込む。 */
 bool suz_parse_integer(const char *bytes, uint64_t length, unsigned bits,
-                       bool signed_target, uint8_t mode, uint64_t *output);
+                       bool signed_target, bool wrap, uint64_t *output);
+bool suz_parse_integer_sat(const char *bytes, uint64_t length, unsigned bits,
+                           bool signed_target, uint64_t *output);
 bool suz_parse_bool(const char *bytes, uint64_t length, bool *output);
 
 /* Suzの十進表記からIEEEのビット列へ、最近接偶数丸めで直接変換する。

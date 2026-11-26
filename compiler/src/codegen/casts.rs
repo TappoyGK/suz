@@ -83,17 +83,26 @@ pub(super) fn cast_parts(
             ),
             Type::Integer(ty) => {
                 context.bit_helpers.insert(ty);
-                let mode = match kind {
-                    crate::ast::CastKind::Checked => 0,
-                    crate::ast::CastKind::Wrap => 1,
-                    crate::ast::CastKind::Saturating => 2,
-                };
-                (
-                    Type::Integer(IntegerType::U64),
-                    "suz_parse_integer",
-                    format!(", {}, {}, {mode}", ty.bits(), u8::from(ty.bounds().0 < 0)),
-                    format!("suz_bits_{}(suz_cmp_{output})", ty.name()),
-                )
+                if kind == crate::ast::CastKind::Saturating {
+                    (
+                        Type::Integer(IntegerType::U64),
+                        "suz_parse_integer_sat",
+                        format!(", {}, {}", ty.bits(), u8::from(ty.bounds().0 < 0)),
+                        format!("suz_bits_{}(suz_cmp_{output})", ty.name()),
+                    )
+                } else {
+                    (
+                        Type::Integer(IntegerType::U64),
+                        "suz_parse_integer",
+                        format!(
+                            ", {}, {}, {}",
+                            ty.bits(),
+                            u8::from(ty.bounds().0 < 0),
+                            u8::from(kind == crate::ast::CastKind::Wrap)
+                        ),
+                        format!("suz_bits_{}(suz_cmp_{output})", ty.name()),
+                    )
+                }
             }
             _ => unreachable!(),
         };
@@ -114,7 +123,7 @@ pub(super) fn cast_parts(
             context.float_types.insert(from);
             context.float_sat_casts.insert((from, to));
             converted = format!("suz_sat_f2i_{}_{}({local})", from.name(), to.name());
-            format!("!isnan({local})")
+            format!("{local} == {local}")
         }
         (Type::Float(_), Type::Integer(to)) => {
             context.float_types.insert(FloatType::F64);

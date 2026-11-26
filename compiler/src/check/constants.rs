@@ -256,6 +256,9 @@ fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
                         }
                     });
                 }
+                BinaryOperator::SaturatingShiftLeft => {
+                    return integer_result(BinaryOperator::SaturatingShiftLeft, left, right, ty);
+                }
                 _ => {}
             }
             Some(wrap(match operator {

@@ -243,6 +243,15 @@ fn saturating_diagnostics_and_warnings_are_reported() {
         warnings[0]
     );
 
+    // Unsigned shift count on <<| is infallible: accepted under Deny, rejects or handler
+    let unsigned_shl =
+        b"fn f(n: u8) -> i8 {\n    return (1 as i8) <<| n\n}\nfn main() -> u8 { return 0 }\n";
+    suz::compile_with_mode(unsigned_shl, suz::ArithmeticMode::Deny).unwrap();
+    let unsigned_shl_or =
+        b"fn f(n: u8) -> i8 {\n    return (1 as i8) <<| n or 5\n}\nfn main() -> u8 { return 0 }\n";
+    let err = suz::compile(unsigned_shl_or).unwrap_err();
+    assert!(err.message().contains("expr.arithmetic-handler"), "{err:?}");
+
     // Invalid usages
     for (src, expected_rule) in [
         (

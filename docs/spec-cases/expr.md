@@ -2283,9 +2283,11 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | 正常終了 | 0 | 0 |
 
-### expr-079 飽和算術・飽和左シフト・飽和変換
+### expr-079 飽和算術と単項飽和符号反転
 
-主根拠：`[expr.sat]`、`[expr.as-sat]`、`[symbol.cast-sat]`。
+主根拠：`[expr.sat]`。
+
+補助根拠：`[assign.compound]`。
 
 **ソース：**
 
@@ -2297,15 +2299,8 @@ fn main() -> u8 {
     vol -|= 20
     fix s: i8 = -128
     fix inv: i8 = -| s
-    fix sh: i8 = (64 as i8) <<| (1 as u8)
-    fix sh_neg: i8 = (1 as i8) <<| -1 or 77
-    fix pcm: i16 = (50000 as i32) as| i16
-    fix f_nan: f64 = nan
-    fix fn_val: i16 = f_nan as| i16 or -9
-    fix txt: u8 = `999` as| u8 or 1
-    if vol != 0 || inv != 127 || sh != 127 || sh_neg != 77 || pcm != 32767 || fn_val != -9 || txt != 255 {
-        return 1
-    }
+    fix m: i8 = (100 as i8) *| (2 as i8)
+    if vol != 0 || inv != 127 || m != 127 { return 1 }
     return 0
 }
 ```
@@ -2316,7 +2311,59 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | 正常終了 | 0 | 0 |
 
-### expr-080 or のない浮動小数点飽和変換の警告と allow による抑制
+### expr-080 飽和左シフト
+
+主根拠：`[expr.sat-shift]`。
+
+補助根拠：`[expr.arithmetic-handler]`、`[assign.compound]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    var v: i8 = 64
+    v <<|= 1 as u8
+    fix huge: u8 = (1 as u8) <<| (100 as u8)
+    fix neg: i8 = (1 as i8) <<| -1 or 77
+    if v != 127 || huge != 255 || neg != 77 { return 1 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### expr-081 整数・浮動小数点からの飽和変換
+
+主根拠：`[expr.as-sat]`。
+
+補助根拠：`[expr.cast-binding]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix pcm: i16 = (50000 as i32) as| i16
+    fix lo: u8 = (-5 as i32) as| u8
+    fix f_nan: f64 = nan
+    fix f_inf: f64 = inf
+    fix fn_val: i16 = f_nan as| i16 or -9
+    fix fi_val: i16 = f_inf as| i16 or -9
+    if pcm != 32767 || lo != 0 || fn_val != -9 || fi_val != 32767 { return 1 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### expr-082 or のない浮動小数点飽和変換の警告と allow による抑制
 
 主根拠：`[expr.as-sat]`。
 
@@ -2351,3 +2398,133 @@ fn main() -> u8 {
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
 | 通常 | `[diagnostic.float-sat-nan]` | 2 | 14 |
+
+### expr-083 正確な算術式からの飽和変換
+
+主根拠：`[arith.as-sat]`。
+
+補助根拠：`[arith.exact-use]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix a: i32 = 100
+    fix b: i32 = 200
+    fix c: i8 = (a + b) as| i8
+    return ifexpr c == 127 { 0 } else { 1 }
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### expr-084 符号なし整数への単項飽和符号反転は拒否する
+
+主根拠：`[expr.operator-types]`。
+
+補助根拠：`[expr.sat]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix a: u8 = -| (1 as u8)
+    return a
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[expr.operator-types]` | 2 | 17 |
+
+### expr-085 len_t を変換先とする飽和変換は拒否する
+
+主根拠：`[expr.as-sat]`。
+
+補助根拠：`[len.type-operations]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix a: len_t = (1 as i32) as| len_t
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[expr.as-sat]` | 2 | 31 |
+
+### expr-086 整数からの飽和変換に付けた or は拒否する
+
+主根拠：`[expr.cast-sat-handler-syntax]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix a: u8 = (1 as i32) as| u8 or 0
+    return a
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[expr.cast-sat-handler-syntax]` | 2 | 28 |
+
+### expr-087 len_t の飽和算術は拒否する
+
+主根拠：`[expr.operator-types]`。
+
+補助根拠：`[len.type-operations]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix a: len_t = 1
+    fix b: len_t = a +| a
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[expr.operator-types]` | 3 | 22 |
