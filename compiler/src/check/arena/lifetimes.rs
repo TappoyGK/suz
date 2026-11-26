@@ -851,6 +851,72 @@ impl Analysis {
                         self.locals.remove(id);
                     }
                 }
+                CheckedStatement::ArrayBulkWrite(bulk) => {
+                    let target_vals = self.expr(&bulk.target, region, arena);
+                    if let Some(start) = &bulk.start {
+                        let _ = self.expr(start, region, arena);
+                    }
+                    if let Some(end) = &bulk.end {
+                        let _ = self.expr(end, region, arena);
+                    }
+                    let mut saved_locals = Vec::new();
+                    for input in &bulk.inputs {
+                        match input {
+                            crate::check::ir::BulkInput::Array {
+                                elem_id,
+                                expr,
+                                location,
+                                ..
+                            } => {
+                                let arr_vals = self.expr(expr, region, arena);
+                                let elem_ty = self
+                                    .structs
+                                    .arrays
+                                    .borrow()
+                                    .get(expr.ty.array_id().unwrap())
+                                    .element;
+                                let elem_cell = self.cell(region, *location, elem_ty);
+                                if let Some(&ptr) = arr_vals.get(&vec![]) {
+                                    let read = self.read(elem_ty, Place::Indirect(ptr, vec![]));
+                                    self.write(Place::Direct(elem_cell), read, *location);
+                                }
+                                saved_locals
+                                    .push((*elem_id, self.locals.insert(*elem_id, elem_cell)));
+                            }
+                            crate::check::ir::BulkInput::Scalar { local_id, expr } => {
+                                let val = self.expr(expr, region, arena);
+                                let cell = self.cell(region, bulk.location, expr.ty);
+                                self.write(Place::Direct(cell), val, bulk.location);
+                                saved_locals.push((*local_id, self.locals.insert(*local_id, cell)));
+                            }
+                        }
+                    }
+                    if let Some(out_id) = bulk.out_elem_id {
+                        let elem_ty = self
+                            .structs
+                            .arrays
+                            .borrow()
+                            .get(bulk.target.ty.array_id().unwrap())
+                            .element;
+                        let out_cell = self.cell(region, bulk.location, elem_ty);
+                        if let Some(&ptr) = target_vals.get(&vec![]) {
+                            let read = self.read(elem_ty, Place::Indirect(ptr, vec![]));
+                            self.write(Place::Direct(out_cell), read, bulk.location);
+                        }
+                        saved_locals.push((out_id, self.locals.insert(out_id, out_cell)));
+                    }
+                    let elem_val = self.expr(&bulk.element_value, region, arena);
+                    if let Some(&ptr) = target_vals.get(&vec![]) {
+                        self.write(Place::Indirect(ptr, vec![]), elem_val, bulk.location);
+                    }
+                    for (id, prev) in saved_locals.into_iter().rev() {
+                        if let Some(prev) = prev {
+                            self.locals.insert(id, prev);
+                        } else {
+                            self.locals.remove(&id);
+                        }
+                    }
+                }
                 CheckedStatement::Objection(body) => {
                     let saved = self.objection;
                     self.objection = true;

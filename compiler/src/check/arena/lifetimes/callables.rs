@@ -799,6 +799,32 @@ impl Walk<'_> {
                         self.program.write(key, values);
                     }
                 }
+                CheckedStatement::ArrayBulkWrite(bulk) => {
+                    let target_ptrs = self.expr(&mut bulk.target);
+                    if let Some(start) = &mut bulk.start {
+                        self.expr(start);
+                    }
+                    if let Some(end) = &mut bulk.end {
+                        self.expr(end);
+                    }
+                    for input in &mut bulk.inputs {
+                        match input {
+                            crate::check::ir::BulkInput::Array { expr, .. } => {
+                                self.expr(expr);
+                            }
+                            crate::check::ir::BulkInput::Scalar { local_id, expr } => {
+                                let vals = self.expr(expr);
+                                merge(self.locals.entry(*local_id).or_default(), vals);
+                            }
+                        }
+                    }
+                    let values = self.expr(&mut bulk.element_value);
+                    for pointer in target_ptrs.values().flat_map(|set| set.values()) {
+                        self.program
+                            .write(Flow::Heap(pointer.function), values.clone());
+                    }
+                    self.save_fields(bulk.element_value.ty, &values);
+                }
                 CheckedStatement::Return { value, .. } => {
                     let values = self.expr(value);
                     merge(&mut self.returned, values);

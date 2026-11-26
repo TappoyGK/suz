@@ -762,6 +762,7 @@ pub(crate) enum Statement {
         operator: Option<AssignmentOperator>,
         location: Location,
     },
+    ArrayBulkWrite(Box<ArrayBulkWrite>),
 
     Trusted(Vec<Statement>),
     Objection(Vec<Statement>),
@@ -817,6 +818,26 @@ pub(crate) enum Statement {
     Fail(Expression),
     Recover(Expression),
     Ignore(Box<Ignore>),
+}
+
+/// 1次元配列への一括書き込み文（`out#[] = 式`、`out#[s:e] = 式`、複合代入）。
+#[derive(Clone)]
+pub(crate) struct ArrayBulkWrite {
+    pub target: Expression,
+    pub selector: BulkSelector,
+    pub value: Expression,
+    pub operator: Option<AssignmentOperator>,
+    pub location: Location,
+}
+
+/// 配列一括書き込みの対象範囲指定。
+#[derive(Clone)]
+pub(crate) enum BulkSelector {
+    All,
+    Slice {
+        start: Option<Box<Expression>>,
+        end: Option<Box<Expression>>,
+    },
 }
 
 /// 代入文の読み出しと右辺を、算術またはtext追記として組み立てる。

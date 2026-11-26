@@ -62,6 +62,9 @@ pub(super) fn emit_block(
                 )
                 .unwrap();
             }
+            CheckedStatement::ArrayBulkWrite(bulk) => {
+                super::arrays::emit_bulk_write(c, bulk, depth, next_assignment, context);
+            }
 
             CheckedStatement::Recover(value) => {
                 let target = context

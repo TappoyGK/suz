@@ -328,12 +328,61 @@ fn target_dimension(target: &CheckedExpression, axis: usize, scope: &Scope) -> O
 }
 
 /// 配列参照 `target` の `axis` 番目の次元の長さを、仕様 1.1 の項として抽出する。
-fn target_dim_affine(target: &CheckedExpression, axis: usize, scope: &Scope) -> Option<Affine> {
+pub(super) fn target_dim_affine(
+    target: &CheckedExpression,
+    axis: usize,
+    scope: &Scope,
+) -> Option<Affine> {
     if let Some(dim) = target_dimension(target, axis, scope) {
         return Some(dim_to_affine(dim));
     }
     let (root, fields) = array_value_path(target)?;
     Some(Affine::term(Term::PathDim(root, fields, axis)))
+}
+
+/// 切り出し `target#[start:end]` の長さを `Affine` として抽出する。
+pub(super) fn slice_length_affine(
+    target: &CheckedExpression,
+    start: Option<&CheckedExpression>,
+    end: Option<&CheckedExpression>,
+    scope: &Scope,
+) -> Option<Affine> {
+    let start_const = match start {
+        None => Some(0),
+        Some(expr) => constant(expr),
+    };
+    let end_const = match end {
+        None => target_dimension(target, 0, scope).and_then(Dimension::known),
+        Some(expr) => constant(expr),
+    };
+    if let (Some(a), Some(b)) = (start_const, end_const)
+        && 0 <= a
+        && a <= b
+    {
+        return Some(Affine::constant(b - a));
+    }
+    let s = start_const?;
+    let end_affine = match end {
+        None => target_dim_affine(target, 0, scope)?,
+        Some(expr) => affine(expr, scope)?,
+    };
+    end_affine.shifted(s.checked_neg()?)
+}
+
+/// 書き込み先の対象長さ `out_len` と入力配列 `input` の長さが等しいことを静的に証明できるか判定する。
+pub(super) fn proves_same_length(
+    out_len: &Affine,
+    input: &CheckedExpression,
+    scope: &Scope,
+) -> bool {
+    let Some(input_len) = target_dim_affine(input, 0, scope) else {
+        return false;
+    };
+    if out_len == &input_len {
+        return true;
+    }
+    let facts = scope.array_bounds.facts.borrow();
+    facts.proves_le(out_len, &input_len).is_some() && facts.proves_le(&input_len, out_len).is_some()
 }
 
 /// 仕様 1.1 の項（整数束縛・`len a`・寸法名・定数式、およびそれぞれへの定数加減算）を抽出する。

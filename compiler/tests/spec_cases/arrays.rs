@@ -1483,3 +1483,119 @@ fn main() -> u8 {
         assert_eq!(err.rule(), rule, "{code}\n{err}");
     }
 }
+
+#[test]
+fn bulk_write_step1_covers_ops_aliases_evaluation_order_and_restrict() {
+    let source = r#"
+fn scale(log_count: mut i64) -> f32 {
+    #log_count = .log_count + 1
+    return 0.5
+}
+
+fn fallback(calls: mut i64) -> i64 {
+    #calls = .calls + 1
+    return -1
+}
+
+fn mix(out: #[f32; n], a: .[f32; n], b: .[f32; n], k: len_t) -> void {
+    out#[] = a * 0.5 + b
+    if k <= n {
+        out#[0:k] += a.[0:k]
+    }
+}
+
+fn main() -> u8 {
+    fix out: #[f32] = new #[0.0; 4]
+    fix a: .[f32] = .[2.0, 4.0, 6.0, 8.0]
+    fix b: .[f32] = .[1.0, 1.0, 1.0, 1.0]
+    mix(out, a, b, 2)
+    if out.[0] != 4.0 || out.[1] != 7.0 || out.[2] != 4.0 || out.[3] != 5.0 { return 1 }
+
+    // スカラーは長さ0でも1回だけ評価される
+    fix calls = new 0
+    fix empty: #[f32] = new #[0.0; 0]
+    empty#[] = scale(calls)
+    if .calls != 1 { return 2 }
+
+    // 要素ごとの or 代替値は失敗した要素でのみ評価される
+    fix fb_calls = new 0
+    fix num = new #[10, 20, 30]
+    fix den = new #[2, 0, 5]
+    fix quo = new #[0; 3]
+    quo#[] = num / den or fallback(fb_calls)
+    if quo.[0] != 5 || quo.[1] != -1 || quo.[2] != 6 || .fb_calls != 1 { return 3 }
+
+    // ラップ演算・飽和演算・as%・as|
+    fix u = new #[250 as u8, 10 as u8]
+    fix v = new #[20 as u8, 30 as u8]
+    fix w = new #[0 as u8; 2]
+    w#[] = u +% v
+    if w.[0] != 14 || w.[1] != 40 { return 4 }
+    w#[] = u +| v
+    if w.[0] != 255 || w.[1] != 40 { return 5 }
+
+    // 完全一致とずれた重なり
+    fix same = new #[1, 2, 3, 4]
+    same#[] = same * 3
+    if same.[0] != 3 || same.[1] != 6 || same.[2] != 9 || same.[3] != 12 { return 6 }
+    fix shift = new #[1, 2, 3, 4]
+    shift#[1:4] = shift.[0:3]
+    if shift.[0] != 1 || shift.[1] != 1 || shift.[2] != 1 || shift.[3] != 1 { return 7 }
+    return 0
+}
+"#;
+    let c = suz::compile(source.as_bytes()).expect("STEP 1 bulk write compiles");
+    // 非重複分岐では restrict を使用し、完全一致分岐では独立 restrict ポインタを作らない
+    assert!(
+        c.contains("*restrict suz_bulk_dst_"),
+        "missing restrict dst:\n{c}"
+    );
+    assert!(
+        c.contains("*restrict suz_bulk_in_"),
+        "missing restrict in:\n{c}"
+    );
+    // 共通寸法名 n を持つ mix では長さ不一致パニックを生成しない
+    let mix_only = r#"
+fn mix(out: #[f32; n], a: .[f32; n], b: .[f32; n]) -> void {
+    out#[] = a * 0.5 + b
+}
+fn main() -> u8 {
+    fix out: #[f32] = new #[0.0; 4]
+    fix a: .[f32] = .[1.0, 2.0, 3.0, 4.0]
+    fix b: .[f32] = .[1.0, 1.0, 1.0, 1.0]
+    mix(out, a, b)
+    return 0
+}
+"#;
+    let mix_c = suz::compile(mix_only.as_bytes()).expect("mix_only compiles");
+    assert!(
+        !mix_c.contains("array bulk length mismatch"),
+        "expected static length proof in mix:\n{mix_c}"
+    );
+    let output = compile_and_run_c23(source, "bulk_write_step1.suz");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // 拒否ケース
+    for (code, rule) in [
+        (
+            "fn main() -> u8 {\nfix out = new #[0 as u8; 2]\nfix src = new #[1, 2]\nout#[] = src as u8\nreturn 0\n}",
+            "expr.cast-handler",
+        ),
+        (
+            "fn main() -> u8 {\nfix out = new #[0; 2]\nfix a = new #[1, 2]\nfix b = new #[1, 0]\nout#[] = a / b or return 1\nreturn 0\n}",
+            "array.bulk",
+        ),
+        (
+            "fn main() -> u8 {\nfix out: .[i32] = .[1, 2]\nout#[] = 0\nreturn 0\n}",
+            "array.write",
+        ),
+    ] {
+        let err = suz::compile(code.as_bytes()).unwrap_err();
+        assert_eq!(err.rule(), rule, "{code}\n{err}");
+    }
+}

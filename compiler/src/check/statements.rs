@@ -115,6 +115,7 @@ fn check_statement(
         Statement::Arena { .. } | Statement::Let { .. } | Statement::Store { .. } => {
             super::arena::statement(statement, context)?
         }
+        Statement::ArrayBulkWrite(bulk) => super::arrays::bulk::check(bulk, context)?,
         Statement::Recover(value) => {
             let Some(ty) = context.bindings.recovery.filter(|ty| *ty != Type::Void) else {
                 return Err(value.location.error(

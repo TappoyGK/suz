@@ -78,6 +78,7 @@ pub(crate) enum CheckedStatement {
         body: Vec<CheckedStatement>,
         location: Location,
     },
+    ArrayBulkWrite(Box<CheckedBulkWrite>),
 
     Ignore(Box<crate::ast::Ignore>),
     Recover(CheckedExpression),
@@ -163,6 +164,40 @@ pub(crate) enum CheckedStatement {
         location: Location,
     },
 }
+/// 1次元配列への一括書き込みの検査済みIR。
+#[derive(Clone)]
+pub(crate) struct CheckedBulkWrite {
+    pub target: CheckedExpression,
+    pub start: Option<CheckedExpression>,
+    pub end: Option<CheckedExpression>,
+    pub slice: bool,
+    pub slice_proven: bool,
+    pub slice_location: Location,
+    /// 左から右の評価順でループ前に1回だけ評価する入力（配列参照・ブロードキャストスカラー）。
+    pub inputs: Vec<BulkInput>,
+    /// 複合代入時に書き込み先の現在要素を参照する仮ローカルID。
+    pub out_elem_id: Option<usize>,
+    /// 要素ごとの書き込み値。配列入力は`elem_id`、スカラーは`local_id`の`Local`で参照する。
+    pub element_value: CheckedExpression,
+    pub location: Location,
+}
+
+/// 一括書き込みのループ前に1回だけ評価する入力。
+#[derive(Clone)]
+pub(crate) enum BulkInput {
+    Array {
+        array_id: usize,
+        elem_id: usize,
+        expr: CheckedExpression,
+        length_proven: bool,
+        location: Location,
+    },
+    Scalar {
+        local_id: usize,
+        expr: CheckedExpression,
+    },
+}
+
 /// [`crate::ast::Expression`] の検査結果。
 /// 推論・検査した型と、参照先を解決した [`Value`] を対にする。
 /// 汎用検査中は型が記号的な場合もあり、C生成に渡す前に具体化する。

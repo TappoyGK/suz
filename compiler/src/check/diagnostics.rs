@@ -268,6 +268,22 @@ fn collect_statements(statements: &[CheckedStatement], locations: &mut Vec<Locat
                 collect_statements(body, locations);
                 collect(value, locations);
             }
+            CheckedStatement::ArrayBulkWrite(bulk) => {
+                collect(&bulk.target, locations);
+                if let Some(start) = &bulk.start {
+                    collect(start, locations);
+                }
+                if let Some(end) = &bulk.end {
+                    collect(end, locations);
+                }
+                for input in &bulk.inputs {
+                    match input {
+                        super::ir::BulkInput::Array { expr, .. }
+                        | super::ir::BulkInput::Scalar { expr, .. } => collect(expr, locations),
+                    }
+                }
+                collect(&bulk.element_value, locations);
+            }
             CheckedStatement::Binding { initializer, .. } => collect(initializer, locations),
             CheckedStatement::Assign { value, .. } => collect(value, locations),
             CheckedStatement::Return { value, .. } => collect(value, locations),
