@@ -16,7 +16,7 @@ mod function_types;
 mod functions;
 mod generics;
 mod logs;
-mod names;
+pub(crate) mod names;
 mod need_groups;
 pub(crate) mod nesting;
 mod statements;

@@ -455,6 +455,51 @@ fn main() -> u8 { return ifexpr div_cmp(6, 2) { 0 } else { 1 } }
     );
 }
 
+#[test]
+fn enum_indexed_arrays_omit_bounds_checks_in_generated_c() {
+    let source = r#"
+enum Wave: u8 { Saw, Square, Triangle }
+fnshape Shape(f32) -> f32
+fn saw(p: f32) -> f32 { return p * 2.0 - 1.0 }
+fn square(p: f32) -> f32 { if p < 0.5 { return 1.0 } else { return -1.0 } }
+fn triangle(p: f32) -> f32 { if p < 0.5 { return p * 4.0 - 1.0 } else { return 3.0 - p * 4.0 } }
+fix SHAPES: .[static fn Shape; Wave] = .[
+    Wave.Triangle: fn triangle,
+    Wave.Saw: fn saw,
+    Wave.Square: fn square,
+]
+fn render(shapes: .[static fn Shape; Wave], levels: #[f32; Wave], wave: Wave, phase: f32) -> f32 {
+    levels#[wave] = levels.[wave] + 0.25
+    return shapes.[wave](phase) * levels.[wave]
+}
+fn main() -> u8 {
+    fix levels: #[f32; Wave] = new #[0.5; Wave]
+    fix w = 2 as Wave or return 1
+    fix v = render(SHAPES, levels, w, 0.25)
+    return ifexpr v == 0.0 { 0 } else { 1 }
+}
+"#;
+    let (program, _) =
+        crate::analyze(source.as_bytes(), &crate::CompilationOptions::default()).unwrap();
+    let c = generate(
+        &program,
+        "enum-array.suz",
+        crate::SymbolPoolLimit::default(),
+        crate::ArenaOptions::default(),
+        crate::LogLevel::default(),
+        false,
+        None,
+    );
+    assert!(
+        !c.contains("suz_array_bounds"),
+        "expected no runtime bounds check for enum-indexed array:\n{c}"
+    );
+    assert!(
+        c.contains("static suz_fntype_"),
+        "expected static constant function table:\n{c}"
+    );
+}
+
 #[path = "tests/array_bounds.rs"]
 mod array_bounds;
 #[path = "tests/struct_params.rs"]

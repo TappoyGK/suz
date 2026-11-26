@@ -22,24 +22,178 @@ pub(super) fn initializer(
     let ExpressionKind::ArrayInit {
         values,
         lengths,
+        keys,
         repeated,
         ..
     } = &expr.kind
     else {
         unreachable!()
     };
-    let required = match expected {
+    let expected_array = match expected {
         Some(Type::Array(id) | Type::ArrayRef { id, .. }) => {
-            let array = scope.structs.arrays.borrow().get(id);
-            if array.rank != lengths.len() {
-                return Err(expr.location.error(
-                    ErrorKind::InvalidSource,
-                    crate::diagnostic!("array.type", "array rank does not match the required type"),
-                ));
-            }
-            Some(array.element)
+            Some(scope.structs.arrays.borrow().get(id))
         }
         _ => None,
+    };
+
+    // 列挙型添字の反復初期化 `new #[式; E]` / `.[式; E]` の判定。
+    let enum_repeated = if *repeated {
+        let enum_pos = lengths.iter().position(|length| {
+            matches!(
+                &length.kind,
+                ExpressionKind::Name(name) if crate::parser::names::is_type_spelling(name)
+            )
+        });
+        if let Some(pos) = enum_pos {
+            if lengths.len() != 1 {
+                return Err(lengths[pos].location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "array.enum-type",
+                        "enum-indexed arrays must be 1-dimensional"
+                    ),
+                ));
+            }
+            let ExpressionKind::Name(name) = &lengths[0].kind else {
+                unreachable!()
+            };
+            let Some(decl) = scope
+                .enums
+                .iter()
+                .find(|d| &d.name == name && !d.ty.is_error)
+            else {
+                return Err(lengths[0].location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "array.enum-type",
+                        "unknown enum type '{name}' in array initializer"
+                    ),
+                ));
+            };
+            Some(decl.ty)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // 列挙子キー初期化 `new #[E.A: 式, ...]` / `.[E.A: 式, ...]` の判定。
+    let (index_enum, slots) = if let Some(keys) = keys {
+        let mut enum_ty: Option<crate::ast::EnumType> = None;
+        let mut seen = Vec::new();
+        let mut slots = Vec::with_capacity(keys.len());
+        for key in keys {
+            let ExpressionKind::Variant {
+                enum_name,
+                variant: name,
+            } = &key.kind
+            else {
+                return Err(key.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "array.enum-init",
+                        "enum array key must be an enum variant (Enum.Variant)"
+                    ),
+                ));
+            };
+            let Some(decl) = scope
+                .enums
+                .iter()
+                .find(|d| &d.name == enum_name && !d.ty.is_error)
+            else {
+                return Err(key.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "array.enum-init",
+                        "unknown enum type '{enum_name}' in array key"
+                    ),
+                ));
+            };
+            let current = decl.ty;
+            if let Some(previous) = enum_ty {
+                if previous.id != current.id {
+                    return Err(key.location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "array.enum-init",
+                            "all enum array keys must belong to the same enum type"
+                        ),
+                    ));
+                }
+            } else {
+                enum_ty = Some(current);
+                seen = vec![false; decl.variants.len()];
+            }
+            let Some(variant_index) = decl.variants.iter().position(|v| v == name) else {
+                return Err(key.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "array.enum-init",
+                        "unknown variant '{name}' for enum '{enum_name}'"
+                    ),
+                ));
+            };
+            if seen[variant_index] {
+                return Err(key.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "array.enum-init",
+                        "duplicate enum array key '{enum_name}.{name}'"
+                    ),
+                ));
+            }
+            seen[variant_index] = true;
+            slots.push(variant_index);
+        }
+        let enum_ty = enum_ty.unwrap();
+        if let Some(missing) = seen.iter().position(|&present| !present) {
+            let decl = &scope.enums[enum_ty.id];
+            let missing_name = &decl.variants[missing];
+            return Err(expr.location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "array.enum-init",
+                    "missing enum array key '{}.{missing_name}'",
+                    decl.name
+                ),
+            ));
+        }
+        (Some(enum_ty), slots)
+    } else if let Some(enum_ty) = enum_repeated {
+        (Some(enum_ty), Vec::new())
+    } else {
+        (None, Vec::new())
+    };
+
+    let required = if let Some(array) = expected_array {
+        if let Some(actual_enum) = index_enum {
+            if array.rank != 1 || array.index_enum != Some(actual_enum) {
+                return Err(expr.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "array.enum-type",
+                        "enum-indexed array type does not match the required type"
+                    ),
+                ));
+            }
+        } else if array.index_enum.is_some() {
+            return Err(expr.location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "array.enum-init",
+                    "enum-indexed arrays require explicit enum keys or '; EnumName'"
+                ),
+            ));
+        } else if array.rank != lengths.len() {
+            return Err(expr.location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("array.type", "array rank does not match the required type"),
+            ));
+        }
+        Some(array.element)
+    } else {
+        None
     };
     let mut initial = Vec::new();
     for v in values {
@@ -71,23 +225,36 @@ pub(super) fn initializer(
             ),
         ));
     }
-    let mut checked_lengths = Vec::new();
-    for length in lengths {
-        let v = expression::expression(length, None, scope)?;
-        if !v.ty.is_integer() {
-            return Err(length.location.error(
-                ErrorKind::InvalidSource,
-                crate::diagnostic!("array.layout", "array dimensions require integers"),
-            ));
+    let checked_lengths = if let Some(enum_ty) = index_enum {
+        vec![CheckedExpression {
+            ty: Type::Integer(crate::ast::IntegerType::Len),
+            value: Value::Integer {
+                value: enum_ty.count as i128,
+                minus: None,
+            },
+        }]
+    } else {
+        let mut checked_lengths = Vec::new();
+        for length in lengths {
+            let v = expression::expression(length, None, scope)?;
+            if !v.ty.is_integer() {
+                return Err(length.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("array.layout", "array dimensions require integers"),
+                ));
+            }
+            if constants::constant_integer(&v)?
+                .is_some_and(|n| !(0..=i32::MAX as i128).contains(&n))
+            {
+                return Err(expr.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("array.layout", "array dimension is outside len_t"),
+                ));
+            }
+            checked_lengths.push(v);
         }
-        if constants::constant_integer(&v)?.is_some_and(|n| !(0..=i32::MAX as i128).contains(&n)) {
-            return Err(expr.location.error(
-                ErrorKind::InvalidSource,
-                crate::diagnostic!("array.layout", "array dimension is outside len_t"),
-            ));
-        }
-        checked_lengths.push(v);
-    }
+        checked_lengths
+    };
     // 内側の積も表せることを確認する。外側が0でも内側の配置のあふれを隠さない。
     let mut count = Some(1_u64);
     let mut constant_counts = Vec::new();
@@ -112,11 +279,12 @@ pub(super) fn initializer(
             constant_counts.push(count);
         }
     }
+    let rank = checked_lengths.len();
     let ty = scope
         .structs
         .arrays
         .borrow_mut()
-        .intern(element, lengths.len());
+        .intern_indexed(element, rank, index_enum);
     Ok(CheckedExpression {
         ty,
         value: Value::Array {
@@ -124,10 +292,9 @@ pub(super) fn initializer(
             lengths: checked_lengths,
             repeated: *repeated,
             metadata: Box::new(super::ir::ArrayMetadata {
-                origins: (0..lengths.len())
-                    .map(|axis| (expr.location, axis))
-                    .collect(),
+                origins: (0..rank).map(|axis| (expr.location, axis)).collect(),
                 constant_counts,
+                slots,
             }),
         },
     })
@@ -234,6 +401,52 @@ fn access(
             ));
         }
         let array = scope.structs.arrays.borrow().get(id);
+        if let Some(enum_ty) = array.index_enum {
+            let step = steps[position];
+            let ExpressionKind::Slice { start, index, .. } = &step.kind else {
+                unreachable!()
+            };
+            if !*index {
+                return Err(step.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "array.enum-index",
+                        "slicing is not supported for enum-indexed arrays"
+                    ),
+                ));
+            }
+            let index_expr = start.as_ref().unwrap();
+            let value = expression::expression(index_expr, Some(Type::Enum(enum_ty)), scope)?;
+            if value.ty != Type::Enum(enum_ty) {
+                return Err(index_expr.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "array.enum-index",
+                        "enum-indexed array requires an index of type '{}'",
+                        scope.enums[enum_ty.id].name
+                    ),
+                ));
+            }
+            let address = CheckedExpression {
+                ty: array.element.pointer(),
+                value: Value::ArrayElement {
+                    target: Box::new(target),
+                    indices: vec![(value, step.location, true)],
+                },
+            };
+            target = CheckedExpression {
+                ty: array.element,
+                value: Value::ArrayRead {
+                    address: Box::new(address),
+                    handler: None,
+                },
+            };
+            position += 1;
+            if !fallible && position < steps.len() {
+                target = constants::evaluate(&target)?.unwrap_or(target);
+            }
+            continue;
+        }
         let indices = steps[position..]
             .iter()
             .take_while(|s| matches!(s.kind, ExpressionKind::Slice { index: true, .. }))
@@ -592,9 +805,7 @@ fn constant_element_type(
     }
     match ty {
         Type::Pointer { .. } if ty.is_nilable() => true,
-        Type::Pointer { .. } | Type::CPointer | Type::Function(_) | Type::StaticFunction(_) => {
-            false
-        }
+        Type::Pointer { .. } | Type::CPointer | Type::Function(_) => false,
         Type::Struct(id) => scope
             .structs
             .get(id)

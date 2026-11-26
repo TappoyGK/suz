@@ -1142,6 +1142,7 @@ pub(crate) enum ExpressionKind {
     ArrayInit {
         values: Vec<Expression>,
         lengths: Vec<Expression>,
+        keys: Option<Vec<Expression>>,
         repeated: bool,
         readonly: bool,
     },

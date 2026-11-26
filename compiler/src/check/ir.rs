@@ -11,6 +11,8 @@ pub(crate) struct ArrayMetadata {
     pub origins: Vec<(Location, usize)>,
     /// 内側からの定数の要素数。対象C環境のsizeofでもコンパイル時に検査する。
     pub constant_counts: Vec<u64>,
+    /// 列挙子キー初期化の記述順から宣言順スロット番号への対応。通常配列・反復初期化では空。
+    pub slots: Vec<usize>,
 }
 
 /// [`crate::ast::Program`] の意味検査結果。

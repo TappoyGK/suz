@@ -217,7 +217,8 @@ pub(super) fn allocate(
         write!(c, "for (size_t suz_i = 0; suz_i < suz_count; ++suz_i) (({element} *)suz_data)[suz_i] = suz_initial_0; ").unwrap();
     } else {
         for i in 0..values.len() {
-            write!(c, "(({element} *)suz_data)[{i}] = suz_initial_{i}; ").unwrap();
+            let slot = metadata.slots.get(i).copied().unwrap_or(i);
+            write!(c, "(({element} *)suz_data)[{slot}] = suz_initial_{i}; ").unwrap();
         }
     }
     c.push_str("suz_array_value.data = suz_data; suz_array_value; })");

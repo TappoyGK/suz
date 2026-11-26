@@ -604,18 +604,17 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | `[array.constant-index]` | 3 | 18 |
 
-### array-019 定数配列に関数値を含めない
+### array-019 定数配列に非nilのポインタを含めない
 
 主根拠：`[array.constant]`。
 
-補助根拠：`[fn.value-const]`。
+補助根拠：`[const.expression]`。
 
 **ソース：**
 
 ```suz
-fn value() -> i32 { return 1 }
 fn main() -> u8 {
-    fix a = .[fn value]
+    fix a = .[new (1 as i32)]
     return 0
 }
 ```
@@ -630,7 +629,7 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[array.constant]` | 3 | 14 |
+| 通常 | `[array.constant]` | 2 | 14 |
 
 ### array-020 読み取り専用の配列も比較しない
 

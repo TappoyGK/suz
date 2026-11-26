@@ -68,7 +68,9 @@ impl Structs {
             Type::Array(id) => {
                 let array = self.arrays.borrow().get(id);
                 let element = self.normalize(array.element);
-                self.arrays.borrow_mut().intern(element, array.rank)
+                self.arrays
+                    .borrow_mut()
+                    .intern_indexed(element, array.rank, array.index_enum)
             }
             Type::ArrayRef {
                 id,
@@ -77,7 +79,11 @@ impl Structs {
             } => {
                 let array = self.arrays.borrow().get(id);
                 let element = self.normalize(array.element);
-                let Type::Array(id) = self.arrays.borrow_mut().intern(element, array.rank) else {
+                let Type::Array(id) =
+                    self.arrays
+                        .borrow_mut()
+                        .intern_indexed(element, array.rank, array.index_enum)
+                else {
                     unreachable!()
                 };
                 Type::ArrayRef {
@@ -278,7 +284,9 @@ impl Structs {
             Type::Array(id) => {
                 let array = self.arrays.borrow().get(id);
                 let element = self.name(array.element);
-                if array.rank == 1 {
+                if let Some(index_enum) = array.index_enum {
+                    format!("[{element}; {}]", self.enums[index_enum.id].name)
+                } else if array.rank == 1 {
                     format!("[{element}]")
                 } else {
                     format!("[{element}; {}]", vec!["_"; array.rank].join(", "))
@@ -293,7 +301,12 @@ impl Structs {
                 let element = self.name(array.element);
                 let prefix = if mutable { "#" } else { "." };
                 let suffix = if nilable { "?" } else { "" };
-                if array.rank == 1 {
+                if let Some(index_enum) = array.index_enum {
+                    format!(
+                        "{prefix}[{element}; {}]{suffix}",
+                        self.enums[index_enum.id].name
+                    )
+                } else if array.rank == 1 {
                     format!("{prefix}[{element}]{suffix}")
                 } else {
                     format!(
@@ -337,7 +350,9 @@ impl Structs {
             Type::Array(id) => {
                 let array = self.arrays.borrow().get(id);
                 let element = self.name_with_parameters(array.element, parameters);
-                if array.rank == 1 {
+                if let Some(index_enum) = array.index_enum {
+                    format!("[{element}; {}]", self.enums[index_enum.id].name)
+                } else if array.rank == 1 {
                     format!("[{element}]")
                 } else {
                     format!("[{element}; {}]", vec!["_"; array.rank].join(", "))
@@ -352,7 +367,12 @@ impl Structs {
                 let element = self.name_with_parameters(array.element, parameters);
                 let prefix = if mutable { "#" } else { "." };
                 let suffix = if nilable { "?" } else { "" };
-                if array.rank == 1 {
+                if let Some(index_enum) = array.index_enum {
+                    format!(
+                        "{prefix}[{element}; {}]{suffix}",
+                        self.enums[index_enum.id].name
+                    )
+                } else if array.rank == 1 {
                     format!("{prefix}[{element}]{suffix}")
                 } else {
                     format!(
@@ -568,7 +588,11 @@ impl Structs {
                     crate::diagnostic!("array.type", "array elements require stored value types"),
                 ));
             }
-            return Ok(self.arrays.borrow_mut().intern(element, array.rank));
+            return Ok(self.arrays.borrow_mut().intern_indexed(
+                element,
+                array.rank,
+                array.index_enum,
+            ));
         }
         if let Type::ArrayRef {
             id,
@@ -585,7 +609,11 @@ impl Structs {
                     crate::diagnostic!("array.type", "array elements require stored value types"),
                 ));
             }
-            let Type::Array(id) = self.arrays.borrow_mut().intern(element, array.rank) else {
+            let Type::Array(id) =
+                self.arrays
+                    .borrow_mut()
+                    .intern_indexed(element, array.rank, array.index_enum)
+            else {
                 unreachable!()
             };
             return Ok(Type::ArrayRef {
