@@ -201,7 +201,7 @@ fn main() -> u8 {                          // 本体のブロック：1
     fix a: u8 = (1 + 2) * 3                // *：2、丸括弧：3、+：4、1・2：5、3：3
     fix b = 0 < a < 10                     // 比較：2、0・a・10：3
     fix s = a + 1 + 1                      // 外側の+：2、内側の+：3、a：4
-    fix t: symbol = `n=${a + 1}`           // テンプレート：2、+：3、a・1：4
+    fix t: symbol = "n=${a + 1}"           // テンプレート：2、+：3、a・1：4
     fix v = ifexpr a == 0 { a } else { 0 } // ifexpr：2、条件と値ブロック：3、その中の式：4
     return 0
 }
@@ -483,10 +483,10 @@ fix RIGHT = ORIGIN with { x: 1 }
 | 利用者の制御 | 等しいかだけを調べる場合は [symbol.compare] を使える |
 
 ```suz
-fix a: symbol = `a`
-fix aa: symbol = `aa`
-fix upper: symbol = `A`
-fix b: symbol = `b`
+fix a: symbol = "a"
+fix aa: symbol = "aa"
+fix upper: symbol = "A"
+fix b: symbol = "b"
 fix prefix_first = a < aa
 fix codepoint_order = upper < a
 fix chain = a < b <= b
@@ -497,10 +497,10 @@ fix chain = a < b <= b
 **[symbol.operations]** `symbol` の二項演算には `==`、`!=`、`<`、`<=`、`>`、`>=` を使える。`text` との比較には [text.equal-view] と [text.order-view] を適用する。算術演算はコンパイルエラーである。`as` による変換は [symbol.cast] に従う。`as%` による変換は [symbol.cast-wrap] に、`as|` による変換は [symbol.cast-sat] に従う。連結はテンプレートへの埋め込みで表す。
 
 ```suz
-fix left: symbol = `Hello`
-fix right: symbol = `Suz`
-fix joined: symbol = `${left}, ${right}!`
-fix empty = joined == ``
+fix left: symbol = "Hello"
+fix right: symbol = "Suz"
+fix joined: symbol = "${left}, ${right}!"
+fix empty = joined == ""
 ```
 
 ### 5.6 text
@@ -545,14 +545,14 @@ fix empty = joined == ``
 **[text.buffer-capacity]** `textbuf[容量] 式` は初期容量の下限をバイト数で指定する。容量にはlen_tを要求し、内容の式より先に1回だけ評価する。初期容量は指定値と内容のバイト長の大きい方とし、省略時は内容のバイト長とする。指定値は追記後の容量の上限ではない。容量0と空の内容も認める。容量と内容は [rt.arena-storage] に従って確保し、使わなかった容量も作業領域の使用量に含める。
 
 ```suz
-var message = textbuf[1024] `Hello`
+var message = textbuf[1024] "Hello"
 fix old = message
-fix suffix = ` world`
-message <- `${suffix}`
+fix suffix = " world"
+message <- "${suffix}"
 // message は Hello world、old は Hello。
 arena {
     var local = textbuf message
-    local <- `!`
+    local <- "!"
     // local は Hello world!。外側の message は変わらない。
 }
 ```
@@ -564,10 +564,10 @@ arena {
 **[text.append-storage]** 左辺の範囲の終わりが、その実体の使用済み末尾と一致し、かつ右辺の内容が空き容量に収まる場合は、その場に書き足す。追加確保と左辺の内容のコピーは行わない。この条件を満たさない場合は、現在の作業領域に別の実体を確保し、左辺と右辺の内容をコピーする。元の実体は作業領域の終了まで保持する。参照数を数える必要はないが、使用済み末尾と容量は実行時に確認する。
 
 ```suz
-var a = textbuf[1024] `Hello`
+var a = textbuf[1024] "Hello"
 var b = a
-b <- ` B`
-a <- ` A`
+b <- " B"
+a <- " A"
 // a は Hello A、b は Hello B。
 // a は使用済み末尾に届かないため、容量が余っていてもコピーする。
 ```
@@ -695,7 +695,7 @@ fn clear_optional(grid: #[u8; _, _]?) -> void {
 
 ```suz
 fix PALETTE: .[i32] = .[17, 18, 19, 21, 27, 33]
-fix LABELS: .[text] = .[`開始`, `終了`]
+fix LABELS: .[text] = .["開始", "終了"]
 
 fn color(n: u32) -> i32 {
     return PALETTE.[n % len PALETTE]
@@ -771,9 +771,9 @@ fix CHANNELS = 2
 
 
 ```suz
-fix PRODUCT: symbol = `Suz`
+fix PRODUCT: symbol = "Suz"
 fix MAJOR: u8 = 1
-fix LABEL = `${PRODUCT} ${MAJOR}`
+fix LABEL = "${PRODUCT} ${MAJOR}"
 ```
 
 `LABEL` の内容は `Suz 1` となる。
@@ -781,8 +781,8 @@ fix LABEL = `${PRODUCT} ${MAJOR}`
 **[const.symbol-cast]** 定数式の `symbol` からの `as`・`as%`・`as|` は定数式として評価できる。`or` の代替値も定数式とし、実行時と同じ形式・範囲・丸め・ラップ・飽和の規則で判定する。[symbol.cast] で認める構造体への変換も対象とし、フィールドを再帰的に検査する。成功した結果の `symbol` フィールドはconstant symbolとして配置する。変換が失敗した場合は代替値を使う。成功する変換であっても [symbol.cast-handler] に従って `or` を必須とする。
 
 ```suz
-fix ENABLED = `true` as bool or false
-fix COUNT: u8 = `256` as u8 or 10
+fix ENABLED = "true" as bool or false
+fix COUNT: u8 = "256" as u8 or 10
 ```
 
 `ENABLED` は `true`、`COUNT` は10となる。
@@ -906,7 +906,7 @@ fn choose(ready: bool) -> i32 {
 
 ```suz
 if p == (Vec2 { x: 0.0, y: 0.0 }) {
-    log info `origin`
+    log info "origin"
 }
 ```
 
@@ -918,7 +918,7 @@ if p == (Vec2 { x: 0.0, y: 0.0 }) {
 
 ```suz
 if not ready {
-    log info `not ready`
+    log info "not ready"
 }
 ```
 
@@ -1033,10 +1033,10 @@ fix x = a as u8 or return 1
 ```suz
 fn convert(value: i64) -> u8 {
     fix count = value as u8 or return expr {
-        log info `out of range: ${value}`
+        log info "out of range: ${value}"
         1
     }
-    log info `count: ${count}`
+    log info "count: ${count}"
     return 0
 }
 ```
@@ -1062,14 +1062,14 @@ fix wave = code as Wave or Wave.Sine
 fix sum = (a + b) or 0
 fix quotient = (a / b) or return 1
 fix shifted = (value << count) or return expr {
-    log info `invalid shift`
+    log info "invalid shift"
     1
 }
 ```
 
 ### 7.13 テンプレート式
 
-**[symbol.template]** バッククォートで囲むテンプレートは、symbolを要求される場所ではsymbolを生成し、それ以外ではtextを生成する。textとして使う定数テンプレートは静的な文字列を参照し、インターン化しない。実行時の埋め込みを持つテンプレートをtextの値にするには [text.buffer] のtextbufが必要であり、省略するとコンパイルエラーである。ただし、追記の右辺に直接書くテンプレートは [text.append]、log・panicの本文は [output.template] に従う。取得済みのtextの値をsymbolにするには、要求型だけでは変換せず [text.to-symbol] のasを使う。エスケープ、本文、埋め込み、1行の制約、値の表示は [symbol.escape]、[symbol.template-text]、[symbol.interpolation]、[symbol.template-line]、[symbol.value-format] に従う。空のテンプレートは空文字列を表す。ログ文に直接書くテンプレートは [log.fragments] に従う。
+**[symbol.template]** 二重引用符で囲むテンプレートは、symbolを要求される場所ではsymbolを生成し、それ以外ではtextを生成する。textとして使う定数テンプレートは静的な文字列を参照し、インターン化しない。実行時の埋め込みを持つテンプレートをtextの値にするには [text.buffer] のtextbufが必要であり、省略するとコンパイルエラーである。ただし、追記の右辺に直接書くテンプレートは [text.append]、log・panicの本文は [output.template] に従う。取得済みのtextの値をsymbolにするには、要求型だけでは変換せず [text.to-symbol] のasを使う。エスケープ、本文、埋め込み、1行の制約、値の表示は [symbol.escape]、[symbol.template-text]、[symbol.interpolation]、[symbol.template-line]、[symbol.value-format] に従う。空のテンプレートは空文字列を表す。ログ文に直接書くテンプレートは [log.fragments] に従う。
 
 symbolの要求型は、各構文の型検査規則に従って決める。以下は代表例であり、要求型が伝わる場所をこの列挙だけに限定しない。
 
@@ -1078,11 +1078,11 @@ symbolの要求型は、各構文の型検査規則に従って決める。以�
 - [array.initializer-type]：外側から要求される配列参照の要素型がsymbolの場合の、列挙初期化の各要素と反復初期化の初期値。
 - [type.branch-inference]：外側からsymbolが要求されるifexpr・matchexprの分岐。外側からの要求型がない場合は、他の分岐がsymbolでもテンプレートにはsymbolを要求せず、[text.join] に従う。実行時の埋め込みを持つテンプレートにはtextbufが必要である。
 
-例えば、nameがsymbolフィールドなら `` v with { name: `${x}` } `` はそのテンプレートをsymbolとして生成する。`` var items: #[symbol] = new #[`${x}`; n] `` も、初期値のテンプレートをsymbolとして1回生成してから各要素へコピーする。
+例えば、nameがsymbolフィールドなら `v with { name: "${x}" }` はそのテンプレートをsymbolとして生成する。`var items: #[symbol] = new #["${x}"; n]` も、初期値のテンプレートをsymbolとして1回生成してから各要素へコピーする。
 
 丸括弧は要求型を変えない。`as symbol` は変換元へsymbolを要求しない。比較のオペランド、match・matchexprの対象、テンプレートの埋め込みにも、それだけを理由にsymbolを要求しない。
 
-例えば、実行時のxに対して `` `${x}` as symbol `` は拒否し、`` textbuf `${x}` as symbol `` または `` fix s: symbol = `${x}` `` と書く。`` name == `${x}` `` もsymbolへの暗黙の生成とはせず、`` name == textbuf `${x}` `` と書く。定数テンプレートとの比較はtextとの比較として受理する。
+例えば、実行時のxに対して `"${x}" as symbol` は拒否し、`textbuf "${x}" as symbol` または `fix s: symbol = "${x}"` と書く。`name == "${x}"` もsymbolへの暗黙の生成とはせず、`name == textbuf "${x}"` と書く。定数テンプレートとの比較はtextとの比較として受理する。
 
 **[symbol.template-evaluation]** symbolを生成するテンプレート中の式は左から右へ1回ずつ評価する。内容を組み立てた後、同じ内容の実体があれば再利用し、なければ新たに保存する。生成中にパニックした場合は値を返さない。同じ内容の値を取得するためだけに、プールの管理領域を拡張して上限超過を起こしてはならない。プールが上限に達していても、登録済みの実体を取得できる。ただし、内容の生成に必要な一時領域の確保は失敗しうる。生成と検索の一時領域は処理後に解放または再利用し、同じ内容の生成を繰り返すことで保持し続けない。
 
@@ -1097,16 +1097,16 @@ symbolの要求型は、各構文の型検査規則に従って決める。以�
 
 ```suz
 fn greeting(name: symbol) -> symbol {
-    return `Hello, ${name}!`
+    return "Hello, ${name}!"
 }
 
 fn main() -> u8 {
-    var name: symbol = `Suz`
+    var name: symbol = "Suz"
     fix first = greeting(name)
-    name = `World`
+    name = "World"
     fix second = greeting(name)
-    log info `${first}`
-    log info `${second}`
+    log info "${first}"
+    log info "${second}"
     return 0
 }
 ```
@@ -1116,8 +1116,8 @@ fn main() -> u8 {
 次の例では、直接書いたテンプレートと埋め込みによって生成した値が、同じ実体を共有する。
 
 ```suz
-fix name: symbol = `Suz`
-fix generated: symbol = `${name}`
+fix name: symbol = "Suz"
+fix generated: symbol = "${name}"
 fix same = name == generated
 ```
 
@@ -1125,9 +1125,9 @@ fix same = name == generated
 
 ### 7.14 テンプレートの記法と値の表示
 
-**[symbol.template-line]** テンプレートは、開くバッククォートから閉じるバッククォートまで、ソース上の1行に書く。内容に改行を含める場合は `\n` を使う。
+**[symbol.template-line]** テンプレートは、開く二重引用符から閉じる二重引用符まで、ソース上の1行に書く。内容に改行を含める場合は `\n` を使う。
 
-**[symbol.template-text]** テンプレートの本文では、`//` は文字として扱う。`${` は埋め込みを開始する。文字として `${` を含める場合は `\${` と書く。埋め込み式の中は通常の式の字句規則に従う。
+**[symbol.template-text]** テンプレートの本文では、`//` と `` ` `` は文字として扱う。`${` は埋め込みを開始する。文字として `${` を含める場合は `\${` と書く。埋め込み式の中は通常の式の字句規則に従う。
 
 **[symbol.interpolation]** `${式}` は、式を評価した値の表示に置き換える。埋め込み式は左から右に、それぞれ1回評価する。埋め込める値の型は整数型、浮動小数点型、`bool`、`char`、列挙型、エラー型、`symbol`、`text` である。エラー型の表示は [error.ops] に従う。それ以外の型を埋め込むとコンパイルエラーである。既存の `symbol` を埋め込んでも、その実体の保持期間は変わらない。
 
@@ -1140,7 +1140,7 @@ fix same = name == generated
 | `\r` | 復帰 |
 | `\t` | タブ |
 | `\\` | バックスラッシュ |
-| `` \` `` | バッククォート |
+| `\"` | 二重引用符 |
 | `\$` | `$` |
 
 **[symbol.value-format]** 埋め込んだ値は、次の形式で表示する。
@@ -1159,10 +1159,10 @@ fix same = name == generated
 **[symbol.nul]** インターン化、比較、埋め込み、ログ出力はNULを含む全バイトを扱う。
 
 ```suz
-fix empty = ``
-fix with_nul = `a\0b`
-fix different = with_nul != `a`
-log info `${with_nul}`
+fix empty = ""
+fix with_nul = "a\0b"
+fix different = with_nul != "a"
+log info "${with_nul}"
 ```
 
 `empty` のバイト長は0、`with_nul` のバイト長は3、`different` は `true` となる。ログ本文は `a`、NUL、`b` の3バイトであり、ログの接頭辞と末尾のLFは [log.output] に従って付く。
@@ -1187,10 +1187,10 @@ log info `${with_nul}`
 入力の数学的な整数値を2^Nで割った非負の剰余を取り、Nビットの値とする。Nは変換先のビット数である。符号付き整数型では、そのビット列を2の補数として解釈する。整数値の大きさや桁数によって変換失敗とはしない。書式が不正な場合は変換失敗とする。浮動小数点型、`bool`、構造体型など、整数型以外への `as%` はコンパイルエラーである。
 
 ```suz
-fix wrapped = `256` as% u8 or 0
-fix negative = `-1` as% u8 or 0
-fix signed = `255` as% i8 or 0
-fix invalid = `1.0` as% u8 or 7
+fix wrapped = "256" as% u8 or 0
+fix negative = "-1" as% u8 or 0
+fix signed = "255" as% i8 or 0
+fix invalid = "1.0" as% u8 or 7
 ```
 
 `wrapped` は0、`negative` は255、`signed` は−1、`invalid` は7となる。最初の3つは変換に成功し、代替値を評価しない。
@@ -1198,10 +1198,10 @@ fix invalid = `1.0` as% u8 or 7
 **[symbol.cast-sat]** `symbol` から整数型への `as|` は、[symbol.cast-wrap] と同じ形式で10進整数を読み、変換先の最小値未満なら最小値、最大値超なら最大値へ飽和させる。書式が不正な場合は変換失敗とする。整数型以外への `as|` はコンパイルエラーである。
 
 ```suz
-fix sat_hi = `300` as| u8 or 0
-fix sat_lo = `-5` as| u8 or 9
-fix sat_signed = `-200` as| i8 or 0
-fix sat_bad = `12x` as| u8 or 7
+fix sat_hi = "300" as| u8 or 0
+fix sat_lo = "-5" as| u8 or 9
+fix sat_signed = "-200" as| i8 or 0
+fix sat_bad = "12x" as| u8 or 7
 ```
 
 `sat_hi` は255、`sat_lo` は0、`sat_signed` は−128、`sat_bad` は7となる。最初の3つは変換に成功し、代替値を評価しない。
@@ -1209,10 +1209,10 @@ fix sat_bad = `12x` as| u8 or 7
 **[symbol.cast-handler]** `symbol` からの `as`・`as%`・`as|` には、`or 式`、`or return`、`or panic テンプレート`のいずれかを必ず付ける。`or panic`の動作は [err.or-panic] に従う。定数式からの変換でも省略できない。[const.cast-check] による成功時の省略規則は適用しない。`as% 型`・`as| 型` の直後の `or` も、その変換の失敗処理として結合する。代替値には変換先の型を要求し、変換が失敗した場合だけ評価する。`or return` の戻り値と記述位置、`expr` 系内部での脱出禁止、`or` の結合には [expr.cast-return]、[expr.or-return-position]、[expr.jump-prohibited]、[expr.cast-binding] を適用する。
 
 ```suz
-fix count = `1_000` as u16 or 0
-fix enabled = `true` as bool or false
-fix rate = `1.5e-3` as f64 or 0.0
-fix fallback = `256` as u8 or 0
+fix count = "1_000" as u16 or 0
+fix enabled = "true" as bool or false
+fix rate = "1.5e-3" as f64 or 0.0
+fix fallback = "256" as u8 or 0
 ```
 
 `count` は1000、`enabled` は `true`、`rate` は0.0015を `f64` に丸めた値、`fallback` は0となる。
@@ -1253,8 +1253,8 @@ struct Point {
 }
 
 fn main() -> u8 {
-    fix point = `Point { y: 20, x: 10 }` as Point or Point { x: 0, y: 0 }
-    log info `${point.x}, ${point.y}`
+    fix point = "Point { y: 20, x: 10 }" as Point or Point { x: 0, y: 0 }
+    log info "${point.x}, ${point.y}"
     return 0
 }
 ```
@@ -1266,22 +1266,22 @@ fn main() -> u8 {
 | フィールド型 | 入力形式 |
 |---|---|
 | 整数型・浮動小数点型・`bool` | [symbol.cast-format] と [symbol.cast-range] に従う値 |
-| `symbol`・`text` | バッククォートで囲んだ、埋め込みのない文字列 |
+| `symbol`・`text` | 二重引用符で囲んだ、埋め込みのない文字列 |
 | `char` | [char.literal] に従う文字リテラル。不正な入力は変換失敗とする |
 | 列挙型 | フィールドの列挙型名と列挙子名を `.` でつないだ形。宣言済みの列挙子に一致することを要求する |
 | 構造体型 | [symbol.cast-struct] に従う入れ子の構造体リテラル |
 
 値の位置に、変数名、定数名、関数呼び出し、算術式、型変換などを書いた入力は変換失敗とする。入れ子も値の表記として読み、Suzの式として実行しない。
 
-**[symbol.cast-struct-symbol]** `symbol`・`text` フィールドの文字列には [symbol.escape] と [symbol.template-line] の形式を適用する。変換入力中の不正なエスケープや改行は、コンパイルエラーではなく変換失敗として扱い、`or` の処理へ進む。定数式からの変換でも同じとする。Suzのソース自体に書いたテンプレートの字句検査とは区別する。エスケープを展開した内容は、入力全体の検査後に [symbol.cast-struct-result] に従って保存する。エスケープされていない `${` がある場合は変換失敗とする。文字として `${` を含める場合は `\${` と書く。バッククォートは `` \` ``、NULは `\0` で表す。
+**[symbol.cast-struct-symbol]** `symbol`・`text` フィールドの文字列には [symbol.escape] と [symbol.template-line] の形式を適用する。変換入力中の不正なエスケープや改行は、コンパイルエラーではなく変換失敗として扱い、`or` の処理へ進む。定数式からの変換でも同じとする。Suzのソース自体に書いたテンプレートの字句検査とは区別する。エスケープを展開した内容は、入力全体の検査後に [symbol.cast-struct-result] に従って保存する。エスケープされていない `${` がある場合は変換失敗とする。文字として `${` を含める場合は `\${` と書く。二重引用符は `\"`、NULは `\0` で表す。
 
 次は、変換元の `symbol` の内容である。
 
 ```text
-Label { name: `Suz` }
+Label { name: "Suz" }
 ```
 
-同じ内容をSuzのソースに書く場合は、外側のテンプレートに含めるバッククォートをエスケープする。
+同じ内容をSuzのソースに書く場合は、外側のテンプレートに含める二重引用符をエスケープする。
 
 ```suz
 struct Label {
@@ -1289,9 +1289,9 @@ struct Label {
 }
 
 fn main() -> u8 {
-    fix input = `Label { name: \`Suz\` }`
-    fix label = input as Label or Label { name: `` }
-    log info `${label.name}`
+    fix input = "Label { name: \"Suz\" }"
+    fix label = input as Label or Label { name: "" }
+    log info "${label.name}"
     return 0
 }
 ```
@@ -1340,7 +1340,7 @@ textフィールドの作業領域への確保失敗は [rt.arena-allocation]、
 
 ```suz
 fix tail = line.[5:] or return 1
-fix first = (line.[5:] or ``).[0] or '?'
+fix first = (line.[5:] or "").[0] or '?'
 ```
 
 **[text.to-symbol]** `text` の `as symbol` は、範囲内の内容をインターン化する。既存の同じ内容があれば共有し、なければ保存する。変換失敗を返さないため `or` を付けない。資源不足には [rt.symbol-allocation] を適用する。
@@ -1394,7 +1394,7 @@ fix first = (line.[5:] or ``).[0] or '?'
 
 **[len.const]** 定数式の `symbol` または `text` に対する `len` は定数式であり、[const.expression] の構成要素に含める。
 
-**[len.precedence]** `len` は単項の `-`、`not`、`~` と同じ優先順位である。`len t - 1` は `(len t) - 1` となる。切り出し・添字に付けた `or` は `len` より強く結合し、``` len s.[1:] or `` ``` は ``` len (s.[1:] or ``) ``` となる。
+**[len.precedence]** `len` は単項の `-`、`not`、`~` と同じ優先順位である。`len t - 1` は `(len t) - 1` となる。切り出し・添字に付けた `or` は `len` より強く結合し、`len s.[1:] or ""` は `len (s.[1:] or "")` となる。
 
 ### 7.18 正確な整数の算術
 
@@ -1642,7 +1642,7 @@ fix narrow: u8 = a + b or 0 // 格納に失敗し、代替値0を使う
 ```suz
 fn wait_forever() -> void {
     loop {
-        log info `waiting`
+        log info "waiting"
     }
 }
 ```
@@ -1681,8 +1681,8 @@ fn square(x: i64) -> i64 {
 ```suz
 fn status_code(status: symbol) -> u8 {
     return matchexpr status {
-        `ready` => 0
-        `busy` => 1
+        "ready" => 0
+        "busy" => 1
         _ => 2
     }
 }
@@ -1766,11 +1766,11 @@ for i in 0..<limit {
 
 ```suz
 for i in 0..<10 {
-    log info `${i}`
+    log info "${i}"
 }
 
 for i in 0..=10 {
-    log info `${i}`
+    log info "${i}"
 }
 ```
 
@@ -2270,7 +2270,7 @@ extern "output.h" {
     fn output_bytes(data: *const void, size: _size_t) -> _int
 }
 fn main() -> u8 {
-    fix msg = `こんにちは\n`
+    fix msg = "こんにちは\n"
     trusted {
         if output_bytes(c_bytes msg, c_byte_len msg) < 0 { return 1 }
     }
@@ -2752,9 +2752,9 @@ needs Comparable[T] {
 ```suz
 fn get_mode(code: u8) -> symbol {
     match code {
-        0 => { return `idle` }
-        1 => { return `active` }
-        _ => { panic `unexpected mode: ${code}` }
+        0 => { return "idle" }
+        1 => { return "active" }
+        _ => { panic "unexpected mode: ${code}" }
     }
 }
 ```
@@ -2827,7 +2827,7 @@ fix b = top + 1     // パニックする
 
 **[rt.symbol-allocation]** シンボルプールの上限を超える追加確保が必要な場合、または文字列本体・検索用管理領域・一時領域を確保できない場合はパニックする。必要なバイト数が表現可能な範囲を超える場合も同じとする。計算をラップさせたり、途中までの文字列を成功した値として返したりしない。
 
-**[rt.symbol-location]** 実行中の `symbol` 生成の失敗は、生成元のテンプレートの開くバッククォートの位置を示す。`symbol` または `text` からの変換処理で資源不足が起きた場合は、その `as`・`as%`・`as|` の位置を示す。埋め込み式の評価中も、失敗した生成・変換の位置を使う。プールの初期化の失敗は、`main` 宣言の `fn` の位置を示す。診断と終了コードは [rt.panic] に従う。
+**[rt.symbol-location]** 実行中の `symbol` 生成の失敗は、生成元のテンプレートの開く二重引用符の位置を示す。`symbol` または `text` からの変換処理で資源不足が起きた場合は、その `as`・`as%`・`as|` の位置を示す。埋め込み式の評価中も、失敗した生成・変換の位置を使う。プールの初期化の失敗は、`main` 宣言の `fn` の位置を示す。診断と終了コードは [rt.panic] に従う。
 
 **[rt.len-limit]** symbolの登録、textbuf、追記、構造体の文字列フィールドの生成で、Unicodeスカラー値が2^31−1個を超える場合はパニックする。symbolは [rt.symbol-allocation]、作業領域のtextは [rt.arena-allocation] の長さ超過とする。検査のための追加走査は行わない。定数のsymbolとtextはコンパイル時に検査する。上限は個数に対するものであり、バイト数とバイトオフセットの表現範囲は縮めない。
 
@@ -2918,18 +2918,18 @@ fix b = top + 1     // パニックする
 
 ```suz
 fix count: u8 = 3
-log info `count: ${count}`
+log info "count: ${count}"
 ```
 
 ログは `count: ` と数値の表示を本文の順に出力する。数値の整形には固定長の作業領域を使う。
 
 ```suz
 fn make_text(count: u8) -> symbol {
-    return `count: ${count}`
+    return "count: ${count}"
 }
 fn main() -> u8 {
     fix message = make_text(3)
-    log info `${message}`
+    log info "${message}"
     return 0
 }
 ```
@@ -3085,7 +3085,9 @@ CharEscape ::= "\" ( "0" | "n" | "r" | "t" | "\" | "'"
 
 `..<` と `..=` の隣接条件は、改行や空白を読み飛ばす前のソース位置で検査する。`elif` と `else` の位置も、直前の `}` と同じ物理行かどうかで検査する。
 
-テンプレートは、バッククォートから本文の走査に入り、[symbol.escape] に従ってエスケープを読む。`${` で通常の式のトークン化に切り替え、対応する `}` で本文に戻る。埋め込み式の中の構造体やブロックの `{ }` は、入れ子として数える。各埋め込みの内容は `Expression` に一致しなければならない。本文のエスケープされていないバッククォートでテンプレートを閉じる。全体には [symbol.template-line] の 1 行の制約を適用する。
+`extern` の直後の二重引用符は [ffi.header] の `HEADER` として読み、それ以外の二重引用符がテンプレートを開く。テンプレートは、二重引用符から本文の走査に入り、[symbol.escape] に従ってエスケープを読む。`${` で通常の式のトークン化に切り替え、対応する `}` で本文に戻る。埋め込み式の中の構造体やブロックの `{ }` は、入れ子として数える。各埋め込みの内容は `Expression` に一致しなければならない。本文のエスケープされていない二重引用符でテンプレートを閉じる。全体には [symbol.template-line] の 1 行の制約を適用する。
+
+テンプレート・文字リテラル・コメント・理由の外で、この付録のどのトークンにも当たらない文字（`` ` `` など）は [syntax.grammar] のコンパイルエラーである。
 
 ### A.3 宣言と型
 

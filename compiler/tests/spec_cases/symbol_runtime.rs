@@ -242,8 +242,8 @@ fn main() -> u8 {
     for i in 0..<1000 {
         fix fraction = 1.5
         fix yes = true
-        log info `value ${i} / ${fraction} / ${yes} / ${State.Ready}`
-        log info ``
+        log info "value ${i} / ${fraction} / ${yes} / ${State.Ready}"
+        log info ""
     }
     return 0
 }
@@ -274,12 +274,12 @@ int main(void) {
 fn allocation_failures_report_the_operation_location() {
     for (source, line, column) in [
         (
-            "fn main() -> u8 {\n    fix message: symbol = `constant`\n    return 0\n}",
+            "fn main() -> u8 {\n    fix message: symbol = \"constant\"\n    return 0\n}",
             1,
             1,
         ),
         (
-            "fn main() -> u8 {\n    fix message: symbol = `${ifexpr true { 7 } else { 8 }}`\n    return 0\n}",
+            "fn main() -> u8 {\n    fix message: symbol = \"${ifexpr true { 7 } else { 8 }}\"\n    return 0\n}",
             2,
             27,
         ),
@@ -300,7 +300,7 @@ fn allocation_failures_report_the_operation_location() {
 
 #[test]
 fn logs_preserve_embedded_nul_bytes() {
-    let source = "fn main() -> u8 {\n    fix message: symbol = `a\\0b`\n    log info `${message}`\n    return 0\n}";
+    let source = "fn main() -> u8 {\n    fix message: symbol = \"a\\0b\"\n    log info \"${message}\"\n    return 0\n}";
     let result = generated_with_environment(source, "int main(void) { return suz_program(); }\n");
     assert_eq!(result.status.code(), Some(0));
     assert_eq!(result.stderr, b"info text.suz:3: a\0b\n");

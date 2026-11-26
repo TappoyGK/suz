@@ -22,7 +22,7 @@ fn main() -> u8 {
     wrap.value#shift()
     fix copied = copy(wrap.value)
     if copied != (Sample { x: 4, y: 4.0 }) { return 1 }
-    fix parsed = `Sample { x: 5, y: 6.0 }` as Sample or return 2
+    fix parsed = "Sample { x: 5, y: 6.0 }" as Sample or return 2
     if parsed.x != 5 || parsed.y != 6.0 { return 3 }
     arena {
         fix p = new copied

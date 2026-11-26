@@ -10,8 +10,8 @@
 
 ```suz
 fn main() -> u8 {
-    fix message = `hello`
-    log info `${message}`
+    fix message = "hello"
+    log info "${message}"
     return 0
 }
 ```
@@ -38,8 +38,8 @@ info log-001.suz:3: hello
 
 ```suz
 fn main() -> u8 {
-    log info `first
-second`
+    log info "first
+second"
     return 0
 }
 ```
@@ -50,13 +50,40 @@ second`
 |---|---|---:|---:|
 | 通常 | コンパイルエラー | — | 0 |
 
-開くバッククォートと閉じるバッククォートは同じ行に書く必要がある。
+開く二重引用符と閉じる二重引用符は同じ行に書く必要がある。
 
 **コンパイル診断：**
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
 | 通常 | `[symbol.template-line]` | 2 | 20 |
+
+### log-014 テンプレート本文にバッククォートとエスケープされた二重引用符を含める
+
+主根拠：`[symbol.template-text]`。
+
+補助根拠：`[symbol.escape]`、`[log.output]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    log info "a`b`c \"q\""
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+**標準エラー：**
+
+```text
+info log-014.suz:2: a`b`c "q"
+```
 
 ### log-003 ログに構造体を埋め込む
 
@@ -68,7 +95,7 @@ second`
 struct Point { x: i32 }
 fn main() -> u8 {
     fix p = Point { x: 1 }
-    log info `${p}`
+    log info "${p}"
     return 0
 }
 ```
@@ -97,7 +124,7 @@ fn main() -> u8 {
 fn action() -> void {}
 
 fn main() -> u8 {
-    log info `${action()}`
+    log info "${action()}"
     return 0
 }
 ```
@@ -126,13 +153,13 @@ fn main() -> u8 {
 
 ```suz
 fn value() -> u8 {
-    log info `inner`
+    log info "inner"
     return 3
 }
 
 fn main() -> u8 {
     fix result = value()
-    log info `outer: ${result}`
+    log info "outer: ${result}"
     return 0
 }
 ```
@@ -162,13 +189,13 @@ info log-005.suz:8: outer: 3
 
 ```suz
 fn divide(divisor: i32) -> i32 {
-    log info `inner`
+    log info "inner"
     return 1 / divisor
 }
 
 fn main() -> u8 {
     fix result = divide(0)
-    log info `outer: ${result}`
+    log info "outer: ${result}"
     return 0
 }
 ```
@@ -203,7 +230,7 @@ info log-006.suz:2: inner
 
 ```suz
 fn main() -> u8 {
-    log info `invalid: \q`
+    log info "invalid: \q"
     return 0
 }
 ```
@@ -232,7 +259,7 @@ fn main() -> u8 {
 
 ```suz
 fn main() -> u8 {
-    log info `literal: \${value} // text\nnext`
+    log info "literal: \${value} // text\nnext"
     return 0
 }
 ```
@@ -250,6 +277,31 @@ info log-008.suz:2: literal: ${value} // text
 next
 ```
 
+### log-015 バッククォートのエスケープは未定義として拒否する
+
+主根拠：`[symbol.escape]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    log info "invalid: \`"
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[symbol.escape]` | 2 | 24 |
+
 ### log-009 bool・enum・整数のログ表示
 
 主根拠：`[symbol.value-format]`。
@@ -266,7 +318,7 @@ fn main() -> u8 {
     fix no = false
     fix count = 1_234
     fix negative = -7
-    log info `${yes} ${no} ${Wave.Saw} ${count} ${negative}`
+    log info "${yes} ${no} ${Wave.Saw} ${count} ${negative}"
     return 0
 }
 ```
@@ -299,7 +351,7 @@ fn main() -> u8 {
     fix fraction = 0.125
     fix tiny = 1.0e-8
     fix negative = -1.0e-8
-    log info `${whole} ${fraction} ${tiny} ${negative}`
+    log info "${whole} ${fraction} ${tiny} ${negative}"
     return 0
 }
 ```
@@ -327,7 +379,7 @@ info log-010.suz:6: 1.0 0.125 1.0e-8 -1.0e-8
 ```suz
 fn main() -> u8 {
     fix warn: u8 = 7
-    log warn `count: ${warn}`
+    log warn "count: ${warn}"
     return 0
 }
 ```
@@ -359,10 +411,10 @@ fn main() -> u8 {
     fix debug = 1
     fix info = 2
     fix warn = 3
-    log debug `${debug}`
-    log info `${info}`
-    log warn `${warn}`
-    log error `failed`
+    log debug "${debug}"
+    log info "${info}"
+    log warn "${warn}"
+    log error "failed"
     return 7
 }
 ```
@@ -392,7 +444,7 @@ error log-012.suz:8: failed
 ```suz
 fn main() -> u8 {
     fix count = 1
-    panic `count: ${count + 1}`
+    panic "count: ${count + 1}"
 }
 ```
 

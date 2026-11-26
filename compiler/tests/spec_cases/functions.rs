@@ -88,11 +88,11 @@ fn fib(n: u8) -> u8 {
 fn void_failure_returns_exit_only_the_called_function() {
     let source = r#"fn narrow(raw: u16) -> void {
     fix count = raw as u8 or return
-    log info `cast=${count}`
+    log info "cast=${count}"
 }
 fn increment(raw: u8) -> void {
     fix count = (raw + 1) or return
-    log info `sum=${count}`
+    log info "sum=${count}"
     return
 }
 fn main() -> u8 {

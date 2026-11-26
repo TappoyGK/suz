@@ -48,7 +48,7 @@ pub(crate) fn scan(
         }
         match *modes.last().unwrap() {
             Mode::Text { start, .. } => match bytes[cursor] {
-                b'`' => {
+                b'"' => {
                     if modes.len() == 1 {
                         parts.push(Segment::Text(&source[start..cursor]));
                         return Ok((cursor + 1, parts));
@@ -57,7 +57,7 @@ pub(crate) fn scan(
                     cursor += 1;
                 }
                 b'\\' => match bytes.get(cursor + 1) {
-                    Some(b'0' | b'n' | b'r' | b't' | b'\\' | b'`' | b'$') => cursor += 2,
+                    Some(b'0' | b'n' | b'r' | b't' | b'\\' | b'"' | b'$') => cursor += 2,
                     Some(b'\n') => {
                         return Err(fail(
                             cursor + 1,
@@ -101,7 +101,7 @@ pub(crate) fn scan(
                             cursor += 1;
                         }
                         if bytes.get(cursor) == Some(&b'[') {
-                            // 理由中の括弧やバッククォートは補間式の構文として数えない。
+                            // 理由中の括弧や引用符は補間式の構文として数えない。
                             let kind = if word == "ignore" {
                                 super::reasons::Kind::Ignore
                             } else {
@@ -142,7 +142,7 @@ pub(crate) fn scan(
                         .map_err(|message| fail(cursor, message))?;
                     cursor += length;
                 }
-                b'`' => {
+                b'"' => {
                     modes.push(Mode::Text {
                         start: cursor + 1,
                         opening: cursor,
@@ -217,7 +217,7 @@ pub(crate) fn decode(text: &str) -> String {
                 'n' => '\n',
                 'r' => '\r',
                 't' => '\t',
-                ch @ ('\\' | '`' | '$') => ch,
+                ch @ ('\\' | '"' | '$') => ch,
                 _ => unreachable!("template escapes are validated by the scanner"),
             }
         } else {

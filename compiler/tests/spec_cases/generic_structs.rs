@@ -226,14 +226,14 @@ fn generic_structs_parse_concrete_type_names_in_constants_and_runtime_values() {
     let output = compile_and_run_c23(
         r#"
 struct Box[T] { value: T }
-fix SAVED = `Box[i32] { value: 7 }` as Box[i32] or Box[i32] { value: 0 }
+fix SAVED = "Box[i32] { value: 7 }" as Box[i32] or Box[i32] { value: 0 }
 fn parse(source: symbol) -> Box[Box[i32]] {
     return source as Box[Box[i32]] or Box[Box[i32]] { value: SAVED }
 }
 fn main() -> u8 {
     if SAVED.value != 7 { return 1 }
-    if parse(`Box [ Box [ i32 ] ] { value: Box[i32] { value: 9 } }`).value.value != 9 { return 2 }
-    if parse(`Box[Box[u32]] { value: Box[i32] { value: 9 } }`).value.value != 7 { return 3 }
+    if parse("Box [ Box [ i32 ] ] { value: Box[i32] { value: 9 } }").value.value != 9 { return 2 }
+    if parse("Box[Box[u32]] { value: Box[i32] { value: 9 } }").value.value != 7 { return 3 }
     return 0
 }
 "#,
@@ -269,7 +269,7 @@ fn main() -> u8 {
             "generic.operations",
         ),
         (
-            "struct Box[T] { value: T }\nfn render[T](b: Box[T]) -> symbol { return `value: ${b.value}` }\nfn main() -> u8 { return 0 }",
+            "struct Box[T] { value: T }\nfn render[T](b: Box[T]) -> symbol { return \"value: ${b.value}\" }\nfn main() -> u8 { return 0 }",
             "symbol.interpolation",
         ),
     ] {

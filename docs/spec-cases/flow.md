@@ -567,15 +567,15 @@ fn main() -> u8 {
 
 ```suz
 fn subject() -> i32 {
-    log info `subject`
+    log info "subject"
     return 2
 }
 
 fn main() -> u8 {
     match subject() {
-        1 => { log info `first` }
-        2 => { log info `second` }
-        _ => { log info `other` }
+        1 => { log info "first" }
+        2 => { log info "second" }
+        _ => { log info "other" }
     }
     return 0
 }
@@ -611,7 +611,7 @@ fn main() -> u8 {
         _ => 0
     }
     fix digit = '0' <= ch <= '9'
-    log info `${kind} ${digit}`
+    log info "${kind} ${digit}"
     return 0
 }
 ```
@@ -1045,7 +1045,7 @@ fn main() -> u8 {
 ```suz
 fn main() -> u8 {
     fix value = expr {
-        log info `message`
+        log info "message"
     }
     return 0
 }
@@ -1138,7 +1138,7 @@ elseは直前の}と同じ行に置く。
 
 ```suz
 fn check(id: u8, result: bool) -> bool {
-    log info `${id}`
+    log info "${id}"
     return result
 }
 
@@ -1352,13 +1352,13 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
-fn low() -> u8 { log info `low`
+fn low() -> u8 { log info "low"
 return 1 }
-fn high() -> u8 { log info `high`
+fn high() -> u8 { log info "high"
 return 3 }
 fn main() -> u8 {
-    rev i in low()..<high() { log info `${i}` }
-    rev i in 1..=3 { log info `${i}` }
+    rev i in low()..<high() { log info "${i}" }
+    rev i in 1..=3 { log info "${i}" }
     return 0
 }
 ```
@@ -1422,7 +1422,7 @@ fn main() -> u8 {
         last = i
         continue
     }
-    log info `${count} ${last}`
+    log info "${count} ${last}"
     return 0
 }
 ```
@@ -1449,11 +1449,11 @@ info flow-062.suz:11: 256 -128
 fn main() -> u8 {
     for ch in '\u{D7FF}'..='\u{E000}' {
         fix code = ch as u32
-        log info `${code}`
+        log info "${code}"
     }
     rev ch in '\u{D7FF}'..='\u{E000}' {
         fix code = ch as u32
-        log info `${code}`
+        log info "${code}"
     }
     for ch in '\u{10FFFF}'..='\u{10FFFF}' { continue }
     rev ch in '\0'..='\0' { continue }
@@ -1486,7 +1486,7 @@ info flow-065.suz:8: 55295
 ```suz
 fn main() -> u8 {
     for i in 0 ..< 3 {
-        log info `${i}`
+        log info "${i}"
     }
     return 0
 }
@@ -1632,18 +1632,18 @@ fn main() -> u8 {
 
 ```suz
 fn lower() -> u8 {
-    log info `lower`
+    log info "lower"
     return 0
 }
 
 fn upper() -> u8 {
-    log info `upper`
+    log info "upper"
     return 2
 }
 
 fn main() -> u8 {
     for i in lower()..<upper() {
-        log info `i=${i}`
+        log info "i=${i}"
     }
     return 0
 }
@@ -1797,7 +1797,7 @@ limitsのフィールドへの参照もvarからの参照として扱う。
 
 ```suz
 fn main() -> u8 {
-    var message = `abc`
+    var message = "abc"
     for ch in message {}
     return 0
 }
@@ -1880,24 +1880,24 @@ iを参照できるのはループ本体の中だけ。
 
 ```suz
 fn read(value: text) -> text {
-    log info `read`
+    log info "read"
     return value
 }
 fn main() -> u8 {
-    var message = `aあ😀`
+    var message = "aあ😀"
     fix target = message
     for ch in read(target) {
-        log info `${ch}`
-        message = `changed`
+        log info "${ch}"
+        message = "changed"
         continue
     }
     rev ch in read(target) {
         if ch == 'a' { break }
-        log info `${ch}`
+        log info "${ch}"
     }
-    for ch in `` { return 1 }
-    rev ch in `` { return 2 }
-    log info `${message}`
+    for ch in "" { return 1 }
+    rev ch in "" { return 2 }
+    log info "${message}"
     return 0
 }
 ```
@@ -2607,13 +2607,13 @@ fn main() -> u8 {
 
 ```suz
 fnshape Transform(i32) -> i32
-fn twice(n: i32) -> i32 { log info `twice`
+fn twice(n: i32) -> i32 { log info "twice"
     return n * 2 }
-fn triple(n: i32) -> i32 { log info `triple`
+fn triple(n: i32) -> i32 { log info "triple"
     return n * 3 }
 fn main() -> u8 {
     var f: static fn Transform = fn twice
-    fix result = f(expr { log info `argument`
+    fix result = f(expr { log info "argument"
         f = fn triple
         3 })
     if result != 6 || f(3) != 9 { return 1 }
@@ -2672,7 +2672,7 @@ fn main() -> u8 {
 fn twice(n: i32) -> i32 { return n * 2 }
 fn main() -> u8 {
     fix f = fn twice
-    fix rendered: symbol = `${f}`
+    fix rendered: symbol = "${f}"
     return 0
 }
 ```

@@ -403,7 +403,7 @@ fn main() -> u8 {
 
 ```suz
 fn main() -> u8 {
-    fix p = c_bytes `hello`
+    fix p = c_bytes "hello"
     return 0
 }
 ```
@@ -428,7 +428,7 @@ fn main() -> u8 {
 
 ```suz
 fn main() -> u8 {
-    if c_byte_len `こんにちは` != 15 { return 1 }
+    if c_byte_len "こんにちは" != 15 { return 1 }
     return 0
 }
 ```
@@ -447,7 +447,7 @@ fn main() -> u8 {
 
 ```suz
 fn main() -> u8 {
-    trusted { fix p = c_bytes `hello`
+    trusted { fix p = c_bytes "hello"
         fix equal = p == p }
     return 0
 }

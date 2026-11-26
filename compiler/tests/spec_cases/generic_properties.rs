@@ -33,7 +33,7 @@ fn generic_instantiations_agree_with_explicit_scalar_functions() {
         "ifexpr true { x } else { n }",
         "ifexpr n == 0 { n } else { 300 }",
         "expr { fix a = n +% 300\na }",
-        "`v=${n},${x}`",
+        "\"v=${n},${x}\"",
         "`abc`[n] or 'x'",
         "n as u8 or 0",
         "x as f32 or 0.0",
@@ -200,13 +200,13 @@ fn generic_constant_casts_keep_dependencies_inside_concrete_results() {
 #[test]
 fn generic_symbolic_constants_are_substituted_before_formatting() {
     let source = r#"fn render(n: int, x: float) -> symbol {
-    return `${(1 as% int) << 1},${((1 as% int) as u16 or 0) as u8},${(1.0 as float or 0.0) + 2.0}`
+    return "${(1 as% int) << 1},${((1 as% int) as u16 or 0) as u8},${(1.0 as float or 0.0) + 2.0}"
 }
 fn main() -> u8 {
     fix a: u8 = 1
     fix b: f32 = 1.0
     fix rendered = render(a,b)
-    log info `${rendered}`
+    log info "${rendered}"
     return 0
 }"#;
     let result = crate::test_util::compile_and_run_c23(source, "generic-constants.suz");
@@ -255,7 +255,7 @@ fn invalid_generic_bodies_preserve_all_earlier_deferred_judgments() {
         "fix value = -(ifexpr true { n } else { expr { fix local = x\nlocal } })",
         "fix value = -(ifexpr true { n } else { x as float or 0 })",
         "fix value = ifexpr true { x } else { n }",
-        "fix value = `value=${expr { ifexpr true { x } else { n } }}`",
+        "fix value = \"value=${expr { ifexpr true { x } else { n } }}\"",
         "fix value = (ifexpr true { x } else { n }) as f32 or 0",
         "fix value = ((300 as% int)) == x",
         "fix value = (ifexpr true { 300 } else { (300 as% int) }) >= (300 as f32 or 0)",

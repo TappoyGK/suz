@@ -446,7 +446,7 @@ fn main() -> u8 {
     // -0.0 %% 1.0 は +0.0（文字列表示が "0.0"）
     fix neg_zero: f64 = -0.0
     fix pos_zero = neg_zero %% 1.0
-    if textbuf `${pos_zero}` != `0.0` { return 14 }
+    if textbuf "${pos_zero}" != "0.0" { return 14 }
 
     return 0
 }

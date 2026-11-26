@@ -31,7 +31,7 @@ fn invalid_syntax_reports_source_errors_through_check() {
             "unknown type 'Missing' [type.name]",
         ),
         (
-            "log info `outside`\nfn main() -> u8 { return 0 }",
+            "log info \"outside\"\nfn main() -> u8 { return 0 }",
             "[decl.top-level]",
         ),
         (
@@ -44,7 +44,7 @@ fn invalid_syntax_reports_source_errors_through_check() {
         ),
         // 型をまだ知らない構文診断に、数値比較だけの案内を混ぜない。
         (
-            "fn f() -> void { var s = textbuf `a`\nfix y = s <- `b` }\nfn main() -> u8 { return 0 }",
+            "fn f() -> void { var s = textbuf \"a\"\nfix y = s <- \"b\" }\nfn main() -> u8 { return 0 }",
             "text append is a statement, not an expression [text.append]",
         ),
         (

@@ -56,7 +56,7 @@ impl Parser<'_, '_> {
                 ),
             ));
         };
-        if raw == "``" {
+        if raw == "\"\"" {
             return Err(self.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!("panic.stmt", "panic requires a non-empty template"),

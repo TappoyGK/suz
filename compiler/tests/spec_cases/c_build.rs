@@ -135,7 +135,7 @@ fn build_command_preserves_ieee_results_and_protects_existing_output() {
     fix tiny: f32 = 1.40129846e-45
     if tiny + tiny != 2.80259693e-45 { return 2 }
     fix negative_zero = -zero
-    log info `${invalid} ${negative_zero}`
+    log info "${invalid} ${negative_zero}"
     return 7
 }"#,
         )
@@ -188,7 +188,7 @@ fn stack_exhaustion_terminates_abnormally() {
             br#"fn recurse(n: u64) -> void {
     if n == 0 { return }
     recurse(n - 1)
-    log info `${n}`
+    log info "${n}"
 }
 fn main() -> u8 {
     recurse(18446744073709551615)

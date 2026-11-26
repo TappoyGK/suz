@@ -585,7 +585,7 @@ xを重複して指定している。
 struct Pair { x: i32, y: i32 }
 
 fn mark(n: i32) -> i32 {
-    log info `${n}`
+    log info "${n}"
     return n
 }
 
@@ -897,7 +897,7 @@ fn main() -> u8 {
     fix original = Letter { ch: 'a' }
     var copy = original
     copy#ch = echo('b')
-    log info `${original.ch} ${copy.ch}`
+    log info "${original.ch} ${copy.ch}"
     return 0
 }
 ```

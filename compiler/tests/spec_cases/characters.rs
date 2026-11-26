@@ -37,18 +37,18 @@ fn character_literals_and_conversions_reject_invalid_values_and_operations() {
         ("fix x = 55296 as char", "const.cast-check"),
         ("fix x = -1 as char", "const.cast-check"),
         ("fix n: u32 = 65\nfix x = n as char", "expr.cast-handler"),
-        ("fix x = `a` as char", "symbol.cast-handler"),
+        ("fix x = \"a\" as char", "symbol.cast-handler"),
         (
-            "var message = `a`\nfor ch in message {}",
+            "var message = \"a\"\nfor ch in message {}",
             "for.bound-reference",
         ),
         (
-            "var message = `a`\nrev ch in `${message}` {}",
+            "var message = \"a\"\nrev ch in \"${message}\" {}",
             "for.bound-reference",
         ),
         ("for ch in 12 {}", "char.for-type"),
         ("for ch in 'a'..<100 {}", "type.expected"),
-        ("for ch in `a` { ch = 'b' }", "for.variable"),
+        ("for ch in \"a\" { ch = 'b' }", "for.variable"),
         ("fix x = matchexpr 'a' { 'a' => 1 }", "match.exhaustive"),
         (
             "fix x = matchexpr 'a' { 'a' => 1\n'\\u{61}' => 2\n_ => 0 }",
@@ -56,7 +56,7 @@ fn character_literals_and_conversions_reject_invalid_values_and_operations() {
         ),
         ("fix x: char = 65", "type.expected"),
         (
-            "fix x = expr { rev ch in `a` { continue }\n0 }",
+            "fix x = expr { rev ch in \"a\" { continue }\n0 }",
             "expr.jump-prohibited",
         ),
         ("fix char = 1", "src.ident"),
@@ -88,17 +88,17 @@ fn main() -> u8 {
     ] {
         constants.push_str(&format!(
             r#"fix CH{value} = '\u{{{value:X}}}'
-fix PARSED{value} = `${{CH{value}}}` as char or '?'
-fix ITEM{value} = `Item {{ ch: '\\u{{{value:x}}}' }}` as Item or Item {{ ch: '?' }}
+fix PARSED{value} = "${{CH{value}}}" as char or '?'
+fix ITEM{value} = "Item {{ ch: '\\u{{{value:x}}}' }}" as Item or Item {{ ch: '?' }}
 "#
         ));
         source.push_str(&format!(
             r#"{{
     if (CH{value} as u32) != {value} {{ return 2 }}
     if integer({value}) != CH{value} {{ return 3 }}
-    if parse_text(`${{CH{value}}}`) != CH{value} {{ return 4 }}
+    if parse_text("${{CH{value}}}") != CH{value} {{ return 4 }}
     if PARSED{value} != CH{value} {{ return 5 }}
-    fix input: symbol = `Item {{ ch: '\\u{{{value:x}}}' }}`
+    fix input: symbol = "Item {{ ch: '\\u{{{value:x}}}' }}"
     if structure(input) != ITEM{value} || ITEM{value}.ch != CH{value} {{ return 6 }}
 }}
 "#
@@ -115,8 +115,8 @@ fix ITEM{value} = `Item {{ ch: '\\u{{{value:x}}}' }}` as Item or Item {{ ch: '?'
     }
     source.push_str(
         r#"
-    if parse_text(``) != '?' || parse_text(`ab`) != '?' || parse_text(`é`) != '?' { return 8 }
-    if structure(`Item { ch: '\\u{D800}' }`).ch != '?' { return 9 }
+    if parse_text("") != '?' || parse_text("ab") != '?' || parse_text("é") != '?' { return 8 }
+    if structure("Item { ch: '\\u{D800}' }").ch != '?' { return 9 }
     if ('あ' as u8 or 3) != 3 { return 10 }
     if ('0' <= '5' <= '9') == false { return 11 }
     return 0
@@ -145,12 +145,12 @@ fn symbol_iteration_and_character_logs_allocate_nothing_after_startup() {
     let source = r#"fn scan(t: symbol) -> u32 {
     var count: u32 = 0
     for ch in t {
-        log info `${ch}`
+        log info "${ch}"
         count += 1
         continue
     }
     rev ch in t {
-        log info `${ch}`
+        log info "${ch}"
         count += 1
         continue
     }
@@ -170,8 +170,8 @@ continue }
     for ch in 'z'..<'a' { return 101 }
     return count
 }
-fix SAMPLE = `aあ😀\0`
-fix EMPTY = ``
+fix SAMPLE = "aあ😀\0"
+fix EMPTY = ""
 fn main() -> u8 { return 0 }
 "#;
     let driver = r#"
@@ -224,7 +224,7 @@ fn unicode_escape_diagnostics_identify_the_failure_in_each_expression_context() 
             "Unicode escape requires at least one hexadecimal digit",
         ),
     ] {
-        for (prefix, suffix) in [("    fix ch = ", ""), ("    log info `${", "}`")] {
+        for (prefix, suffix) in [("    fix ch = ", ""), ("    log info \"${", "}`")] {
             let source = format!("fn main() -> u8 {{\n{prefix}{literal}{suffix}\nreturn 0 }}");
             let error = suz::compile(source.as_bytes()).unwrap_err();
             assert_eq!(
@@ -245,7 +245,7 @@ fn unicode_escape_diagnostics_identify_the_failure_in_each_expression_context() 
 fn mutable_loop_inputs_have_a_diagnostic_shared_by_symbol_and_ranges() {
     for keyword in ["for", "rev"] {
         for (declaration, input) in [
-            ("var value = `abc`", "value"),
+            ("var value = \"abc\"", "value"),
             ("var value = 3", "0..<value"),
         ] {
             let source = format!(

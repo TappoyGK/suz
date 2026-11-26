@@ -232,7 +232,7 @@ fn generic_shape_argument_counts_report_expected_and_actual() {
         ("T", "[]", 1, 0),
     ] {
         let source = format!(
-            "fnshape Act[{parameters}](T) -> T\nfn main() -> u8 {{ fix f: static fn Act{arguments} = panic `x`\nreturn 0 }}"
+            "fnshape Act[{parameters}](T) -> T\nfn main() -> u8 {{ fix f: static fn Act{arguments} = panic \"x\"\nreturn 0 }}"
         );
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.rule(), "generic.type-arguments");

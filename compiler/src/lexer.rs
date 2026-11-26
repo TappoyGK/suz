@@ -429,7 +429,7 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
                 continuation = false;
                 continue;
             }
-            '`' => {
+            '"' => {
                 let length = templates::scan(rest, line, column)?.0;
                 tokens.push(Token {
                     kind: Kind::Template(&rest[..length]),
@@ -891,12 +891,12 @@ mod tests {
 
     #[test]
     fn distinguishes_invalid_characters_from_template_text() {
-        for source in ["!", "\u{000b}", "名前"] {
+        for source in ["!", "\u{000b}", "名前", "`"] {
             assert_eq!(lex(source).unwrap_err().kind, ErrorKind::InvalidSource);
         }
         assert_eq!(
-            lex("log info `a // b`").unwrap()[2].kind,
-            Kind::Template("`a // b`")
+            lex(r#"log info "a // b `raw`""#).unwrap()[2].kind,
+            Kind::Template(r#""a // b `raw`""#)
         );
     }
 }

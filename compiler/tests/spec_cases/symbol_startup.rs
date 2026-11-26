@@ -3,24 +3,24 @@ use std::process::Command;
 
 #[test]
 fn startup_registers_unused_folded_and_pattern_symbols_before_direct_access() {
-    let source = r#"fix UNUSED: symbol = `unused`
-fix FOLDED: symbol = `${`fold`}${`ed`}`
-fn unused() -> symbol { return `not called` }
+    let source = r#"fix UNUSED: symbol = "unused"
+fix FOLDED: symbol = "${"fold"}${"ed"}"
+fn unused() -> symbol { return "not called" }
 fn compare(t: symbol) -> u8 {
     var count: u8 = 0
     for index in 0..<3 {
-        if t == `v1` { count += 1 }
-        if t != `` { count += 1 }
-        match t { `v1` => { count += 1 }
+        if t == "v1" { count += 1 }
+        if t != "" { count += 1 }
+        match t { "v1" => { count += 1 }
             _ => {} }
-        fix selected: u8 = matchexpr t { `v1` => 1
+        fix selected: u8 = matchexpr t { "v1" => 1
             _ => 0 }
         count += selected
     }
     return count
 }
 fn main() -> u8 {
-    if false { fix message: symbol = `not selected` }
+    if false { fix message: symbol = "not selected" }
     return 0
 }
 "#;
@@ -66,7 +66,7 @@ int main(void) {
 
 #[test]
 fn startup_failure_points_to_main_keyword_before_main_body_runs() {
-    let source = "fix UNUSED: symbol = `not used`\n  fn    main() -> u8 { log info `main entered`\nreturn 0 }";
+    let source = "fix UNUSED: symbol = \"not used\"\n  fn    main() -> u8 { log info \"main entered\"\nreturn 0 }";
     let driver = "int main(void) { text_fail_after = 0; text_expected_panic_calls = 1; return suz_program(); }";
     let (_directory, executable) = build_with_environment(source, driver);
     let result = Command::new(executable).output().unwrap();
@@ -80,14 +80,14 @@ fn startup_failure_points_to_main_keyword_before_main_body_runs() {
 #[test]
 fn logs_reference_generated_and_long_symbol_without_allocating() {
     let source = r#"fn make_text(count: u8) -> symbol {
-    log info `inner: ${count}`
-    return `count: ${count}`
+    log info "inner: ${count}"
+    return "count: ${count}"
 }
 fn write(message: symbol, top: u64) -> void {
     fix fraction = 1.5
     fix yes = true
     fix finite = top * top < inf
-    log info `outer: ${message} / ${fraction} / ${yes} / ${top} / ${finite}`
+    log info "outer: ${message} / ${fraction} / ${yes} / ${top} / ${finite}"
 }
 fn main() -> u8 { return 0 }
 "#;

@@ -4,7 +4,7 @@ use std::process::Command;
 const SOURCE: &str = r#"struct Inner { name: symbol, count: u8 }
 struct Item { inner: Inner, valid: bool }
 fn convert(input: symbol) -> symbol {
-    fix item = input as Item or return `fallback`
+    fix item = input as Item or return "fallback"
     return item.inner.name
 }
 fn main() -> u8 { return 0 }
@@ -24,11 +24,11 @@ int main(int argc, char **argv) {
     suz_text fallback = input("fallback");
     if (strcmp(argv[1], "validation") == 0) {
         const char *invalid[] = {
-            "Item { inner: Inner { name: `unseen\\0value`, count: 256 }, valid: true }",
-            "Item { inner: Inner { name: `unseen\\0value`, count: 1 }, valid: true }tail",
-            "Item { inner: Inner { name: `unseen\\0value`, count: 1 }, valid: true, valid: false }",
-            "Item { inner: Inner { name: `unseen\\0value`, count: 1 } }",
-            "Item { inner: Inner { name: `unseen\\0value`, count: 1 }, valid: wrong }"
+            "Item { inner: Inner { name: \"unseen\\0value\", count: 256 }, valid: true }",
+            "Item { inner: Inner { name: \"unseen\\0value\", count: 1 }, valid: true }tail",
+            "Item { inner: Inner { name: \"unseen\\0value\", count: 1 }, valid: true, valid: false }",
+            "Item { inner: Inner { name: \"unseen\\0value\", count: 1 } }",
+            "Item { inner: Inner { name: \"unseen\\0value\", count: 1 }, valid: wrong }"
         };
         for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i) {
             suz_text source = input(invalid[i]);
@@ -37,7 +37,7 @@ int main(int argc, char **argv) {
             for (unsigned repeat = 0; repeat < 100; ++repeat) assert(suz_fn_0(source) == fallback);
             assert(suz_symbol_pool_used() == before && text_calls == calls_before);
         }
-        suz_text source = input("Item { inner: Inner { name: `a\\0b`, count: 1 }, valid: true }");
+        suz_text source = input("Item { inner: Inner { name: \"a\\0b\", count: 1 }, valid: true }");
         suz_text parsed = suz_fn_0(source);
         assert(suz_text_length(parsed) == 3 && memcmp(suz_text_bytes(parsed), "a\0b", 3) == 0);
         uint64_t before = suz_symbol_pool_used();
@@ -48,7 +48,7 @@ int main(int argc, char **argv) {
         assert(suz_text_intern("a\0b", 3, true, input_location) == parsed);
         return 0;
     }
-    suz_text source = input("Item { inner: Inner { name: `a\\0b`, count: 1 }, valid: true }");
+    suz_text source = input("Item { inner: Inner { name: \"a\\0b\", count: 1 }, valid: true }");
     if (strcmp(argv[1], "probe") == 0) {
         printf("%llu\n", (unsigned long long)suz_symbol_pool_used());
         return 0;
@@ -114,10 +114,10 @@ fn constant_struct_symbol_results_keep_static_payloads_in_bindings_and_constants
     let content = "x".repeat(1000);
     let source = format!(
         r#"struct Label {{ name: symbol }}
-fix ITEM = `Label {{ name: \`{content}\` }}` as Label or Label {{ name: `` }}
+fix ITEM = "Label {{ name: \"{content}\" }}" as Label or Label {{ name: "" }}
 fn from_const() -> symbol {{ return ITEM.name }}
 fn from_expression() -> symbol {{
-    fix item = `Label {{ name: \`{content}\` }}` as Label or Label {{ name: `` }}
+    fix item = "Label {{ name: \"{content}\" }}" as Label or Label {{ name: "" }}
     return item.name
 }}
 fn main() -> u8 {{ return 0 }}

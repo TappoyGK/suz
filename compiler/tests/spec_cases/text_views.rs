@@ -4,35 +4,35 @@ use std::process::Command;
 #[test]
 fn views_reject_missing_handlers_wrong_types_and_hidden_returns() {
     for (body, rule) in [
-        ("fix x = `abc`.[0]", "text.slice-handler"),
-        ("fix x = `abc`.[:2]", "text.slice-handler"),
-        ("fix x = `abc`.[:] or ``", "text.slice-handler"),
-        ("fix x = `abc`.[true] or '?'", "text.slice-bounds"),
-        ("fix x = `abc`.[0.0:] or ``", "text.slice-bounds"),
-        ("fix x = `abc`.[0] or ``", "type.expected"),
-        ("fix x = `abc`.[:1] or 'a'", "type.expected"),
-        ("fix x: symbol = `abc`.[:]", "type.expected"),
-        ("fix x = `abc`.[:] as symbol or ``", "text.to-symbol"),
-        ("fix x = `abc`.[:] as% symbol or ``", "symbol.cast-wrap"),
+        ("fix x = \"abc\".[0]", "text.slice-handler"),
+        ("fix x = \"abc\".[:2]", "text.slice-handler"),
+        ("fix x = \"abc\".[:] or \"\"", "text.slice-handler"),
+        ("fix x = \"abc\".[true] or '?'", "text.slice-bounds"),
+        ("fix x = \"abc\".[0.0:] or \"\"", "text.slice-bounds"),
+        ("fix x = \"abc\".[0] or \"\"", "type.expected"),
+        ("fix x = \"abc\".[:1] or 'a'", "type.expected"),
+        ("fix x: symbol = \"abc\".[:]", "type.expected"),
+        ("fix x = \"abc\".[:] as symbol or \"\"", "text.to-symbol"),
+        ("fix x = \"abc\".[:] as% symbol or \"\"", "symbol.cast-wrap"),
         (
-            "fix x = (`abc`.[:1] or return 1).[0] or '?'",
+            "fix x = (\"abc\".[:1] or return 1).[0] or '?'",
             "expr.or-return-position",
         ),
         (
-            "fix x = expr { fix v = `abc`.[0] or return 1\nv }",
+            "fix x = expr { fix v = \"abc\".[0] or return 1\nv }",
             "expr.jump-prohibited",
         ),
         (
-            "fix x = `abc`.[(`a`.[0] or return 1) as u32] or '?'",
+            "fix x = \"abc\".[(\"a\".[0] or return 1) as u32] or '?'",
             "expr.or-return-position",
         ),
         (
-            "var v: text = `abc`\nfor ch in v.[:] {}",
+            "var v: text = \"abc\"\nfor ch in v.[:] {}",
             "for.bound-reference",
         ),
-        ("fix x = `abc`.[0..<1] or ``", "text.slice-omit"),
-        ("fix x = `abc`.[..=1] or ``", "text.slice-omit"),
-        ("fix x = `abc`.[:1..=2] or ``", "text.slice-omit"),
+        ("fix x = \"abc\".[0..<1] or \"\"", "text.slice-omit"),
+        ("fix x = \"abc\".[..=1] or \"\"", "text.slice-omit"),
+        ("fix x = \"abc\".[:1..=2] or \"\"", "text.slice-omit"),
     ] {
         let source = format!("fn main() -> u8 {{\n{body}\nreturn 0 }}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
@@ -48,7 +48,7 @@ fn views_preserve_ranges_without_allocations_and_reintern_only_explicitly() {
     let source = r#"struct Pair { first: text, second: text }
 fn scan(input: text) -> u32 {
     fix body = input.[1:5] or return 100
-    if body != `あ😀\0z` { return 101 }
+    if body != "あ😀\0z" { return 101 }
     if (body.[0] or '?') != 'あ' { return 102 }
     if (body.[1] or '?') != '😀' { return 103 }
     if (body.[2] or '?') != '\0' { return 104 }
@@ -57,22 +57,22 @@ fn scan(input: text) -> u32 {
     if (body.[-1] or '?') != '?' { return 107 }
     fix maximum: u64 = 18446744073709551615
     if (body.[maximum] or '?') != '?' { return 108 }
-    if (body.[4:] or `bad`) != `` { return 109 }
-    if (body.[3:2] or `bad`) != `bad` { return 110 }
-    if (body.[-1:] or `bad`) != `bad` { return 111 }
-    if (body.[:5] or `bad`) != `bad` { return 112 }
-    if ((input.[1:] or ``).[0] or '?') != 'あ' { return 113 }
+    if (body.[4:] or "bad") != "" { return 109 }
+    if (body.[3:2] or "bad") != "bad" { return 110 }
+    if (body.[-1:] or "bad") != "bad" { return 111 }
+    if (body.[:5] or "bad") != "bad" { return 112 }
+    if ((input.[1:] or "").[0] or '?') != 'あ' { return 113 }
     fix copy = Pair { first: body, second: body.[:] }
-    if copy != (Pair { first: `あ😀\0z`, second: body }) { return 114 }
+    if copy != (Pair { first: "あ😀\0z", second: body }) { return 114 }
     var count: u32 = 0
     for ch in copy.first { count += 1 }
     rev ch in copy.second { count += 1 }
-    fix joined = ifexpr true { `default` } else { body }
-    fix reverse_join = ifexpr false { body } else { `default` }
+    fix joined = ifexpr true { "default" } else { body }
+    fix reverse_join = ifexpr false { body } else { "default" }
     if joined != reverse_join { return 115 }
-    match body { `あ😀\0z` => { count += 1 }
+    match body { "あ😀\0z" => { count += 1 }
         _ => { return 116 } }
-    log info `${body}`
+    log info "${body}"
     return count
 }
 fn parse(input: text) -> u8 {
@@ -125,7 +125,7 @@ int main(void) {
 #[test]
 fn view_slicing_matches_unicode_boundaries_for_every_pair_of_positions() {
     let source = r#"fn slice(value: text, start: i64, end: i64) -> text {
-    return value.[start:end] or `invalid`
+    return value.[start:end] or "invalid"
 }
 fn at(value: text, pos: i64) -> char { return value.[pos] or '?' }
 fn equal(left: text, right: text) -> bool { return left == right && not (left != right) }
@@ -205,7 +205,7 @@ int main(void) {
 
 #[test]
 fn constant_views_preserve_diagnostics_and_lazy_failure_evaluation() {
-    let source = "fn main() -> u8 { fix value = (`abc`.[:1 + 1] or ``) as symbol\nreturn 0 }";
+    let source = "fn main() -> u8 { fix value = (\"abc\".[:1 + 1] or \"\") as symbol\nreturn 0 }";
     let compiled =
         suz::compile_with_source_name(source.as_bytes(), suz::ArithmeticMode::Warn, "view.suz")
             .unwrap();
@@ -214,13 +214,13 @@ fn constant_views_preserve_diagnostics_and_lazy_failure_evaluation() {
     let function = compiled.c.split("int main(void)").next().unwrap();
     assert!(!function.contains("suz_text_intern("));
     for source in [
-        "fix PART = `abc`.[:1] or (`x`.[1 / (0 as u8):] or ``)\nfn main() -> u8 { return 0 }",
-        "fix PART = `abc`.[-1:] or `fallback`\nfn main() -> u8 { return 0 }",
+        "fix PART = \"abc\".[:1] or (\"x\".[1 / (0 as u8):] or \"\")\nfn main() -> u8 { return 0 }",
+        "fix PART = \"abc\".[-1:] or \"fallback\"\nfn main() -> u8 { return 0 }",
     ] {
         suz::compile(source.as_bytes()).unwrap();
     }
     let error = suz::compile(
-        b"fix PART = `abc`.[-1:] or (`x`.[1 / (0 as u8):] or ``)\nfn main() -> u8 { return 0 }",
+        b"fix PART = \"abc\".[-1:] or (\"x\".[1 / (0 as u8):] or \"\")\nfn main() -> u8 { return 0 }",
     )
     .unwrap_err();
     assert!(error.message().contains("[const.evaluation]"));
@@ -228,7 +228,7 @@ fn constant_views_preserve_diagnostics_and_lazy_failure_evaluation() {
 
 #[test]
 fn conversion_diagnostics_identify_the_source_type() {
-    for (value, ty) in [("S", "symbol"), ("`abc`.[:]", "text")] {
+    for (value, ty) in [("S", "symbol"), ("\"abc\".[:]", "text")] {
         for (conversion, message) in [
             (
                 "as u8",
@@ -247,7 +247,7 @@ fn conversion_diagnostics_identify_the_source_type() {
                 continue;
             }
             let source = format!(
-                "fix S: symbol = `abc`\nfn main() -> u8 {{ fix value = ({value}) {conversion}\nreturn 0 }}"
+                "fix S: symbol = \"abc\"\nfn main() -> u8 {{ fix value = ({value}) {conversion}\nreturn 0 }}"
             );
             assert_eq!(
                 suz::compile(source.as_bytes()).unwrap_err().message(),

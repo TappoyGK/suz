@@ -21,7 +21,7 @@ fn main() -> u8 {
     fix mixed = first(a, f)
     fix expression: f32 = scale(4.0) + 0.5
     fix again = clamp(narrow, 0, 10)
-    log info `${wide},${narrow},${plain},${f},${g},${mixed},${expression},${again}`
+    log info "${wide},${narrow},${plain},${f},${g},${mixed},${expression},${again}"
     return 0
 }"#;
     let result = compile_and_run_c23(source, "generic.suz");
@@ -282,7 +282,7 @@ fn generic_unused_bodies_share_ordinary_diagnostics_and_report_independent_error
     }
     for (expression, rule) in [
         ("x @as u8", "num.fn-cast"),
-        ("`5` @as% int", "symbol.cast-handler"),
+        ("\"5\" @as% int", "symbol.cast-handler"),
         ("t @as% int", "symbol.cast-handler"),
         ("x @as% float", "expr.as-trunc"),
         ("y @as int", "num.fn-cast"),
@@ -375,7 +375,7 @@ fn generic_boundaries_preserve_inner_errors_and_reject_non_numeric_values() {
         ("fix a: u8 = 1\nfix n = f(a + g(@true))", "type.expected"),
         ("fix n = pick(1, @3)", "type.expected"),
         ("fix n = f(@true)", "type.expected"),
-        ("fix t: text = `x`\nfix n = f(@t)", "type.expected"),
+        ("fix t: text = \"x\"\nfix n = f(@t)", "type.expected"),
         ("fix a: u8 = 1\nfix t: text = @f(a)", "type.expected"),
         ("fix n = f(@h(1.0))", "num.fn-convert"),
     ] {
@@ -557,7 +557,7 @@ fn generic_rule_judgments_agree_with_scalar_checks() {
                 "x as float",
                 "ifexpr x == 0 { x } else { 300 }",
                 "(1 as int) as u8",
-                "`abc`[x] or 'a'",
+                "\"abc\"[x] or 'a'",
                 "x << x",
                 "~x",
                 "-x",
@@ -611,7 +611,7 @@ fn generic_constant_patterns_keep_type_dependent_values_and_duplicates() {
     for pattern in [
         "1 as int",
         "(1.0 as float or 0.0) as int or 0",
-        "`1` as int or 0",
+        "\"1\" as int or 0",
     ] {
         let source = format!(
             "fn f(n: int, x: float) -> int {{ match n {{ {pattern} => {{ return n }}\n_ => {{ return 0 }} }} }}\nfn main() -> u8 {{ return 0 }}"

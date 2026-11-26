@@ -74,11 +74,11 @@ fn ffi_rejects_trusted_escape_and_unsupported_operations() {
         "fix x: _int = 1\nfix y = ~x",
         "var x: _int = 1\nx += 1",
         "var x: _int = 1\nx &= x",
-        "fix x: _int = 1\nfix y = `${x}`",
+        "fix x: _int = 1\nfix y = \"${x}\"",
         "fix x = ifexpr true { abs(-1) } else { abs(-2) }",
         "fix x = expr { abs(-1) }",
         "fix x = 1.0e20 as _int or abs(-1)",
-        "fix x: _int = 1\nlog info `${x}`",
+        "fix x: _int = 1\nlog info \"${x}\"",
         "fix x: _int = 1\nfix y: _long = 1\nfix z = x == y",
         "fix x: _char = 'a'",
         "fix x: _char = 65\nfix y = x == 'a'",
@@ -86,7 +86,7 @@ fn ffi_rejects_trusted_escape_and_unsupported_operations() {
         "fix x: _int = 1\nfix y = x as% f64",
         "fix x: _int = 1\nfix y = x as% len_t",
         "fix x: _int = 1\nfix y = x as bool or false",
-        "fix x = `1` as _int or 0",
+        "fix x = \"1\" as _int or 0",
         "fix abs = 1",
     ] {
         let source = format!("{declaration}fn main() -> u8 {{\n{body}\nreturn 0\n}}");

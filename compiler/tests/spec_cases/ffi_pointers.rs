@@ -156,7 +156,7 @@ fn c_pointer_calls_reject_wrong_types_nilability_and_untrusted_calls() {
             "fix p = new Other { value: 0 }\ntrusted { take(p) }",
             "type.expected",
         ),
-        ("trusted { take(c_bytes `x`) }", "type.expected"),
+        ("trusted { take(c_bytes \"x\") }", "type.expected"),
         (
             "fix n: _int = 0\nfix p = new n\ntrusted { number(p) }",
             "type.expected",
@@ -260,7 +260,7 @@ fn keep_is_a_c_pointer_modifier_not_a_reserved_name() {
     // Cが保持するバイト列も、型付きポインタと同じく反復外へ残る実体として扱う。
     for (keep, warnings) in [("keep ", 0), ("", 1)] {
         let source = format!(
-            "extern \"retain.h\" {{ fn retain({keep}bytes: *const void) -> void }}\nfn main() -> u8 {{ for i in 0..<2 {{ fix t = textbuf `held`\ntrusted {{ retain(c_bytes t) }} }}\nreturn 0 }}"
+            "extern \"retain.h\" {{ fn retain({keep}bytes: *const void) -> void }}\nfn main() -> u8 {{ for i in 0..<2 {{ fix t = textbuf \"held\"\ntrusted {{ retain(c_bytes t) }} }}\nreturn 0 }}"
         );
         let compiled = suz::compile_with_source_name(
             source.as_bytes(),

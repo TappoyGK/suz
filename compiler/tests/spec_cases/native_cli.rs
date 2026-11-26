@@ -240,7 +240,7 @@ fn run_inherits_streams_and_cwd_and_cleans_up_after_signals() {
     let directory = setup();
     fs::write(
         directory.0.join("input.suz"),
-        "fn main() -> u8 { log info `ready`\nreturn 7 }",
+        "fn main() -> u8 { log info \"ready\"\nreturn 7 }",
     )
     .unwrap();
     fs::write(
@@ -331,7 +331,7 @@ fn build_and_run_apply_symbol_pool_limits() {
     let directory = setup();
     fs::write(
         directory.0.join("input.suz"),
-        "fn main() -> u8 { fix value = `x`\nreturn 0 }",
+        "fn main() -> u8 { fix value = \"x\"\nreturn 0 }",
     )
     .unwrap();
     for (index, limit) in [None, Some("256M"), Some("2G"), Some("unlimited"), Some("1")]

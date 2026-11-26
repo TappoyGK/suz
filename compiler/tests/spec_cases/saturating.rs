@@ -148,11 +148,11 @@ fix C_F64_TO_I16_LO: i16 = -50000.9 as| i16
 fix C_F64_TO_I16_INF: i16 = inf as| i16
 fix C_F64_TO_I16_NINF: i16 = -inf as| i16
 fix C_F64_TO_I16_NAN: i16 = nan as| i16 or -123
-fix C_TEXT_HI: u8 = `99999999999999999999999999` as| u8 or 7
-fix C_TEXT_NEG_U8: u8 = `-5` as| u8 or 7
-fix C_TEXT_LO_I8: i8 = `-999` as| i8 or 7
-fix C_TEXT_BAD: u8 = `12x` as| u8 or 7
-fix C_TEXT_BAD_NEG: u8 = `-12x` as| u8 or 7
+fix C_TEXT_HI: u8 = "99999999999999999999999999" as| u8 or 7
+fix C_TEXT_NEG_U8: u8 = "-5" as| u8 or 7
+fix C_TEXT_LO_I8: i8 = "-999" as| i8 or 7
+fix C_TEXT_BAD: u8 = "12x" as| u8 or 7
+fix C_TEXT_BAD_NEG: u8 = "-12x" as| u8 or 7
 
 fn float_or_return(x: f64) -> i16 {
     fix v = x as| i16 or return -77
@@ -196,9 +196,9 @@ fn main() -> u8 {
         if (f_inf as| i16) != 32767 { return 19 }
     }
 
-    fix t_hi: text = `999`
-    fix t_lo: text = `-50`
-    fix t_bad: text = `-50z`
+    fix t_hi: text = "999"
+    fix t_lo: text = "-50"
+    fix t_bad: text = "-50z"
     if (t_hi as| u8 or 1) != 255 || (t_lo as| u8 or 1) != 0 || (t_bad as| u8 or 1) != 1 { return 20 }
 
     fix z0: f64 = 0.0
@@ -287,7 +287,7 @@ fn saturating_diagnostics_and_warnings_are_reported() {
             "expr.cast-sat-handler-syntax",
         ),
         (
-            "fn main() -> u8 { fix a: u8 = `10` as| u8\n return a }",
+            "fn main() -> u8 { fix a: u8 = \"10\" as| u8\n return a }",
             "symbol.cast-handler",
         ),
         (

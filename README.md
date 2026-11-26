@@ -34,10 +34,10 @@ fn main() -> u8 {
     arena {
         fix temporary = new 20
         fix total = .saved + .temporary
-        log info `${total}`
+        log info "${total}"
     } // temporaryが指す実体を回収する
     fix value = .saved // 外側の実体は引き続き使える
-    log info `${value}`
+    log info "${value}"
     return 0
 }
 ```
@@ -103,7 +103,7 @@ xcode-select --install
 
 ```suz
 fn main() -> u8 {
-    log info `Hello, Suz!`
+    log info "Hello, Suz!"
     return 0
 }
 ```
