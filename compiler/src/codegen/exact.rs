@@ -32,7 +32,7 @@ pub(super) fn lift(ty: Type, name: &str) -> String {
         format!("suz_exact_make(false, {name})")
     }
 }
-fn can_fail(e: &Exact) -> bool {
+pub(super) fn can_fail(e: &Exact) -> bool {
     match &e.kind {
         ExactKind::Negate(a) => can_fail(a),
         ExactKind::Binary(op, a, b) => {
@@ -49,6 +49,25 @@ fn can_fail(e: &Exact) -> bool {
         }
         _ => false,
     }
+}
+pub(super) fn native_type(expr: &CheckedExpression) -> Option<Type> {
+    let Value::Exact(e) = &expr.value else {
+        return None;
+    };
+    native::ty(e)
+}
+pub(super) fn emit_native(expr: &CheckedExpression, ty: Type, c: &mut ExpressionContext) -> String {
+    let Value::Exact(e) = &expr.value else {
+        unreachable!()
+    };
+    native::emit(e, ty, c)
+}
+pub(super) fn native_value(
+    expr: &CheckedExpression,
+    c: &mut ExpressionContext,
+) -> Option<(Type, String)> {
+    let ty = native_type(expr)?;
+    Some((ty, emit_native(expr, ty, c)))
 }
 pub(super) fn tree(e: &Exact, c: &mut ExpressionContext) -> String {
     if let Some(ty) = native::ty(e) {

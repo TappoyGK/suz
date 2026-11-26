@@ -257,10 +257,6 @@ int suz_exact_compare_float(suz_exact a, double b) {
     }
     return negative ? -order : order;
 }
-suz_exact suz_exact_require(suz_exact a, const char *source) {
-    if (a.failed) suz_panic(source, a.line, a.column, "integer division by zero [rt.div-zero]");
-    return a;
-}
 size_t suz_format_exact(suz_exact a, char text[40]) {
     size_t start = 40;
     do {

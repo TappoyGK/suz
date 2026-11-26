@@ -18,7 +18,8 @@ pub(super) fn cast_parts(
     {
         return super::ffi::cast_parts(operand, target, kind, context);
     }
-    if operand.ty == crate::ast::Type::Exact {
+    let native_ty = super::exact::native_type(operand);
+    if operand.ty == crate::ast::Type::Exact && native_ty.is_none() {
         let id = context.temporaries.len();
         context.temporaries.push(crate::ast::Type::Exact);
         let name = format!("suz_cmp_{id}");
@@ -31,16 +32,21 @@ pub(super) fn cast_parts(
     }
 
     use crate::ast::{FloatType, IntegerType, Type};
-    for ty in [operand.ty, target] {
+    let operand_ty = native_ty.unwrap_or(operand.ty);
+    for ty in [operand_ty, target] {
         if let Type::Float(ty) = ty {
             context.float_types.insert(ty);
         }
     }
     let index = context.temporaries.len();
-    context.temporaries.push(operand.ty);
-    let source = expression(operand, context);
+    context.temporaries.push(operand_ty);
+    let source = if let Some(ty) = native_ty {
+        super::exact::emit_native(operand, ty, context)
+    } else {
+        expression(operand, context)
+    };
     let local = format!("suz_cmp_{index}");
-    if operand.ty.is_text() {
+    if operand_ty.is_text() {
         context.uses_text = true;
         let output = context.temporaries.len();
         if let Type::Struct(id) = target {
@@ -112,7 +118,7 @@ pub(super) fn cast_parts(
         return (format!("{local} = {source}"), condition, converted);
     }
     let mut converted = format!("({}){local}", target.c_name());
-    let condition = match (operand.ty, target) {
+    let condition = match (operand_ty, target) {
         (Type::Float(FloatType::F64), Type::Float(FloatType::F32)) => {
             context.narrow_float = true;
             context.narrow_float_check = true;

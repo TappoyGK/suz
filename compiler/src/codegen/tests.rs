@@ -395,6 +395,66 @@ return result != {expected} || trace != {trace};
     }
 }
 
+#[test]
+fn exact_expressions_avoid_suz_exact_require_and_use_native_path() {
+    let generate_c = |source: &str| {
+        let (program, _) =
+            crate::analyze(source.as_bytes(), &crate::CompilationOptions::default()).unwrap();
+        generate(
+            &program,
+            "exact.suz",
+            crate::SymbolPoolLimit::default(),
+            crate::ArenaOptions::default(),
+            crate::LogLevel::default(),
+            false,
+            None,
+        )
+    };
+
+    // 64ビットネイティブ演算に収まる式はsuz_exactもsuz_exact_requireも経由しない。
+    let native_c = generate_c(
+        r#"
+fn sat(x: i16) -> i16 { return ((x as i32) * 3) as| i16 }
+fn wrap(x: i16) -> i16 { return ((x as i32) * 3) as% i16 }
+fn checked(x: i16) -> i16 { return ((x as i32) * 3) as i16 or 0 }
+fn cmp(x: i16) -> bool { return (x as i32) * 3 > 1000 }
+fn widen(x: i16) -> f64 { return ((x as i32) * 3) as f64 }
+fn main() -> u8 {
+    if cmp(sat(10) +| wrap(20) +| checked(30)) && widen(1) > 0.0 { return 0 }
+    return 1
+}
+"#,
+    );
+    assert!(
+        !native_c.contains("suz_exact"),
+        "expected native 64-bit path without suz_exact:\n{native_c}"
+    );
+
+    // 64ビットを超えるがゼロ除算がない式はsuz_exact_requireを省く。
+    let wide_c = generate_c(
+        r#"
+fn wide(x: i64, y: i64) -> i64 { return (x * y) as| i64 }
+fn main() -> u8 { return ifexpr wide(2, 3) == 6 { 0 } else { 1 } }
+"#,
+    );
+    assert!(
+        !wide_c.contains("suz_exact_require"),
+        "expected infallible wide exact expression to omit suz_exact_require:\n{wide_c}"
+    );
+
+    // ゼロ除算の可能性がある式はsuz_exact_requireを残す。
+    let div_c = generate_c(
+        r#"
+fn div_cmp(x: i32, d: i32) -> bool { return x / d > 0 }
+fn main() -> u8 { return ifexpr div_cmp(6, 2) { 0 } else { 1 } }
+"#,
+    );
+    assert!(
+        div_c.contains("suz_exact_require"),
+        "expected fallible division exact expression to keep suz_exact_require:\n{div_c}"
+    );
+}
+
 #[path = "tests/array_bounds.rs"]
 mod array_bounds;
 #[path = "tests/struct_params.rs"]

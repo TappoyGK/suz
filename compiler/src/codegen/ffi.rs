@@ -157,12 +157,18 @@ pub(super) fn cast_parts(
     kind: crate::ast::CastKind,
     context: &mut ExpressionContext,
 ) -> (String, String, String) {
+    let native_ty = super::exact::native_type(operand);
+    let operand_ty = native_ty.unwrap_or(operand.ty);
     let id = context.temporaries.len();
-    context.temporaries.push(operand.ty);
-    let value = expression(operand, context);
+    context.temporaries.push(operand_ty);
+    let value = if let Some(ty) = native_ty {
+        super::exact::emit_native(operand, ty, context)
+    } else {
+        expression(operand, context)
+    };
     let name = format!("suz_cmp_{id}");
     let setup = format!("{name} = {value}");
-    if operand.ty == Type::Exact {
+    if operand_ty == Type::Exact {
         return (
             setup,
             exact_fits(target, &name),
@@ -174,7 +180,7 @@ pub(super) fn cast_parts(
         return (setup, "1".into(), converted);
     }
     let (lo, hi) = bounds(target);
-    if kind == crate::ast::CastKind::Saturating && matches!(operand.ty, Type::Float(_)) {
+    if kind == crate::ast::CastKind::Saturating && matches!(operand_ty, Type::Float(_)) {
         context.uses_float_rem = true;
         let sat = format!(
             "((double){name} <= (double)({lo}) ? ({})({lo}) : ((double){name} >= (double)((unsigned _BitInt(128))({hi}) + 1) ? ({})({hi}) : ({}){name}))",
@@ -184,7 +190,7 @@ pub(super) fn cast_parts(
         );
         return (setup, format!("!isnan({name})"), sat);
     }
-    let condition = if matches!(operand.ty, Type::Float(_)) {
+    let condition = if matches!(operand_ty, Type::Float(_)) {
         // 0方向への丸めを考慮し、下限-1より大きい値まで受け付ける。
         // 64ビットの下限ではdoubleが下限-1を区別できないため、下限以上で検査する。
         // 上限+1は2のべき乗なのでdoubleでも正確に比較できる。
@@ -208,11 +214,12 @@ pub(super) fn truncate(
     let id = context.temporaries.len();
     context.temporaries.push(Type::Integer(IntegerType::U64));
     let name = format!("suz_cmp_{id}");
-    let value = expression(operand, context);
-    let value = if operand.ty == Type::Exact {
-        format!("suz_exact_bits({value})")
-    } else {
+    let value = if let Some((_, value)) = super::exact::native_value(operand, context) {
         format!("(uint64_t)({value})")
+    } else if operand.ty == Type::Exact {
+        format!("suz_exact_bits({})", expression(operand, context))
+    } else {
+        format!("(uint64_t)({})", expression(operand, context))
     };
     let (lo, hi) = bounds(target);
     let bits = format!("(sizeof({}) * CHAR_BIT)", target.c_name());
@@ -231,17 +238,23 @@ pub(super) fn saturating_cast(
     target: Type,
     context: &mut ExpressionContext,
 ) -> String {
+    let native_ty = super::exact::native_type(operand);
+    let operand_ty = native_ty.unwrap_or(operand.ty);
     let id = context.temporaries.len();
-    context.temporaries.push(operand.ty);
+    context.temporaries.push(operand_ty);
     let name = format!("suz_cmp_{id}");
-    let value = expression(operand, context);
+    let value = if let Some(ty) = native_ty {
+        super::exact::emit_native(operand, ty, context)
+    } else {
+        expression(operand, context)
+    };
     let (lo, hi) = bounds(target);
     let c_to = target.c_name();
-    let converted = if operand.ty == Type::Exact {
+    let converted = if operand_ty == Type::Exact {
         format!(
             "({name}.negative ? ({name}.magnitude >= (unsigned _BitInt(128))(-(_BitInt(128))({lo})) ? ({c_to})({lo}) : ({c_to})(-(_BitInt(128)){name}.magnitude)) : ({name}.magnitude >= (unsigned _BitInt(128))({hi}) ? ({c_to})({hi}) : ({c_to}){name}.magnitude))"
         )
-    } else if matches!(operand.ty, Type::Float(_)) {
+    } else if matches!(operand_ty, Type::Float(_)) {
         context.uses_float_rem = true;
         format!(
             "(isnan({name}) ? ({c_to})0 : ((double){name} <= (double)({lo}) ? ({c_to})({lo}) : ((double){name} >= (double)((unsigned _BitInt(128))({hi}) + 1) ? ({c_to})({hi}) : ({c_to}){name})))"

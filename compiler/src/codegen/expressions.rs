@@ -144,11 +144,17 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
         Value::GenericNumericLiteral { .. } => {
             unreachable!("generic values are substituted before code generation")
         }
-        Value::Exact(ref e) => format!(
-            "suz_exact_require({}, {})",
-            super::exact::tree(e, context),
-            c_string(&context.source_name)
-        ),
+        Value::Exact(ref e) => {
+            let tree = super::exact::tree(e, context);
+            if super::exact::can_fail(e) {
+                format!(
+                    "suz_exact_require({tree}, {})",
+                    c_string(&context.source_name)
+                )
+            } else {
+                tree
+            }
+        }
         Value::TextView(ref inner) => format!("suz_text_as_view({})", expression(inner, context)),
         Value::Intern {
             ref operand,
@@ -367,6 +373,12 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             if expr.ty.array_id().is_some() {
                 return expression(inner, context);
             }
+            if let Some((_, value)) = super::exact::native_value(inner, context) {
+                if let crate::ast::Type::Float(ty) = expr.ty {
+                    context.float_types.insert(ty);
+                }
+                return format!("({})({value})", expr.ty.c_name());
+            }
             if inner.ty == crate::ast::Type::Exact {
                 let value = expression(inner, context);
                 return super::exact::converted(expr.ty, &value, context);
@@ -483,7 +495,9 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             format!(
                 "suz_bits_{}((uint64_t)({}))",
                 ty.name(),
-                if inner.ty == crate::ast::Type::Exact {
+                if let Some((_, value)) = super::exact::native_value(inner, context) {
+                    value
+                } else if inner.ty == crate::ast::Type::Exact {
                     format!("suz_exact_bits({})", expression(inner, context))
                 } else {
                     expression(inner, context)
@@ -505,7 +519,8 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                 .to_uppercase()
                 .replace('I', "INT")
                 .replace('U', "UINT");
-            if inner.ty == Type::Exact {
+            let native_ty = super::exact::native_type(inner);
+            if inner.ty == Type::Exact && native_ty.is_none() {
                 let id = context.temporaries.len();
                 context.temporaries.push(Type::Exact);
                 let val = expression(inner, context);
@@ -521,7 +536,8 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                     "(suz_cmp_{id} = {val}, suz_cmp_{id}.negative ? {neg_branch} : (suz_cmp_{id}.magnitude >= {to_max}ULL ? {limit}_MAX : ({c_to})suz_cmp_{id}.magnitude))"
                 );
             }
-            if let Type::Float(from) = inner.ty {
+            let inner_ty = native_ty.unwrap_or(inner.ty);
+            if let Type::Float(from) = inner_ty {
                 context.float_types.insert(from);
                 context.float_sat_casts.insert((from, to));
                 return format!(
@@ -531,16 +547,25 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                     expression(inner, context)
                 );
             }
-            let Type::Integer(from) = inner.ty else {
+            let Type::Integer(from) = inner_ty else {
                 unreachable!()
             };
             let (from_min, from_max) = from.bounds();
             if from_min >= to_min && from_max <= to_max {
-                return format!("({c_to})({})", expression(inner, context));
+                let val = if let Some(ty) = native_ty {
+                    super::exact::emit_native(inner, ty, context)
+                } else {
+                    expression(inner, context)
+                };
+                return format!("({c_to})({val})");
             }
             let id = context.temporaries.len();
-            context.temporaries.push(inner.ty);
-            let val = expression(inner, context);
+            context.temporaries.push(inner_ty);
+            let val = if let Some(ty) = native_ty {
+                super::exact::emit_native(inner, ty, context)
+            } else {
+                expression(inner, context)
+            };
             let local = format!("suz_cmp_{id}");
             let mut body = format!("({c_to}){local}");
             if from_max > to_max {
@@ -631,11 +656,17 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                     ),
                 };
             }
+            let right_native = super::exact::native_type(right);
+            let right_ty = right_native.unwrap_or(right.ty);
             let index = context.temporaries.len();
-            context.temporaries.extend([left.ty, right.ty]);
-            let right_is_exact = right.ty == crate::ast::Type::Exact;
+            context.temporaries.extend([left.ty, right_ty]);
+            let right_is_exact = right_ty == crate::ast::Type::Exact;
             let left = expression(left, context);
-            let right = expression(right, context);
+            let right = if let Some(ty) = right_native {
+                super::exact::emit_native(right, ty, context)
+            } else {
+                expression(right, context)
+            };
             let result = match expr.ty {
                 crate::ast::Type::Integer(ty) => {
                     use crate::ast::BinaryOperator;
@@ -816,22 +847,35 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                     left_method && right_method
                 })
                 .collect();
+            let native_types: Vec<_> = operands.iter().map(super::exact::native_type).collect();
+            let operand_types: Vec<_> = operands
+                .iter()
+                .enumerate()
+                .map(|(i, operand)| native_types[i].unwrap_or(operand.ty))
+                .collect();
             let names: Vec<_> = operands
                 .iter()
                 .enumerate()
-                .map(|(i, operand)| {
+                .map(|(i, _)| {
                     if direct_struct[i] {
                         String::new()
                     } else {
                         let index = context.temporaries.len();
-                        context.temporaries.push(operand.ty);
+                        context.temporaries.push(operand_types[i]);
                         format!("suz_cmp_{index}")
                     }
                 })
                 .collect();
             let values: Vec<_> = operands
                 .iter()
-                .map(|operand| expression(operand, context))
+                .enumerate()
+                .map(|(i, operand)| {
+                    if let Some(ty) = native_types[i] {
+                        super::exact::emit_native(operand, ty, context)
+                    } else {
+                        expression(operand, context)
+                    }
+                })
                 .collect();
             let method_argument = |i: usize| -> String {
                 if direct_struct[i] {
@@ -850,14 +894,12 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                         method_argument(index + 1)
                     );
                 }
-                let unsigned = operands[index]
-                    .ty
-                    .integer_storage()
-                    .is_some_and(|ty| ty.bounds().0 == 0);
-                let text = operands[index].ty.is_text();
-                let view = operands[index].ty == Type::Text;
-                let floating = matches!(operands[index].ty, Type::Float(_));
-                let structure = if let Type::Struct(id) = operands[index].ty {
+                let ty = operand_types[index];
+                let unsigned = ty.integer_storage().is_some_and(|ty| ty.bounds().0 == 0);
+                let text = ty.is_text();
+                let view = ty == Type::Text;
+                let floating = matches!(ty, Type::Float(_));
+                let structure = if let Type::Struct(id) = ty {
                     context.struct_equals.insert(id);
                     Some(id)
                 } else {
@@ -866,10 +908,7 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                 if !floating
                     && !text
                     && structure.is_none()
-                    && !matches!(
-                        operands[index].ty,
-                        Type::Integer(_) | Type::Exact | Type::CInteger(_)
-                    )
+                    && !matches!(ty, Type::Integer(_) | Type::Exact | Type::CInteger(_))
                 {
                     context.helpers.insert(unsigned);
                 }
@@ -888,11 +927,8 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                 }
                 if text {
                     if operators[index].is_equality() {
-                        let equal = super::expressions::equality(
-                            operands[index].ty,
-                            &names[index],
-                            &names[index + 1],
-                        );
+                        let equal =
+                            super::expressions::equality(ty, &names[index], &names[index + 1]);
                         return if matches!(
                             operators[index],
                             crate::ast::ComparisonOperator::NotEqual
@@ -914,19 +950,16 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                         operators[index].symbol()
                     );
                 }
-                if matches!(
-                    operands[index].ty,
-                    Type::Exact | Type::Integer(_) | Type::Float(_)
-                ) {
+                if matches!(ty, Type::Exact | Type::Integer(_) | Type::Float(_)) {
                     return super::exact::compare(
-                        operands[index].ty,
+                        ty,
                         &names[index],
-                        operands[index + 1].ty,
+                        operand_types[index + 1],
                         &names[index + 1],
                         operators[index],
                     );
                 }
-                if matches!(operands[index].ty, Type::CInteger(_)) {
+                if matches!(ty, Type::CInteger(_)) {
                     // 同じC型同士なので、その型の符号と幅のまま比較する。
                     // int64_tの比較ヘルパーへ渡すとsize_tなどの上半分を負数にしてしまう。
                     return format!(
