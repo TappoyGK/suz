@@ -416,7 +416,7 @@ fn access(
                 ));
             }
             let index_expr = start.as_ref().unwrap();
-            let value = expression::expression(index_expr, Some(Type::Enum(enum_ty)), scope)?;
+            let value = expression::expression(index_expr, None, scope)?;
             if value.ty != Type::Enum(enum_ty) {
                 return Err(index_expr.location.error(
                     ErrorKind::InvalidSource,
