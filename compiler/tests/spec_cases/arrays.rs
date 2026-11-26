@@ -1450,7 +1450,7 @@ fn main() -> u8 {
         // 要求型と異なる列挙型
         (
             "enum Wave: u8 { Saw, Square }\nenum Other: u8 { A, B }\nfn main() -> u8 {\nfix a: .[i32; Wave] = .[0; Other]\nreturn 0\n}",
-            "array.enum-type",
+            "array.enum-init",
         ),
         // error 型や未定義型名・多次元
         (
@@ -1463,7 +1463,7 @@ fn main() -> u8 {
         ),
         (
             "enum Wave: u8 { Saw, Square }\nfn main() -> u8 {\nfix a = new #[0; Wav]\nreturn 0\n}",
-            "array.enum-type",
+            "array.enum-init",
         ),
         // 寿命エスケープ拒否
         (

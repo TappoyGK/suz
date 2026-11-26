@@ -1530,7 +1530,7 @@ fix narrow: u8 = a + b or 0 // 格納に失敗し、代替値0を使う
 | 外部処理 | 再利用できるブロックがなく、容量設定が許す場合は環境層の確保を1回呼ぶ。その処理量と待機時間の上限は定めない |
 | 利用者の制御 | 配列の長さ・要素型、作業領域の容量と追加確保の可否を指定できる。設定は [tool.arena-capacity] に従う |
 
-**[array.enumeration]** `new #[...]`・`new .[...]`・`.[...]`の列挙初期化では、`[値, ...]`は1次元、`[[値, ...], ...]`は2次元を表す（列挙子をキーにする初期化には [array.enum-init]・[array.enum-init-order] を適用する）。さらに行を入れ子にできる。行の角括弧は初期化構文であり、独立した値式ではない（要素として書いた`.[...]`は独立した定数配列の値式であり、行としては扱わない）。各段で行の長さと入れ子の深さを揃え、同じ段に値と行を混在させない。内側の行に反復初期化のセミコロンを書けない。列挙の葉（列挙子キー初期化の各初期値を含む）を外側から順に左から右へ1回ずつ評価し、サイズ検査と確保の後で格納する。評価中に失敗した場合は後続の式を評価しない。空の内側の行は認めない。
+**[array.enumeration]** `new #[...]`・`new .[...]`・`.[...]`の列挙初期化では、`[値, ...]`は1次元、`[[値, ...], ...]`は2次元を表す（列挙子をキーにする初期化には [array.enum-init]・[array.enum-init-order] を適用する）。さらに行を入れ子にできる。行の角括弧は初期化構文であり、独立した値式ではない（要素として書いた`.[...]`は独立した定数配列の値式であり、行としては扱わない）。各段で行の長さと入れ子の深さを揃え、同じ段に値と行を混在させない。内側の行に反復初期化のセミコロンや列挙子キーは書けない。列挙の葉（列挙子キー初期化の各初期値を含む）を外側から順に左から右へ1回ずつ評価し、サイズ検査と確保の後で格納する。評価中に失敗した場合は後続の式を評価しない。空の内側の行は認めない。
 
 **[array.initializer-type]** 外側から配列参照の型が要求される場合は、その要素型を各初期値に要求する。次元数と添字の列挙型も一致しなければならない（[array.enum-init]）。要求型がない場合は、初期値に [type.literal-default] と式の型推論を適用し、列挙の全要素が同じ型になることを要求する。列挙の先頭要素から後続の要素へ型を要求したり、配列専用の数値の幅拡張をしたりはしない。
 
@@ -1611,7 +1611,7 @@ fix narrow: u8 = a + b or 0 // 格納に失敗し、代替値0を使う
 **[array.enum-init]** 列挙型`E`を添字にする配列は、作業領域に確保する`new #[...]`・`new .[...]`および定数配列`.[...]`（[array.constant]）で次の2つの形により生成する。
 
 - `new #[E.A: 式, E.B: 式, ...]` / `new .[E.A: 式, ...]` / `.[E.A: 式, ...]`：すべての列挙子をちょうど1回ずつ書く。欠落、重複、別の列挙型の列挙子、整数や任意の式をキーにすることはコンパイルエラーとする。書く順は宣言順と違ってもよい。
-- `new #[式; E]` / `new .[式; E]` / `.[式; E]`：すべての要素を同じ値で初期化する。式は1回だけ評価する（結果が参照なら全要素が同じ実体を指す。[array.new] と同じ）。定数配列では式に定数式を要求する。
+- `new #[式; E]` / `new .[式; E]` / `.[式; E]`：すべての要素を同じ値で初期化する。セミコロンの後に [name.type] のつづりの名前を書いた場合は列挙型の添字として解釈し、宣言済みの列挙型でなければコンパイルエラーとする。式は1回だけ評価する（結果が参照なら全要素が同じ実体を指す。[array.new] と同じ）。定数配列では式に定数式を要求する。
 
 要求型が`#[T; E]`または`.[T; E]`であっても、キーなしの`.[1.0, 2.0, 3.0]`・`.[0.0; 3]`・`.[]`（および`new`版）は列挙型添字配列として受理しない。添字の列挙型はキーまたはセミコロン後の列挙型名から決め、要求型の添字と異なる列挙型ならコンパイルエラーとする。要素型の推論と要求型の伝播には [array.initializer-type] を適用する。
 
@@ -3264,10 +3264,12 @@ Unary            ::= ( "-" | "-%" | "-|" | "not" | "~" | "len" | "c_bytes" | "c_
 Postfix          ::= Primary ( "." IDENT | "#" IDENT "(" Arguments? ")" | "." "[" Index "]" IndexHandler?
                              | "(" Arguments? ")"
                              | "with" "{" NL* Initializers "}" )*
-ArrayInitializer ::= "[" ( Expression ";" ArrayLengths | ArrayItems? ) "]"
+ArrayInitializer ::= "[" ( Expression ";" ArrayLengths | EnumArrayItems | ArrayItems? ) "]"
 ArrayLengths     ::= Expression ( "," Expression )* ","?
+EnumArrayItems   ::= EnumArrayItem ( "," EnumArrayItem )* ","?
+EnumArrayItem    ::= Expression ":" Expression
 ArrayItems       ::= ArrayItem ( "," ArrayItem )* ","?
-ArrayItem        ::= Expression ( ":" Expression )? | "[" ArrayItems "]"
+ArrayItem        ::= Expression | "[" ArrayItems "]"
 Index            ::= Expression | Expression? ":" Expression?
 IndexHandler     ::= "or" ( Expression | "return" Expression? | "panic" TEMPLATE )
 Primary          ::= "self" | Literal | IDENT | FunctionCall | StructLiteral | TEMPLATE | "." ArrayInitializer

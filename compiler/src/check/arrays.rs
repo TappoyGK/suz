@@ -65,7 +65,7 @@ pub(super) fn initializer(
                 return Err(lengths[0].location.error(
                     ErrorKind::InvalidSource,
                     crate::diagnostic!(
-                        "array.enum-type",
+                        "array.enum-init",
                         "unknown enum type '{name}' in array initializer"
                     ),
                 ));
@@ -172,7 +172,7 @@ pub(super) fn initializer(
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
                     crate::diagnostic!(
-                        "array.enum-type",
+                        "array.enum-init",
                         "enum-indexed array type does not match the required type"
                     ),
                 ));

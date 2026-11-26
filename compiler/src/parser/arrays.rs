@@ -165,6 +165,14 @@ impl Parser<'_, '_> {
     }
 
     pub(super) fn array_initializer(&mut self, readonly: bool) -> Result<Expression, Diagnostic> {
+        self.array_initializer_inner(readonly, true)
+    }
+
+    fn array_initializer_inner(
+        &mut self,
+        readonly: bool,
+        allow_keys: bool,
+    ) -> Result<Expression, Diagnostic> {
         let location = self.location();
         self.nested(location, |parser| {
             let open = parser.location();
@@ -177,6 +185,15 @@ impl Parser<'_, '_> {
             if parser.token().kind != Kind::Symbol("]") {
                 items.push(parser.array_item()?);
                 if parser.token().kind == Kind::Symbol(":") {
+                    if !allow_keys {
+                        return Err(items[0].0.location.error(
+                            ErrorKind::InvalidSource,
+                            crate::diagnostic!(
+                                "array.enumeration",
+                                "nested array rows cannot use enum keys"
+                            ),
+                        ));
+                    }
                     if items[0].1 {
                         return Err(location.error(
                             ErrorKind::InvalidSource,
@@ -291,6 +308,7 @@ impl Parser<'_, '_> {
                             ExpressionKind::ArrayInit {
                                 values,
                                 lengths,
+                                keys: None,
                                 repeated: false,
                                 ..
                             } if !values.is_empty() => {
@@ -359,7 +377,7 @@ impl Parser<'_, '_> {
     }
     fn array_item(&mut self) -> Result<(Expression, bool), Diagnostic> {
         if self.token().kind == Kind::Symbol("[") {
-            Ok((self.array_initializer(false)?, true))
+            Ok((self.array_initializer_inner(false, false)?, true))
         } else {
             Ok((self.expression()?, false))
         }

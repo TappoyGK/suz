@@ -631,6 +631,31 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | `[array.constant]` | 2 | 14 |
 
+### array-069 整数添字の定数配列にstatic fnを含める
+
+主根拠：`[array.constant]`。
+
+補助根拠：`[fn.value-const]`、`[fn.value-call]`。
+
+**ソース：**
+
+```suz
+fnshape Get() -> i32
+fn one() -> i32 { return 1 }
+fn two() -> i32 { return 2 }
+fix FS: .[static fn Get] = .[fn one, fn two]
+fn main() -> u8 {
+    if FS.[0]() != 1 || FS.[1]() != 2 { return 1 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
 ### array-020 読み取り専用の配列も比較しない
 
 主根拠：`[array.value]`。
@@ -1278,6 +1303,34 @@ fn main() -> u8 {
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
 | 通常 | `[array.enumeration]` | 2 | 18 |
+
+### array-070 多次元配列の内側の行に列挙子キーを書けない
+
+主根拠：`[array.enumeration]`。
+
+補助根拠：`[array.enum-type]`、`[array.enum-init]`。
+
+**ソース：**
+
+```suz
+enum Wave: u8 { Saw, Square }
+fn main() -> u8 {
+    fix a = .[[Wave.Square: 10, Wave.Saw: 20]]
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[array.enumeration]` | 3 | 16 |
 
 ### array-042 newを付けない#[...]は認めない
 
@@ -2154,32 +2207,6 @@ fn main() -> u8 {
     fix r1 = t.[Wave.Saw](swap(t))
     fix r2 = t.[Wave.Saw](5)
     if r1 != 6 || r2 != 105 { return 1 }
-    return 0
-}
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | 正常終了 | 0 | 0 |
-
-
-### array-069 整数添字の定数配列にstatic fnを含める
-
-主根拠：`[array.constant]`。
-
-補助根拠：`[fn.value-const]`、`[fn.value-call]`。
-
-**ソース：**
-
-```suz
-fnshape Get() -> i32
-fn one() -> i32 { return 1 }
-fn two() -> i32 { return 2 }
-fix FS: .[static fn Get] = .[fn one, fn two]
-fn main() -> u8 {
-    if FS.[0]() != 1 || FS.[1]() != 2 { return 1 }
     return 0
 }
 ```
