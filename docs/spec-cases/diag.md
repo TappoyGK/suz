@@ -304,6 +304,44 @@ rawは定数式ではなく、i64からu8への変換にはorが必要。警告�
 | 警告 | `[expr.cast-handler]` | 3 | 21 |
 | 強制 | `[expr.cast-handler]` | 3 | 21 |
 
+### diag-015 飽和左シフトは失敗しうる右オペランドだけを診断対象にする
+
+主根拠：`[diagnostic.arithmetic-target]`。
+
+補助根拠：`[expr.sat-shift]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix u: u8 = 1
+    fix s: i32 = 1
+    fix a: i8 = (1 as i8) <<| u
+    fix b: i8 = (1 as i8) <<| s
+    return ifexpr a == 2 && b == 2 { 0 } else { 1 }
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+| 警告 | 正常終了 | 0 | 1 |
+| 強制 | コンパイルエラー | — | 0 |
+
+**警告：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 警告 | `[diagnostic.arithmetic]` | 5 | 27 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 強制 | `[diagnostic.arithmetic]` | 5 | 27 |
+
 ### diag-013 範囲だけで決まる比較を通常設定で警告する
 
 主根拠：`[diagnostic.constant-comparison]`。

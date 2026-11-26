@@ -122,7 +122,12 @@ pub(super) fn cast_parts(
         (Type::Float(from), Type::Integer(to)) if kind == crate::ast::CastKind::Saturating => {
             context.float_types.insert(from);
             context.float_sat_casts.insert((from, to));
-            converted = format!("suz_sat_f2i_{}_{}({local})", from.name(), to.name());
+            converted = format!(
+                "suz_sat_f2i_{}_{}({local}, ({})0)",
+                from.name(),
+                to.name(),
+                to.c_name()
+            );
             format!("{local} == {local}")
         }
         (Type::Float(_), Type::Integer(to)) => {

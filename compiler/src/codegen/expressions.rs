@@ -327,6 +327,22 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             if let Some(value) = constant_struct {
                 return expression(value, context);
             }
+            if kind == crate::ast::CastKind::Saturating
+                && let (crate::ast::Type::Float(from), crate::ast::Type::Integer(to)) =
+                    (operand.ty, expr.ty)
+                && unordered_read(fallback, context)
+            {
+                context.float_types.insert(from);
+                context.float_sat_casts.insert((from, to));
+                return format!(
+                    "suz_sat_f2i_{}_{}({}, ({})({}))",
+                    from.name(),
+                    to.name(),
+                    expression(operand, context),
+                    to.c_name(),
+                    expression(fallback, context)
+                );
+            }
             let (setup, condition, converted) =
                 cast_parts(operand, expr.ty, kind, location, context);
             let fallback = expression(fallback, context);
@@ -497,7 +513,7 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                 context.float_types.insert(from);
                 context.float_sat_casts.insert((from, to));
                 return format!(
-                    "suz_sat_f2i_{}_{}({})",
+                    "suz_sat_f2i_{}_{}({}, ({c_to})0)",
                     from.name(),
                     to.name(),
                     expression(inner, context)

@@ -70,7 +70,7 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
         if from == crate::ast::FloatType::F32 && bits <= 16 {
             writeln!(
                 c,
-                "static inline {c_to} suz_sat_f2i_{}_{}({c_from} x) {{\n    float c = x < {min}.0f ? {min}.0f : (x > {max}.0f ? {max}.0f : x);\n    return x != x ? ({c_to})0 : ({c_to})c;\n}}\n",
+                "static inline {c_to} suz_sat_f2i_{}_{}({c_from} x, {c_to} nan_val) {{\n    float c = x < {min}.0f ? {min}.0f : (x > {max}.0f ? {max}.0f : x);\n    return x != x ? nan_val : ({c_to})c;\n}}\n",
                 from.name(),
                 to.name(),
             )
@@ -78,7 +78,7 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
         } else if bits <= 32 {
             writeln!(
                 c,
-                "static inline {c_to} suz_sat_f2i_{}_{}({c_from} x) {{\n    double d = (double)x;\n    double c = d < {min}.0 ? {min}.0 : (d > {max}.0 ? {max}.0 : d);\n    return d != d ? ({c_to})0 : ({c_to})c;\n}}\n",
+                "static inline {c_to} suz_sat_f2i_{}_{}({c_from} x, {c_to} nan_val) {{\n    double d = (double)x;\n    double c = d < {min}.0 ? {min}.0 : (d > {max}.0 ? {max}.0 : d);\n    return d != d ? nan_val : ({c_to})c;\n}}\n",
                 from.name(),
                 to.name(),
             )
@@ -87,7 +87,7 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
             let max_plus_1 = max + 1;
             writeln!(
                 c,
-                "static inline {c_to} suz_sat_f2i_{}_{}({c_from} x) {{\n    double d = (double)x;\n    return d != d ? ({c_to})0 : (d <= {min}.0 ? {min_expr} : (d >= {max_plus_1}.0 ? {limit}_MAX : ({c_to})d));\n}}\n",
+                "static inline {c_to} suz_sat_f2i_{}_{}({c_from} x, {c_to} nan_val) {{\n    double d = (double)x;\n    return d != d ? nan_val : (d <= {min}.0 ? {min_expr} : (d >= {max_plus_1}.0 ? {limit}_MAX : ({c_to})d));\n}}\n",
                 from.name(),
                 to.name(),
             )
@@ -233,7 +233,7 @@ static inline _Bool suz_f32_fits(double value) {
                 let wide = if bits < 32 { "uint32_t" } else { "uint64_t" };
                 writeln!(
                     c,
-                    "static inline {c_type} suz_sat_mul_{name}({c_type} a, {c_type} b) {{\n    {wide} r = ({wide})a * ({wide})b;\n    return r > {limit}_MAX ? {limit}_MAX : ({c_type})r;\n}}\n"
+                    "static inline {c_type} suz_sat_mul_{name}({c_type} a, {c_type} b) {{\n    {wide} r = ({wide})a * ({wide})b;\n    {wide} m = r < {limit}_MAX ? r : {limit}_MAX;\n    return ({c_type})m;\n}}\n"
                 )
                 .unwrap();
             }

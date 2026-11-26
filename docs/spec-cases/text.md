@@ -300,6 +300,32 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | `[symbol.cast-wrap]` | 2 | 24 |
 
+### text-067 symbol と text から整数型への飽和変換
+
+主根拠：`[symbol.cast-sat]`。
+
+補助根拠：`[text.cast-view]`、`[symbol.cast-handler]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix hi: u8 = `999` as| u8 or 1
+    fix lo: u8 = `-5` as| u8 or 1
+    fix bad: u8 = `-5x` as| u8 or 7
+    fix t: text = `-200`
+    fix s: i8 = t as| i8 or 0
+    if hi != 255 || lo != 0 || bad != 7 || s != -128 { return 1 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
 ### text-008 成功する定数文字列のasにもorを要求する
 
 主根拠：`[symbol.cast-handler]`。
@@ -407,6 +433,33 @@ fn main() -> u8 {
 | 設定 | 結果 | 終了コード | 警告数 |
 |---|---|---:|---:|
 | 通常 | 正常終了 | 0 | 0 |
+
+### text-068 symbol からの飽和変換で or を省略すると拒否する
+
+主根拠：`[symbol.cast-handler]`。
+
+補助根拠：`[symbol.cast-sat]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix a: u8 = `10` as| u8
+    return a
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[symbol.cast-handler]` | 2 | 22 |
 
 ### text-005 数値とboolをSuzの表記で読み取る
 
@@ -1917,56 +1970,3 @@ fn main() -> u8 {
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
 | 通常 | `[text.append]` | 3 | 9 |
-
-### text-067 symbol と text から整数型への飽和変換
-
-主根拠：`[symbol.cast-sat]`。
-
-補助根拠：`[text.cast-view]`、`[symbol.cast-handler]`。
-
-**ソース：**
-
-```suz
-fn main() -> u8 {
-    fix hi: u8 = `999` as| u8 or 1
-    fix lo: u8 = `-5` as| u8 or 1
-    fix bad: u8 = `-5x` as| u8 or 7
-    fix t: text = `-200`
-    fix s: i8 = t as| i8 or 0
-    if hi != 255 || lo != 0 || bad != 7 || s != -128 { return 1 }
-    return 0
-}
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | 正常終了 | 0 | 0 |
-
-### text-068 symbol からの飽和変換で or を省略すると拒否する
-
-主根拠：`[symbol.cast-handler]`。
-
-補助根拠：`[symbol.cast-sat]`。
-
-**ソース：**
-
-```suz
-fn main() -> u8 {
-    fix a: u8 = `10` as| u8
-    return a
-}
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | コンパイルエラー | — | 0 |
-
-**コンパイル診断：**
-
-| 設定 | 規則 | 行 | 列 |
-|---|---|---:|---:|
-| 通常 | `[symbol.cast-handler]` | 2 | 22 |
