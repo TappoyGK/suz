@@ -49,7 +49,7 @@ pub(super) fn initializer(
                 return Err(lengths[pos].location.error(
                     ErrorKind::InvalidSource,
                     crate::diagnostic!(
-                        "array.enum-type",
+                        "array.enum-init",
                         "enum-indexed arrays must be 1-dimensional"
                     ),
                 ));

@@ -1465,6 +1465,14 @@ fn main() -> u8 {
             "enum Wave: u8 { Saw, Square }\nfn main() -> u8 {\nfix a = new #[0; Wav]\nreturn 0\n}",
             "array.enum-init",
         ),
+        (
+            "enum Wave: u8 { Saw, Square }\nfn main() -> u8 {\nfix a = new #[0; Wave, 3]\nreturn 0\n}",
+            "array.enum-init",
+        ),
+        (
+            "enum Wave: u8 { Saw, Square }\nfn main() -> u8 {\nfix a = .[[1, Wave.Saw: 2]]\nreturn 0\n}",
+            "array.enumeration",
+        ),
         // 寿命エスケープ拒否
         (
             "enum Wave: u8 { Saw, Square }\nfn main() -> u8 {\nvar out: #[i64; Wave]? = nil\narena {\nfix inner = new #[0; Wave]\nout = inner\n}\nreturn 0\n}",

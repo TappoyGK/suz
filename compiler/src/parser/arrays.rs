@@ -266,6 +266,15 @@ impl Parser<'_, '_> {
                     } else {
                         items.push(parser.array_item()?);
                         if parser.token().kind == Kind::Symbol(":") {
+                            if !allow_keys {
+                                return Err(items.last().unwrap().0.location.error(
+                                    ErrorKind::InvalidSource,
+                                    crate::diagnostic!(
+                                        "array.enumeration",
+                                        "nested array rows cannot use enum keys"
+                                    ),
+                                ));
+                            }
                             return Err(parser.error(
                                 ErrorKind::InvalidSource,
                                 crate::diagnostic!(
