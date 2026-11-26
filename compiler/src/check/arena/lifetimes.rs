@@ -610,8 +610,10 @@ impl Analysis {
             | Value::Len(v)
             | Value::Negate(v)
             | Value::Truncate(v)
+            | Value::SaturatingCast(v)
             | Value::BitNot(v)
             | Value::WrapNegate(v)
+            | Value::SaturatingNegate(v)
             | Value::Not(v)
             | Value::Intern { operand: v, .. } => {
                 self.expr(v, region, arena);

@@ -136,6 +136,7 @@ pub(super) fn check(
         }
         ExpressionKind::BitNot(_)
         | ExpressionKind::WrapNegate(_)
+        | ExpressionKind::SaturatingNegate(_)
         | ExpressionKind::Negate(_)
         | ExpressionKind::Binary { .. } => {
             let ty = expected
@@ -159,7 +160,8 @@ pub(super) fn check(
                 ExpressionKind::Binary {
                     operator: BinaryOperator::ShiftLeft
                         | BinaryOperator::ShiftRight
-                        | BinaryOperator::LogicalShiftRight,
+                        | BinaryOperator::LogicalShiftRight
+                        | BinaryOperator::SaturatingShiftLeft,
                     ..
                 }
             );
@@ -184,8 +186,10 @@ pub(super) fn check(
                         ),
                     ));
                 }
-                if matches!(&expr.kind, ExpressionKind::Negate(_))
-                    && matches!(ty, Type::Integer(integer) if integer.bounds().0 == 0)
+                if matches!(
+                    &expr.kind,
+                    ExpressionKind::Negate(_) | ExpressionKind::SaturatingNegate(_)
+                ) && matches!(ty, Type::Integer(integer) if integer.bounds().0 == 0)
                 {
                     return Some(expr.location.error(
                         ErrorKind::InvalidSource,
@@ -206,6 +210,7 @@ pub(super) fn check(
                                     &expr.kind,
                                     ExpressionKind::Negate(_)
                                         | ExpressionKind::WrapNegate(_)
+                                        | ExpressionKind::SaturatingNegate(_)
                                         | ExpressionKind::BitNot(_)
                                 ) =>
                             {
@@ -271,6 +276,12 @@ pub(super) fn check(
                         same_width(operand_type(inner, bindings), ty, inner.location, bindings)?;
                     }
                     Value::WrapNegate(Box::new(expression(inner, Some(ty), bindings)?))
+                }
+                ExpressionKind::SaturatingNegate(inner) => {
+                    if !super::super::exact::is_operator(inner) {
+                        same_width(operand_type(inner, bindings), ty, inner.location, bindings)?;
+                    }
+                    Value::SaturatingNegate(Box::new(expression(inner, Some(ty), bindings)?))
                 }
                 ExpressionKind::Binary {
                     operator,

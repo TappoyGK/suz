@@ -248,10 +248,10 @@ pub(super) fn emit_block(
                     CheckedStatement::CastReturn {
                         ty,
                         operand,
-                        wrap,
+                        kind,
                         location,
                         ..
-                    } => (*ty, cast_parts(operand, *ty, *wrap, *location, context)),
+                    } => (*ty, cast_parts(operand, *ty, *kind, *location, context)),
                     _ => unreachable!(),
                 };
                 writeln!(c, "{indent}{setup};").unwrap();

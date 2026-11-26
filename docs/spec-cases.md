@@ -121,17 +121,17 @@ IDは分野の接頭辞と番号で構成し、期待結果の種類を含めな
 | [symbolとtext](spec-cases/text.md) | `text` | 第5・6・7・8・9・10・14章 | 66 |
 | [配列](spec-cases/array.md) | `array` | 第5・6・7・9・13・15章 | 56 |
 | [定数・変数・代入](spec-cases/bind.md) | `bind` | 第4・6・9章 | 34 |
-| [式](spec-cases/expr.md) | `expr` | 第7・9章 | 78 |
+| [式](spec-cases/expr.md) | `expr` | 第7・9章 | 80 |
 | [関数と制御](spec-cases/flow.md)・[メソッド](spec-cases/method.md)・[匿名汎用](spec-cases/generic.md) | `flow` | 第8・11・12章 | 122 |
 | [エラー型と失敗する関数](spec-cases/errors.md) | `err` | 第8章 | 10 |
 | [作業領域とポインタ](spec-cases/arena.md) | `arena` | 第5・9・11章 | 27 |
 | [C FFI](spec-cases/ffi.md) | `ffi` | 第10章 | 22 |
-| [メソッドと演算子メソッド](spec-cases/method.md) | `method` | 第11章 | 34 |
+| [メソッドと演算子メソッド](spec-cases/method.md) | `method` | 第11章 | 35 |
 | [汎用](spec-cases/generic.md) | `generic` | 第12章 | 22 |
 | [実行時の検査](spec-cases/runtime.md) | `runtime` | 第13章 | 18 |
 | [ログ](spec-cases/log.md) | `log` | 第7・14章 | 13 |
 | [警告と診断設定](spec-cases/diag.md) | `diag` | 第15章 | 14 |
-| 合計 | | | 610 |
+| 合計 | | | 613 |
 
 件数はID接頭辞ごとに数える。flow-090・flow-091はメソッドのファイルに、flow接頭辞の匿名汎用22例は汎用のファイルに掲載する。
 
@@ -139,11 +139,11 @@ IDは分野の接頭辞と番号で構成し、期待結果の種類を含めな
 
 | 結果 | 件数 |
 |---|---:|
-| 受理 | 256 |
+| 受理 | 259 |
 | コンパイルエラー | 328 |
 | 実行時パニック | 15 |
 | 診断設定の比較 | 11 |
-| 合計 | 610 |
+| 合計 | 613 |
 
 期待結果が複数の設定を持つ例は「診断設定の比較」に1例として数える。設定が1つの例は、その結果で分類する。バイト列を指定する例も同じように数える。
 

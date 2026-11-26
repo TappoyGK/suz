@@ -265,6 +265,13 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
             .iter()
             .map(|&(line, column)| crate::ast::Location { line, column })
             .collect(),
+        float_sat_nan_warnings: globals
+            .outputs
+            .float_sat_nans
+            .borrow()
+            .iter()
+            .map(|&(line, column)| crate::ast::Location { line, column })
+            .collect(),
         comparison_warnings: globals
             .outputs
             .comparisons
@@ -496,6 +503,7 @@ pub(super) fn check_with_captures(
     if scope.instance() {
         scope.outputs.comparisons = Default::default();
         scope.outputs.divisions = Default::default();
+        scope.outputs.float_sat_nans = Default::default();
     }
     scope.errors = Rc::new(function.errors.clone());
     scope.result = scope.resolve_type_at(function.result, function.location)?;

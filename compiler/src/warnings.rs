@@ -66,6 +66,14 @@ pub(crate) fn collect(
             true,
         )
     }));
+    candidates.extend(checked.float_sat_nan_warnings.iter().map(|&location| {
+        (
+            location,
+            "diagnostic.float-sat-nan",
+            "floating-point saturating cast turns NaN into 0".to_string(),
+            true,
+        )
+    }));
     candidates.extend(
         checked.arena_warnings.iter().map(|(location, message, _)| {
             (*location, "arena.loop-allocation", message.clone(), true)

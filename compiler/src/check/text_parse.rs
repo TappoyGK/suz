@@ -6,14 +6,18 @@ use super::ir::{CheckedExpression, Value};
 use crate::ast::{FloatType, IntegerType, Type};
 
 // コンパイラと生成プログラムで、メモリ確保をしない同じパーサーを使う。
-pub(super) fn parse(text: &str, target: Type, wrap: bool) -> Option<CheckedExpression> {
+pub(super) fn parse(
+    text: &str,
+    target: Type,
+    kind: crate::ast::CastKind,
+) -> Option<CheckedExpression> {
     unsafe extern "C" {
         fn suz_parse_integer(
             bytes: *const u8,
             length: u64,
             bits: u32,
             signed_target: bool,
-            wrap: bool,
+            mode: u8,
             output: *mut u64,
         ) -> bool;
         fn suz_parse_float_bits(
@@ -36,6 +40,11 @@ pub(super) fn parse(text: &str, target: Type, wrap: bool) -> Option<CheckedExpre
         Type::Integer(ty) => {
             let mut bits = 0_u64;
             let signed = ty.bounds().0 < 0;
+            let mode = match kind {
+                crate::ast::CastKind::Checked => 0,
+                crate::ast::CastKind::Wrap => 1,
+                crate::ast::CastKind::Saturating => 2,
+            };
             // 呼び出しが終わるまで、バイト列と出力先は生存する。
             if !unsafe {
                 suz_parse_integer(
@@ -43,7 +52,7 @@ pub(super) fn parse(text: &str, target: Type, wrap: bool) -> Option<CheckedExpre
                     text.len() as u64,
                     ty.bits(),
                     signed,
-                    wrap,
+                    mode,
                     &mut bits,
                 )
             } {

@@ -108,6 +108,8 @@ mod ranges;
 mod readme;
 #[path = "spec_cases/runtime.rs"]
 mod runtime;
+#[path = "spec_cases/saturating.rs"]
+mod saturating;
 #[path = "spec_cases/shifts.rs"]
 mod shifts;
 #[path = "spec_cases/structs.rs"]

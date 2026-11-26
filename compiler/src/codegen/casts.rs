@@ -9,14 +9,14 @@ use crate::check::CheckedExpression;
 pub(super) fn cast_parts(
     operand: &CheckedExpression,
     target: crate::ast::Type,
-    wrap: bool,
+    kind: crate::ast::CastKind,
     location: crate::ast::Location,
     context: &mut ExpressionContext,
 ) -> (String, String, String) {
     if matches!(operand.ty, crate::ast::Type::CInteger(_))
         || matches!(target, crate::ast::Type::CInteger(_))
     {
-        return super::ffi::cast_parts(operand, target, context);
+        return super::ffi::cast_parts(operand, target, kind, context);
     }
     if operand.ty == crate::ast::Type::Exact {
         let id = context.temporaries.len();
@@ -83,15 +83,15 @@ pub(super) fn cast_parts(
             ),
             Type::Integer(ty) => {
                 context.bit_helpers.insert(ty);
+                let mode = match kind {
+                    crate::ast::CastKind::Checked => 0,
+                    crate::ast::CastKind::Wrap => 1,
+                    crate::ast::CastKind::Saturating => 2,
+                };
                 (
                     Type::Integer(IntegerType::U64),
                     "suz_parse_integer",
-                    format!(
-                        ", {}, {}, {}",
-                        ty.bits(),
-                        u8::from(ty.bounds().0 < 0),
-                        u8::from(wrap)
-                    ),
+                    format!(", {}, {}, {mode}", ty.bits(), u8::from(ty.bounds().0 < 0)),
                     format!("suz_bits_{}(suz_cmp_{output})", ty.name()),
                 )
             }
@@ -109,6 +109,12 @@ pub(super) fn cast_parts(
             context.narrow_float_check = true;
             converted = format!("suz_narrow_f32({local})");
             format!("suz_f32_fits({local})")
+        }
+        (Type::Float(from), Type::Integer(to)) if kind == crate::ast::CastKind::Saturating => {
+            context.float_types.insert(from);
+            context.float_sat_casts.insert((from, to));
+            converted = format!("suz_sat_f2i_{}_{}({local})", from.name(), to.name());
+            format!("!isnan({local})")
         }
         (Type::Float(_), Type::Integer(to)) => {
             context.float_types.insert(FloatType::F64);

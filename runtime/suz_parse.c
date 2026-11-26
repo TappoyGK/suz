@@ -7,14 +7,17 @@ static bool digit(unsigned char byte) {
 }
 
 bool suz_parse_integer(const char *bytes, uint64_t length, unsigned bits,
-                       bool signed_target, bool wrap, uint64_t *output) {
+                       bool signed_target, uint8_t mode, uint64_t *output) {
     if (length == 0) return false;
+    const bool wrap = mode == 1;
+    const bool saturating = mode == 2;
     const bool negative = bytes[0] == '-';
     uint64_t index = negative ? 1 : 0;
-    if (index == length || (!wrap && !signed_target && negative)) return false;
+    if (index == length || (!wrap && !saturating && !signed_target && negative)) return false;
     const uint64_t mask = UINT64_MAX >> (64 - bits);
     const uint64_t limit = signed_target ? (mask >> 1) + (negative ? 1 : 0) : mask;
     uint64_t value = 0;
+    bool saturated = saturating && !signed_target && negative;
     for (; index < length; ++index) {
         const unsigned char byte = (unsigned char)bytes[index];
         if (byte == '_') {
@@ -25,11 +28,29 @@ bool suz_parse_integer(const char *bytes, uint64_t length, unsigned bits,
         }
         if (!digit(byte)) return false;
         const unsigned next = byte - '0';
-        if (!wrap && (value > limit / 10 ||
-                      (value == limit / 10 && next > limit % 10))) return false;
-        /* 符号なしのオーバーフローにより、as%に必要な下位ビットが正確に残る。
-           累積値の型の大きさによって入力桁数を制限しない。 */
-        value = value * 10 + next;
+        if (saturating) {
+            if (!saturated && (value > limit / 10 ||
+                               (value == limit / 10 && next > limit % 10))) {
+                saturated = true;
+            }
+            if (!saturated) value = value * 10 + next;
+        } else {
+            if (!wrap && (value > limit / 10 ||
+                          (value == limit / 10 && next > limit % 10))) return false;
+            /* 符号なしのオーバーフローにより、as%に必要な下位ビットが正確に残る。
+               累積値の型の大きさによって入力桁数を制限しない。 */
+            value = value * 10 + next;
+        }
+    }
+    if (saturated) {
+        if (!signed_target && negative) {
+            *output = 0;
+        } else if (negative) {
+            *output = (UINT64_C(0) - ((mask >> 1) + 1)) & mask;
+        } else {
+            *output = signed_target ? (mask >> 1) : mask;
+        }
+        return true;
     }
     *output = (negative ? UINT64_C(0) - value : value) & mask;
     return true;

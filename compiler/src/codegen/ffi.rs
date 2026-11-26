@@ -154,6 +154,7 @@ pub(super) fn exact_converted(ty: Type, value: &str) -> String {
 pub(super) fn cast_parts(
     operand: &CheckedExpression,
     target: Type,
+    kind: crate::ast::CastKind,
     context: &mut ExpressionContext,
 ) -> (String, String, String) {
     let id = context.temporaries.len();
@@ -173,6 +174,16 @@ pub(super) fn cast_parts(
         return (setup, "1".into(), converted);
     }
     let (lo, hi) = bounds(target);
+    if kind == crate::ast::CastKind::Saturating && matches!(operand.ty, Type::Float(_)) {
+        context.uses_float_rem = true;
+        let sat = format!(
+            "((double){name} <= (double)({lo}) ? ({})({lo}) : ((double){name} >= (double)((unsigned _BitInt(128))({hi}) + 1) ? ({})({hi}) : ({}){name}))",
+            target.c_name(),
+            target.c_name(),
+            target.c_name(),
+        );
+        return (setup, format!("!isnan({name})"), sat);
+    }
     let condition = if matches!(operand.ty, Type::Float(_)) {
         // 0方向への丸めを考慮し、下限-1より大きい値まで受け付ける。
         // 64ビットの下限ではdoubleが下限-1を区別できないため、下限以上で検査する。
@@ -213,6 +224,34 @@ pub(super) fn truncate(
         "({name} = {value} & {mask}, ({}){converted})",
         target.c_name()
     )
+}
+
+pub(super) fn saturating_cast(
+    operand: &CheckedExpression,
+    target: Type,
+    context: &mut ExpressionContext,
+) -> String {
+    let id = context.temporaries.len();
+    context.temporaries.push(operand.ty);
+    let name = format!("suz_cmp_{id}");
+    let value = expression(operand, context);
+    let (lo, hi) = bounds(target);
+    let c_to = target.c_name();
+    let converted = if operand.ty == Type::Exact {
+        format!(
+            "({name}.negative ? ({name}.magnitude >= (unsigned _BitInt(128))(-(_BitInt(128))({lo})) ? ({c_to})({lo}) : ({c_to})(-(_BitInt(128)){name}.magnitude)) : ({name}.magnitude >= (unsigned _BitInt(128))({hi}) ? ({c_to})({hi}) : ({c_to}){name}.magnitude))"
+        )
+    } else if matches!(operand.ty, Type::Float(_)) {
+        context.uses_float_rem = true;
+        format!(
+            "(isnan({name}) ? ({c_to})0 : ((double){name} <= (double)({lo}) ? ({c_to})({lo}) : ((double){name} >= (double)((unsigned _BitInt(128))({hi}) + 1) ? ({c_to})({hi}) : ({c_to}){name})))"
+        )
+    } else {
+        format!(
+            "((_BitInt(128)){name} < (_BitInt(128))({lo}) ? ({c_to})({lo}) : ((_BitInt(128)){name} > (_BitInt(128))({hi}) ? ({c_to})({hi}) : ({c_to}){name}))"
+        )
+    };
+    format!("({name} = {value}, {converted})")
 }
 
 /// 宣言だけのC型も含めて検出し、FFIを使わないプログラムには制約を追加しない。

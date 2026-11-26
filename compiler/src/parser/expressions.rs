@@ -74,14 +74,23 @@ impl Parser<'_, '_> {
                     | "*="
                     | "/="
                     | "%="
+                    | "%%="
                     | "+%="
                     | "-%="
                     | "*%="
+                    | "+|="
+                    | "-|="
+                    | "*|="
                     | "&="
                     | "|="
                     | "^="
                     | "<<="
                     | ">>="
+                    | ">>>="
+                    | "<<%="
+                    | ">>%="
+                    | ">>>%="
+                    | "<<|="
             )
         ) {
             return Err(self.error(
@@ -284,8 +293,15 @@ impl Parser<'_, '_> {
 
     fn cast(&mut self) -> Result<Expression, Diagnostic> {
         let mut operand = self.unary()?;
-        while matches!(self.token().kind, Kind::Symbol("as%") | Kind::Keyword("as")) {
-            let truncate = self.token().kind == Kind::Symbol("as%");
+        while matches!(
+            self.token().kind,
+            Kind::Symbol("as%" | "as|") | Kind::Keyword("as")
+        ) {
+            let kind = match self.token().kind {
+                Kind::Symbol("as%") => crate::ast::CastKind::Wrap,
+                Kind::Symbol("as|") => crate::ast::CastKind::Saturating,
+                _ => crate::ast::CastKind::Checked,
+            };
             let location = self.location();
             self.cursor += 1;
             self.check_height(operand.height + 1, location)?;
@@ -299,7 +315,7 @@ impl Parser<'_, '_> {
                 None
             };
             let kind = ExpressionKind::Cast {
-                wrap: truncate,
+                kind,
                 operand: Box::new(operand),
                 target,
                 fallback,
@@ -538,12 +554,13 @@ impl Parser<'_, '_> {
                 self.cursor += 2;
                 ExpressionKind::New(Box::new(self.array_initializer(readonly)?))
             }
-            Kind::Symbol("~" | "-%")
+            Kind::Symbol("~" | "-%" | "-|")
             | Kind::Keyword("len" | "not" | "c_bytes" | "c_byte_len" | "new") => {
                 let constructor: fn(Box<Expression>) -> ExpressionKind = match self.token().kind {
                     Kind::Keyword("new") => ExpressionKind::New,
                     Kind::Symbol("~") => ExpressionKind::BitNot,
                     Kind::Symbol("-%") => ExpressionKind::WrapNegate,
+                    Kind::Symbol("-|") => ExpressionKind::SaturatingNegate,
                     Kind::Keyword("len") => ExpressionKind::Len,
                     Kind::Keyword("not") => ExpressionKind::Not,
                     Kind::Keyword("c_bytes") => ExpressionKind::CBytes,

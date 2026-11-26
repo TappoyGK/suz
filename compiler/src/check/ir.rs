@@ -23,6 +23,7 @@ pub(crate) struct CheckedProgram {
     pub function_types: Vec<crate::ast::FunctionType>,
     /// 整数除算を含む浮動小数点演算の警告候補。
     pub division_warnings: Vec<Location>,
+    pub float_sat_nan_warnings: Vec<Location>,
     /// 反復の外へ残らず、外側のArenaへ蓄積する確保。
     pub arena_warnings: Vec<(Location, String, Vec<crate::Diagnostic>)>,
     /// 保証済みの配列アクセスに付いた不要なorハンドラの警告候補。
@@ -120,7 +121,7 @@ pub(crate) enum CheckedStatement {
     CastReturn {
         return_location: Location,
         location: Location,
-        wrap: bool,
+        kind: crate::ast::CastKind,
         id: usize,
         ty: Type,
         operand: Box<CheckedExpression>,
@@ -395,7 +396,7 @@ pub(crate) enum Value {
     CastReturn {
         return_location: Location,
         location: Location,
-        wrap: bool,
+        kind: crate::ast::CastKind,
         operand: Box<CheckedExpression>,
         return_value: Box<CheckedExpression>,
     },
@@ -403,7 +404,7 @@ pub(crate) enum Value {
     CheckedCast {
         location: Location,
         constant_struct: Option<Box<CheckedExpression>>,
-        wrap: bool,
+        kind: crate::ast::CastKind,
         operand: Box<CheckedExpression>,
         fallback: Box<CheckedExpression>,
     },
@@ -415,8 +416,10 @@ pub(crate) enum Value {
         otherwise: Box<CheckedExpression>,
     },
     Truncate(Box<CheckedExpression>),
+    SaturatingCast(Box<CheckedExpression>),
     BitNot(Box<CheckedExpression>),
     WrapNegate(Box<CheckedExpression>),
+    SaturatingNegate(Box<CheckedExpression>),
     Binary {
         operator: BinaryOperator,
         left: Box<CheckedExpression>,
@@ -473,7 +476,7 @@ macro_rules! constant_children_visitor {
                     }
                     return handler(h, visit);
                 }
-                Self::ArrayLength { target: v, .. } | Self::Receiver { target: v, .. } | Self::New { value: v, .. } | Self::Deref(v) | Self::NonNil(v) | Self::CBytes(v) | Self::CByteLen { operand: v, .. } | Self::FunctionBorrow(v) | Self::Len(v) | Self::Cast(v) | Self::Negate(v) | Self::Truncate(v) | Self::BitNot(v) | Self::WrapNegate(v)
+                Self::ArrayLength { target: v, .. } | Self::Receiver { target: v, .. } | Self::New { value: v, .. } | Self::Deref(v) | Self::NonNil(v) | Self::CBytes(v) | Self::CByteLen { operand: v, .. } | Self::FunctionBorrow(v) | Self::Len(v) | Self::Cast(v) | Self::Negate(v) | Self::Truncate(v) | Self::SaturatingCast(v) | Self::BitNot(v) | Self::WrapNegate(v) | Self::SaturatingNegate(v)
                 | Self::Not(v) | Self::TextView(v) | Self::Intern { operand: v, .. }
                 | Self::Field { target: v, .. } => visit(v),
                 // constant_structはオペランドの解析から得た具体的なキャッシュであり、ソースのオペランドではない。

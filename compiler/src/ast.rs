@@ -937,6 +937,10 @@ pub(crate) enum BinaryOperator {
     WrapShiftLeft,
     WrapShiftRight,
     WrapLogicalShiftRight,
+    SaturatingAdd,
+    SaturatingSubtract,
+    SaturatingMultiply,
+    SaturatingShiftLeft,
     Or,
     Xor,
     And,
@@ -951,6 +955,7 @@ impl BinaryOperator {
                 | Self::WrapShiftLeft
                 | Self::WrapShiftRight
                 | Self::WrapLogicalShiftRight
+                | Self::SaturatingShiftLeft
         )
     }
     pub fn is_arithmetic(self) -> bool {
@@ -965,6 +970,7 @@ impl BinaryOperator {
                 | Self::ShiftLeft
                 | Self::ShiftRight
                 | Self::LogicalShiftRight
+                | Self::SaturatingShiftLeft
         )
     }
     pub fn from_symbol(symbol: &str) -> Option<Self> {
@@ -987,6 +993,10 @@ impl BinaryOperator {
             "<<%" => Some(Self::WrapShiftLeft),
             ">>%" => Some(Self::WrapShiftRight),
             ">>>%" => Some(Self::WrapLogicalShiftRight),
+            "+|" => Some(Self::SaturatingAdd),
+            "-|" => Some(Self::SaturatingSubtract),
+            "*|" => Some(Self::SaturatingMultiply),
+            "<<|" => Some(Self::SaturatingShiftLeft),
             _ => None,
         }
     }
@@ -1007,6 +1017,10 @@ impl BinaryOperator {
             Self::WrapShiftLeft => "<<%",
             Self::WrapShiftRight => ">>%",
             Self::WrapLogicalShiftRight => ">>>%",
+            Self::SaturatingAdd => "+|",
+            Self::SaturatingSubtract => "-|",
+            Self::SaturatingMultiply => "*|",
+            Self::SaturatingShiftLeft => "<<|",
             Self::Or => "|",
             Self::Xor => "^",
             Self::And => "&",
@@ -1023,9 +1037,16 @@ impl BinaryOperator {
             | Self::LogicalShiftRight
             | Self::WrapShiftLeft
             | Self::WrapShiftRight
-            | Self::WrapLogicalShiftRight => 3,
-            Self::WrapAdd | Self::WrapSubtract | Self::Add | Self::Subtract => 4,
+            | Self::WrapLogicalShiftRight
+            | Self::SaturatingShiftLeft => 3,
+            Self::WrapAdd
+            | Self::WrapSubtract
+            | Self::SaturatingAdd
+            | Self::SaturatingSubtract
+            | Self::Add
+            | Self::Subtract => 4,
             Self::WrapMultiply
+            | Self::SaturatingMultiply
             | Self::Multiply
             | Self::Divide
             | Self::Remainder
@@ -1036,7 +1057,7 @@ impl BinaryOperator {
         match self {
             Self::Divide => "/",
             Self::Remainder | Self::EuclideanRemainder => "%",
-            Self::ShiftLeft | Self::WrapShiftLeft => "<<",
+            Self::ShiftLeft | Self::WrapShiftLeft | Self::SaturatingShiftLeft => "<<",
             Self::ShiftRight
             | Self::LogicalShiftRight
             | Self::WrapShiftRight
@@ -1044,9 +1065,9 @@ impl BinaryOperator {
             Self::Or => "|",
             Self::Xor => "^",
             Self::And => "&",
-            Self::WrapAdd | Self::Add => "+",
-            Self::WrapSubtract | Self::Subtract => "-",
-            Self::WrapMultiply | Self::Multiply => "*",
+            Self::WrapAdd | Self::SaturatingAdd | Self::Add => "+",
+            Self::WrapSubtract | Self::SaturatingSubtract | Self::Subtract => "-",
+            Self::WrapMultiply | Self::SaturatingMultiply | Self::Multiply => "*",
         }
     }
 }
@@ -1094,6 +1115,14 @@ pub(crate) struct Capture {
     pub by_reference: bool,
     pub name: String,
     pub location: Location,
+}
+
+/// 型変換の種別（検査あり `as`・ラップ `as%`・飽和 `as|`）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CastKind {
+    Checked,
+    Wrap,
+    Saturating,
 }
 
 /// 式の構文ごとの内容。名前・リテラルの綴り・子の式を保持し、意味検査で [`crate::check::ir::Value`] へ変換する。
@@ -1184,7 +1213,7 @@ pub(crate) enum ExpressionKind {
         fallback: Option<FailureHandler>,
     },
     Cast {
-        wrap: bool,
+        kind: CastKind,
         operand: Box<Expression>,
         target: Type,
         fallback: Option<FailureHandler>,
@@ -1200,6 +1229,7 @@ pub(crate) enum ExpressionKind {
     },
     BitNot(Box<Expression>),
     WrapNegate(Box<Expression>),
+    SaturatingNegate(Box<Expression>),
     Binary {
         operator: BinaryOperator,
         left: Box<Expression>,

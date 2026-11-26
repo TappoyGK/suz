@@ -19,18 +19,23 @@ pub(in crate::check) fn check(
 ) -> Result<CheckedExpression, Diagnostic> {
     Ok(match &expr.kind {
         ExpressionKind::Cast {
-            wrap,
+            kind,
             operand,
             target: annotation,
             fallback,
         } => {
+            use crate::ast::CastKind;
             let target = bindings.resolve_type_at(*annotation, expr.location)?;
-            if *wrap {
+            if matches!(*kind, CastKind::Wrap | CastKind::Saturating) {
                 let allowed = |ty| ty != Type::Integer(crate::ast::IntegerType::Len);
                 let error = || {
                     expr.location.error(
                         ErrorKind::InvalidSource,
-                        crate::diagnostic!("expr.as-trunc", "len_t cannot be the target of as%"),
+                        if *kind == CastKind::Wrap {
+                            crate::diagnostic!("expr.as-trunc", "len_t cannot be the target of as%")
+                        } else {
+                            crate::diagnostic!("expr.as-sat", "len_t cannot be the target of as|")
+                        },
                     )
                 };
                 match domain::judge_one(target, allowed) {
@@ -63,7 +68,7 @@ pub(in crate::check) fn check(
                 return crate::check::ffi::cast(
                     operand,
                     target,
-                    *wrap,
+                    *kind,
                     fallback,
                     expr.location,
                     bindings,
@@ -73,13 +78,13 @@ pub(in crate::check) fn check(
                 return super::super::exact::cast(
                     operand,
                     target,
-                    *wrap,
+                    *kind,
                     fallback,
                     expr.location,
                     bindings,
                 );
             }
-            if !*wrap && operand.ty == Type::Text && target == Type::Symbol {
+            if *kind == CastKind::Checked && operand.ty == Type::Text && target == Type::Symbol {
                 if fallback.is_some() {
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
@@ -115,7 +120,7 @@ pub(in crate::check) fn check(
                         ),
                     ));
                 }
-                let valid = if *wrap {
+                let valid = if matches!(*kind, CastKind::Wrap | CastKind::Saturating) {
                     target.is_integer()
                 } else {
                     matches!(
@@ -137,18 +142,22 @@ pub(in crate::check) fn check(
                 {
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
-                        if *wrap {
-                            crate::diagnostic!(
+                        match *kind {
+                            CastKind::Wrap => crate::diagnostic!(
                                 "symbol.cast-wrap",
                                 "{} as% requires an integer target",
                                 operand.ty.name()
-                            )
-                        } else {
-                            crate::diagnostic!(
+                            ),
+                            CastKind::Saturating => crate::diagnostic!(
+                                "symbol.cast-sat",
+                                "{} as| requires an integer target",
+                                operand.ty.name()
+                            ),
+                            CastKind::Checked => crate::diagnostic!(
                                 "symbol.cast",
                                 "unsupported {} conversion target",
                                 operand.ty.name()
-                            )
+                            ),
                         },
                     ));
                 }
@@ -162,7 +171,7 @@ pub(in crate::check) fn check(
                         ),
                     ));
                 }
-            } else if *wrap {
+            } else if *kind == CastKind::Wrap {
                 if fallback.is_some() {
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
@@ -185,6 +194,47 @@ pub(in crate::check) fn check(
                     ty: target,
                     value: Value::Truncate(Box::new(operand)),
                 });
+            } else if *kind == CastKind::Saturating {
+                if !(target.is_integer() && (operand.ty.is_integer() || operand.ty.is_float())) {
+                    return Err(expr.location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "expr.as-sat",
+                            "as| requires integer or floating-point source and integer target"
+                        ),
+                    ));
+                }
+                if operand.ty.is_integer() {
+                    if fallback.is_some() {
+                        return Err(expr.location.error(
+                            ErrorKind::InvalidSource,
+                            crate::diagnostic!(
+                                "expr.cast-sat-handler-syntax",
+                                "integer as| does not accept or"
+                            ),
+                        ));
+                    }
+                    return Ok(CheckedExpression {
+                        ty: target,
+                        value: Value::SaturatingCast(Box::new(operand)),
+                    });
+                }
+                if fallback.is_none() {
+                    let known_non_nan = !target.symbolic()
+                        && !super::super::constants::depends_on_generic(&operand)
+                        && constant_float(&operand)?.is_some_and(|v| !v.is_nan());
+                    if !known_non_nan {
+                        bindings
+                            .outputs
+                            .float_sat_nans
+                            .borrow_mut()
+                            .insert((expr.location.line, expr.location.column));
+                    }
+                    return Ok(CheckedExpression {
+                        ty: target,
+                        value: Value::SaturatingCast(Box::new(operand)),
+                    });
+                }
             }
             let validity = domain::judge(operand.ty, target, |from, to| {
                 conversion_safety(from, to).is_some()
@@ -225,7 +275,7 @@ pub(in crate::check) fn check(
                     value: Value::CastReturn {
                         return_location: *return_location,
                         location: expr.location,
-                        wrap: *wrap,
+                        kind: *kind,
                         operand: Box::new(operand),
                         return_value: Box::new(return_value),
                     },
@@ -281,7 +331,7 @@ pub(in crate::check) fn check(
                     value: Value::CheckedCast {
                         location: expr.location,
                         constant_struct,
-                        wrap: *wrap,
+                        kind: *kind,
                         operand: Box::new(operand),
                         fallback: Box::new(fallback.unwrap()),
                     },
@@ -291,7 +341,7 @@ pub(in crate::check) fn check(
                 Value::CheckedCast {
                     location: expr.location,
                     constant_struct: None,
-                    wrap: false,
+                    kind: *kind,
                     operand: Box::new(operand),
                     fallback: Box::new(fallback),
                 }

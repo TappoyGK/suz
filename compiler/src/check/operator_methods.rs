@@ -169,6 +169,9 @@ pub(super) fn supported(op: crate::ast::BinaryOperator) -> bool {
             | WrapAdd
             | WrapSubtract
             | WrapMultiply
+            | SaturatingAdd
+            | SaturatingSubtract
+            | SaturatingMultiply
             | And
             | Or
             | Xor
@@ -178,6 +181,7 @@ pub(super) fn supported(op: crate::ast::BinaryOperator) -> bool {
             | WrapShiftLeft
             | WrapShiftRight
             | WrapLogicalShiftRight
+            | SaturatingShiftLeft
     )
 }
 
@@ -222,6 +226,7 @@ pub(super) fn unary(expr: &Expression) -> Option<(&'static str, &Expression)> {
     match &expr.kind {
         ExpressionKind::Negate(inner) => Some(("-", inner)),
         ExpressionKind::WrapNegate(inner) => Some(("-%", inner)),
+        ExpressionKind::SaturatingNegate(inner) => Some(("-|", inner)),
         ExpressionKind::BitNot(inner) => Some(("~", inner)),
         ExpressionKind::Not(inner) => Some(("not", inner)),
         ExpressionKind::Len(inner) => Some(("len", inner)),

@@ -144,9 +144,11 @@ pub(super) fn collect(expr: &CheckedExpression, locations: &mut Vec<Location>) {
         }
         Value::Cast(inner)
         | Value::Truncate(inner)
+        | Value::SaturatingCast(inner)
         | Value::Not(inner)
         | Value::BitNot(inner)
         | Value::WrapNegate(inner)
+        | Value::SaturatingNegate(inner)
         | Value::Negate(inner) => collect(inner, locations),
         Value::Logical { left, right, .. } | Value::Binary { left, right, .. } => {
             collect(left, locations);

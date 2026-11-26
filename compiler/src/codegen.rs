@@ -72,6 +72,8 @@ struct ExpressionContext {
     narrow_float: bool,
     narrow_float_check: bool,
     bit_helpers: BTreeSet<crate::ast::IntegerType>,
+    saturating_helpers: BTreeSet<(&'static str, crate::ast::IntegerType)>,
+    float_sat_casts: BTreeSet<(crate::ast::FloatType, crate::ast::IntegerType)>,
     float_helpers: BTreeSet<crate::ast::FloatType>,
     float_types: BTreeSet<crate::ast::FloatType>,
     uses_float_rem: bool,

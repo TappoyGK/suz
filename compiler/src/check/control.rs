@@ -188,6 +188,7 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
             | ExpressionKind::Len(inner)
             | ExpressionKind::BitNot(inner)
             | ExpressionKind::WrapNegate(inner)
+            | ExpressionKind::SaturatingNegate(inner)
             | ExpressionKind::Not(inner) => visit(inner, false, in_value)?,
             ExpressionKind::TextAppend { left, right }
             | ExpressionKind::Binary { left, right, .. }
@@ -492,7 +493,7 @@ pub(super) fn lower_return_handler(
     let Value::CastReturn {
         return_location,
         location,
-        wrap,
+        kind,
         operand,
         return_value,
     } = std::mem::replace(&mut expr.value, Value::Local(id))
@@ -502,7 +503,7 @@ pub(super) fn lower_return_handler(
     statements.push(CheckedStatement::CastReturn {
         return_location,
         location,
-        wrap,
+        kind,
         id,
         ty: expr.ty,
         operand,

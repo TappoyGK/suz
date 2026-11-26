@@ -130,6 +130,7 @@ fn generated_bool_values_preserve_negation_and_copies() {
             unhandled_arithmetic: Vec::new(),
             comparison_warnings: Vec::new(),
             division_warnings: Vec::new(),
+            float_sat_nan_warnings: Vec::new(),
             main_id: 0,
             functions: vec![crate::check::ir::CheckedFunction {
                 name: String::new(),
@@ -329,6 +330,7 @@ fn comparison_codegen_sequences_and_reuses_operands() {
             unhandled_arithmetic: Vec::new(),
             comparison_warnings: Vec::new(),
             division_warnings: Vec::new(),
+            float_sat_nan_warnings: Vec::new(),
             main_id: 0,
             functions: vec![crate::check::ir::CheckedFunction {
                 name: String::new(),

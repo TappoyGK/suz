@@ -258,6 +258,7 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                             BinaryOperator::ShiftLeft => "left shift",
                             BinaryOperator::ShiftRight => "right shift",
                             BinaryOperator::LogicalShiftRight => "logical right shift",
+                            BinaryOperator::SaturatingShiftLeft => "saturating left shift",
                             _ => unreachable!(),
                         },
                         IntegerOperation::Exact(_) => unreachable!(),
@@ -318,7 +319,7 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
         Value::CheckedCast {
             ref constant_struct,
             location,
-            wrap,
+            kind,
             ref operand,
             ref fallback,
             ..
@@ -327,7 +328,7 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                 return expression(value, context);
             }
             let (setup, condition, converted) =
-                cast_parts(operand, expr.ty, wrap, location, context);
+                cast_parts(operand, expr.ty, kind, location, context);
             let fallback = expression(fallback, context);
             format!("({setup}, {condition} ? {converted} : ({fallback}))")
         }
@@ -461,6 +462,77 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                 }
             )
         }
+        Value::SaturatingCast(ref inner) => {
+            use crate::ast::Type;
+            if matches!(expr.ty, Type::CInteger(_)) || matches!(inner.ty, Type::CInteger(_)) {
+                return super::ffi::saturating_cast(inner, expr.ty, context);
+            }
+            let Type::Integer(to) = expr.ty else {
+                unreachable!()
+            };
+            let (to_min, to_max) = to.bounds();
+            let c_to = to.c_name();
+            let limit = to
+                .name()
+                .to_uppercase()
+                .replace('I', "INT")
+                .replace('U', "UINT");
+            if inner.ty == Type::Exact {
+                let id = context.temporaries.len();
+                context.temporaries.push(Type::Exact);
+                let val = expression(inner, context);
+                let neg_branch = if to_min == 0 {
+                    format!("({c_to})0")
+                } else {
+                    let abs_min = to_min.unsigned_abs();
+                    format!(
+                        "(suz_cmp_{id}.magnitude >= {abs_min}ULL ? {limit}_MIN : ({c_to})-(int64_t)suz_cmp_{id}.magnitude)"
+                    )
+                };
+                return format!(
+                    "(suz_cmp_{id} = {val}, suz_cmp_{id}.negative ? {neg_branch} : (suz_cmp_{id}.magnitude >= {to_max}ULL ? {limit}_MAX : ({c_to})suz_cmp_{id}.magnitude))"
+                );
+            }
+            if let Type::Float(from) = inner.ty {
+                context.float_types.insert(from);
+                context.float_sat_casts.insert((from, to));
+                return format!(
+                    "suz_sat_f2i_{}_{}({})",
+                    from.name(),
+                    to.name(),
+                    expression(inner, context)
+                );
+            }
+            let Type::Integer(from) = inner.ty else {
+                unreachable!()
+            };
+            let (from_min, from_max) = from.bounds();
+            if from_min >= to_min && from_max <= to_max {
+                return format!("({c_to})({})", expression(inner, context));
+            }
+            let id = context.temporaries.len();
+            context.temporaries.push(inner.ty);
+            let val = expression(inner, context);
+            let local = format!("suz_cmp_{id}");
+            let mut body = format!("({c_to}){local}");
+            if from_max > to_max {
+                let prefix = if from.c_signed() {
+                    "INT64_C"
+                } else {
+                    "UINT64_C"
+                };
+                body = format!("({local} > {prefix}({to_max}) ? {limit}_MAX : {body})");
+            }
+            if from_min < to_min {
+                let min_expr = if to_min == 0 {
+                    format!("({c_to})0")
+                } else {
+                    format!("{limit}_MIN")
+                };
+                body = format!("({local} < INT64_C({to_min}) ? {min_expr} : {body})");
+            }
+            format!("({local} = {val}, {body})")
+        }
         Value::BitNot(ref inner) => {
             let crate::ast::Type::Integer(ty) = expr.ty else {
                 unreachable!()
@@ -482,6 +554,13 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                 ty.name(),
                 expression(inner, context)
             )
+        }
+        Value::SaturatingNegate(ref inner) => {
+            let crate::ast::Type::Integer(ty) = expr.ty else {
+                unreachable!()
+            };
+            context.saturating_helpers.insert(("neg", ty));
+            format!("suz_sat_neg_{}({})", ty.name(), expression(inner, context))
         }
         Value::Binary {
             operator,
@@ -568,6 +647,30 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                             format!(
                                 "suz_bits_{}(((uint64_t)suz_cmp_{index} & UINT64_C({value_mask})) >> {shift_count})",
                                 ty.name()
+                            )
+                        }
+                        BinaryOperator::SaturatingAdd => {
+                            context.saturating_helpers.insert(("add", ty));
+                            format!(
+                                "suz_sat_add_{}(suz_cmp_{index}, suz_cmp_{})",
+                                ty.name(),
+                                index + 1
+                            )
+                        }
+                        BinaryOperator::SaturatingSubtract => {
+                            context.saturating_helpers.insert(("sub", ty));
+                            format!(
+                                "suz_sat_sub_{}(suz_cmp_{index}, suz_cmp_{})",
+                                ty.name(),
+                                index + 1
+                            )
+                        }
+                        BinaryOperator::SaturatingMultiply => {
+                            context.saturating_helpers.insert(("mul", ty));
+                            format!(
+                                "suz_sat_mul_{}(suz_cmp_{index}, suz_cmp_{})",
+                                ty.name(),
+                                index + 1
                             )
                         }
                         _ => {

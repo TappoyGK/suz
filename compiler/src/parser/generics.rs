@@ -207,9 +207,9 @@ impl Parser<'_, '_> {
                 }
             }
             Kind::Symbol(
-                op @ ("+" | "-" | "*" | "/" | "%" | "%%" | "+%" | "-%" | "*%" | "~" | "&" | "|"
-                | "^" | "<<" | ">>" | ">>>" | "<<%" | ">>%" | ">>>%" | "==" | "!=" | "<"
-                | "<=" | ">" | ">="),
+                op @ ("+" | "-" | "*" | "/" | "%" | "%%" | "+%" | "-%" | "*%" | "+|" | "-|" | "*|"
+                | "~" | "&" | "|" | "^" | "<<" | ">>" | ">>>" | "<<%" | ">>%" | ">>>%"
+                | "<<|" | "==" | "!=" | "<" | "<=" | ">" | ">="),
             )
             | Kind::Keyword(op @ ("len" | "not")) => {
                 self.cursor += 1;
@@ -252,7 +252,7 @@ impl Parser<'_, '_> {
         if let RequiredOperation::Operator(op) = operation {
             let valid_arity = if matches!(op, "len" | "not" | "~") {
                 parameters.is_empty()
-            } else if matches!(op, "-" | "-%") {
+            } else if matches!(op, "-" | "-%" | "-|") {
                 parameters.len() <= 1
             } else {
                 parameters.len() == 1

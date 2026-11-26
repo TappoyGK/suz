@@ -2282,3 +2282,72 @@ fn main() -> u8 {
 | 設定 | 結果 | 終了コード | 警告数 |
 |---|---|---:|---:|
 | 通常 | 正常終了 | 0 | 0 |
+
+### expr-079 飽和算術・飽和左シフト・飽和変換
+
+主根拠：`[expr.sat]`、`[expr.as-sat]`、`[symbol.cast-sat]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    var vol: u8 = 250
+    vol +|= 20
+    vol -|= 250
+    vol -|= 20
+    fix s: i8 = -128
+    fix inv: i8 = -| s
+    fix sh: i8 = (64 as i8) <<| (1 as u8)
+    fix sh_neg: i8 = (1 as i8) <<| -1 or 77
+    fix pcm: i16 = (50000 as i32) as| i16
+    fix f_nan: f64 = nan
+    fix fn_val: i16 = f_nan as| i16 or -9
+    fix txt: u8 = `999` as| u8 or 1
+    if vol != 0 || inv != 127 || sh != 127 || sh_neg != 77 || pcm != 32767 || fn_val != -9 || txt != 255 {
+        return 1
+    }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### expr-080 or のない浮動小数点飽和変換の警告と allow による抑制
+
+主根拠：`[expr.as-sat]`。
+
+補助根拠：`[diagnostic.float-sat-nan]`、`[allow.clause]`。
+
+**ソース：**
+
+```suz
+fn to_pcm(x: f32) -> i16 {
+    return x as| i16
+}
+
+fn to_pcm_allowed(x: f32) -> i16 {
+    return x as| i16 allow [diagnostic.float-sat-nan: audio output treats NaN as silence]
+}
+
+fn main() -> u8 {
+    fix a = to_pcm(nan)
+    fix b = to_pcm_allowed(nan)
+    return ifexpr a == 0 && b == 0 { 0 } else { 1 }
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 1 |
+
+**警告：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[diagnostic.float-sat-nan]` | 2 | 14 |
