@@ -23,7 +23,10 @@ mod text;
 mod text_structure;
 
 use crate::check::CheckedProgram;
-use std::{collections::BTreeSet, fmt::Write};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt::Write,
+};
 
 struct RecoveryTarget {
     result: Option<String>,
@@ -67,6 +70,7 @@ struct ExpressionContext {
     closure_environments: Vec<String>,
     references: BTreeSet<usize>,
     immutable_locals: BTreeSet<usize>,
+    bulk_bindings: BTreeMap<usize, String>,
     helpers: BTreeSet<bool>,
     source_name: String,
     narrow_float: bool,
@@ -83,7 +87,9 @@ struct ExpressionContext {
 
 impl ExpressionContext {
     fn local(&self, id: usize) -> String {
-        if self.references.contains(&id) {
+        if let Some(expr) = self.bulk_bindings.get(&id) {
+            expr.clone()
+        } else if self.references.contains(&id) {
             format!("(*suz_ref_{id})")
         } else {
             format!("suz_local_{id}")

@@ -123,6 +123,18 @@ fn statement_height(statement: &Statement) -> usize {
             .max(block_height(body))
             .max(block_height(otherwise)),
         Statement::Store { target, value, .. } => target.height.max(value.height),
+        Statement::ArrayBulkWrite(bulk) => {
+            let mut h = bulk.target.height.max(bulk.value.height);
+            if let crate::ast::BulkSelector::Slice { start, end } = &bulk.selector {
+                if let Some(start) = start {
+                    h = h.max(start.height);
+                }
+                if let Some(end) = end {
+                    h = h.max(end.height);
+                }
+            }
+            h
+        }
         Statement::Binding { initializer, .. } => initializer.height,
         Statement::Assign {
             value, compound, ..

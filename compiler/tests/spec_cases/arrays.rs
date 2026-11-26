@@ -1483,3 +1483,336 @@ fn main() -> u8 {
         assert_eq!(err.rule(), rule, "{code}\n{err}");
     }
 }
+
+#[test]
+fn bulk_write_step1_covers_ops_aliases_evaluation_order_and_restrict() {
+    let source = r#"
+fn scale(log_count: mut i64) -> f32 {
+    #log_count = .log_count + 1
+    return 0.5
+}
+
+fn fallback(calls: mut i64) -> i64 {
+    #calls = .calls + 1
+    return -1
+}
+
+fn mix(out: #[f32; n], a: .[f32; n], b: .[f32; n], k: len_t) -> void {
+    out#[] = a * 0.5 + b
+    if k <= n {
+        out#[0:k] += a.[0:k]
+    }
+}
+
+fn main() -> u8 {
+    fix out: #[f32] = new #[0.0; 4]
+    fix a: .[f32] = .[2.0, 4.0, 6.0, 8.0]
+    fix b: .[f32] = .[1.0, 1.0, 1.0, 1.0]
+    mix(out, a, b, 2)
+    if out.[0] != 4.0 || out.[1] != 7.0 || out.[2] != 4.0 || out.[3] != 5.0 { return 1 }
+
+    // スカラーは長さ0でも1回だけ評価される
+    fix calls = new 0
+    fix empty: #[f32] = new #[0.0; 0]
+    empty#[] = scale(calls)
+    if .calls != 1 { return 2 }
+
+    // 要素ごとの or 代替値は失敗した要素でのみ評価される
+    fix fb_calls = new 0
+    fix num = new #[10, 20, 30]
+    fix den = new #[2, 0, 5]
+    fix quo = new #[0; 3]
+    quo#[] = num / den or fallback(fb_calls)
+    if quo.[0] != 5 || quo.[1] != -1 || quo.[2] != 6 || .fb_calls != 1 { return 3 }
+
+    // ラップ演算・飽和演算・as%・as|
+    fix u = new #[250 as u8, 10 as u8]
+    fix v = new #[20 as u8, 30 as u8]
+    fix w = new #[0 as u8; 2]
+    w#[] = u +% v
+    if w.[0] != 14 || w.[1] != 40 { return 4 }
+    w#[] = u +| v
+    if w.[0] != 255 || w.[1] != 40 { return 5 }
+
+    // 完全一致とずれた重なり
+    fix same = new #[1, 2, 3, 4]
+    same#[] = same * 3
+    if same.[0] != 3 || same.[1] != 6 || same.[2] != 9 || same.[3] != 12 { return 6 }
+    fix shift = new #[1, 2, 3, 4]
+    shift#[1:4] = shift.[0:3]
+    if shift.[0] != 1 || shift.[1] != 1 || shift.[2] != 1 || shift.[3] != 1 { return 7 }
+    return 0
+}
+"#;
+    let c = suz::compile(source.as_bytes()).expect("STEP 1 bulk write compiles");
+    // 非重複分岐では restrict を使用し、完全一致分岐では独立 restrict ポインタを作らない
+    assert!(
+        c.contains("*restrict suz_bulk_dst_"),
+        "missing restrict dst:\n{c}"
+    );
+    assert!(
+        c.contains("*restrict suz_bulk_in_"),
+        "missing restrict in:\n{c}"
+    );
+    // 共通寸法名 n を持つ mix では長さ不一致パニックを生成しない
+    let mix_only = r#"
+fn mix(out: #[f32; n], a: .[f32; n], b: .[f32; n]) -> void {
+    out#[] = a * 0.5 + b
+}
+fn main() -> u8 {
+    fix out: #[f32] = new #[0.0; 4]
+    fix a: .[f32] = .[1.0, 2.0, 3.0, 4.0]
+    fix b: .[f32] = .[1.0, 1.0, 1.0, 1.0]
+    mix(out, a, b)
+    return 0
+}
+"#;
+    let mix_c = suz::compile(mix_only.as_bytes()).expect("mix_only compiles");
+    assert!(
+        !mix_c.contains("array bulk length mismatch"),
+        "expected static length proof in mix:\n{mix_c}"
+    );
+    let output = compile_and_run_c23(source, "bulk_write_step1.suz");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // 拒否ケース
+    for (code, rule) in [
+        (
+            "fn main() -> u8 {\nfix out = new #[0 as u8; 2]\nfix src = new #[1, 2]\nout#[] = src as u8\nreturn 0\n}",
+            "expr.cast-handler",
+        ),
+        (
+            "fn main() -> u8 {\nfix out = new #[0; 2]\nfix a = new #[1, 2]\nfix b = new #[1, 0]\nout#[] = a / b or return 1\nreturn 0\n}",
+            "array.bulk-handler",
+        ),
+        (
+            "fn main() -> u8 {\nfix out: .[i32] = .[1, 2]\nout#[] = 0\nreturn 0\n}",
+            "array.write",
+        ),
+    ] {
+        let err = suz::compile(code.as_bytes()).unwrap_err();
+        assert_eq!(err.rule(), rule, "{code}\n{err}");
+    }
+}
+
+#[test]
+fn bulk_write_step2_covers_masks_and_masked_compound_assignments() {
+    let source = r#"
+fn fallback(calls: mut i64) -> i64 {
+    #calls = .calls + 1
+    return -1
+}
+
+fn main() -> u8 {
+    fix a = new #[10, 20, 30, 40]
+    fix b = new #[2, 0, 5, 0]
+    fix out = new #[99, 99, 99, 99]
+    out#[b != 0] = a / b
+    if out.[0] != 5 || out.[1] != 99 || out.[2] != 6 || out.[3] != 99 { return 1 }
+
+    // マスク付き複合代入：偽の位置は読み書きせず、0除算も起きない
+    fix m = new #[1, 0, 1]
+    fix div = new #[2, 0, 5]
+    fix acc = new #[10, 20, 30]
+    acc#[m != 0] /= div
+    if acc.[0] != 5 || acc.[1] != 20 || acc.[2] != 6 { return 2 }
+
+    // 偽の位置では or 代替値を評価しない
+    fix calls = new 0
+    fix out2 = new #[0, 0, 0]
+    out2#[m != 0] = acc / div or fallback(calls)
+    if out2.[0] != 2 || out2.[1] != 0 || out2.[2] != 1 || .calls != 0 { return 3 }
+
+    // | と ^ のマスク組み合わせ
+    fix p = new #[1, 2, 3, 4]
+    fix dst = new #[0, 0, 0, 0]
+    dst#[(p == 1) | (p == 4)] = 10
+    dst#[(p <= 2) ^ (p >= 2)] += 5
+    if dst.[0] != 15 || dst.[1] != 0 || dst.[2] != 5 || dst.[3] != 15 { return 4 }
+    return 0
+}
+"#;
+    let output = compile_and_run_c23(source, "bulk_write_step2.suz");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn bulk_write_step3_covers_operator_methods_and_enum_arrays() {
+    let enum_source = r#"
+enum Wave: u8 { Saw, Square, Triangle }
+
+fn mix_waves(out: #[f32; Wave], a: .[f32; Wave], b: .[f32; Wave]) -> void {
+    out#[] = a * 0.5 + b
+    out#[a > 2.0] += 10.0
+}
+
+fn main() -> u8 {
+    fix out: #[f32; Wave] = new #[0.0; Wave]
+    fix a: .[f32; Wave] = .[Wave.Saw: 2.0, Wave.Square: 4.0, Wave.Triangle: 6.0]
+    fix b: .[f32; Wave] = .[Wave.Saw: 1.0, Wave.Square: 1.0, Wave.Triangle: 1.0]
+    mix_waves(out, a, b)
+    if out.[Wave.Saw] != 2.0 || out.[Wave.Square] != 13.0 || out.[Wave.Triangle] != 14.0 { return 1 }
+    return 0
+}
+"#;
+    let c = suz::compile(enum_source.as_bytes()).expect("enum bulk write compiles");
+    // 同じ列挙型の配列同士では実行時の長さ検査を生成しない
+    assert!(
+        !c.contains("array bulk length mismatch"),
+        "expected no runtime length check for enum-indexed bulk write:\n{c}"
+    );
+    let output = compile_and_run_c23(enum_source, "bulk_write_step3_enum.suz");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // 混在・切り出し・未定義演算子メソッドの拒否
+    for (code, rule) in [
+        (
+            "enum Wave: u8 { Saw, Square }\nfn main() -> u8 {\nfix out: #[f32; Wave] = new #[0.0; Wave]\nfix xs: .[f32] = .[1.0, 2.0]\nout#[] = xs\nreturn 0\n}",
+            "array.bulk",
+        ),
+        (
+            "enum Wave: u8 { Saw, Square }\nfn main() -> u8 {\nfix out: #[f32] = new #[0.0; 2]\nfix w: .[f32; Wave] = .[Wave.Saw: 1.0, Wave.Square: 2.0]\nout#[] = w\nreturn 0\n}",
+            "array.bulk",
+        ),
+        (
+            "enum Wave: u8 { Saw, Square }\nenum Other: u8 { A, B }\nfn main() -> u8 {\nfix out: #[f32; Wave] = new #[0.0; Wave]\nfix o: .[f32; Other] = .[Other.A: 1.0, Other.B: 2.0]\nout#[] = o\nreturn 0\n}",
+            "array.bulk",
+        ),
+        (
+            "enum Wave: u8 { Saw, Square }\nfn main() -> u8 {\nfix out: #[f32; Wave] = new #[0.0; Wave]\nout#[0:1] = 1.0\nreturn 0\n}",
+            "array.enum-index",
+        ),
+        (
+            "struct Plain { v: i32 }\nfn main() -> u8 {\nfix a = new #[Plain { v: 1 }; 2]\nfix b = new #[Plain { v: 2 }; 2]\nfix out = new #[Plain { v: 0 }; 2]\nout#[] = a + b\nreturn 0\n}",
+            "operator.overload",
+        ),
+    ] {
+        let err = suz::compile(code.as_bytes()).unwrap_err();
+        assert_eq!(err.rule(), rule, "{code}\n{err}");
+    }
+}
+
+#[test]
+fn bulk_write_review_fixes_cover_or_literals_and_partial_same_restrict() {
+    // 指摘4: or付きリテラル式と飽和演算の組み合わせ
+    // 指摘9: out#[] = out * 0.5 + b で out を書き込み先ポインタへ統合し b に restrict を付ける
+    let source = r#"
+fn apply(out: #[i32; n], c: .[i32; n]) -> void {
+    out#[] = (3 * 5 or 1) +| c
+    out#[] = c +| (3 * 2147483647 or 1)
+}
+
+fn mix_inplace(out: #[f32; n], b: .[f32; n]) -> void {
+    out#[] = out * 0.5 + b
+}
+
+fn main() -> u8 {
+    fix out: #[i32] = new #[0; 2]
+    fix c: .[i32] = .[10, 20]
+    apply(out, c)
+    if out.[0] != 11 || out.[1] != 21 { return 1 }
+
+    fix buf: #[f32] = new #[2.0, 4.0]
+    fix add: .[f32] = .[1.0, 3.0]
+    mix_inplace(buf, add)
+    if buf.[0] != 2.0 || buf.[1] != 5.0 { return 2 }
+    return 0
+}
+"#;
+    let c = suz::compile(source.as_bytes()).expect("review fix cases compile");
+    // mix_inplace では out を書き込み先ポインタに統合し、b だけ restrict 入力にする（else if の第3分岐は出ない）
+    assert!(
+        c.contains("*restrict suz_bulk_dst_"),
+        "missing restrict dst:\n{c}"
+    );
+    assert!(
+        c.contains("*restrict suz_bulk_in_"),
+        "missing restrict in:\n{c}"
+    );
+    assert!(!c.contains("else if ("), "unexpected 3rd branch:\n{c}");
+    let output = compile_and_run_c23(source, "bulk_write_review_fixes.suz");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn bulk_write_round2_fixes_omit_restrict_with_operator_methods_and_dedup_inputs() {
+    // 指摘1: 演算子メソッドを含む一括書き込みでは書き込み先にも restrict を付けない（C23 §6.7.3.1）
+    let method_alias = r#"
+struct Cell { v: i64, all: #[Cell]? }
+fn Cell.+(k: i64) -> Cell {
+    let a = self.all {
+        if len a == 2 {
+            a#[1] = Cell { v: 100, all: nil }
+        }
+    }
+    return Cell { v: self.v + k, all: nil }
+}
+fn main() -> u8 {
+    fix cells = new #[Cell { v: 1, all: nil }, Cell { v: 2, all: nil }]
+    cells.[0]#all = cells
+    cells#[] = cells + 1
+    if cells.[0].v != 2 || cells.[1].v != 101 { return 1 }
+    return 0
+}
+"#;
+    let c_method = suz::compile(method_alias.as_bytes()).expect("Cell.+ bulk write compiles");
+    assert!(
+        !c_method.contains("*restrict suz_bulk_dst_"),
+        "operator method bulk write must not put restrict on dst:\n{c_method}"
+    );
+    let out_method = compile_and_run_c23(method_alias, "bulk_write_round2_method.suz");
+    assert_eq!(
+        out_method.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out_method.stderr)
+    );
+
+    // 指摘8: 同じ不変ローカル入力の重複排除（a, b を2回ずつ使っても raw ポインタは2本だけ）
+    let dedup_source = r#"
+fn calc(out: #[f32; n], a: .[f32; n], b: .[f32; n]) -> void {
+    out#[] = a * b + a - b * 0.5 + out
+}
+fn main() -> u8 {
+    fix out: #[f32] = new #[1.0, 2.0]
+    fix a: .[f32] = .[2.0, 3.0]
+    fix b: .[f32] = .[4.0, 6.0]
+    calc(out, a, b)
+    if out.[0] != 9.0 || out.[1] != 20.0 { return 1 }
+    return 0
+}
+"#;
+    let c_dedup = suz::compile(dedup_source.as_bytes()).expect("dedup bulk write compiles");
+    let raw_in_decls = c_dedup.matches("*const suz_bulk_in_raw_").count();
+    assert_eq!(
+        raw_in_decls, 2,
+        "expected deduplicated raw input pointers (2), got {raw_in_decls}:\n{c_dedup}"
+    );
+    let out_dedup = compile_and_run_c23(dedup_source, "bulk_write_round2_dedup.suz");
+    assert_eq!(
+        out_dedup.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out_dedup.stderr)
+    );
+}

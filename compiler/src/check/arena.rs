@@ -388,6 +388,17 @@ fn store(
     location: Location,
     context: &mut StatementContext<'_>,
 ) -> Result<(), Diagnostic> {
+    if let ExpressionKind::Slice {
+        target: base,
+        start: Some(selector),
+        end: None,
+        index: true,
+        ..
+    } = &target.kind
+        && super::arrays::bulk::is_mask_expr(selector, context.bindings)
+    {
+        return super::arrays::bulk::check_mask(base, selector, value, operator, location, context);
+    }
     super::writes::array(value, target)?;
     let target = super::arrays::write_target(target, context.bindings)?;
     fn deref_pointer(value: &Value) -> Option<Type> {

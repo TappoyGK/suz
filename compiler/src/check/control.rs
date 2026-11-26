@@ -285,6 +285,18 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
                 visit(target, false, in_value)?;
                 visit(value, true, in_value)?;
             }
+            Statement::ArrayBulkWrite(bulk) => {
+                visit(&bulk.target, false, in_value)?;
+                if let crate::ast::BulkSelector::Slice { start, end } = &bulk.selector {
+                    if let Some(start) = start {
+                        visit(start, false, in_value)?;
+                    }
+                    if let Some(end) = end {
+                        visit(end, false, in_value)?;
+                    }
+                }
+                visit(&bulk.value, true, in_value)?;
+            }
             Statement::Arena { body, .. }
             | Statement::Block(body)
             | Statement::Trusted(body)

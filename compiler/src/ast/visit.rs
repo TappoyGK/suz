@@ -181,6 +181,18 @@ pub(crate) fn walk_statement<V: Visitor + ?Sized>(
             visitor.expression(target)?;
             visitor.expression(value)?;
         }
+        Statement::ArrayBulkWrite(bulk) => {
+            visitor.expression(&bulk.target)?;
+            if let crate::ast::BulkSelector::Slice { start, end } = &bulk.selector {
+                if let Some(start) = start {
+                    visitor.expression(start)?;
+                }
+                if let Some(end) = end {
+                    visitor.expression(end)?;
+                }
+            }
+            visitor.expression(&bulk.value)?;
+        }
         Statement::Binding { initializer, .. } => visitor.expression(initializer)?,
         Statement::Assign { value, .. }
         | Statement::Return(value)

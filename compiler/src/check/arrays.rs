@@ -1,6 +1,7 @@
 //! 配列の初期化と要素へのアクセスを検査する。要素の保存先は寿命解析でも元の配列へ結ぶ。
 //! 利用元: 式・代入の意味検査。定数配列は[array.constant]、書き込み可否は[array.readonly]に従う。
 pub(super) mod bounds;
+pub(super) mod bulk;
 pub(super) mod dimensions;
 pub(super) mod facts;
 
