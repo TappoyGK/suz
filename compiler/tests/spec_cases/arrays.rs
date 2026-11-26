@@ -1645,3 +1645,64 @@ fn main() -> u8 {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[test]
+fn bulk_write_step3_covers_operator_methods_and_enum_arrays() {
+    let enum_source = r#"
+enum Wave: u8 { Saw, Square, Triangle }
+
+fn mix_waves(out: #[f32; Wave], a: .[f32; Wave], b: .[f32; Wave]) -> void {
+    out#[] = a * 0.5 + b
+    out#[a > 2.0] += 10.0
+}
+
+fn main() -> u8 {
+    fix out: #[f32; Wave] = new #[0.0; Wave]
+    fix a: .[f32; Wave] = .[Wave.Saw: 2.0, Wave.Square: 4.0, Wave.Triangle: 6.0]
+    fix b: .[f32; Wave] = .[Wave.Saw: 1.0, Wave.Square: 1.0, Wave.Triangle: 1.0]
+    mix_waves(out, a, b)
+    if out.[Wave.Saw] != 2.0 || out.[Wave.Square] != 13.0 || out.[Wave.Triangle] != 14.0 { return 1 }
+    return 0
+}
+"#;
+    let c = suz::compile(enum_source.as_bytes()).expect("enum bulk write compiles");
+    // 同じ列挙型の配列同士では実行時の長さ検査を生成しない
+    assert!(
+        !c.contains("array bulk length mismatch"),
+        "expected no runtime length check for enum-indexed bulk write:\n{c}"
+    );
+    let output = compile_and_run_c23(enum_source, "bulk_write_step3_enum.suz");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // 混在・切り出し・未定義演算子メソッドの拒否
+    for (code, rule) in [
+        (
+            "enum Wave: u8 { Saw, Square }\nfn main() -> u8 {\nfix out: #[f32; Wave] = new #[0.0; Wave]\nfix xs: .[f32] = .[1.0, 2.0]\nout#[] = xs\nreturn 0\n}",
+            "array.bulk",
+        ),
+        (
+            "enum Wave: u8 { Saw, Square }\nfn main() -> u8 {\nfix out: #[f32] = new #[0.0; 2]\nfix w: .[f32; Wave] = .[Wave.Saw: 1.0, Wave.Square: 2.0]\nout#[] = w\nreturn 0\n}",
+            "array.bulk",
+        ),
+        (
+            "enum Wave: u8 { Saw, Square }\nenum Other: u8 { A, B }\nfn main() -> u8 {\nfix out: #[f32; Wave] = new #[0.0; Wave]\nfix o: .[f32; Other] = .[Other.A: 1.0, Other.B: 2.0]\nout#[] = o\nreturn 0\n}",
+            "array.bulk",
+        ),
+        (
+            "enum Wave: u8 { Saw, Square }\nfn main() -> u8 {\nfix out: #[f32; Wave] = new #[0.0; Wave]\nout#[0:1] = 1.0\nreturn 0\n}",
+            "array.enum-index",
+        ),
+        (
+            "struct Plain { v: i32 }\nfn main() -> u8 {\nfix a = new #[Plain { v: 1 }; 2]\nfix b = new #[Plain { v: 2 }; 2]\nfix out = new #[Plain { v: 0 }; 2]\nout#[] = a + b\nreturn 0\n}",
+            "operator.overload",
+        ),
+    ] {
+        let err = suz::compile(code.as_bytes()).unwrap_err();
+        assert_eq!(err.rule(), rule, "{code}\n{err}");
+    }
+}

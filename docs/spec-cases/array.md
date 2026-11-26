@@ -2503,3 +2503,189 @@ fn main() -> u8 {
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
 | 通常 | `[array.bulk]` | 4 | 8 |
+
+
+### array-079 構造体要素の配列への演算子メソッド適用と添字順の呼び出し順序
+
+主根拠：`[array.bulk]`。
+
+補助根拠：`[operator.decl]`・`[operator.arith-boundary]`。
+
+**ソース：**
+
+```suz
+struct Vec2 { x: f32, y: f32 }
+
+fn Vec2.+(other: Vec2) -> Vec2 {
+    log info "add ${self.x}"
+    return Vec2 { x: self.x + other.x, y: self.y + other.y }
+}
+
+fn Vec2.*(scale: f32) -> Vec2 {
+    return Vec2 { x: self.x * scale, y: self.y * scale }
+}
+
+fn main() -> u8 {
+    fix ps = new #[Vec2 { x: 1.0, y: 2.0 }, Vec2 { x: 3.0, y: 4.0 }]
+    fix vs = new #[Vec2 { x: 10.0, y: 20.0 }, Vec2 { x: 30.0, y: 40.0 }]
+    ps#[] = ps + vs * 0.5
+    if ps.[0].x != 6.0 || ps.[0].y != 12.0 || ps.[1].x != 18.0 || ps.[1].y != 24.0 { return 1 }
+    ps#[] += vs
+    if ps.[0].x != 16.0 || ps.[1].x != 48.0 { return 2 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+**標準エラー：**
+
+```text
+info array-079.suz:4: add 1.0
+info array-079.suz:4: add 3.0
+info array-079.suz:4: add 6.0
+info array-079.suz:4: add 18.0
+```
+
+### array-080 演算子メソッドが途中で失敗すると失敗より前の呼び出し順だけが観測される
+
+主根拠：`[array.bulk]`。
+
+補助根拠：`[operator.arith-boundary]`・`[rt.div-zero]`。
+
+**ソース：**
+
+```suz
+struct Item { v: i64 }
+
+fn Item./(other: Item) -> Item {
+    log info "div ${self.v}/${other.v}"
+    return Item { v: self.v / other.v }
+}
+
+fn main() -> u8 {
+    fix a = new #[Item { v: 10 }, Item { v: 20 }, Item { v: 30 }]
+    fix b = new #[Item { v: 2 }, Item { v: 0 }, Item { v: 5 }]
+    fix out = new #[Item { v: 0 }; 3]
+    out#[] = a / b
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | パニック | 101 | 0 |
+
+**パニック前の標準エラー：**
+
+```text
+info array-080.suz:4: div 10/2
+info array-080.suz:4: div 20/0
+```
+
+**パニック診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[rt.div-zero]` | 5 | 29 |
+
+### array-081 演算子メソッドの定義がない構造体要素の配列の一括演算は拒否される
+
+主根拠：`[operator.overload]`。
+
+補助根拠：`[array.bulk]`。
+
+**ソース：**
+
+```suz
+struct Plain { v: i32 }
+
+fn main() -> u8 {
+    fix a = new #[Plain { v: 1 }; 2]
+    fix b = new #[Plain { v: 2 }; 2]
+    fix out = new #[Plain { v: 0 }; 2]
+    out#[] = a + b
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[operator.overload]` | 7 | 16 |
+
+### array-082 列挙型添字配列の一括書き込み・複合代入・マスク付き書き込み
+
+主根拠：`[array.bulk]`。
+
+補助根拠：`[array.enum-type]`・`[array.enum-index]`。
+
+**ソース：**
+
+```suz
+enum Wave: u8 { Saw, Square, Triangle }
+
+fn mix_waves(out: #[f32; Wave], a: .[f32; Wave], b: .[f32; Wave]) -> void {
+    out#[] = a * 0.5 + b
+    out#[a > 2.0] += 10.0
+}
+
+fn main() -> u8 {
+    fix out: #[f32; Wave] = new #[0.0; Wave]
+    fix a: .[f32; Wave] = .[Wave.Saw: 2.0, Wave.Square: 4.0, Wave.Triangle: 6.0]
+    fix b: .[f32; Wave] = .[Wave.Saw: 1.0, Wave.Square: 1.0, Wave.Triangle: 1.0]
+    mix_waves(out, a, b)
+    if out.[Wave.Saw] != 2.0 || out.[Wave.Square] != 13.0 || out.[Wave.Triangle] != 14.0 { return 1 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### array-083 列挙型添字配列と整数添字配列を一括書き込みに混在できない
+
+主根拠：`[array.bulk]`。
+
+補助根拠：`[array.enum-type]`。
+
+**ソース：**
+
+```suz
+enum Wave: u8 { Saw, Square }
+
+fn main() -> u8 {
+    fix out: #[f32; Wave] = new #[0.0; Wave]
+    fix xs: .[f32] = .[1.0, 2.0]
+    out#[] = xs
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[array.bulk]` | 6 | 14 |

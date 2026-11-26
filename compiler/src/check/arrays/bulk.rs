@@ -67,13 +67,11 @@ pub(in crate::check) fn check(
             crate::diagnostic!("array.write", "bulk write requires a 1D array"),
         ));
     }
-    if target_array.index_enum.is_some() {
+    let target_enum = target_array.index_enum;
+    if target_enum.is_some() && matches!(bulk.selector, BulkSelector::Slice { .. }) {
         return Err(bulk.location.error(
             ErrorKind::InvalidSource,
-            crate::diagnostic!(
-                "array.bulk",
-                "enum-indexed arrays are not yet supported in bulk write"
-            ),
+            crate::diagnostic!("array.enum-index", "enum-indexed arrays cannot be sliced"),
         ));
     }
     let out_elem_ty = target_array.element;
@@ -134,6 +132,7 @@ pub(in crate::check) fn check(
     let mut lowerer = Lowerer {
         context,
         out_len_affine,
+        target_enum,
         inputs: Vec::new(),
         temp_names: Vec::new(),
     };
@@ -171,8 +170,11 @@ pub(in crate::check) fn check(
                 right: Box::new(lowered_rhs),
             },
         };
-        let checked =
-            expression::coerced(&compound_expr, Some(out_elem_ty), lowerer.context.bindings);
+        let checked = crate::check::operator_methods::compound(
+            &compound_expr,
+            out_elem_ty,
+            lowerer.context.bindings,
+        );
         (Some(id), checked)
     } else {
         let checked =
@@ -323,15 +325,7 @@ pub(in crate::check) fn check_mask(
             crate::diagnostic!("array.write", "bulk write requires a 1D array"),
         ));
     }
-    if target_array.index_enum.is_some() {
-        return Err(location.error(
-            ErrorKind::InvalidSource,
-            crate::diagnostic!(
-                "array.bulk",
-                "enum-indexed arrays are not yet supported in bulk write"
-            ),
-        ));
-    }
+    let target_enum = target_array.index_enum;
     let out_elem_ty = target_array.element;
 
     lower_return_handler(
@@ -346,6 +340,7 @@ pub(in crate::check) fn check_mask(
     let mut lowerer = Lowerer {
         context,
         out_len_affine,
+        target_enum,
         inputs: Vec::new(),
         temp_names: Vec::new(),
     };
@@ -390,8 +385,11 @@ pub(in crate::check) fn check_mask(
                 right: Box::new(lowered_rhs),
             },
         };
-        let checked =
-            expression::coerced(&compound_expr, Some(out_elem_ty), lowerer.context.bindings);
+        let checked = crate::check::operator_methods::compound(
+            &compound_expr,
+            out_elem_ty,
+            lowerer.context.bindings,
+        );
         (Some(id), checked)
     } else {
         let checked =
@@ -450,6 +448,7 @@ pub(in crate::check) fn check_mask(
 struct Lowerer<'a, 'b> {
     context: &'a mut StatementContext<'b>,
     out_len_affine: Option<super::facts::Affine>,
+    target_enum: Option<crate::ast::EnumType>,
     inputs: Vec<BulkInput>,
     temp_names: Vec<String>,
 }
@@ -694,18 +693,19 @@ impl Lowerer<'_, '_> {
                 crate::diagnostic!("array.bulk", "bulk write requires 1D arrays"),
             ));
         }
-        if array.index_enum.is_some() {
+        if array.index_enum != self.target_enum {
             return Err(expr.location.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(
                     "array.bulk",
-                    "enum-indexed arrays are not yet supported in bulk write"
+                    "cannot mix enum-indexed arrays with integer-indexed or differently-indexed arrays in bulk write"
                 ),
             ));
         }
-        let length_proven = self.out_len_affine.as_ref().is_some_and(|out_len| {
-            bounds::proves_same_length(out_len, &checked, self.context.bindings)
-        });
+        let length_proven = self.target_enum.is_some()
+            || self.out_len_affine.as_ref().is_some_and(|out_len| {
+                bounds::proves_same_length(out_len, &checked, self.context.bindings)
+            });
 
         let array_id = *self.context.next_id;
         *self.context.next_id += 1;
