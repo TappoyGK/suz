@@ -1463,7 +1463,7 @@ fn main() -> u8 {
         ),
         (
             "enum Wave: u8 { Saw, Square }\nfn main() -> u8 {\nfix a = new #[0; Wav]\nreturn 0\n}",
-            "array.enum-init",
+            "array.enum-dimension",
         ),
         (
             "enum Wave: u8 { Saw, Square }\nfn main() -> u8 {\nfix a = new #[0; Wave, 3]\nreturn 0\n}",

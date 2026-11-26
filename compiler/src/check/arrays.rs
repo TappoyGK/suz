@@ -65,7 +65,7 @@ pub(super) fn initializer(
                 return Err(lengths[0].location.error(
                     ErrorKind::InvalidSource,
                     crate::diagnostic!(
-                        "array.enum-init",
+                        "array.enum-dimension",
                         "unknown enum type '{name}' in array initializer"
                     ),
                 ));
