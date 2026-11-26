@@ -1706,3 +1706,50 @@ fn main() -> u8 {
         assert_eq!(err.rule(), rule, "{code}\n{err}");
     }
 }
+
+#[test]
+fn bulk_write_review_fixes_cover_or_literals_and_partial_same_restrict() {
+    // 指摘4: or付きリテラル式と飽和演算の組み合わせ
+    // 指摘9: out#[] = out * 0.5 + b で out を書き込み先ポインタへ統合し b に restrict を付ける
+    let source = r#"
+fn apply(out: #[i32; n], c: .[i32; n]) -> void {
+    out#[] = (3 * 5 or 1) +| c
+    out#[] = c +| (3 * 2147483647 or 1)
+}
+
+fn mix_inplace(out: #[f32; n], b: .[f32; n]) -> void {
+    out#[] = out * 0.5 + b
+}
+
+fn main() -> u8 {
+    fix out: #[i32] = new #[0; 2]
+    fix c: .[i32] = .[10, 20]
+    apply(out, c)
+    if out.[0] != 11 || out.[1] != 21 { return 1 }
+
+    fix buf: #[f32] = new #[2.0, 4.0]
+    fix add: .[f32] = .[1.0, 3.0]
+    mix_inplace(buf, add)
+    if buf.[0] != 2.0 || buf.[1] != 5.0 { return 2 }
+    return 0
+}
+"#;
+    let c = suz::compile(source.as_bytes()).expect("review fix cases compile");
+    // mix_inplace では out を書き込み先ポインタに統合し、b だけ restrict 入力にする（else if の第3分岐は出ない）
+    assert!(
+        c.contains("*restrict suz_bulk_dst_"),
+        "missing restrict dst:\n{c}"
+    );
+    assert!(
+        c.contains("*restrict suz_bulk_in_"),
+        "missing restrict in:\n{c}"
+    );
+    assert!(!c.contains("else if ("), "unexpected 3rd branch:\n{c}");
+    let output = compile_and_run_c23(source, "bulk_write_review_fixes.suz");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

@@ -765,7 +765,16 @@ pub(super) fn emit_bulk_write(
     };
 
     // 右辺の配列参照とブロードキャストスカラーを左から右へ1回ずつ評価する。
-    let mut array_inputs: Vec<(usize, usize, Type, bool, Location)> = Vec::new();
+    // 不変ローカルの書き込み先と同じローカルを参照する入力は、書き込み先ポインタ経由の読み取りへまとめる。
+    let immutable_target_local = if !bulk.slice
+        && let Value::Local(id) = bulk.target.value
+        && context.immutable_locals.contains(&id)
+    {
+        Some(id)
+    } else {
+        None
+    };
+    let mut array_inputs: Vec<(usize, usize, Type, bool, Location, bool)> = Vec::new();
     for input in &bulk.inputs {
         match input {
             BulkInput::Array {
@@ -775,15 +784,28 @@ pub(super) fn emit_bulk_write(
                 length_proven,
                 location,
             } => {
-                let expr_c = expression(expr, context);
-                writeln!(
-                    c,
-                    "{inner}const {} suz_bulk_arr_{array_id} = {expr_c};",
-                    expr.ty.c_name()
-                )
-                .unwrap();
                 let elem_ty = context.arrays.get(expr.ty.array_id().unwrap()).element;
-                array_inputs.push((*array_id, *elem_id, elem_ty, *length_proven, *location));
+                let same_as_dst = immutable_target_local.is_some_and(|target_id| {
+                    matches!(expr.value, Value::Local(in_id) if in_id == target_id)
+                        && elem_ty == out_elem_ty
+                });
+                if !same_as_dst {
+                    let expr_c = expression(expr, context);
+                    writeln!(
+                        c,
+                        "{inner}const {} suz_bulk_arr_{array_id} = {expr_c};",
+                        expr.ty.c_name()
+                    )
+                    .unwrap();
+                }
+                array_inputs.push((
+                    *array_id,
+                    *elem_id,
+                    elem_ty,
+                    *length_proven || same_as_dst,
+                    *location,
+                    same_as_dst,
+                ));
             }
             BulkInput::Scalar { local_id, expr } => {
                 let expr_c = expression(expr, context);
@@ -835,7 +857,7 @@ pub(super) fn emit_bulk_write(
         .unwrap();
     }
 
-    for &(array_id, _, _, length_proven, location) in &array_inputs {
+    for &(array_id, _, _, length_proven, location, _) in &array_inputs {
         if !length_proven {
             let fail = panic(
                 location,
@@ -864,13 +886,15 @@ pub(super) fn emit_bulk_write(
         )
         .unwrap();
     }
-    for (idx, &(array_id, _, elem_ty, _, _)) in array_inputs.iter().enumerate() {
-        let in_c_ty = elem_ty.c_name();
-        writeln!(
-            c,
-            "{inner}const {in_c_ty} *const suz_bulk_in_raw_{bid}_{idx} = (const {in_c_ty} *)suz_bulk_arr_{array_id}.data;"
-        )
-        .unwrap();
+    for (idx, &(array_id, _, elem_ty, _, _, same_as_dst)) in array_inputs.iter().enumerate() {
+        if !same_as_dst {
+            let in_c_ty = elem_ty.c_name();
+            writeln!(
+                c,
+                "{inner}const {in_c_ty} *const suz_bulk_in_raw_{bid}_{idx} = (const {in_c_ty} *)suz_bulk_arr_{array_id}.data;"
+            )
+            .unwrap();
+        }
     }
 
     let emit_loop = |c: &mut String,
@@ -888,7 +912,7 @@ pub(super) fn emit_bulk_write(
                     .insert(out_id, format!("{dst_name}[{idx_var}]")),
             ));
         }
-        for (j, &(_, elem_id, _, _, _)) in array_inputs.iter().enumerate() {
+        for (j, &(_, elem_id, _, _, _, _)) in array_inputs.iter().enumerate() {
             saved.push((
                 elem_id,
                 context
@@ -922,18 +946,34 @@ pub(super) fn emit_bulk_write(
 
     let has_side_effect_call =
         bulk_has_call(&bulk.element_value) || bulk.mask.as_ref().is_some_and(mask_has_call);
-    if array_inputs.is_empty() {
+    let distinct_inputs: Vec<usize> = array_inputs
+        .iter()
+        .enumerate()
+        .filter(|(_, (_, _, _, _, _, same_as_dst))| !*same_as_dst)
+        .map(|(j, _)| j)
+        .collect();
+
+    if distinct_inputs.is_empty() {
         let dst_name = format!("suz_bulk_dst_{bid}");
         writeln!(
             c,
             "{inner}{dst_c_ty} *restrict {dst_name} = suz_bulk_dst_raw_{bid};"
         )
         .unwrap();
-        emit_loop(c, &inner, &dst_name, &[], context);
+        let in_names = vec![dst_name.clone(); array_inputs.len()];
+        emit_loop(c, &inner, &dst_name, &in_names, context);
     } else if has_side_effect_call {
         let dst_name = format!("suz_bulk_dst_raw_{bid}");
-        let in_names: Vec<String> = (0..array_inputs.len())
-            .map(|j| format!("suz_bulk_in_raw_{bid}_{j}"))
+        let in_names: Vec<String> = array_inputs
+            .iter()
+            .enumerate()
+            .map(|(j, &(_, _, _, _, _, same_as_dst))| {
+                if same_as_dst {
+                    dst_name.clone()
+                } else {
+                    format!("suz_bulk_in_raw_{bid}_{j}")
+                }
+            })
             .collect();
         emit_loop(c, &inner, &dst_name, &in_names, context);
     } else {
@@ -947,11 +987,10 @@ pub(super) fn emit_bulk_write(
             "{inner}const uintptr_t suz_bulk_dst_hi_{bid} = suz_bulk_dst_lo_{bid} + suz_bulk_n_{bid} * sizeof({dst_c_ty});"
         )
         .unwrap();
-        let disjoint_cond = array_inputs
+        let disjoint_cond = distinct_inputs
             .iter()
-            .enumerate()
-            .map(|(j, &(_, _, elem_ty, _, _))| {
-                let in_c_ty = elem_ty.c_name();
+            .map(|&j| {
+                let in_c_ty = array_inputs[j].2.c_name();
                 format!(
                     "((uintptr_t)suz_bulk_in_raw_{bid}_{j} + suz_bulk_n_{bid} * sizeof({in_c_ty}) <= suz_bulk_dst_lo_{bid} || suz_bulk_dst_hi_{bid} <= (uintptr_t)suz_bulk_in_raw_{bid}_{j})"
                 )
@@ -960,7 +999,7 @@ pub(super) fn emit_bulk_write(
             .join(" && ");
 
         let branch_indent = "    ".repeat(depth + 2);
-        // 分岐1: すべての入力が書き込み先と非重複 -> 全ポインタに restrict を付けてベクトル化可能にする。
+        // 分岐1: 書き込み先と一致する入力は書き込み先ポインタへ統合し、残りの入力がすべて非重複なら restrict を付ける。
         writeln!(c, "{inner}if ({disjoint_cond}) {{").unwrap();
         let dst_name = format!("suz_bulk_dst_{bid}");
         writeln!(
@@ -969,45 +1008,36 @@ pub(super) fn emit_bulk_write(
         )
         .unwrap();
         let mut restrict_ins = Vec::with_capacity(array_inputs.len());
-        for (j, &(_, _, elem_ty, _, _)) in array_inputs.iter().enumerate() {
-            let in_c_ty = elem_ty.c_name();
-            let name = format!("suz_bulk_in_{bid}_{j}");
-            writeln!(
-                c,
-                "{branch_indent}const {in_c_ty} *restrict {name} = suz_bulk_in_raw_{bid}_{j};"
-            )
-            .unwrap();
-            restrict_ins.push(name);
+        for (j, &(_, _, elem_ty, _, _, same_as_dst)) in array_inputs.iter().enumerate() {
+            if same_as_dst {
+                restrict_ins.push(dst_name.clone());
+            } else {
+                let in_c_ty = elem_ty.c_name();
+                let name = format!("suz_bulk_in_{bid}_{j}");
+                writeln!(
+                    c,
+                    "{branch_indent}const {in_c_ty} *restrict {name} = suz_bulk_in_raw_{bid}_{j};"
+                )
+                .unwrap();
+                restrict_ins.push(name);
+            }
         }
         emit_loop(c, &branch_indent, &dst_name, &restrict_ins, context);
         writeln!(c, "{inner}}}").unwrap();
 
-        // 分岐2: すべての入力が書き込み先と完全一致（要素型も一致） -> 書き込み先の単一 restrict ポインタ経由で読み書き。
-        if array_inputs
-            .iter()
-            .all(|&(_, _, elem_ty, _, _)| elem_ty == out_elem_ty)
-        {
-            let same_cond = (0..array_inputs.len())
-                .map(|j| format!("(uintptr_t)suz_bulk_in_raw_{bid}_{j} == suz_bulk_dst_lo_{bid}"))
-                .collect::<Vec<_>>()
-                .join(" && ");
-            writeln!(c, "{inner}else if ({same_cond}) {{").unwrap();
-            let dst_name = format!("suz_bulk_dst_{bid}");
-            writeln!(
-                c,
-                "{branch_indent}{dst_c_ty} *restrict {dst_name} = suz_bulk_dst_raw_{bid};"
-            )
-            .unwrap();
-            let same_ins = vec![dst_name.clone(); array_inputs.len()];
-            emit_loop(c, &branch_indent, &dst_name, &same_ins, context);
-            writeln!(c, "{inner}}}").unwrap();
-        }
-
-        // 分岐3: ずれた重なり・部分的な一致 -> restrict なしの添字順ループ。
+        // 分岐2: 重なり得る場合 -> restrict なしの添字順ループ。
         writeln!(c, "{inner}else {{").unwrap();
         let dst_name = format!("suz_bulk_dst_raw_{bid}");
-        let raw_ins: Vec<String> = (0..array_inputs.len())
-            .map(|j| format!("suz_bulk_in_raw_{bid}_{j}"))
+        let raw_ins: Vec<String> = array_inputs
+            .iter()
+            .enumerate()
+            .map(|(j, &(_, _, _, _, _, same_as_dst))| {
+                if same_as_dst {
+                    dst_name.clone()
+                } else {
+                    format!("suz_bulk_in_raw_{bid}_{j}")
+                }
+            })
             .collect();
         emit_loop(c, &branch_indent, &dst_name, &raw_ins, context);
         writeln!(c, "{inner}}}").unwrap();

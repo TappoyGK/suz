@@ -41,7 +41,7 @@ pub(in crate::check) fn check(
         return Err(bulk.target.location.error(
             ErrorKind::InvalidSource,
             crate::diagnostic!(
-                "array.nil",
+                "array.value",
                 "use let before writing to a possibly nil array"
             ),
         ));
@@ -299,7 +299,7 @@ pub(in crate::check) fn check_mask(
         return Err(base.location.error(
             ErrorKind::InvalidSource,
             crate::diagnostic!(
-                "array.nil",
+                "array.value",
                 "use let before writing to a possibly nil array"
             ),
         ));
@@ -677,7 +677,7 @@ impl Lowerer<'_, '_> {
         if checked.ty.is_nilable() {
             return Err(expr.location.error(
                 ErrorKind::InvalidSource,
-                crate::diagnostic!("array.nil", "use let before reading a possibly nil array"),
+                crate::diagnostic!("array.value", "use let before reading a possibly nil array"),
             ));
         }
         let array = self
@@ -818,6 +818,13 @@ fn is_untyped_literal_expr(expr: &Expression) -> bool {
         | ExpressionKind::Not(inner) => is_untyped_literal_expr(inner),
         ExpressionKind::Binary { left, right, .. } => {
             is_untyped_literal_expr(left) && is_untyped_literal_expr(right)
+        }
+        ExpressionKind::ArithmeticHandler { operand, fallback } => {
+            is_untyped_literal_expr(operand)
+                && matches!(
+                    fallback,
+                    Some(FailureHandler::Value(fb)) if is_untyped_literal_expr(fb)
+                )
         }
         _ => false,
     }

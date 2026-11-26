@@ -2333,9 +2333,9 @@ fn main() -> u8 {
 
 ### array-074 一括書き込みの要素式で失敗しうるasにorを省略できない
 
-主根拠：`[expr.cast-handler]`。
+主根拠：`[array.bulk-handler]`。
 
-補助根拠：`[array.bulk]`。
+補助根拠：`[expr.cast-handler]`。
 
 **ソース：**
 
@@ -2388,10 +2388,9 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | `[array.bulk]` | 5 | 23 |
 
-
 ### array-076 マスク付き一括書き込みとマスク付き複合代入は偽の位置を評価・更新しない
 
-主根拠：`[array.bulk]`。
+主根拠：`[array.bulk-mask]`。
 
 補助根拠：`[array.slice]`・`[expr.arithmetic-handler]`。
 
@@ -2450,9 +2449,9 @@ fn main() -> u8 {
 
 ### array-077 マスク条件の位置以外では配列参照の比較はコンパイルエラーになる
 
-主根拠：`[array.value]`。
+主根拠：`[array.bulk-mask]`。
 
-補助根拠：`[expr.equality]`・`[array.bulk]`。
+補助根拠：`[array.value]`・`[expr.equality]`。
 
 **ソース：**
 
@@ -2504,10 +2503,9 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | `[array.bulk]` | 4 | 8 |
 
-
 ### array-079 構造体要素の配列への演算子メソッド適用と添字順の呼び出し順序
 
-主根拠：`[array.bulk]`。
+主根拠：`[array.bulk-ops]`。
 
 補助根拠：`[operator.decl]`・`[operator.arith-boundary]`。
 
@@ -2597,9 +2595,9 @@ info array-080.suz:4: div 20/0
 
 ### array-081 演算子メソッドの定義がない構造体要素の配列の一括演算は拒否される
 
-主根拠：`[operator.overload]`。
+主根拠：`[array.bulk-ops]`。
 
-補助根拠：`[array.bulk]`。
+補助根拠：`[operator.overload]`。
 
 **ソース：**
 
@@ -2689,3 +2687,261 @@ fn main() -> u8 {
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
 | 通常 | `[array.bulk]` | 6 | 14 |
+
+### array-084 ブロードキャストスカラーの1回評価とマスク内の比較連鎖の短絡
+
+主根拠：`[array.bulk-eval]`。
+
+補助根拠：`[array.bulk-mask]`。
+
+**ソース：**
+
+```suz
+fn count(n: mut i64) -> i64 {
+    #n = .n + 1
+    return 10
+}
+
+fn main() -> u8 {
+    // 長さ0の配列でもブロードキャストスカラーは1回評価される
+    fix c1 = new 0
+    fix empty = new #[0; 0]
+    empty#[] = count(c1)
+    if .c1 != 1 { return 1 }
+
+    // 全位置でマスクが偽でもブロードキャストスカラーは1回評価される
+    fix c2 = new 0
+    fix out = new #[1, 2]
+    fix m = new #[0, 0]
+    out#[m > 0] = count(c2)
+    if .c2 != 1 || out.[0] != 1 || out.[1] != 2 { return 2 }
+
+    // マスク内の比較連鎖は左が偽なら右の比較を短絡する
+    fix a = new #[0, 5]
+    fix b = new #[0, 2]
+    fix dst = new #[0, 0]
+    dst#[0 < a < (10 / b)] = 1
+    if dst.[0] != 0 || dst.[1] != 0 { return 3 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### array-085 一括書き込みの複合代入はスカラー評価後に各位置の現在値を読む
+
+主根拠：`[array.bulk-eval]`。
+
+補助根拠：`[assign.eval-order]`・`[array.write]`。
+
+**ソース：**
+
+```suz
+fn bump(x: #[i64]) -> i64 {
+    x#[0] = 100
+    return 5
+}
+
+fn main() -> u8 {
+    fix out = new #[1, 2, 3]
+    fix alias = out
+    out#[] += bump(alias)
+    if out.[0] != 105 || out.[1] != 7 || out.[2] != 8 { return 1 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### array-086 異なる列挙型添字配列同士を一括書き込みに混在できない
+
+主根拠：`[array.bulk]`。
+
+補助根拠：`[array.enum-type]`。
+
+**ソース：**
+
+```suz
+enum Wave: u8 { Saw, Square }
+enum Mode: u8 { Fast, Slow }
+
+fn main() -> u8 {
+    fix out: #[f32; Wave] = new #[0.0; Wave]
+    fix src: .[f32; Mode] = .[Mode.Fast: 1.0, Mode.Slow: 2.0]
+    out#[] = src
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[array.bulk]` | 7 | 14 |
+
+### array-087 列挙型添字配列への切り出し一括書き込みは拒否される
+
+主根拠：`[array.bulk]`。
+
+補助根拠：`[array.enum-index]`。
+
+**ソース：**
+
+```suz
+enum Wave: u8 { Saw, Square }
+
+fn main() -> u8 {
+    fix out: #[f32; Wave] = new #[0.0; Wave]
+    out#[0:1] = 1.0
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[array.enum-index]` | 5 | 15 |
+
+### array-088 nil許容の配列参照への一括書き込みは拒否される
+
+主根拠：`[array.bulk]`。
+
+補助根拠：`[array.value]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix out: #[i32]? = new #[0; 2]
+    out#[] = 1
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[array.value]` | 3 | 5 |
+
+### array-089 一括書き込みで追記演算子<-は使えない
+
+主根拠：`[array.bulk]`。
+
+補助根拠：`[array.write]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix out = new #[0; 2]
+    out#[] <- 1
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[array.write]` | 3 | 12 |
+
+### array-090 一括書き込みの要素算術に対する診断設定の比較
+
+主根拠：`[diagnostic.arithmetic-target]`。
+
+補助根拠：`[array.bulk-handler]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix a = new #[1, 2]
+    fix out = new #[0; 2]
+    out#[] = a + 1
+    if out.[0] != 2 || out.[1] != 3 { return 1 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+| 警告 | 正常終了 | 0 | 1 |
+| 強制 | コンパイルエラー | — | 0 |
+
+**警告：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 警告 | `[diagnostic.arithmetic]` | 4 | 16 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 強制 | `[diagnostic.arithmetic]` | 4 | 16 |
+
+### array-091 or付きリテラル式と飽和演算を組み合わせた一括書き込み
+
+主根拠：`[array.bulk-ops]`。
+
+補助根拠：`[array.bulk-handler]`・`[expr.sat-arith]`。
+
+**ソース：**
+
+```suz
+fn apply(out: #[i32; n], c: .[i32; n]) -> void {
+    out#[] = (3 * 5 or 1) +| c
+    out#[] = c +| (3 * 2147483647 or 1)
+}
+
+fn main() -> u8 {
+    fix out: #[i32] = new #[0; 2]
+    fix c: .[i32] = .[10, 20]
+    apply(out, c)
+    if out.[0] != 11 || out.[1] != 21 { return 1 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
