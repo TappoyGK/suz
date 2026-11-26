@@ -26,7 +26,7 @@ pub(in crate::check) fn check(
     if matches!(bulk.operator, Some(AssignmentOperator::Append)) {
         return Err(bulk.location.error(
             ErrorKind::InvalidSource,
-            crate::diagnostic!("array.write", "bulk write does not support <-"),
+            crate::diagnostic!("array.bulk", "bulk write does not support <-"),
         ));
     }
 
@@ -190,7 +190,7 @@ pub(in crate::check) fn check(
         return Err(bulk.value.location.error(
             ErrorKind::InvalidSource,
             crate::diagnostic!(
-                "array.bulk",
+                "array.bulk-handler",
                 "or return is not allowed inside a bulk write element expression"
             ),
         ));
@@ -266,7 +266,7 @@ pub(in crate::check) fn check_mask(
     if matches!(operator, Some(AssignmentOperator::Append)) {
         return Err(location.error(
             ErrorKind::InvalidSource,
-            crate::diagnostic!("array.write", "bulk write does not support <-"),
+            crate::diagnostic!("array.bulk", "bulk write does not support <-"),
         ));
     }
 
@@ -282,7 +282,7 @@ pub(in crate::check) fn check_mask(
         return Err(base.location.error(
             ErrorKind::InvalidSource,
             crate::diagnostic!(
-                "array.bulk",
+                "array.bulk-mask",
                 "slicing cannot be chained directly with a masked bulk write; bind the slice to a variable first"
             ),
         ));
@@ -406,7 +406,7 @@ pub(in crate::check) fn check_mask(
         return Err(value.location.error(
             ErrorKind::InvalidSource,
             crate::diagnostic!(
-                "array.bulk",
+                "array.bulk-handler",
                 "or return is not allowed inside a bulk write element expression"
             ),
         ));
@@ -500,7 +500,7 @@ impl Lowerer<'_, '_> {
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
                         crate::diagnostic!(
-                            "array.bulk",
+                            "array.bulk-mask",
                             "bulk write mask comparison requires at least one array operand"
                         ),
                     ));
@@ -525,7 +525,7 @@ impl Lowerer<'_, '_> {
             _ => Err(expr.location.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(
-                    "array.bulk",
+                    "array.bulk-mask",
                     "bulk write mask requires array comparisons combined with &, |, ^, or ~"
                 ),
             )),
@@ -769,7 +769,7 @@ fn check_no_return_handler(handler: Option<&FailureHandler>) -> Result<(), Diagn
         return Err(location.error(
             ErrorKind::InvalidSource,
             crate::diagnostic!(
-                "array.bulk",
+                "array.bulk-handler",
                 "or return is not allowed inside a bulk write element expression"
             ),
         ));

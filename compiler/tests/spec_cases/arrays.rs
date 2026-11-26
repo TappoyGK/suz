@@ -1588,7 +1588,7 @@ fn main() -> u8 {
         ),
         (
             "fn main() -> u8 {\nfix out = new #[0; 2]\nfix a = new #[1, 2]\nfix b = new #[1, 0]\nout#[] = a / b or return 1\nreturn 0\n}",
-            "array.bulk",
+            "array.bulk-handler",
         ),
         (
             "fn main() -> u8 {\nfix out: .[i32] = .[1, 2]\nout#[] = 0\nreturn 0\n}",
@@ -1751,5 +1751,68 @@ fn main() -> u8 {
         Some(0),
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn bulk_write_round2_fixes_omit_restrict_with_operator_methods_and_dedup_inputs() {
+    // 指摘1: 演算子メソッドを含む一括書き込みでは書き込み先にも restrict を付けない（C23 §6.7.3.1）
+    let method_alias = r#"
+struct Cell { v: i64, all: #[Cell]? }
+fn Cell.+(k: i64) -> Cell {
+    let a = self.all {
+        if len a == 2 {
+            a#[1] = Cell { v: 100, all: nil }
+        }
+    }
+    return Cell { v: self.v + k, all: nil }
+}
+fn main() -> u8 {
+    fix cells = new #[Cell { v: 1, all: nil }, Cell { v: 2, all: nil }]
+    cells.[0]#all = cells
+    cells#[] = cells + 1
+    if cells.[0].v != 2 || cells.[1].v != 101 { return 1 }
+    return 0
+}
+"#;
+    let c_method = suz::compile(method_alias.as_bytes()).expect("Cell.+ bulk write compiles");
+    assert!(
+        !c_method.contains("*restrict suz_bulk_dst_"),
+        "operator method bulk write must not put restrict on dst:\n{c_method}"
+    );
+    let out_method = compile_and_run_c23(method_alias, "bulk_write_round2_method.suz");
+    assert_eq!(
+        out_method.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out_method.stderr)
+    );
+
+    // 指摘8: 同じ不変ローカル入力の重複排除（a, b を2回ずつ使っても raw ポインタは2本だけ）
+    let dedup_source = r#"
+fn calc(out: #[f32; n], a: .[f32; n], b: .[f32; n]) -> void {
+    out#[] = a * b + a - b * 0.5 + out
+}
+fn main() -> u8 {
+    fix out: #[f32] = new #[1.0, 2.0]
+    fix a: .[f32] = .[2.0, 3.0]
+    fix b: .[f32] = .[4.0, 6.0]
+    calc(out, a, b)
+    if out.[0] != 9.0 || out.[1] != 20.0 { return 1 }
+    return 0
+}
+"#;
+    let c_dedup = suz::compile(dedup_source.as_bytes()).expect("dedup bulk write compiles");
+    let raw_in_decls = c_dedup.matches("*const suz_bulk_in_raw_").count();
+    assert_eq!(
+        raw_in_decls, 2,
+        "expected deduplicated raw input pointers (2), got {raw_in_decls}:\n{c_dedup}"
+    );
+    let out_dedup = compile_and_run_c23(dedup_source, "bulk_write_round2_dedup.suz");
+    assert_eq!(
+        out_dedup.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out_dedup.stderr)
     );
 }
