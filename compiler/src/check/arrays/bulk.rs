@@ -7,13 +7,13 @@ use super::bounds;
 use crate::{
     Diagnostic, ErrorKind,
     ast::{
-        ArrayBulkWrite, AssignmentOperator, BulkSelector, Expression, ExpressionKind,
-        FailureHandler, Type,
+        ArrayBulkWrite, AssignmentOperator, BinaryOperator, BulkSelector, Expression,
+        ExpressionKind, FailureHandler, Location, Type,
     },
     check::{
         control::lower_return_handler,
         expression,
-        ir::{BulkInput, CheckedBulkWrite, CheckedExpression, CheckedStatement},
+        ir::{BulkInput, CheckedBulkWrite, CheckedExpression, CheckedMask, CheckedStatement},
         scope::Scope,
         statements::{Binding, StatementContext},
     },
@@ -228,8 +228,220 @@ pub(in crate::check) fn check(
                 slice_location,
                 inputs: lowered_inputs,
                 out_elem_id,
+                mask: None,
                 element_value,
                 location: bulk.location,
+            },
+        )));
+    Ok(())
+}
+
+/// `out#[条件] = 式` の条件位置に現れる配列比較マスクかどうかを判定する。
+pub(in crate::check) fn is_mask_expr(expr: &Expression, scope: &Scope) -> bool {
+    match &expr.kind {
+        ExpressionKind::Group(inner) | ExpressionKind::BitNot(inner) => is_mask_expr(inner, scope),
+        ExpressionKind::Binary {
+            operator: BinaryOperator::And | BinaryOperator::Or | BinaryOperator::Xor,
+            left,
+            right,
+        } => is_mask_expr(left, scope) || is_mask_expr(right, scope),
+        ExpressionKind::Comparison { operands, .. } => operands
+            .iter()
+            .any(|operand| contains_array_expr(operand, scope)),
+        _ => false,
+    }
+}
+
+/// マスク付き一括書き込み（`out#[条件] = 式`、`out#[条件] += 式`）を検査する。
+pub(in crate::check) fn check_mask(
+    base: &Expression,
+    mask_expr: &Expression,
+    value: &Expression,
+    operator: Option<AssignmentOperator>,
+    location: Location,
+    context: &mut StatementContext<'_>,
+) -> Result<(), Diagnostic> {
+    if matches!(operator, Some(AssignmentOperator::Append)) {
+        return Err(location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!("array.write", "bulk write does not support <-"),
+        ));
+    }
+
+    // 切り出しとマスクの直接連結（`out.[s:e]#[条件] = 式`）は対象外とする。
+    let mut ungrouped_base = base;
+    while let ExpressionKind::Group(inner) = &ungrouped_base.kind {
+        ungrouped_base = inner;
+    }
+    if matches!(
+        ungrouped_base.kind,
+        ExpressionKind::Slice { index: false, .. }
+    ) {
+        return Err(base.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "array.bulk",
+                "slicing cannot be chained directly with a masked bulk write; bind the slice to a variable first"
+            ),
+        ));
+    }
+
+    let mut target = expression::expression(base, None, context.bindings)?;
+    let Some(target_array_id) = target.ty.array_id() else {
+        return Err(base.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!("array.write", "bulk write requires an array reference"),
+        ));
+    };
+    if target.ty.is_nilable() {
+        return Err(base.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "array.nil",
+                "use let before writing to a possibly nil array"
+            ),
+        ));
+    }
+    if target.ty.is_readonly_array() {
+        return Err(location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "array.write",
+                "cannot write through a readonly array reference"
+            ),
+        ));
+    }
+    let target_array = context
+        .bindings
+        .structs
+        .arrays
+        .borrow()
+        .get(target_array_id);
+    if target_array.rank != 1 {
+        return Err(location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!("array.write", "bulk write requires a 1D array"),
+        ));
+    }
+    if target_array.index_enum.is_some() {
+        return Err(location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "array.bulk",
+                "enum-indexed arrays are not yet supported in bulk write"
+            ),
+        ));
+    }
+    let out_elem_ty = target_array.element;
+
+    lower_return_handler(
+        &mut target,
+        &mut context.output,
+        context.next_id,
+        base.location,
+    );
+
+    let out_len_affine = bounds::target_dim_affine(&target, 0, context.bindings);
+
+    let mut lowerer = Lowerer {
+        context,
+        out_len_affine,
+        inputs: Vec::new(),
+        temp_names: Vec::new(),
+    };
+
+    let mask_result = lowerer.lower_mask(mask_expr);
+    let checked_mask = match mask_result {
+        Ok(m) => m,
+        Err(err) => {
+            lowerer.cleanup();
+            return Err(err);
+        }
+    };
+
+    let rhs_result = lowerer.lower_root(value, operator.is_none().then_some(out_elem_ty));
+    let lowered_rhs = match rhs_result {
+        Ok(expr) => expr,
+        Err(err) => {
+            lowerer.cleanup();
+            return Err(err);
+        }
+    };
+
+    let (out_elem_id, element_result) = if let Some(AssignmentOperator::Binary(op)) = operator {
+        let id = *lowerer.context.next_id;
+        *lowerer.context.next_id += 1;
+        let name = format!("$bulk_out_elem_{id}");
+        lowerer.context.bindings.locals.insert(
+            name.clone(),
+            Binding::local(id, out_elem_ty, false, false, location),
+        );
+        lowerer.temp_names.push(name.clone());
+        let compound_expr = Expression {
+            height: lowered_rhs.height + 2,
+            location,
+            kind: ExpressionKind::Binary {
+                operator: op,
+                left: Box::new(Expression {
+                    height: 1,
+                    location,
+                    kind: ExpressionKind::Name(name),
+                }),
+                right: Box::new(lowered_rhs),
+            },
+        };
+        let checked =
+            expression::coerced(&compound_expr, Some(out_elem_ty), lowerer.context.bindings);
+        (Some(id), checked)
+    } else {
+        let checked =
+            expression::coerced(&lowered_rhs, Some(out_elem_ty), lowerer.context.bindings);
+        (None, checked)
+    };
+
+    let inputs = std::mem::take(&mut lowerer.inputs);
+    lowerer.cleanup();
+
+    let element_value = element_result?;
+    if contains_return_handler_ir(&element_value) || mask_contains_return_handler_ir(&checked_mask)
+    {
+        return Err(value.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "array.bulk",
+                "or return is not allowed inside a bulk write element expression"
+            ),
+        ));
+    }
+
+    let mut lowered_inputs = Vec::with_capacity(inputs.len());
+    for mut input in inputs {
+        match &mut input {
+            BulkInput::Array { expr, location, .. } => {
+                lower_return_handler(expr, &mut context.output, context.next_id, *location);
+            }
+            BulkInput::Scalar { expr, .. } => {
+                lower_return_handler(expr, &mut context.output, context.next_id, value.location);
+            }
+        }
+        lowered_inputs.push(input);
+    }
+
+    context
+        .output
+        .push(CheckedStatement::ArrayBulkWrite(Box::new(
+            CheckedBulkWrite {
+                target,
+                start: None,
+                end: None,
+                slice: false,
+                slice_proven: true,
+                slice_location: location,
+                inputs: lowered_inputs,
+                out_elem_id,
+                mask: Some(checked_mask),
+                element_value,
+                location,
             },
         )));
     Ok(())
@@ -255,6 +467,70 @@ impl Lowerer<'_, '_> {
         expected_scalar: Option<Type>,
     ) -> Result<Expression, Diagnostic> {
         self.lower_expr(expr, false, expected_scalar)
+    }
+
+    fn lower_mask(&mut self, expr: &Expression) -> Result<CheckedMask, Diagnostic> {
+        match &expr.kind {
+            ExpressionKind::Group(inner) => self.lower_mask(inner),
+            ExpressionKind::BitNot(inner) => {
+                Ok(CheckedMask::Not(Box::new(self.lower_mask(inner)?)))
+            }
+            ExpressionKind::Binary {
+                operator: op @ (BinaryOperator::And | BinaryOperator::Or | BinaryOperator::Xor),
+                left,
+                right,
+            } => {
+                let left = Box::new(self.lower_mask(left)?);
+                let right = Box::new(self.lower_mask(right)?);
+                Ok(match op {
+                    BinaryOperator::And => CheckedMask::And(left, right),
+                    BinaryOperator::Or => CheckedMask::Or(left, right),
+                    BinaryOperator::Xor => CheckedMask::Xor(left, right),
+                    _ => unreachable!(),
+                })
+            }
+            ExpressionKind::Comparison {
+                locations,
+                operators,
+                operands,
+            } => {
+                if !operands
+                    .iter()
+                    .any(|operand| contains_array_expr(operand, self.context.bindings))
+                {
+                    return Err(expr.location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "array.bulk",
+                            "bulk write mask comparison requires at least one array operand"
+                        ),
+                    ));
+                }
+                let mut lowered_operands = Vec::with_capacity(operands.len());
+                for operand in operands {
+                    lowered_operands.push(self.lower_expr(operand, false, None)?);
+                }
+                let lowered = Expression {
+                    height: expr.height,
+                    location: expr.location,
+                    kind: ExpressionKind::Comparison {
+                        locations: locations.clone(),
+                        operators: operators.clone(),
+                        operands: lowered_operands,
+                    },
+                };
+                let checked =
+                    expression::expression(&lowered, Some(Type::Bool), self.context.bindings)?;
+                Ok(CheckedMask::Leaf(Box::new(checked)))
+            }
+            _ => Err(expr.location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "array.bulk",
+                    "bulk write mask requires array comparisons combined with &, |, ^, or ~"
+                ),
+            )),
+        }
     }
 
     fn lower_expr(
@@ -544,6 +820,16 @@ fn is_untyped_literal_expr(expr: &Expression) -> bool {
             is_untyped_literal_expr(left) && is_untyped_literal_expr(right)
         }
         _ => false,
+    }
+}
+
+fn mask_contains_return_handler_ir(mask: &CheckedMask) -> bool {
+    match mask {
+        CheckedMask::Leaf(expr) => contains_return_handler_ir(expr),
+        CheckedMask::And(l, r) | CheckedMask::Or(l, r) | CheckedMask::Xor(l, r) => {
+            mask_contains_return_handler_ir(l) || mask_contains_return_handler_ir(r)
+        }
+        CheckedMask::Not(inner) => mask_contains_return_handler_ir(inner),
     }
 }
 

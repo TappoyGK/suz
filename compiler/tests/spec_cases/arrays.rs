@@ -1599,3 +1599,49 @@ fn main() -> u8 {
         assert_eq!(err.rule(), rule, "{code}\n{err}");
     }
 }
+
+#[test]
+fn bulk_write_step2_covers_masks_and_masked_compound_assignments() {
+    let source = r#"
+fn fallback(calls: mut i64) -> i64 {
+    #calls = .calls + 1
+    return -1
+}
+
+fn main() -> u8 {
+    fix a = new #[10, 20, 30, 40]
+    fix b = new #[2, 0, 5, 0]
+    fix out = new #[99, 99, 99, 99]
+    out#[b != 0] = a / b
+    if out.[0] != 5 || out.[1] != 99 || out.[2] != 6 || out.[3] != 99 { return 1 }
+
+    // マスク付き複合代入：偽の位置は読み書きせず、0除算も起きない
+    fix m = new #[1, 0, 1]
+    fix div = new #[2, 0, 5]
+    fix acc = new #[10, 20, 30]
+    acc#[m != 0] /= div
+    if acc.[0] != 5 || acc.[1] != 20 || acc.[2] != 6 { return 2 }
+
+    // 偽の位置では or 代替値を評価しない
+    fix calls = new 0
+    fix out2 = new #[0, 0, 0]
+    out2#[m != 0] = acc / div or fallback(calls)
+    if out2.[0] != 2 || out2.[1] != 0 || out2.[2] != 1 || .calls != 0 { return 3 }
+
+    // | と ^ のマスク組み合わせ
+    fix p = new #[1, 2, 3, 4]
+    fix dst = new #[0, 0, 0, 0]
+    dst#[(p == 1) | (p == 4)] = 10
+    dst#[(p <= 2) ^ (p >= 2)] += 5
+    if dst.[0] != 15 || dst.[1] != 0 || dst.[2] != 5 || dst.[3] != 15 { return 4 }
+    return 0
+}
+"#;
+    let output = compile_and_run_c23(source, "bulk_write_step2.suz");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

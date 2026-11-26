@@ -282,6 +282,9 @@ fn collect_statements(statements: &[CheckedStatement], locations: &mut Vec<Locat
                         | super::ir::BulkInput::Scalar { expr, .. } => collect(expr, locations),
                     }
                 }
+                if let Some(mask) = &bulk.mask {
+                    collect_mask(mask, locations);
+                }
                 collect(&bulk.element_value, locations);
             }
             CheckedStatement::Binding { initializer, .. } => collect(initializer, locations),
@@ -295,6 +298,19 @@ pub(super) fn unhandled_arithmetic(statements: &[CheckedStatement]) -> Vec<Locat
     let mut locations = Vec::new();
     collect_statements(statements, &mut locations);
     locations
+}
+
+fn collect_mask(mask: &super::ir::CheckedMask, locations: &mut Vec<Location>) {
+    match mask {
+        super::ir::CheckedMask::Leaf(expr) => collect(expr, locations),
+        super::ir::CheckedMask::And(l, r)
+        | super::ir::CheckedMask::Or(l, r)
+        | super::ir::CheckedMask::Xor(l, r) => {
+            collect_mask(l, locations);
+            collect_mask(r, locations);
+        }
+        super::ir::CheckedMask::Not(inner) => collect_mask(inner, locations),
+    }
 }
 
 fn collect_handler(handler: &super::ir::CallHandler, locations: &mut Vec<Location>) {

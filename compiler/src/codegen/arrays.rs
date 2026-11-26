@@ -896,6 +896,7 @@ pub(super) fn emit_bulk_write(
                     .insert(elem_id, format!("{}[{idx_var}]", in_names[j])),
             ));
         }
+        let mask_c = bulk.mask.as_ref().map(|mask| emit_bulk_mask(mask, context));
         let rhs_c = expression(&bulk.element_value, context);
         for (id, prev) in saved.into_iter().rev() {
             if let Some(prev) = prev {
@@ -909,11 +910,18 @@ pub(super) fn emit_bulk_write(
             "{loop_indent}for (size_t {idx_var} = 0; {idx_var} < suz_bulk_n_{bid}; ++{idx_var}) {{"
         )
         .unwrap();
-        writeln!(c, "{loop_indent}    {dst_name}[{idx_var}] = {rhs_c};").unwrap();
+        if let Some(mask_c) = mask_c {
+            writeln!(c, "{loop_indent}    if ({mask_c}) {{").unwrap();
+            writeln!(c, "{loop_indent}        {dst_name}[{idx_var}] = {rhs_c};").unwrap();
+            writeln!(c, "{loop_indent}    }}").unwrap();
+        } else {
+            writeln!(c, "{loop_indent}    {dst_name}[{idx_var}] = {rhs_c};").unwrap();
+        }
         writeln!(c, "{loop_indent}}}").unwrap();
     };
 
-    let has_side_effect_call = bulk_has_call(&bulk.element_value);
+    let has_side_effect_call =
+        bulk_has_call(&bulk.element_value) || bulk.mask.as_ref().is_some_and(mask_has_call);
     if array_inputs.is_empty() {
         let dst_name = format!("suz_bulk_dst_{bid}");
         writeln!(
@@ -1006,6 +1014,40 @@ pub(super) fn emit_bulk_write(
     }
 
     writeln!(c, "{indent}}}").unwrap();
+}
+
+fn emit_bulk_mask(mask: &crate::check::ir::CheckedMask, context: &mut ExpressionContext) -> String {
+    use crate::check::ir::CheckedMask;
+    match mask {
+        CheckedMask::Leaf(expr) => expression(expr, context),
+        CheckedMask::And(l, r) => format!(
+            "((int)(_Bool)({}) & (int)(_Bool)({}))",
+            emit_bulk_mask(l, context),
+            emit_bulk_mask(r, context)
+        ),
+        CheckedMask::Or(l, r) => format!(
+            "((int)(_Bool)({}) | (int)(_Bool)({}))",
+            emit_bulk_mask(l, context),
+            emit_bulk_mask(r, context)
+        ),
+        CheckedMask::Xor(l, r) => format!(
+            "((int)(_Bool)({}) ^ (int)(_Bool)({}))",
+            emit_bulk_mask(l, context),
+            emit_bulk_mask(r, context)
+        ),
+        CheckedMask::Not(inner) => format!("(!(_Bool)({}))", emit_bulk_mask(inner, context)),
+    }
+}
+
+fn mask_has_call(mask: &crate::check::ir::CheckedMask) -> bool {
+    use crate::check::ir::CheckedMask;
+    match mask {
+        CheckedMask::Leaf(expr) => bulk_has_call(expr),
+        CheckedMask::And(l, r) | CheckedMask::Or(l, r) | CheckedMask::Xor(l, r) => {
+            mask_has_call(l) || mask_has_call(r)
+        }
+        CheckedMask::Not(inner) => mask_has_call(inner),
+    }
 }
 
 fn bulk_has_call(expr: &CheckedExpression) -> bool {

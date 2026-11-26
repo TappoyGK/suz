@@ -177,9 +177,21 @@ pub(crate) struct CheckedBulkWrite {
     pub inputs: Vec<BulkInput>,
     /// 複合代入時に書き込み先の現在要素を参照する仮ローカルID。
     pub out_elem_id: Option<usize>,
+    /// マスク付き書き込みの要素ごとの条件。
+    pub mask: Option<CheckedMask>,
     /// 要素ごとの書き込み値。配列入力は`elem_id`、スカラーは`local_id`の`Local`で参照する。
     pub element_value: CheckedExpression,
     pub location: Location,
+}
+
+/// 一括書き込みのマスク条件。要素ごとの比較と論理演算（`&`・`|`・`^`・`~`）を表す。
+#[derive(Clone)]
+pub(crate) enum CheckedMask {
+    Leaf(Box<CheckedExpression>),
+    And(Box<CheckedMask>, Box<CheckedMask>),
+    Or(Box<CheckedMask>, Box<CheckedMask>),
+    Xor(Box<CheckedMask>, Box<CheckedMask>),
+    Not(Box<CheckedMask>),
 }
 
 /// 一括書き込みのループ前に1回だけ評価する入力。
