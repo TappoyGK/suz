@@ -270,6 +270,7 @@ fn defaulted(expr: &Expression, scope: &Scope) -> Option<Type> {
         | ExpressionKind::Negate(inner)
         | ExpressionKind::BitNot(inner)
         | ExpressionKind::WrapNegate(inner)
+        | ExpressionKind::SaturatingNegate(inner)
         | ExpressionKind::ArithmeticHandler { operand: inner, .. } => defaulted(inner, scope),
         ExpressionKind::New(inner) => defaulted(inner, scope).map(Type::pointer),
         ExpressionKind::Binary {

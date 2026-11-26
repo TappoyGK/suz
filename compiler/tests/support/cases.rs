@@ -160,6 +160,7 @@ fn source(lines: &[&str]) -> Result<Source> {
             "diagnostic.arithmetic"
                 | "diagnostic.constant-comparison"
                 | "diagnostic.integer-division-to-float"
+                | "diagnostic.float-sat-nan"
                 | "arena.loop-allocation"
                 | "array.redundant-handler"
         ) {

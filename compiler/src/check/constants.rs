@@ -17,6 +17,14 @@ pub(super) fn float_to_integer(value: f64, ty: IntegerType) -> Option<i128> {
     (value.is_finite() && (min..=max).contains(&integer)).then_some(integer)
 }
 
+pub(super) fn float_to_integer_sat(value: f64, ty: IntegerType) -> i128 {
+    if value.is_nan() {
+        return 0;
+    }
+    let (min, max) = ty.bounds();
+    (value.trunc() as i128).clamp(min, max)
+}
+
 fn integer_result(operator: BinaryOperator, a: i128, b: i128, ty: IntegerType) -> Option<i128> {
     if matches!(operator, BinaryOperator::Divide | BinaryOperator::Remainder)
         && (b == 0 || (a == ty.bounds().0 && b == -1))
@@ -26,8 +34,33 @@ fn integer_result(operator: BinaryOperator, a: i128, b: i128, ty: IntegerType) -
     if matches!(operator, BinaryOperator::EuclideanRemainder) && b == 0 {
         return None;
     }
-    if operator.is_shift() && !(0..i128::from(ty.bits())).contains(&b) {
-        return None;
+    if operator.is_shift() {
+        if matches!(operator, BinaryOperator::SaturatingShiftLeft) {
+            if b < 0 {
+                return None;
+            }
+            let (min, max) = ty.bounds();
+            if a == 0 || b == 0 {
+                return Some(a);
+            }
+            if b >= i128::from(ty.bits()) {
+                return Some(if a > 0 { max } else { min });
+            }
+            let shifted = a.checked_mul(1_i128 << b);
+            return Some(match shifted {
+                Some(v) => v.clamp(min, max),
+                None => {
+                    if a > 0 {
+                        max
+                    } else {
+                        min
+                    }
+                }
+            });
+        }
+        if !(0..i128::from(ty.bits())).contains(&b) {
+            return None;
+        }
     }
     let value = match operator {
         BinaryOperator::Add => a.checked_add(b),
@@ -117,17 +150,24 @@ fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
         Value::CheckedCast {
             operand,
             fallback,
-            wrap,
+            kind,
             ..
         } => {
             if operand.ty.is_text() {
-                return text_cast(operand, expr.ty, *wrap)
+                return text_cast(operand, expr.ty, *kind)
                     .and_then(|value| constant_integer_raw(&value))
                     .or_else(|| constant_integer_raw(fallback));
             }
             // 両辺とも定数式の文法に従っていなければならない。
             if matches!(operand.ty, Type::Float(_)) {
                 let value = constant_float_raw(operand)?;
+                if *kind == crate::ast::CastKind::Saturating {
+                    return if value.is_nan() {
+                        constant_integer_raw(fallback)
+                    } else {
+                        Some(float_to_integer_sat(value, ty))
+                    };
+                }
                 return float_to_integer(value, ty).or_else(|| constant_integer_raw(fallback));
             }
             if operand.ty == Type::Exact {
@@ -143,6 +183,23 @@ fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
                 Some(value)
             } else {
                 constant_integer_raw(fallback)
+            }
+        }
+        Value::SaturatingCast(inner) => {
+            let (min, max) = ty.bounds();
+            if inner.ty == Type::Exact {
+                let n = super::exact::constant(inner)?;
+                if n < Int::from_i128(min) {
+                    Some(min)
+                } else if n > Int::from_i128(max) {
+                    Some(max)
+                } else {
+                    n.to_i128()
+                }
+            } else if matches!(inner.ty, Type::Float(_)) {
+                Some(float_to_integer_sat(constant_float_raw(inner)?, ty))
+            } else {
+                Some(constant_integer_raw(inner)?.clamp(min, max))
             }
         }
         Value::Truncate(inner) => {
@@ -172,6 +229,10 @@ fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
         },
         Value::BitNot(inner) => Some(wrap(!constant_integer_raw(inner)?)),
         Value::WrapNegate(inner) => Some(wrap(-constant_integer_raw(inner)?)),
+        Value::SaturatingNegate(inner) => {
+            let (min, max) = ty.bounds();
+            Some((-constant_integer_raw(inner)?).clamp(min, max))
+        }
         Value::Binary {
             operator,
             left,
@@ -179,6 +240,27 @@ fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
         } => {
             let left = constant_integer_raw(left)?;
             let right = constant_integer_raw(right)?;
+            let (min, max) = ty.bounds();
+            match operator {
+                BinaryOperator::SaturatingAdd => return Some((left + right).clamp(min, max)),
+                BinaryOperator::SaturatingSubtract => return Some((left - right).clamp(min, max)),
+                BinaryOperator::SaturatingMultiply => {
+                    return Some(match left.checked_mul(right) {
+                        Some(v) => v.clamp(min, max),
+                        None => {
+                            if (left < 0) != (right < 0) {
+                                min
+                            } else {
+                                max
+                            }
+                        }
+                    });
+                }
+                BinaryOperator::SaturatingShiftLeft => {
+                    return integer_result(BinaryOperator::SaturatingShiftLeft, left, right, ty);
+                }
+                _ => {}
+            }
             Some(wrap(match operator {
                 BinaryOperator::WrapAdd => left + right,
                 BinaryOperator::WrapSubtract => left - right,
@@ -257,12 +339,12 @@ fn constant_float_raw(expr: &CheckedExpression) -> Option<f64> {
         Value::CheckedCast {
             operand,
             fallback,
-            wrap,
+            kind,
             ..
         } => {
-            debug_assert!(!wrap);
+            debug_assert_eq!(*kind, crate::ast::CastKind::Checked);
             if operand.ty.is_text() {
-                return text_cast(operand, expr.ty, false)
+                return text_cast(operand, expr.ty, *kind)
                     .and_then(|value| constant_float_raw(&value))
                     .or_else(|| constant_float_raw(fallback));
             }
@@ -361,9 +443,9 @@ fn constant_bool_raw(expr: &CheckedExpression) -> Option<bool> {
         Value::CheckedCast {
             operand,
             fallback,
-            wrap,
+            kind,
             ..
-        } if operand.ty.is_text() => text_cast(operand, Type::Bool, *wrap)
+        } if operand.ty.is_text() => text_cast(operand, Type::Bool, *kind)
             .and_then(|value| constant_bool_raw(&value))
             .or_else(|| constant_bool_raw(fallback)),
         Value::Not(inner) => Some(!constant_bool_raw(inner)?),
@@ -876,7 +958,7 @@ pub(super) fn depends_on_generic(expr: &CheckedExpression) -> bool {
         || constant_kind(expr) == ConstantKind::Generic
 }
 
-fn cast_succeeds(operand: &CheckedExpression, target: Type, wrap: bool) -> bool {
+fn cast_succeeds(operand: &CheckedExpression, target: Type, kind: crate::ast::CastKind) -> bool {
     if operand.ty == Type::Exact {
         return super::exact::constant(operand).is_some_and(|n| {
             if matches!(target, Type::Float(_)) {
@@ -887,7 +969,7 @@ fn cast_succeeds(operand: &CheckedExpression, target: Type, wrap: bool) -> bool 
     }
 
     if operand.ty.is_text() {
-        return text_cast(operand, target, wrap).is_some();
+        return text_cast(operand, target, kind).is_some();
     }
     if operand.ty.integer_bounds().is_some() && target.integer_bounds().is_some() {
         let value = constant_integer_raw(operand).unwrap();
@@ -895,7 +977,12 @@ fn cast_succeeds(operand: &CheckedExpression, target: Type, wrap: bool) -> bool 
     }
     match (operand.ty, target) {
         (Type::Float(_), Type::Integer(to)) => {
-            float_to_integer(constant_float_raw(operand).unwrap(), to).is_some()
+            let value = constant_float_raw(operand).unwrap();
+            if kind == crate::ast::CastKind::Saturating {
+                !value.is_nan()
+            } else {
+                float_to_integer(value, to).is_some()
+            }
         }
         (Type::Float(_), Type::Float(FloatType::F32)) => {
             let value = constant_float_raw(operand).unwrap();
@@ -1022,13 +1109,15 @@ fn validate_evaluation(expr: &CheckedExpression) -> Result<(), Diagnostic> {
         Value::Cast(inner)
         | Value::Negate(inner)
         | Value::Truncate(inner)
+        | Value::SaturatingCast(inner)
         | Value::BitNot(inner)
         | Value::WrapNegate(inner)
+        | Value::SaturatingNegate(inner)
         | Value::Not(inner) => validate_evaluation(inner)?,
         Value::CheckedCast {
             operand,
             fallback,
-            wrap,
+            kind,
             ..
         } => {
             validate_evaluation(operand)?;
@@ -1041,7 +1130,7 @@ fn validate_evaluation(expr: &CheckedExpression) -> Result<(), Diagnostic> {
                 };
                 constant_struct.is_some()
             } else {
-                cast_succeeds(operand, expr.ty, *wrap)
+                cast_succeeds(operand, expr.ty, *kind)
             };
             if !succeeds {
                 validate_evaluation(fallback)?;
@@ -1105,11 +1194,15 @@ pub(super) fn constant_float(expr: &CheckedExpression) -> Result<Option<f64>, Di
     Ok(evaluate(expr)?.and_then(|value| constant_float_raw(&value)))
 }
 
-fn text_cast(operand: &CheckedExpression, target: Type, wrap: bool) -> Option<CheckedExpression> {
+fn text_cast(
+    operand: &CheckedExpression,
+    target: Type,
+    kind: crate::ast::CastKind,
+) -> Option<CheckedExpression> {
     let Value::Text { text, .. } = evaluate_raw(operand)?.value else {
         return None;
     };
-    super::text_parse::parse(&text, target, wrap)
+    super::text_parse::parse(&text, target, kind)
 }
 
 fn slice_result(expr: &CheckedExpression) -> Option<CheckedExpression> {

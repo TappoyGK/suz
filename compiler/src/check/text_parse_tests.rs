@@ -9,7 +9,7 @@ fn check(text: &str) {
             FloatType::F32 => clean.parse::<f32>().unwrap() as f64,
             FloatType::F64 => clean.parse::<f64>().unwrap(),
         };
-        let parsed = parse(text, Type::Float(ty), false);
+        let parsed = parse(text, Type::Float(ty), crate::ast::CastKind::Checked);
         if expected.is_infinite() && !matches!(clean.as_str(), "inf" | "-inf") {
             assert!(parsed.is_none(), "{ty:?}: {text}");
             continue;
@@ -149,7 +149,7 @@ fn decimal_float_parsing_requires_complete_suz_syntax() {
     ] {
         for ty in [FloatType::F32, FloatType::F64] {
             assert!(
-                parse(text, Type::Float(ty), false).is_none(),
+                parse(text, Type::Float(ty), crate::ast::CastKind::Checked).is_none(),
                 "{ty:?}: {text:?}"
             );
         }

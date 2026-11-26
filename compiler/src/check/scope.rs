@@ -38,6 +38,7 @@ type RedundantHandlers = BTreeMap<(usize, usize), Vec<crate::Diagnostic>>;
 #[derive(Clone, Default)]
 pub(super) struct Outputs {
     pub divisions: Rc<std::cell::RefCell<std::collections::BTreeSet<(usize, usize)>>>,
+    pub float_sat_nans: Rc<std::cell::RefCell<std::collections::BTreeSet<(usize, usize)>>>,
     pub comparisons: Rc<std::cell::RefCell<BTreeMap<(usize, usize), bool>>>,
     pub constant_texts: Rc<std::cell::RefCell<std::collections::BTreeSet<String>>>,
     pub redundant_array_handlers: Rc<std::cell::RefCell<RedundantHandlers>>,

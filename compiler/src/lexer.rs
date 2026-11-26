@@ -69,10 +69,10 @@ const TYPES: &[&str] = &[
 ];
 const SYMBOLS: &[&str] = &[
     ";", "(", ")", "[", "]", "{", "}", ",", ":", ".", "<-", "->", "=>", "=", "+=", "-=", "*=",
-    "/=", "%=", "%%=", "+%=", "-%=", "*%=", "&=", "|=", "^=", "<<=", ">>=", ">>>=", "<<%=", ">>%=",
-    ">>>%=", "+", "-", "*", "/", "%", "%%", "+%", "-%", "*%", "&", "|", "^", "~", "<<", ">>",
-    ">>>", "<<%", ">>%", ">>>%", "==", "!=", "<", "<=", ">", ">=", "&&", "||", "..<", "..=", "?",
-    "#", "@",
+    "/=", "%=", "%%=", "+%=", "-%=", "*%=", "+|=", "-|=", "*|=", "&=", "|=", "^=", "<<=", ">>=",
+    ">>>=", "<<%=", ">>%=", ">>>%=", "<<|=", "+", "-", "*", "/", "%", "%%", "+%", "-%", "*%", "+|",
+    "-|", "*|", "&", "|", "^", "~", "<<", ">>", ">>>", "<<%", ">>%", ">>>%", "<<|", "==", "!=",
+    "<", "<=", ">", ">=", "&&", "||", "..<", "..=", "?", "#", "@",
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -223,7 +223,7 @@ fn can_end_operand(kind: Option<Kind<'_>>) -> bool {
 fn continues_line(kind: Kind<'_>, previous: Option<Kind<'_>>) -> bool {
     match kind {
         Kind::Keyword("or") => true,
-        Kind::Symbol("-" | "-%") => can_end_operand(previous),
+        Kind::Symbol("-" | "-%" | "-|") => can_end_operand(previous),
         Kind::Symbol(symbol) => matches!(
             symbol,
             "=" | "+="
@@ -235,6 +235,9 @@ fn continues_line(kind: Kind<'_>, previous: Option<Kind<'_>>) -> bool {
                 | "+%="
                 | "-%="
                 | "*%="
+                | "+|="
+                | "-|="
+                | "*|="
                 | "&="
                 | "|="
                 | "^="
@@ -244,6 +247,7 @@ fn continues_line(kind: Kind<'_>, previous: Option<Kind<'_>>) -> bool {
                 | "<<%="
                 | ">>%="
                 | ">>>%="
+                | "<<|="
                 | "+"
                 | "*"
                 | "/"
@@ -251,6 +255,8 @@ fn continues_line(kind: Kind<'_>, previous: Option<Kind<'_>>) -> bool {
                 | "%%"
                 | "+%"
                 | "*%"
+                | "+|"
+                | "*|"
                 | "&"
                 | "|"
                 | "^"
@@ -260,6 +266,7 @@ fn continues_line(kind: Kind<'_>, previous: Option<Kind<'_>>) -> bool {
                 | "<<%"
                 | ">>%"
                 | ">>>%"
+                | "<<|"
                 | "=="
                 | "!="
                 | "<"
@@ -445,6 +452,8 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
             let word = &rest[..length];
             if word == "as" && rest.as_bytes().get(length) == Some(&b'%') {
                 (Kind::Symbol("as%"), length + 1)
+            } else if word == "as" && rest.as_bytes().get(length) == Some(&b'|') {
+                (Kind::Symbol("as|"), length + 1)
             } else {
                 let kind = if word == "_" {
                     Kind::Wildcard
@@ -645,12 +654,22 @@ mod tests {
     #[test]
     fn takes_the_longest_operator_and_preserves_cast_boundaries() {
         assert_eq!(
-            kinds("+%= +% += + <<= << <= < >>= >> >= > != == -> => as% as % aside%"),
+            kinds(
+                "+%= +% += + +|= +| -|= -| *|= *| <<|= <<| <<= << <= < >>= >> >= > != == -> => as% as| as % as | aside% aside|"
+            ),
             vec![
                 Kind::Symbol("+%="),
                 Kind::Symbol("+%"),
                 Kind::Symbol("+="),
                 Kind::Symbol("+"),
+                Kind::Symbol("+|="),
+                Kind::Symbol("+|"),
+                Kind::Symbol("-|="),
+                Kind::Symbol("-|"),
+                Kind::Symbol("*|="),
+                Kind::Symbol("*|"),
+                Kind::Symbol("<<|="),
+                Kind::Symbol("<<|"),
                 Kind::Symbol("<<="),
                 Kind::Symbol("<<"),
                 Kind::Symbol("<="),
@@ -664,10 +683,15 @@ mod tests {
                 Kind::Symbol("->"),
                 Kind::Symbol("=>"),
                 Kind::Symbol("as%"),
+                Kind::Symbol("as|"),
                 Kind::Keyword("as"),
                 Kind::Symbol("%"),
+                Kind::Keyword("as"),
+                Kind::Symbol("|"),
                 Kind::Ident("aside"),
                 Kind::Symbol("%"),
+                Kind::Ident("aside"),
+                Kind::Symbol("|"),
                 Kind::End,
             ]
         );

@@ -1037,3 +1037,29 @@ fn main() -> u8 {
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
 | 通常 | `[operator.compound]` | 5 | 7 |
+
+### method-035 飽和演算子メソッドと複合代入
+
+主根拠：`[operator.method]`。
+
+補助根拠：`[operator.unary]`、`[operator.compound]`。
+
+**ソース：**
+
+```suz
+struct Sample { v: i16 }
+fn Sample.+|(other: Sample) -> Sample { return Sample { v: self.v +| other.v } }
+fn Sample.-|() -> Sample { return Sample { v: -| self.v } }
+fn main() -> u8 {
+    var s = Sample { v: 30000 }
+    s +|= Sample { v: 10000 }
+    if s.v != 32767 || (-| Sample { v: -32768 }).v != 32767 { return 1 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |

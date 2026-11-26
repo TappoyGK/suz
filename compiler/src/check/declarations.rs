@@ -112,7 +112,8 @@ pub(super) fn dependencies(
         | ExpressionKind::Len(inner)
         | ExpressionKind::Not(inner)
         | ExpressionKind::BitNot(inner)
-        | ExpressionKind::WrapNegate(inner) => dependencies(inner, names)?,
+        | ExpressionKind::WrapNegate(inner)
+        | ExpressionKind::SaturatingNegate(inner) => dependencies(inner, names)?,
         ExpressionKind::TextAppend { left, right }
         | ExpressionKind::Binary { left, right, .. }
         | ExpressionKind::Logical { left, right, .. } => {

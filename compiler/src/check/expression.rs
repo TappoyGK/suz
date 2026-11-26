@@ -207,6 +207,7 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
         ExpressionKind::Name(name) => bindings.get(name).map(|binding| binding.ty),
         ExpressionKind::Negate(inner)
         | ExpressionKind::WrapNegate(inner)
+        | ExpressionKind::SaturatingNegate(inner)
         | ExpressionKind::BitNot(inner)
         | ExpressionKind::Not(inner)
             if bindings.has_operator_methods
@@ -222,6 +223,7 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
         | ExpressionKind::Group(inner)
         | ExpressionKind::BitNot(inner)
         | ExpressionKind::WrapNegate(inner)
+        | ExpressionKind::SaturatingNegate(inner)
         | ExpressionKind::Negate(inner) => operand_type(inner, bindings),
         ExpressionKind::Binary {
             operator,
@@ -317,6 +319,7 @@ fn has_float_source_inner<const OPERATOR_METHODS: bool>(
         ExpressionKind::Float(_) => true,
         ExpressionKind::Negate(inner)
         | ExpressionKind::WrapNegate(inner)
+        | ExpressionKind::SaturatingNegate(inner)
         | ExpressionKind::BitNot(inner)
         | ExpressionKind::Not(inner)
             if OPERATOR_METHODS && super::operator_methods::owner(inner, bindings).is_some() =>
@@ -332,6 +335,7 @@ fn has_float_source_inner<const OPERATOR_METHODS: bool>(
         | ExpressionKind::Group(inner)
         | ExpressionKind::BitNot(inner)
         | ExpressionKind::WrapNegate(inner)
+        | ExpressionKind::SaturatingNegate(inner)
         | ExpressionKind::Negate(inner) => float_source::<OPERATOR_METHODS>(inner, bindings),
         ExpressionKind::Binary {
             operator,
@@ -683,6 +687,7 @@ fn expression_checked(
             ExpressionKind::ArithmeticHandler { .. }
             | ExpressionKind::BitNot(_)
             | ExpressionKind::WrapNegate(_)
+            | ExpressionKind::SaturatingNegate(_)
             | ExpressionKind::Negate(_)
             | ExpressionKind::Binary { .. }
             | ExpressionKind::Not(_)

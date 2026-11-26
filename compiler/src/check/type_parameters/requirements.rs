@@ -293,6 +293,7 @@ fn symbolic_arithmetic(expr: &Expression, scope: &Scope) -> bool {
         }
         ExpressionKind::Negate(inner)
         | ExpressionKind::WrapNegate(inner)
+        | ExpressionKind::SaturatingNegate(inner)
         | ExpressionKind::BitNot(inner) => {
             target(inner, scope).is_some() || symbolic_arithmetic(inner, scope)
         }
@@ -525,6 +526,7 @@ fn operator(
         return Ok(match op {
             "-" => ExpressionKind::Negate(inner),
             "-%" => ExpressionKind::WrapNegate(inner),
+            "-|" => ExpressionKind::SaturatingNegate(inner),
             "~" => ExpressionKind::BitNot(inner),
             "not" => ExpressionKind::Not(inner),
             "len" => ExpressionKind::Len(inner),

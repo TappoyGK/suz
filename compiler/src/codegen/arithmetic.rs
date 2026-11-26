@@ -59,6 +59,45 @@ pub(super) fn integer_parts(
     else {
         unreachable!()
     };
+    if matches!(operator, BinaryOperator::SaturatingShiftLeft) {
+        context.saturating_helpers.insert(("shl", ty));
+        let index = context.temporaries.len();
+        context.temporaries.extend([left.ty, right.ty]);
+        let exact_count = right.ty == Type::Exact;
+        let unsigned_count = right
+            .ty
+            .integer_storage()
+            .is_some_and(|r| r.bounds().0 == 0);
+        let non_negative_const = matches!(right.value, Value::Integer { value, .. } if value >= 0);
+        let left_code = expression(left, context);
+        let right_code = expression(right, context);
+        let condition = if unsigned_count || non_negative_const {
+            "true".to_owned()
+        } else if exact_count {
+            format!("!suz_cmp_{}.negative", index + 1)
+        } else {
+            format!("suz_cmp_{} >= 0", index + 1)
+        };
+        let shift_arg = if exact_count {
+            format!(
+                "(suz_cmp_{}.magnitude >= {} ? {} : (uint64_t)suz_cmp_{}.magnitude)",
+                index + 1,
+                ty.bits(),
+                ty.bits(),
+                index + 1
+            )
+        } else {
+            format!("(uint64_t)suz_cmp_{}", index + 1)
+        };
+        return (
+            format!(
+                "suz_cmp_{index} = {left_code}, suz_cmp_{} = {right_code}",
+                index + 1
+            ),
+            condition,
+            format!("suz_sat_shl_{}(suz_cmp_{index}, {shift_arg})", ty.name()),
+        );
+    }
     // 有効なリテラルのシフト量は失敗しない。この頻出する符号なしシフトはCで行い、
     // ループの各反復で検査付きランタイムを呼ぶのを避ける。
     if matches!(

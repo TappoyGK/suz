@@ -484,37 +484,52 @@ pub(super) fn join(a: Type, b: Type) -> Option<Type> {
 pub(super) fn cast(
     operand: CheckedExpression,
     target: Type,
-    wrap: bool,
+    kind: crate::ast::CastKind,
     fallback: &Option<crate::ast::FailureHandler>,
     location: Location,
     bindings: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
-    use crate::ast::FailureHandler;
+    use crate::ast::{CastKind, FailureHandler};
     if matches!(target, Type::Enum(e) if e.is_error) {
         return Err(location.error(
             ErrorKind::InvalidSource,
             crate::diagnostic!("error.ops", "integers cannot be converted to errors"),
         ));
     }
-    if wrap {
+    if matches!(kind, CastKind::Wrap | CastKind::Saturating) {
         if fallback.is_some() {
             return Err(location.error(
                 ErrorKind::InvalidSource,
-                crate::diagnostic!(
-                    "expr.cast-wrap-handler-syntax",
-                    "integer as% does not accept or"
-                ),
+                if kind == CastKind::Wrap {
+                    crate::diagnostic!(
+                        "expr.cast-wrap-handler-syntax",
+                        "integer as% does not accept or"
+                    )
+                } else {
+                    crate::diagnostic!(
+                        "expr.cast-sat-handler-syntax",
+                        "integer as| does not accept or"
+                    )
+                },
             ));
         }
         if !target.is_integer() {
             return Err(location.error(
                 ErrorKind::InvalidSource,
-                crate::diagnostic!("expr.as-trunc", "as% requires an integer target"),
+                if kind == CastKind::Wrap {
+                    crate::diagnostic!("expr.as-trunc", "as% requires an integer target")
+                } else {
+                    crate::diagnostic!("expr.as-sat", "as| requires an integer target")
+                },
             ));
         }
         return Ok(CheckedExpression {
             ty: target,
-            value: Value::Truncate(Box::new(operand)),
+            value: if kind == CastKind::Wrap {
+                Value::Truncate(Box::new(operand))
+            } else {
+                Value::SaturatingCast(Box::new(operand))
+            },
         });
     }
     if !matches!(
@@ -553,7 +568,7 @@ pub(super) fn cast(
                 Value::CheckedCast {
                     location,
                     constant_struct: None,
-                    wrap: false,
+                    kind: CastKind::Checked,
                     operand: Box::new(operand),
                     fallback: Box::new(super::arrays::bounds::with_fallback(
                         bindings,
@@ -568,7 +583,7 @@ pub(super) fn cast(
             } => Value::CastReturn {
                 return_location: *return_location,
                 location,
-                wrap: false,
+                kind: CastKind::Checked,
                 operand: Box::new(operand),
                 return_value: Box::new(super::arrays::bounds::with_fallback(
                     bindings,

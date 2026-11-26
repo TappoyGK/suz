@@ -35,6 +35,60 @@ bool suz_parse_integer(const char *bytes, uint64_t length, unsigned bits,
     return true;
 }
 
+bool suz_parse_integer_sat(const char *bytes, uint64_t length, unsigned bits,
+                           bool signed_target, uint64_t *output) {
+    if (length == 0) return false;
+    const bool negative = bytes[0] == '-';
+    uint64_t index = negative ? 1 : 0;
+    if (index == length) return false;
+    const uint64_t mask = UINT64_MAX >> (64 - bits);
+    if (!signed_target && negative) {
+        for (; index < length; ++index) {
+            const unsigned char byte = (unsigned char)bytes[index];
+            if (byte == '_') {
+                if (index == 0 || index + 1 == length ||
+                    !digit((unsigned char)bytes[index - 1]) ||
+                    !digit((unsigned char)bytes[index + 1])) return false;
+                continue;
+            }
+            if (!digit(byte)) return false;
+        }
+        *output = 0;
+        return true;
+    }
+    const uint64_t limit = signed_target ? (mask >> 1) + (negative ? 1 : 0) : mask;
+    uint64_t value = 0;
+    for (; index < length; ++index) {
+        const unsigned char byte = (unsigned char)bytes[index];
+        if (byte == '_') {
+            if (index == 0 || index + 1 == length ||
+                !digit((unsigned char)bytes[index - 1]) ||
+                !digit((unsigned char)bytes[index + 1])) return false;
+            continue;
+        }
+        if (!digit(byte)) return false;
+        const unsigned next = byte - '0';
+        if (value > limit / 10 || (value == limit / 10 && next > limit % 10)) {
+            for (++index; index < length; ++index) {
+                const unsigned char rest = (unsigned char)bytes[index];
+                if (rest == '_') {
+                    if (index == 0 || index + 1 == length ||
+                        !digit((unsigned char)bytes[index - 1]) ||
+                        !digit((unsigned char)bytes[index + 1])) return false;
+                    continue;
+                }
+                if (!digit(rest)) return false;
+            }
+            *output = negative ? ((UINT64_C(0) - ((mask >> 1) + 1)) & mask)
+                               : (signed_target ? (mask >> 1) : mask);
+            return true;
+        }
+        value = value * 10 + next;
+    }
+    *output = (negative ? UINT64_C(0) - value : value) & mask;
+    return true;
+}
+
 bool suz_parse_bool(const char *bytes, uint64_t length, bool *output) {
     if (length == 4 && memcmp(bytes, "true", 4) == 0) {
         *output = true;

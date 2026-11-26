@@ -6,7 +6,11 @@ use super::ir::{CheckedExpression, Value};
 use crate::ast::{FloatType, IntegerType, Type};
 
 // コンパイラと生成プログラムで、メモリ確保をしない同じパーサーを使う。
-pub(super) fn parse(text: &str, target: Type, wrap: bool) -> Option<CheckedExpression> {
+pub(super) fn parse(
+    text: &str,
+    target: Type,
+    kind: crate::ast::CastKind,
+) -> Option<CheckedExpression> {
     unsafe extern "C" {
         fn suz_parse_integer(
             bytes: *const u8,
@@ -14,6 +18,13 @@ pub(super) fn parse(text: &str, target: Type, wrap: bool) -> Option<CheckedExpre
             bits: u32,
             signed_target: bool,
             wrap: bool,
+            output: *mut u64,
+        ) -> bool;
+        fn suz_parse_integer_sat(
+            bytes: *const u8,
+            length: u64,
+            bits: u32,
+            signed_target: bool,
             output: *mut u64,
         ) -> bool;
         fn suz_parse_float_bits(
@@ -37,16 +48,26 @@ pub(super) fn parse(text: &str, target: Type, wrap: bool) -> Option<CheckedExpre
             let mut bits = 0_u64;
             let signed = ty.bounds().0 < 0;
             // 呼び出しが終わるまで、バイト列と出力先は生存する。
-            if !unsafe {
-                suz_parse_integer(
-                    text.as_ptr(),
-                    text.len() as u64,
-                    ty.bits(),
-                    signed,
-                    wrap,
-                    &mut bits,
-                )
-            } {
+            let ok = unsafe {
+                match kind {
+                    crate::ast::CastKind::Saturating => suz_parse_integer_sat(
+                        text.as_ptr(),
+                        text.len() as u64,
+                        ty.bits(),
+                        signed,
+                        &mut bits,
+                    ),
+                    _ => suz_parse_integer(
+                        text.as_ptr(),
+                        text.len() as u64,
+                        ty.bits(),
+                        signed,
+                        kind == crate::ast::CastKind::Wrap,
+                        &mut bits,
+                    ),
+                }
+            };
+            if !ok {
                 return None;
             }
             integer_value(bits, ty)
