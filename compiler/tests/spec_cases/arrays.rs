@@ -1455,7 +1455,7 @@ fn main() -> u8 {
         // error 型や未定義型名・多次元
         (
             "error Err { A, B }\nfn main() -> u8 {\nfix a: .[i32; Err] = .[0; Err]\nreturn 0\n}",
-            "array.enum-type",
+            "array.enum-dimension",
         ),
         (
             "enum Wave: u8 { Saw, Square }\nfn f(a: #[f32; Wave, _]) -> void {}\nfn main() -> u8 { return 0 }",

@@ -76,7 +76,7 @@ impl Parser<'_, '_> {
                                 return Err(parser.error(
                                     ErrorKind::InvalidSource,
                                     crate::diagnostic!(
-                                        "array.enum-type",
+                                        "array.enum-dimension",
                                         "unknown enum type '{name}' in array dimension"
                                     ),
                                 ));

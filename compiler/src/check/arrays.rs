@@ -775,7 +775,7 @@ pub(super) fn constant_initializer(
             ErrorKind::InvalidSource,
             crate::diagnostic!(
                 "array.constant",
-                "constant arrays cannot contain non-nil pointers, non-nil writable arrays, or function values"
+                "constant arrays cannot contain non-nil pointers or non-nil writable arrays"
             ),
         ));
     }

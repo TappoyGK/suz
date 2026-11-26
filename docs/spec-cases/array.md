@@ -1834,7 +1834,7 @@ fn main() -> u8 {
 
 ### array-058 列挙型名のつづり間違いを配列型の宣言位置で拒否する
 
-主根拠：`[array.enum-type]`。
+主根拠：`[array.enum-dimension]`。
 
 **ソース：**
 
@@ -1854,7 +1854,7 @@ fn main() -> u8 { return 0 }
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[array.enum-type]` | 2 | 21 |
+| 通常 | `[array.enum-dimension]` | 2 | 21 |
 
 ### array-059 列挙型添字配列と通常の配列は相互に変換できない
 
@@ -2154,6 +2154,32 @@ fn main() -> u8 {
     fix r1 = t.[Wave.Saw](swap(t))
     fix r2 = t.[Wave.Saw](5)
     if r1 != 6 || r2 != 105 { return 1 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+
+### array-069 整数添字の定数配列にstatic fnを含める
+
+主根拠：`[array.constant]`。
+
+補助根拠：`[fn.value-const]`、`[fn.value-call]`。
+
+**ソース：**
+
+```suz
+fnshape Get() -> i32
+fn one() -> i32 { return 1 }
+fn two() -> i32 { return 2 }
+fix FS: .[static fn Get] = .[fn one, fn two]
+fn main() -> u8 {
+    if FS.[0]() != 1 || FS.[1]() != 2 { return 1 }
     return 0
 }
 ```
