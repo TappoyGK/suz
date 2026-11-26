@@ -186,9 +186,9 @@ fn main() -> u8 { return countdown[u8](0, 3) }
 fn substituted_requirements_and_call_only_types_cannot_hide_invalid_signatures() {
     for source in [
         "@needs T: +(T) -> i8\n@needs U: +(U) -> i64\nfn keep[T, U](a: T, b: U) -> U { return b }\nfn main() -> u8 { keep[i8, i8](1, 2)\nreturn 0 }",
-        "fnshape Action() -> void\nfn local[T]() -> void { fix p: mut T = panic `stop` }\nfn main() -> u8 { local[fn Action]()\nreturn 0 }",
-        "fnshape Action() -> void\nfn local[T]() -> void { fix p: T = panic `stop` }\nfn main() -> u8 { local[fn Action]()\nreturn 0 }",
-        "fnshape Action() -> void\nfn exit_now[T]() -> T { return panic `stop` }\nfn main() -> u8 { exit_now[fn Action]()\nreturn 0 }",
+        "fnshape Action() -> void\nfn local[T]() -> void { fix p: mut T = panic \"stop\" }\nfn main() -> u8 { local[fn Action]()\nreturn 0 }",
+        "fnshape Action() -> void\nfn local[T]() -> void { fix p: T = panic \"stop\" }\nfn main() -> u8 { local[fn Action]()\nreturn 0 }",
+        "fnshape Action() -> void\nfn exit_now[T]() -> T { return panic \"stop\" }\nfn main() -> u8 { exit_now[fn Action]()\nreturn 0 }",
         "fnshape Action() -> void\nfn unused[T](p: mut? T) -> void {}\nfn forward(f: fn Action) -> void { unused[fn Action](nil) }\nfn main() -> u8 { return 0 }",
     ] {
         assert!(suz::compile(source.as_bytes()).is_err(), "{source}");
@@ -524,7 +524,7 @@ fn inference_diagnostics_name_the_callee_type_parameters() {
             "conflicting types Left and Right for type parameter Item",
         ),
         (
-            "fn make[Result]() -> Result { panic `missing` }",
+            "fn make[Result]() -> Result { panic \"missing\" }",
             "fix n: i32 = make()",
             "cannot infer type parameter Result; specify all type arguments explicitly",
         ),

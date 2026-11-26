@@ -2,20 +2,20 @@ use crate::test_util::compile_and_run_c23;
 
 #[test]
 fn templates_preserve_constant_dependencies_and_nested_value_scopes() {
-    let source = r#"fix LABEL: symbol = `${PRODUCT} ${COUNT} ${READY}`
-fix PRODUCT = `Suz`
+    let source = r#"fix LABEL: symbol = "${PRODUCT} ${COUNT} ${READY}"
+fix PRODUCT = "Suz"
 fix COUNT: u8 = 3
 fix READY = true
 struct Label { value: symbol }
 fix ITEM = Label { value: LABEL }
-fix SAME = ITEM == Label { value: `Suz 3 true` }
+fix SAME = ITEM == Label { value: "Suz 3 true" }
 fn main() -> u8 {
     if not SAME { return 1 }
     fix count: u8 = 2
-    fix first: symbol = `${textbuf `nested ${count}`}`
-    fix captured: symbol = expr { `${count}` }
-    if first != `nested 2` { return 3 }
-    if captured != `2` { return 2 }
+    fix first: symbol = "${textbuf "nested ${count}"}"
+    fix captured: symbol = expr { "${count}" }
+    if first != "nested 2" { return 3 }
+    if captured != "2" { return 2 }
     return 0
 }"#;
     let result = compile_and_run_c23(source, "text.suz");
@@ -31,27 +31,27 @@ fn main() -> u8 {
 fn template_contents_keep_diagnostics_and_scope_checks() {
     for (source, rule) in [
         (
-            "fix A = `${B}`\nfix B = `${A}`\nfn main() -> u8 { return 0 }",
+            "fix A = \"${B}\"\nfix B = \"${A}\"\nfn main() -> u8 { return 0 }",
             "const.initializer",
         ),
         ("fn main() -> u8 { fix text = 1\nreturn 0 }", "src.ident"),
         (
-            "fn main() -> u8 { fix value = `${expr { return 1 }}`\nreturn 0 }",
+            "fn main() -> u8 { fix value = \"${expr { return 1 }}\"\nreturn 0 }",
             "expr.jump-prohibited",
         ),
         (
-            "fn main() -> u8 { var n = 2\nfor i in 0..<`${n}` { n += 1 }\nreturn 0 }",
+            "fn main() -> u8 { var n = 2\nfor i in 0..<\"${n}\" { n += 1 }\nreturn 0 }",
             "for.bound-reference",
         ),
         (
-            "fix VALUE = `${1 / 0}`\nfn main() -> u8 { return 0 }",
+            "fix VALUE = \"${1 / 0}\"\nfn main() -> u8 { return 0 }",
             "arith.div-zero-always",
         ),
     ] {
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert!(error.message().contains(rule), "{source}: {error:?}");
     }
-    let source = "fn main() -> u8 { fix value = `${1 + 2}`\nreturn 0 }";
+    let source = "fn main() -> u8 { fix value = \"${1 + 2}\"\nreturn 0 }";
     let result =
         suz::compile_with_source_name(source.as_bytes(), suz::ArithmeticMode::Warn, "text.suz")
             .unwrap();
@@ -75,9 +75,9 @@ fn float_templates(values: impl IntoIterator<Item = (String, &'static str)>) {
             literal
         };
         source.push_str(&format!(
-            "fix VALUE_{index}: {ty} = {literal}\nfix SAVED_{index} = `${{VALUE_{index}}}`\n"
+            "fix VALUE_{index}: {ty} = {literal}\nfix SAVED_{index} = \"${{VALUE_{index}}}\"\n"
         ));
-        body.push_str(&format!("{{\nfix dynamic = VALUE_{index}\nfix rendered: symbol = `${{dynamic}}`\nif SAVED_{index} != rendered {{ log info `mismatch {index}: ${{SAVED_{index}}} ${{dynamic}}`\nreturn 1 }}\n}}\n"));
+        body.push_str(&format!("{{\nfix dynamic = VALUE_{index}\nfix rendered: symbol = \"${{dynamic}}\"\nif SAVED_{index} != rendered {{ log info \"mismatch {index}: ${{SAVED_{index}}} ${{dynamic}}\"\nreturn 1 }}\n}}\n"));
     }
     body.push_str("return 0\n}\n");
     source.push_str(&body);

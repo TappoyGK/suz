@@ -7,8 +7,8 @@ struct Player { pos: Point, name: symbol, view: text }
 struct Wide { x: i64 }
 fix RIGHT = ORIGIN with { x: 1 }
 fix ORIGIN = Point { x: 0, y: 2 }
-fix PLAYER = Player { pos: RIGHT, name: `old`, view: `abc`.[:] }
-fix UPDATED = PLAYER with { pos: RIGHT with { y: 3 }, name: `new` }
+fix PLAYER = Player { pos: RIGHT, name: "old", view: "abc".[:] }
+fix UPDATED = PLAYER with { pos: RIGHT with { y: 3 }, name: "new" }
 struct State { point: Point, trace: i32 }
 fn base(state: mut State) -> Point { state#trace = state.trace * 10 + 1
     return state.point }
@@ -28,16 +28,16 @@ fn main() -> u8 {
     fix x: u8 = 8
     fix chained = ORIGIN with { x } with { y: 4 }
     if chained.x != 8 || chained.y != 4 || ORIGIN.y != 2 { return 3 }
-    fix nested = PLAYER with { pos: PLAYER.pos with { y: 3 }, name: `new` }
-    if nested != UPDATED || PLAYER.pos.y != 2 || PLAYER.name != `old` { return 4 }
+    fix nested = PLAYER with { pos: PLAYER.pos with { y: 3 }, name: "new" }
+    if nested != UPDATED || PLAYER.pos.y != 2 || PLAYER.name != "old" { return 4 }
     var copy = nested
     copy.pos#x = 100
     if nested.pos.x != 1 { return 5 }
     if not accepts(ORIGIN with { x }) || (ORIGIN with { x }).x != 8 { return 6 }
     fix direct = ORIGIN with { x: 9 }.x
     if generic(7).x != 7 || direct != 9 { return 7 }
-    fix sliced = PLAYER with { name: `xyz` }.name.[1:] or ``
-    if sliced != `yz` || nested.view != `abc` { return 8 }
+    fix sliced = PLAYER with { name: "xyz" }.name.[1:] or ""
+    if sliced != "yz" || nested.view != "abc" { return 8 }
     fix block = expr { ORIGIN with { x } }
     fix branch = ifexpr x == 8 { block with { y: 7 } } else { ORIGIN }
     if branch.y != 7 { return 9 }
@@ -156,7 +156,7 @@ fn main() -> u8 {
         x,
         y,
     }
-    fix label: symbol = `original`
+    fix label: symbol = "original"
     fix boxed = Box { pair, label }
     pair#x = 4
     if boxed.pair.x != 3 || boxed.label != label { return 2 }
@@ -169,7 +169,7 @@ fn main() -> u8 {
         if index.i != i { return 4 }
     }
     // 文字列の中の省略形は名前参照にならず、従来どおり変換に失敗する。
-    fix input = `Pair { x, y }`
+    fix input = "Pair { x, y }"
     fix fallback = make(9, 9)
     if (input as Pair or fallback) != fallback { return 5 }
     fix view = input.[:]

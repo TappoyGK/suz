@@ -37,7 +37,7 @@ fn moved_binary_exports_bundled_sources_and_custom_environment_without_tools() {
     fs::copy(env!("CARGO_BIN_EXE_suz"), &binary).unwrap();
     fs::write(
         directory.0.join("input.suz"),
-        "fn main() -> u8 { log info `hello`\nreturn 7 }",
+        "fn main() -> u8 { log info \"hello\"\nreturn 7 }",
     )
     .unwrap();
     success(&emit(
@@ -198,7 +198,7 @@ fn exported_sources_build_independently_with_standard_and_custom_environments() 
     let binary = Path::new(env!("CARGO_BIN_EXE_suz"));
     fs::write(
         directory.0.join("input.suz"),
-        "fn main() -> u8 {\nfix fraction = 1.5\nfix yes = true\nlog info `${fraction} ${yes}`\nreturn 7\n}",
+        "fn main() -> u8 {\nfix fraction = 1.5\nfix yes = true\nlog info \"${fraction} ${yes}\"\nreturn 7\n}",
     )
     .unwrap();
     fs::write(
@@ -260,7 +260,7 @@ fn exported_symbol_pool_limits_preserve_units_defaults_and_full_u64_range() {
     let directory = TemporaryDirectory::new();
     fs::write(
         directory.0.join("input.suz"),
-        "fn main() -> u8 { fix value: symbol = `x`\nreturn 0 }",
+        "fn main() -> u8 { fix value: symbol = \"x\"\nreturn 0 }",
     )
     .unwrap();
     let binary = Path::new(env!("CARGO_BIN_EXE_suz"));
@@ -310,7 +310,7 @@ fn emitted_c_preserves_symbol_pool_limits() {
     let directory = TemporaryDirectory::new();
     fs::write(
         directory.0.join("input.suz"),
-        "fn main() -> u8 { fix value: symbol = `x`\nreturn 0 }",
+        "fn main() -> u8 { fix value: symbol = \"x\"\nreturn 0 }",
     )
     .unwrap();
     let binary = Path::new(env!("CARGO_BIN_EXE_suz"));

@@ -3,7 +3,7 @@ use suz::{ArithmeticMode, CompilationOptions};
 
 #[test]
 fn exact_arithmetic_preserves_large_intermediates_and_storage_boundaries() {
-    let source = r#"fn later() -> u8 { log warn `unexpected`
+    let source = r#"fn later() -> u8 { log warn "unexpected"
 return 1 }
 fn main() -> u8 {
     fix a: u8 = 200
@@ -22,9 +22,9 @@ fn main() -> u8 {
     fix zero: u8 = (a / (b % 1) + later()) or 3
     fix selected = matchexpr a + b { 300 => 4
         _ => 9 }
-    log info `${sum},${scaled},${narrow},${inner},${f},${rounded},${wrap},${negative},${cancel},${tiny},${zero},${selected}`
-    fix square: symbol = `${max * max}`
-    log info `${square}`
+    log info "${sum},${scaled},${narrow},${inner},${f},${rounded},${wrap},${negative},${cancel},${tiny},${zero},${selected}"
+    fix square: symbol = "${max * max}"
+    log info "${square}"
     return 0
 }"#;
     let out = compile_and_run_c23(source, "numeric.suz");
@@ -57,14 +57,14 @@ fn main() -> u8 {
     fix e = zero == -0.0
     fix g = zero < small
     fix h = max * max < huge
-    log info `${EXACT},${a},${b},${c},${d},${e},${g},${h}`
+    log info "${EXACT},${a},${b},${c},${d},${e},${g},${h}"
     fix j = i < nan
     fix k = i >= nan
     fix l = nan <= i
     fix m = nan != i
     fix n = i < inf
     fix o = -inf < minus
-    log info `${j},${k},${l},${m},${n},${o}`
+    log info "${j},${k},${l},${m},${n},${o}"
     return 0
 }"#;
     let out = compile_and_run_c23(source, "compare.suz");
@@ -189,7 +189,7 @@ fn main() -> u8 {
     fix single: f32 = small + 0.5
     fix explicit = (frame / frames) as f64 * unit
     fix intended = frame / frames * unit allow [diagnostic.integer-division-to-float: whole frames]
-    log info `${truncated},${fraction},${position},${single},${explicit},${intended}`
+    log info "${truncated},${fraction},${position},${single},${explicit},${intended}"
     return 0
 }"#;
     let warnings = suz::check_source(source.as_bytes(), ArithmeticMode::Default).unwrap();
@@ -223,11 +223,11 @@ fn main() -> u8 {
 #[test]
 fn exact_boundaries_agree_in_constants_and_runtime_conversions() {
     let source = r#"fix MAX: u64 = 18_446_744_073_709_551_615
-fix EXPECTED = `${MAX * MAX},${(MAX * MAX) as% u8},${(MAX * MAX) as f32},${(MAX * MAX) as f64 or 0.0}`
+fix EXPECTED = "${MAX * MAX},${(MAX * MAX) as% u8},${(MAX * MAX) as f32},${(MAX * MAX) as f64 or 0.0}"
 fn main() -> u8 {
     fix max: u64 = MAX
     fix min: i64 = -9_223_372_036_854_775_808
-    fix actual: symbol = `${max * max},${(max * max) as% u8},${(max * max) as f32},${(max * max) as f64 or 0.0}`
+    fix actual: symbol = "${max * max},${(max * max) as% u8},${(max * max) as f32},${(max * max) as f64 or 0.0}"
     fix negative = (min * max) as i64 or 7
     fix wrap = (min * max) as% i64
     fix kind = matchexpr max * max { MAX * MAX => 1
@@ -271,9 +271,9 @@ fn main() -> u8 {
     fix bad = narrow(1.0e300)
     var value: u16 = 255
     value += 1 as u8 or return 8
-    var view: text = `a`
-    view = `abc`.[0:1] or return 7
-    return ifexpr good == 1 && bad == 9 && value == 256 && view == `a` { 0 } else { 6 }
+    var view: text = "a"
+    view = "abc".[0:1] or return 7
+    return ifexpr good == 1 && bad == 9 && value == 256 && view == "a" { 0 } else { 6 }
 }"#;
     let output = compile_and_run_c23(source, "widen-return.suz");
     assert!(
@@ -298,7 +298,7 @@ fn widening_is_not_applied_to_loop_bounds_or_match_patterns() {
             "{source}: {err:?}"
         );
     }
-    for pattern in ["'a'", "Color.Red", "true", "1.0", "`a`"] {
+    for pattern in ["'a'", "Color.Red", "true", "1.0", "\"a\""] {
         for value_match in [false, true] {
             let arms = if value_match {
                 format!("fix result = matchexpr x + 1 {{ {pattern} => 1\n_ => 2 }}")

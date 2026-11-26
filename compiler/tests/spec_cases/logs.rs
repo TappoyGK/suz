@@ -13,14 +13,14 @@ fn logs_preserve_integer_boundaries_boolean_values_and_utf8_bytes() {
             "fix yes = true\nfix no = false\nfix selected = ifexpr low < high { 7 } else { 9 }\n",
         );
         let line = source.lines().count() + 1;
-        source.push_str("log info `値=${low},${high}; ${yes}/${no}; ${selected}`\n}\n");
+        source.push_str("log info \"値=${low},${high}; ${yes}/${no}; ${selected}\"\n}\n");
         expected.push_str(&format!(
             "info values.suz:{line}: 値={min},{max}; true/false; 7\n"
         ));
     }
     let line = source.lines().count() + 1;
-    source.push_str("log info `\\`\\\\\\$\\t\\r\\n`\nreturn 0\n}\n");
-    expected.push_str(&format!("info values.suz:{line}: `\\$\t\r\n\n"));
+    source.push_str("log info \"`\\\"\\\\\\$\\t\\r\\n\"\nreturn 0\n}\n");
+    expected.push_str(&format!("info values.suz:{line}: `\"\\$\t\r\n\n"));
     let directory = TemporaryDirectory::new();
     let path = directory.0.join("values.c");
     fs::write(
@@ -44,18 +44,20 @@ fn logs_preserve_integer_boundaries_boolean_values_and_utf8_bytes() {
 #[test]
 fn templates_validate_syntax_escapes_and_embedded_expressions() {
     for (body, rule) in [
-        ("log info `${}`", "symbol.interpolation"),
-        ("log info `${1 2}`", "symbol.interpolation"),
-        ("log info `bad\\q`", "symbol.escape"),
-        ("log info `first\nsecond`", "symbol.template-line"),
-        ("log info `${1 // comment}`", "symbol.template-line"),
-        ("log off `text`", "log.level"),
+        ("log info \"${}\"", "symbol.interpolation"),
+        ("log info \"${1 2}\"", "symbol.interpolation"),
+        ("log info \"bad\\q\"", "symbol.escape"),
+        ("log info \"bad\\`\"", "symbol.escape"),
+        ("log info `old`", "syntax.grammar"),
+        ("log info \"first\nsecond\"", "symbol.template-line"),
+        ("log info \"${1 // comment}\"", "symbol.template-line"),
+        ("log off \"text\"", "log.level"),
         ("log info 1", "log.syntax"),
         (
-            "fix n: u16 = 2\nlog info `${n as u8 or return 1}`",
+            "fix n: u16 = 2\nlog info \"${n as u8 or return 1}\"",
             "output.embed-value",
         ),
-        ("log info `a` log info `b`", "src.statement-end"),
+        ("log info \"a\" log info \"b\"", "src.statement-end"),
     ] {
         let source = format!("fn main() -> u8 {{\n{body}\nreturn 0\n}}\n");
         let error = suz::compile(source.as_bytes()).unwrap_err();
@@ -168,11 +170,11 @@ fn show(parameter: u8) -> void {
     var info: u8 = 2
     info = 3
     fix warn = Player { pos: Position { x: 4 } }
-    log debug `${debug} ${info} ${warn.pos.x} ${parameter}`
-    log info `${CONSTANT} ${State.Ready} ${Problem.Missing}`
-    for i in 0..<1 { log warn `${i}` }
-    invoke(fn [debug, var info]() -> void { log error `${debug} ${info}` })
-    log info `continued`
+    log debug "${debug} ${info} ${warn.pos.x} ${parameter}"
+    log info "${CONSTANT} ${State.Ready} ${Problem.Missing}"
+    for i in 0..<1 { log warn "${i}" }
+    invoke(fn [debug, var info]() -> void { log error "${debug} ${info}" })
+    log info "continued"
 }
 fn main() -> u8 {
     show(5)
@@ -226,7 +228,7 @@ fn output_interpolations_reject_computation_for_logs_and_both_panic_forms() {
         "len message",
         "point with { x: 2 }",
         "Point { x: 2 }",
-        "`nested`",
+        "\"nested\"",
         "ifexpr true { 1 } else { 2 }",
         "matchexpr n { _ => 1 }",
         "expr { 1 }",
@@ -243,7 +245,7 @@ fn output_interpolations_reject_computation_for_logs_and_both_panic_forms() {
             "risky() or panic",
         ] {
             let source = format!(
-                "{declarations}fn main() -> u8 {{ fix n = 1\nfix message: symbol = `x`\nfix point = Point {{ x: 1 }}\nfix f: static fn Action = fn read\n{output} `${{{expression}}}`\nreturn 0 }}"
+                "{declarations}fn main() -> u8 {{ fix n = 1\nfix message: symbol = \"x\"\nfix point = Point {{ x: 1 }}\nfix f: static fn Action = fn read\n{output} \"${{{expression}}}\"\nreturn 0 }}"
             );
             let error = suz::compile(source.as_bytes()).unwrap_err().to_string();
             assert!(error.contains("[output.embed-value]"), "{source}\n{error}");
@@ -251,7 +253,7 @@ fn output_interpolations_reject_computation_for_logs_and_both_panic_forms() {
     }
     // 通常のsymbolテンプレートは、計算した値を整形する用途を引き続き持つ。
     let source = format!(
-        "{declarations}fn main() -> u8 {{ fix message: symbol = `${{read() + 2}}`\nlog info `${{message}}`\nreturn 0 }}"
+        "{declarations}fn main() -> u8 {{ fix message: symbol = \"${{read() + 2}}\"\nlog info \"${{message}}\"\nreturn 0 }}"
     );
     let output = crate::test_util::compile_and_run_c23(&source, "symbol.suz");
     assert_eq!(output.status.code(), Some(0), "{output:?}");
@@ -263,7 +265,7 @@ fn c_string_trigraph_sequences_preserve_output_bytes() {
     // Cの三文字表記9種類を、同じ変換を使う各出力経路で確認する。
     let text = "日本語 ??= ??( ??) ??/ ??' ??< ??> ??! ??-";
     let source = format!(
-        "error Err {{ Bad }}\nfn send() -> void or Err {{ fail Err.Bad }}\nfn main() -> u8 {{\nsend() or ignore [{text}]\nfix value = `{text}`\nlog info `${{value}}`\nlog info `{text}`\npanic `{text}`\n}}"
+        "error Err {{ Bad }}\nfn send() -> void or Err {{ fail Err.Bad }}\nfn main() -> u8 {{\nsend() or ignore [{text}]\nfix value = \"{text}\"\nlog info \"${{value}}\"\nlog info \"{text}\"\npanic \"{text}\"\n}}"
     );
     let c = suz::compile_with_options(
         source.as_bytes(),

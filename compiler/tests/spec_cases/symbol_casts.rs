@@ -28,8 +28,8 @@ fn symbol_integer_casts_check_every_width_in_constants_and_at_runtime() {
                 [("checked", "as", expected), ("wrapped", "as%", wrapped)]
             {
                 let name = format!("{ty}_{mode}_{index}").to_ascii_uppercase();
-                source.push_str(&format!("fix {name} = `{value}` {operator} {ty} or 7\n"));
-                body.push_str(&format!("{{\nfix input = `{value}`\nfix actual = input {operator} {ty} or 7\nif actual != {expected} || {name} != {expected} {{ return 1 }}\n}}\n"));
+                source.push_str(&format!("fix {name} = \"{value}\" {operator} {ty} or 7\n"));
+                body.push_str(&format!("{{\nfix input = \"{value}\"\nfix actual = input {operator} {ty} or 7\nif actual != {expected} || {name} != {expected} {{ return 1 }}\n}}\n"));
             }
         }
     }
@@ -62,31 +62,31 @@ fn symbol_casts_reject_incomplete_formats_and_preserve_lazy_constant_evaluation(
         "１",
     ];
     let mut source = String::from(
-        r#"fix GOOD = `1` as u8 or (1 / (0 as u8))
-fix BAD = `bad` as u8 or 7
-fix WRAPPED = `-1` as% u8 or (1 / (0 as u8))
-fix YES = `true` as bool or false
-fix NO = `false` as bool or true
+        r#"fix GOOD = "1" as u8 or (1 / (0 as u8))
+fix BAD = "bad" as u8 or 7
+fix WRAPPED = "-1" as% u8 or (1 / (0 as u8))
+fix YES = "true" as bool or false
+fix NO = "false" as bool or true
 fn main() -> u8 {
     if GOOD != 1 || BAD != 7 || WRAPPED != 255 || not YES || NO { return 1 }
-    fix separated = `0_0_1_2` as u8 or 7
-    fix minus_zero = `-0` as u8 or 7
-    fix signed_zero = `-0` as i8 or 7
+    fix separated = "0_0_1_2" as u8 or 7
+    fix minus_zero = "-0" as u8 or 7
+    fix signed_zero = "-0" as i8 or 7
     if separated != 12 || minus_zero != 7 || signed_zero != 0 { return 2 }
 "#,
     );
     for input in invalid {
         for operator in ["as", "as%"] {
-            source.push_str(&format!("{{\nfix input = `{input}`\nfix result = input {operator} i64 or 7\nif result != 7 {{ return 3 }}\n}}\n"));
+            source.push_str(&format!("{{\nfix input = \"{input}\"\nfix result = input {operator} i64 or 7\nif result != 7 {{ return 3 }}\n}}\n"));
         }
     }
     for input in ["true ", "True", "TRUE", "1", "0", "false\\0", "", " false"] {
-        source.push_str(&format!("{{\nfix input = `{input}`\nfix a = input as bool or false\nfix b = input as bool or true\nif a || not b {{ return 4 }}\n}}\n"));
+        source.push_str(&format!("{{\nfix input = \"{input}\"\nfix a = input as bool or false\nfix b = input as bool or true\nif a || not b {{ return 4 }}\n}}\n"));
     }
     // マシン整数を超える桁数を使い、結果は独立に求める。
     // 10^128は2^64で割り切れるので、最後の桁が剰余全体になる。
     let large = format!("1{}1", "0".repeat(127));
-    source.push_str(&format!("fix large = `{large}` as% u64 or 7\nfix negative = `-{large}` as% i64 or 7\nif large != 1 || negative != -1 {{ return 5 }}\n"));
+    source.push_str(&format!("fix large = \"{large}\" as% u64 or 7\nfix negative = \"-{large}\" as% i64 or 7\nif large != 1 || negative != -1 {{ return 5 }}\n"));
     source.push_str("return 0\n}\n");
     check_program(&source);
 }
@@ -99,7 +99,7 @@ fn symbol_cast_handlers_obey_type_and_control_constraints() {
             "expr.cast-wrap-handler-syntax",
         ),
         (
-            "fn main() -> u8 { fix n = `1` as u8 or false\nreturn n }",
+            "fn main() -> u8 { fix n = \"1\" as u8 or false\nreturn n }",
             "type.expected",
         ),
         (
@@ -107,19 +107,19 @@ fn symbol_cast_handlers_obey_type_and_control_constraints() {
             "expr.as",
         ),
         (
-            "fn main() -> u8 { fix n = `1` as text or ``\nreturn 0 }",
+            "fn main() -> u8 { fix n = \"1\" as text or \"\"\nreturn 0 }",
             "symbol.cast",
         ),
         (
-            "fn main() -> u8 { fix n = (`1` as% u8 or return 1) + 1\nreturn n }",
+            "fn main() -> u8 { fix n = (\"1\" as% u8 or return 1) + 1\nreturn n }",
             "expr.or-return-position",
         ),
         (
-            "fn main() -> u8 { fix n = expr { `1` as% u8 or return 1 }\nreturn n }",
+            "fn main() -> u8 { fix n = expr { \"1\" as% u8 or return 1 }\nreturn n }",
             "expr.jump-prohibited",
         ),
         (
-            "fix N = `bad` as% u8 or (1 / 0)\nfn main() -> u8 { return N }",
+            "fix N = \"bad\" as% u8 or (1 / 0)\nfn main() -> u8 { return N }",
             "arith.div-zero-always",
         ),
     ] {
@@ -137,8 +137,8 @@ fn accumulate(value: symbol) -> u8 {
     return count
 }
 fn main() -> u8 {
-    if not parse(`true`) || parse(`false`) || parse(`bad`) { return 1 }
-    if accumulate(`257`) != 3 || accumulate(`bad`) != 7 { return 2 }
+    if not parse("true") || parse("false") || parse("bad") { return 1 }
+    if accumulate("257") != 3 || accumulate("bad") != 7 { return 2 }
     return 0
 }"#,
     );

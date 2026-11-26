@@ -4,7 +4,7 @@ use std::process::Command;
 #[test]
 fn text_buffers_omit_empty_literal_fragments() {
     // 実行結果では見えない、断片ビューの初期化と走査の余分な回数を検出する。
-    for (template, fragments) in [("`a${n}`", 2), ("`${n}`", 1), ("``", 0)] {
+    for (template, fragments) in [("\"a${n}\"", 2), ("\"${n}\"", 1), ("\"\"", 0)] {
         let source = format!(
             "fn build(n: i32) -> text {{ return textbuf {template} }}\nfn main() -> u8 {{ return 0 }}"
         );
@@ -40,20 +40,20 @@ fn next(p: mut Counter) -> len_t {
 fn copy(t: text) -> text { return textbuf t }
 fn main() -> u8 {
     fix p = new Counter { n: 0 }
-    fix message = textbuf[next(p)] (`あ${next(p)}😀\0${next(p)}`)
-    if message != `あ2😀\03` { return 1 }
+    fix message = textbuf[next(p)] ("あ${next(p)}😀\0${next(p)}")
+    if message != "あ2😀\03" { return 1 }
     if p.n != 3 { return 2 }
-    fix view = message.[1:4] or ``
+    fix view = message.[1:4] or ""
     fix copied = copy(view)
-    if copied != `2😀\0` { return 3 }
+    if copied != "2😀\0" { return 3 }
     fix descriptor = new message
     if .descriptor != message { return 4 }
-    fix empty = textbuf[0] ``
+    fix empty = textbuf[0] ""
     if len empty != 0 { return 5 }
     fix small: i64 = -9223372036854775808
     fix large: u64 = 18446744073709551615
-    fix number = textbuf `${small} ${large} ${true} ${'😀'} ${1.25}`
-    if number != `-9223372036854775808 18446744073709551615 true 😀 1.25` { return 6 }
+    fix number = textbuf "${small} ${large} ${true} ${'😀'} ${1.25}"
+    if number != "-9223372036854775808 18446744073709551615 true 😀 1.25" { return 6 }
     return 0
 }"#;
     let (_dir, path) = build_with_environment(
@@ -74,7 +74,7 @@ int main(void) {
 fn parsed_text_is_saved_only_after_validation_and_has_exact_capacity() {
     // C側から使用量とメタ情報を観測する。言語へ検査専用のAPIを追加しない。
     let source = r#"struct Item { body: text, number: u8 }
-fn parse(t: text) -> Item { return t as Item or Item { body: `fallback`, number: 0 } }
+fn parse(t: text) -> Item { return t as Item or Item { body: "fallback", number: 0 } }
 fn reserve(t: text, n: len_t) -> text { return textbuf[n] t }
 fn main() -> u8 { return 0 }
 "#;
@@ -85,14 +85,14 @@ int main(void) {
     assert(suz_program() == 0);
     suz_arena_init(128, 128, 0, "driver", 1, 1);
     size_t before = text_calls;
-    const char invalid[] = "Item { body: `not saved`, number: 256 }";
+    const char invalid[] = "Item { body: \"not saved\", number: 256 }";
     suz_text_view bad = {invalid, sizeof(invalid) - 1, sizeof(invalid) - 1, NULL};
     suz_struct_0 failed = suz_fn_0(bad);
     (void)failed;
     assert(suz_symbol_pool_used() == 0 && text_calls == before);
     size_t calls = text_calls;
     size_t used = suz_arena_position.used;
-    const char valid[] = "Item { body: `a\\0b`, number: 1 }";
+    const char valid[] = "Item { body: \"a\\0b\", number: 1 }";
     suz_text_view input = {valid, sizeof(valid) - 1, sizeof(valid) - 1, NULL};
     suz_struct_0 item = suz_fn_0(input);
     (void)item;
@@ -129,7 +129,7 @@ fn append_reuses_tail_capacity_and_copies_diverging_views_once() {
 }
 fn formatted(t: text, n: i32) -> text {
     var result = t
-    result <- `${n}`
+    result <- "${n}"
     return result
 }
 fn main() -> u8 { return 0 }
@@ -193,7 +193,7 @@ fn append_checks_length_growth_and_storage_overflow_before_copying() {
     // 巨大な文字列を実際に確保せず、Cの長さ表現の境界を直接与える。
     // どの経路も内容へアクセスする前に失敗しなければならない。
     let (_dir, path) = build_with_environment(
-        "fn main() -> u8 { fix t = textbuf ``\n return 0 }",
+        "fn main() -> u8 { fix t = textbuf \"\"\n return 0 }",
         r#"
 int main(int argc, char **argv) {
     assert(argc == 2);

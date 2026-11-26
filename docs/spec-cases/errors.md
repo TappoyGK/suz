@@ -10,7 +10,7 @@
 error ReadError { Missing, Denied }
 fn main() -> u8 {
     fix e = ReadError.Denied
-    log info `${e}`
+    log info "${e}"
     return matchexpr e {
         ReadError.Missing => 1
         ReadError.Denied => 0

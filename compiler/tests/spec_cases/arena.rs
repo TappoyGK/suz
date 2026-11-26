@@ -418,7 +418,7 @@ fn recursive(n: i64) -> mut? i64 {
     fix p = new n
     if n == 0 { return p }
     fix q = recursive(n -% 1)
-    if .p != n { panic `recursive allocation overwrote its caller` }
+    if .p != n { panic "recursive allocation overwrote its caller" }
     return q
 }
 fn returned() -> i64 {
@@ -602,10 +602,10 @@ fn arena_rejects_pointer_conversions_captures_and_aggregate_operations() {
         "fix n = p as i64",
         "fix q = 1 as mut? i32",
         "fix n = p.[0]",
-        "log info `${p}`",
+        "log info \"${p}\"",
         "fix n = Box { p: p } == Box { p: p }",
-        "fix box = Box { p: p }\nlog info `${box}`",
-        "fix box = `p: 0` as Box or Box { p: p }",
+        "fix box = Box { p: p }\nlog info \"${box}\"",
+        "fix box = \"p: 0\" as Box or Box { p: p }",
         "let q = p { q = p }",
         "let q = p {}\nfix n = .q",
         "let q = 1 {}",
@@ -680,8 +680,8 @@ fn main() -> u8 {
         if .n != 8 { return 1 }
         fix flag = new true
         if not .flag { return 2 }
-        fix word = new `hello`
-        if .word != `hello` { return 3 }
+        fix word = new "hello"
+        if .word != "hello" { return 3 }
         if generic(5 as u16) != 5 { return 4 }
     }
     return 0

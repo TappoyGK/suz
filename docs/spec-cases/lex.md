@@ -268,7 +268,7 @@ fn main() -> u8 {
 ```suz
 fn main() -> u8 {
     fix info: u8 = 3
-    log info `${info}`
+    log info "${info}"
     return 0
 }
 ```
@@ -852,7 +852,7 @@ fn main() -> u8 {
     fix negative_inf = -inf
     fix not_number = nan
     fix infinity = inf
-    log info `${rounded} ${tiny} ${not_number} ${infinity} ${negative_inf}`
+    log info "${rounded} ${tiny} ${not_number} ${infinity} ${negative_inf}"
     return ifexpr nan != nan && not (nan == nan) { 0 } else { 1 }
 }
 ```
@@ -931,11 +931,11 @@ fn main() -> u8 {
     fix same = 'é' == '\u{E9}'
     fix kana = 'あ'
     fix emoji = '\u{1f600}'
-    log info `${same} ${kana} ${emoji}`
+    log info "${same} ${kana} ${emoji}"
     fix brace = '}'
     fix quote = '\''
     fix slash = '\\'
-    log info `${brace} ${quote} ${slash}`
+    log info "${brace} ${quote} ${slash}"
     return 0
 }
 ```

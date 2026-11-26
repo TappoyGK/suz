@@ -1045,7 +1045,7 @@ fn main() -> u8 {
 
 ```suz
 fn mark(n: i32) -> i32 {
-    log info `${n}`
+    log info "${n}"
     return n
 }
 
@@ -1080,7 +1080,7 @@ info expr-027.suz:2: 2
 
 ```suz
 fn probe() -> bool {
-    log info `probe`
+    log info "probe"
     return true
 }
 
@@ -1364,7 +1364,7 @@ fn main() -> u8 {
 
 ```suz
 fn mark(value: i32) -> i32 {
-    log info `${value}`
+    log info "${value}"
     return value
 }
 
@@ -1398,7 +1398,7 @@ info expr-038.suz:2: 3
 
 ```suz
 fn probe() -> i32 {
-    log info `probe`
+    log info "probe"
     return 4
 }
 
@@ -1451,7 +1451,7 @@ fn main() -> u8 {
 
 ```suz
 fn probe() -> f64 {
-    log info `probe`
+    log info "probe"
     return 1.0
 }
 
@@ -1569,11 +1569,11 @@ fn main() -> u8 {
     fix ch = byte as char
     fix narrow: u8 = 'あ' as u8 or 7
     fix code = ch as u32
-    log info `${ch} ${code} ${narrow}`
+    log info "${ch} ${code} ${narrow}"
     fix surrogate = scalar(55296)
     fix negative = scalar(-1)
     fix above = scalar(1114112)
-    log info `${surrogate} ${negative} ${above}`
+    log info "${surrogate} ${negative} ${above}"
     return 0
 }
 ```
@@ -1654,12 +1654,12 @@ rawはconstではなく、変換は型で判定すると失敗しうる。
 
 ```suz
 fn source() -> i64 {
-    log info `source`
+    log info "source"
     return 7
 }
 
 fn fallback() -> u8 {
-    log info `fallback`
+    log info "fallback"
     return 9
 }
 
@@ -1689,12 +1689,12 @@ info expr-047.suz:2: source
 
 ```suz
 fn source() -> i64 {
-    log info `source`
+    log info "source"
     return 300
 }
 
 fn fallback() -> u8 {
-    log info `fallback`
+    log info "fallback"
     return 9
 }
 
@@ -1757,10 +1757,10 @@ fn main() -> u8 {
 fn main() -> u8 {
     fix raw: i64 = 300
     fix count = raw as u8 or return expr {
-        log info `conversion failed`
+        log info "conversion failed"
         7
     }
-    log info `count=${count}`
+    log info "count=${count}"
     return 0
 }
 ```
@@ -1789,7 +1789,7 @@ info expr-050.suz:4: conversion failed
 fn main() -> u8 {
     fix raw: i64 = 3
     fix count = raw as u8 or return expr {
-        log info `conversion failed`
+        log info "conversion failed"
         7
     }
     return count
@@ -1813,12 +1813,12 @@ fn main() -> u8 {
 ```suz
 fn report(raw: i64) -> void {
     fix count = raw as u8 or return
-    log info `count=${count}`
+    log info "count=${count}"
 }
 
 fn main() -> u8 {
     report(300)
-    log info `done`
+    log info "done"
     return 0
 }
 ```
@@ -2113,17 +2113,17 @@ fn main() -> u8 {
 
 ```suz
 fn left_value() -> u8 {
-    log info `left`
+    log info "left"
     return 250
 }
 
 fn right_value() -> u8 {
-    log info `right`
+    log info "right"
     return 10
 }
 
 fn alternative() -> u8 {
-    log info `alternative`
+    log info "alternative"
     return 7
 }
 
@@ -2318,11 +2318,11 @@ fn main() -> u8 {
 ```suz
 fn parse(input: symbol) -> char { return input as char or '?' }
 fn main() -> u8 {
-    fix emoji = parse(`😀`)
-    fix empty = parse(``)
-    fix multiple = parse(`ab`)
-    fix quoted = parse(`'a'`)
-    log info `${emoji} ${empty} ${multiple} ${quoted}`
+    fix emoji = parse("😀")
+    fix empty = parse("")
+    fix multiple = parse("ab")
+    fix quoted = parse("'a'")
+    log info "${emoji} ${empty} ${multiple} ${quoted}"
     return 0
 }
 ```
@@ -2349,9 +2349,9 @@ info expr-072.suz:7: 😀 ? ? ?
 struct Letter { ch: char }
 fn read(input: symbol) -> Letter { return input as Letter or Letter { ch: '?' } }
 fn main() -> u8 {
-    fix good = read(`Letter { ch: '\\u{1F600}' }`)
-    fix bad = read(`Letter { ch: 'ab' }`)
-    log info `${good.ch} ${bad.ch}`
+    fix good = read("Letter { ch: '\\u{1F600}' }")
+    fix bad = read("Letter { ch: 'ab' }")
+    log info "${good.ch} ${bad.ch}"
     return 0
 }
 ```

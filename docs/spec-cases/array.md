@@ -147,7 +147,7 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
-fn rhs() -> i64 { panic `right operand evaluated` }
+fn rhs() -> i64 { panic "right operand evaluated" }
 fn main() -> u8 {
     fix a = new #[0; 2]
     a#[2] = rhs()
@@ -264,7 +264,7 @@ fn main() -> u8 {
 
 ```suz
 fn same(a: #[i64; n], b: #[i64; n]) -> void {
-    panic `body entered`
+    panic "body entered"
 }
 fn main() -> u8 {
     same(new #[0; 2], new #[0; 3])
@@ -324,7 +324,7 @@ fix PALETTE: .[i32] = .[17, 18, 19]
 fix COUNT = len PALETTE
 fix FIRST = PALETTE.[0]
 fn color(n: u32) -> i32 { return PALETTE.[n % len PALETTE] }
-fn first[T](a: .[T]) -> T { return a.[0] or panic `empty array` }
+fn first[T](a: .[T]) -> T { return a.[0] or panic "empty array" }
 fnshape Reader(.[i32], u32) -> i32
 fn read(a: .[i32; n], i: u32) -> i32 { return a.[i] or -1 }
 fn main() -> u8 {
@@ -402,16 +402,16 @@ fn main() -> u8 {
 struct Label { caption: text, entries: .[i32] }
 struct Node { children: .[Node] }
 fix NUMBERS: .[i32] = .[2, 4]
-fix LABELS: .[Label] = .[Label { caption: `開始`, entries: NUMBERS }, Label { caption: `終了`, entries: .[6 as i32] }]
-fix SYMBOLS: .[symbol] = .[`alpha`, `beta`]
+fix LABELS: .[Label] = .[Label { caption: "開始", entries: NUMBERS }, Label { caption: "終了", entries: .[6 as i32] }]
+fix SYMBOLS: .[symbol] = .["alpha", "beta"]
 fix FLOATS: .[f64] = .[inf; 2]
 fix MIXED: .[f64] = .[1.0, nan, inf]
 fn labels() -> .[Label] { return LABELS }
 fn read(a: .[Label], i: u32) -> Label { return a.[i] or LABELS.[0] }
 fn main() -> u8 {
-    var caption: text = ``
+    var caption: text = ""
     arena { caption = read(labels(), 1).caption }
-    if caption != `終了` { return 1 }
+    if caption != "終了" { return 1 }
     fix root = new Node { children: .[] }
     if len root.children != 0 { return 5 }
     fix values = labels()
@@ -420,7 +420,7 @@ fn main() -> u8 {
     if sum != 12 { return 2 }
     fix symbols = SYMBOLS
     var count: i32 = 0
-    for item in symbols { if item == `beta` { count += 1 } }
+    for item in symbols { if item == "beta" { count += 1 } }
     if count != 1 { return 3 }
     fix floats = FLOATS
     for item in floats { if item != inf { return 4 } }
@@ -671,7 +671,7 @@ fn main() -> u8 {
 ```suz
 fn main() -> u8 {
     fix a: .[i32] = .[1]
-    log info `v=${a}`
+    log info "v=${a}"
     return 0
 }
 ```
@@ -699,7 +699,7 @@ fn main() -> u8 {
 ```suz
 fix A: .[i32] = .[1]
 fn main() -> u8 {
-    fix message = textbuf `v=${A}`
+    fix message = textbuf "v=${A}"
     return 0
 }
 ```
@@ -810,7 +810,7 @@ fn main() -> u8 {
 
 ```suz
 struct Hold { values: .[i32] }
-fn first[T](a: .[T]) -> T { return a.[0] or panic `empty` }
+fn first[T](a: .[T]) -> T { return a.[0] or panic "empty" }
 fn view(a: #[i32]) -> .[i32] { return a }
 fn sum(a: .[i32; n]) -> i32 {
     var total: i32 = 0
@@ -857,8 +857,8 @@ fn view(a: #[i32; _, _]) -> .[i32; _, _] { return a }
 fn main() -> u8 {
     fix a: #[i32; _, _] = new #[[1, 2], [3, 4]]
     fix read = view(a)
-    fix row = read.[1] or panic `row`
-    fix sliced = row.[0:2] or panic `slice`
+    fix row = read.[1] or panic "row"
+    fix sliced = row.[0:2] or panic "slice"
     a.[1]#[0] = 9
     var total: i32 = 0
     rev value in sliced { total += value }
@@ -914,7 +914,7 @@ fn main() -> u8 {
 
 ```suz
 struct Item { value: i32 }
-fn first(a: .[mut Item]) -> mut Item { return a.[0] or panic `empty` }
+fn first(a: .[mut Item]) -> mut Item { return a.[0] or panic "empty" }
 fn main() -> u8 {
     var saved: mut? Item = nil
     arena {

@@ -62,14 +62,14 @@ fn dimension_entry_guards_apply_to_function_values_closures_and_generic_instance
         "same(a, b)",
         "fix f: static fn Same = fn same\nf(a, b)",
         "invoke(fn same, a, b)",
-        "invoke(fn [](a: #[i64; n], b: #[i64; n]) -> void { panic `BODY` }, a, b)",
+        "invoke(fn [](a: #[i64; n], b: #[i64; n]) -> void { panic \"BODY\" }, a, b)",
         "generic(a, b)",
     ] {
         let source = format!(
             r#"
 fnshape Same(#[i64], #[i64]) -> void
-fn same(a: #[i64; n], b: #[i64; n]) -> void {{ panic `BODY` }}
-fn generic[T](a: #[T; n], b: #[T; n]) -> void {{ panic `BODY` }}
+fn same(a: #[i64; n], b: #[i64; n]) -> void {{ panic "BODY" }}
+fn generic[T](a: #[T; n], b: #[T; n]) -> void {{ panic "BODY" }}
 fn invoke(f: fn Same, a: #[i64], b: #[i64]) -> void {{ f(a, b) }}
 fn main() -> u8 {{
     fix a = new #[0; 2]
@@ -590,11 +590,11 @@ fn assignments_inside_expressions_and_conditional_fallbacks_do_not_forge_bounds_
         // 指摘 2（F21）: or の代替値内の or panic は、外側のアクセスが成功した場合に評価されない。
         (
             "fallback or panic read does not prove outer read",
-            "fn f(a: .[i32], b: .[i32], i: i64) -> i32 {\n    fix v = b.[0] or (a.[i] or panic `oob`)\n    return v + a.[i]\n}\nfn main() -> u8 { return 0 }",
+            "fn f(a: .[i32], b: .[i32], i: i64) -> i32 {\n    fix v = b.[0] or (a.[i] or panic \"oob\")\n    return v + a.[i]\n}\nfn main() -> u8 { return 0 }",
         ),
         (
             "fallback or panic slice does not prove outer slice",
-            "fn f(a: .[i32], b: .[i32], s: i64, e: i64) -> i64 {\n    fix v = b.[0:1] or (a.[s:e] or panic `oob`)\n    fix w = a.[s:e]\n    return len v as i64 + len w as i64\n}\nfn main() -> u8 { return 0 }",
+            "fn f(a: .[i32], b: .[i32], s: i64, e: i64) -> i64 {\n    fix v = b.[0:1] or (a.[s:e] or panic \"oob\")\n    fix w = a.[s:e]\n    return len v as i64 + len w as i64\n}\nfn main() -> u8 { return 0 }",
         ),
     ] {
         let error = suz::compile(source.as_bytes()).unwrap_err();

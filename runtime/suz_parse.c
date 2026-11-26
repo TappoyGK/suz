@@ -103,12 +103,12 @@ bool suz_parse_bool(const char *bytes, uint64_t length, bool *output) {
 
 bool suz_parse_string_counts(const char *bytes, uint64_t length, uint64_t *consumed,
                        char *output, uint64_t *decoded_length, uint64_t *scalars) {
-    if (!length || bytes[0] != '`') return false;
+    if (!length || bytes[0] != '"') return false;
     uint64_t written = 0;
     *scalars = 0;
     for (uint64_t index = 1; index < length; ++index) {
         char c = bytes[index];
-        if (c == '`') {
+        if (c == '"') {
             *consumed = index + 1;
             *decoded_length = written;
             return true;
@@ -122,7 +122,7 @@ bool suz_parse_string_counts(const char *bytes, uint64_t length, uint64_t *consu
                 case 'n': c = '\n'; break;
                 case 'r': c = '\r'; break;
                 case 't': c = '\t'; break;
-                case '\\': case '`': case '$': c = bytes[index]; break;
+                case '\\': case '"': case '$': c = bytes[index]; break;
                 default: return false;
             }
         }

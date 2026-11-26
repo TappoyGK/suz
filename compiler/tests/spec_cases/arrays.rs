@@ -180,7 +180,7 @@ fn array_failures_precede_later_indices_and_assignment_values() {
     ];
     let sources = cases.iter().map(|(body, _)| {
         format!(
-            "fn rhs() -> i64 {{ panic `RHS evaluated` }}\nfn main() -> u8 {{ fix a = new #[0; 2, 3]\n{body}\nreturn 0 }}"
+            "fn rhs() -> i64 {{ panic \"RHS evaluated\" }}\nfn main() -> u8 {{ fix a = new #[0; 2, 3]\n{body}\nreturn 0 }}"
         )
     }).collect::<Vec<_>>();
     let inputs = sources
@@ -480,7 +480,7 @@ fn main() -> u8 {
     c#n = 0
     fix w = a.[tick(c, 8)].[tick(c, 0):tick(c, 1)].[tick(c, 0)] or tick(c, 88)
     if w != 88 || c.n != 2 { return 2 }
-    fix r = (a.[9] or new #[4; 3]).[1:2] or panic `slice`
+    fix r = (a.[9] or new #[4; 3]).[1:2] or panic "slice"
     fix x = r.[0]
     if x != 4 { return 3 }
     return 0
@@ -580,8 +580,8 @@ fn array_views_reject_missing_or_redundant_handlers_and_whole_view_writes() {
         ("a.[:] = a", "array.write"),
         ("a.[0:1] = a", "array.write"),
         ("(a.[:]) = a", "array.write"),
-        ("fix row = a.[true] or panic `row`", "array.index"),
-        ("fix slice = a.[0:false] or panic `slice`", "array.index"),
+        ("fix row = a.[true] or panic \"row\"", "array.index"),
+        ("fix slice = a.[0:false] or panic \"slice\"", "array.index"),
         ("var b = a\nfor row in b {}", "for.bound-reference"),
     ] {
         let source = format!("fn main() -> u8 {{ fix a = new #[0; 2, 3]\n{body}\nreturn 0 }}");

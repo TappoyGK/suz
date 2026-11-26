@@ -133,7 +133,7 @@ fn trailing_allows_reject_blocks_at_any_expression_depth() {
         "identity(expr { 2 + 3 })",
         "matchexpr true { true => 1 + 2\nfalse => 0 }",
         "Point { x: expr { 1 + 2 } }",
-        "`${expr { 1 + 2 }}`",
+        "\"${expr { 1 + 2 }}\"",
     ] {
         let source = format!(
             "struct Point {{ x: u8 }}\nfn identity(x: u8) -> u8 {{ return x }}\nfn main() -> u8 {{\nfix value = {expression} allow [diagnostic.arithmetic: bound]\nreturn 0\n}}"
@@ -155,8 +155,8 @@ fn trailing_allows_reject_blocks_at_any_expression_depth() {
 #[test]
 fn allow_reasons_are_literal_even_inside_template_interpolations() {
     let source = r#"fn main() -> u8 {
-    fix message: symbol = `value: ${expr { 1 + 2 allow [diagnostic.arithmetic: literal ` ${ // { : , \n 日本語] }}`
-    log warn `${message}`
+    fix message: symbol = "value: ${expr { 1 + 2 allow [diagnostic.arithmetic: literal ` ${ // { : , \n 日本語] }}"
+    log warn "${message}"
     return 0
 }"#;
     let diagnostics =
@@ -165,7 +165,7 @@ fn allow_reasons_are_literal_even_inside_template_interpolations() {
     assert_eq!(diagnostics.len(), 1);
     assert_eq!(
         diagnostics[0].allowed_reason.as_deref(),
-        Some(r"literal ` ${ // { : , \n 日本語")
+        Some(r#"literal ` ${ // { : , \n 日本語"#)
     );
     assert_eq!(
         diagnostics[0].column,

@@ -21,7 +21,7 @@ bool suz_parse_f32(const char *bytes, uint64_t length, float *output);
 bool suz_parse_f64(const char *bytes, uint64_t length, double *output);
 
 /* 引用付きの文字列値を一つ読む。検証だけなら出力先はNULLでよく、出力するなら検証時のdecoded_lengthバイト以上必要。
-   消費長には両端のバッククォートを含む。復号先は入力の先頭と重ねられる。失敗時の出力は使わない。 */
+   消費長には両端の二重引用符を含む。復号先は入力の先頭と重ねられる。失敗時の出力は使わない。 */
 bool suz_parse_string(const char *bytes, uint64_t length, uint64_t *consumed,
                        char *output, uint64_t *decoded_length);
 

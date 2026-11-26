@@ -5,18 +5,18 @@ use std::fs;
 fn length_values_casts_and_mixed_positions_execute() {
     let source = r#"
 struct Size { count: len_t }
-fix PARSED = `2147483647` as len_t or 0
-fix REJECTED = `2147483648` as len_t or 7
-fix COUNT = len `あ😀x`
-fix VIEW = len (`あ😀x`.[1:] or ``)
+fix PARSED = "2147483647" as len_t or 0
+fix REJECTED = "2147483648" as len_t or 7
+fix COUNT = len "あ😀x"
+fix VIEW = len ("あ😀x".[1:] or "")
 fn identity(x: int) -> int { return x }
 fn size(t: text) -> len_t { return len t }
 fn parse(t: text) -> len_t { return t as len_t or 7 }
 fn parse_size(t: text) -> Size { return t as Size or Size { count: 7 } }
 fn narrow(x: u64) -> len_t { return x as len_t or 7 }
 fn convert(x: f64) -> len_t { return x as len_t or 7 }
-fn produce() -> symbol { log info `once`
-return `あ😀` }
+fn produce() -> symbol { log info "once"
+return "あ😀" }
 fn main() -> u8 {
     if len produce() != 2 { return 17 }
     var counter: len_t = 0
@@ -24,7 +24,7 @@ fn main() -> u8 {
     rev i in 0..<COUNT { counter += 1 }
     if counter != 6 { return 18 }
     if COUNT != 3 || VIEW != 2 { return 1 }
-    fix text_value = `あ😀x`
+    fix text_value = "あ😀x"
     fix n = size(text_value)
     fix a: i32 = n
     fix b: u32 = n
@@ -39,16 +39,16 @@ fn main() -> u8 {
     if identity(n) != 3 || l + m != 3 { return 3 }
     fix start: u8 = 1
     fix end: i64 = 3
-    if (text_value.[start:end] or ``) != `😀x` { return 4 }
+    if (text_value.[start:end] or "") != "😀x" { return 4 }
     fix max: u64 = 18446744073709551615
-    if (text_value.[start:max] or `bad`) != `bad` { return 5 }
+    if (text_value.[start:max] or "bad") != "bad" { return 5 }
     fix wide_start: u64 = 0
-    if (text_value.[wide_start:max] or `bad`) != `bad` { return 24 }
+    if (text_value.[wide_start:max] or "bad") != "bad" { return 24 }
     fix tiny_end: i8 = 2
-    if (text_value.[300:tiny_end] or `bad`) != `bad` { return 25 }
-    if (text_value.[-1:end] or `bad`) != `bad` { return 6 }
-    if len text_value - 1 != 2 || (len text_value.[1:] or ``) != 2 { return 7 }
-    if len `` != 0 || len `é` != 2 { return 8 }
+    if (text_value.[300:tiny_end] or "bad") != "bad" { return 25 }
+    if (text_value.[-1:end] or "bad") != "bad" { return 6 }
+    if len text_value - 1 != 2 || (len text_value.[1:] or "") != 2 { return 7 }
+    if len "" != 0 || len "é" != 2 { return 8 }
     fix hi: len_t = 2147483647
     fix zero: len_t = 0
     fix overflow: len_t = hi + 1 or 9
@@ -57,8 +57,8 @@ fn main() -> u8 {
     if overflow != 9 || underflow != 9 || negative != 9 { return 9 }
     fix shift: u32 = 1 << n
     if shift != 8 { return 10 }
-    if parse(`2147483647`) != hi || parse(`2147483648`) != 7 { return 11 }
-    if parse(`-0`) != 7 || parse(`-1`) != 7 { return 12 }
+    if parse("2147483647") != hi || parse("2147483648") != 7 { return 11 }
+    if parse("-0") != 7 || parse("-1") != 7 { return 12 }
     if convert(2147483647.9) != hi || convert(2147483648.0) != 7 { return 13 }
     if convert(-0.5) != 0 || convert(-1.0) != 7 { return 14 }
     fix joined = n + small
@@ -67,11 +67,11 @@ fn main() -> u8 {
     fix signed_join = n + signed
     fix check_signed: i32 = signed_join
     if check_join != 4 || check_signed != 2 { return 15 }
-    if textbuf `${n}` != `3` { return 16 }
+    if textbuf "${n}" != "3" { return 16 }
     if PARSED != hi || REJECTED != 7 { return 19 }
     if narrow(2147483647) != hi || narrow(2147483648) != 7 { return 20 }
-    if parse_size(`Size { count: 2147483647 }`).count != hi { return 21 }
-    if parse_size(`Size { count: 2147483648 }`).count != 7 { return 22 }
+    if parse_size("Size { count: 2147483647 }").count != hi { return 21 }
+    if parse_size("Size { count: 2147483648 }").count != 7 { return 22 }
     fix bits = n as% u8
     if bits != 3 { return 23 }
     return 0
@@ -114,7 +114,7 @@ fn length_rejects_width_operations_and_invalid_targets() {
         ("n +%= 1", "expr.operator-types"),
         ("n <<= 1", "expr.operator-types"),
         ("fix x = 1 as% len_t", "expr.as-trunc"),
-        ("fix x = `1` as% len_t or 0", "expr.as-trunc"),
+        ("fix x = \"1\" as% len_t or 0", "expr.as-trunc"),
         ("fix x = len 1", "len.targets"),
         ("fix len = 1", "src.ident"),
         ("fix len_t = 1", "src.ident"),
@@ -144,7 +144,7 @@ fn length_generic_width_failures_are_deferred_to_the_call() {
         "x << 1",
         "x >> 1",
         "1 as% int",
-        "`1` as% int or 0",
+        "\"1\" as% int or 0",
     ] {
         let prefix = format!("fn operation(x: int) -> int {{ return {expr} }}\n");
         let good =

@@ -10,8 +10,8 @@
 
 ```suz
 fn main() -> u8 {
-    fix message = `hello`
-    log info `${message}`
+    fix message = "hello"
+    log info "${message}"
     return 0
 }
 ```
@@ -38,8 +38,8 @@ info log-001.suz:3: hello
 
 ```suz
 fn main() -> u8 {
-    log info `first
-second`
+    log info "first
+second"
     return 0
 }
 ```
@@ -50,7 +50,7 @@ second`
 |---|---|---:|---:|
 | 通常 | コンパイルエラー | — | 0 |
 
-開くバッククォートと閉じるバッククォートは同じ行に書く必要がある。
+開く二重引用符と閉じる二重引用符は同じ行に書く必要がある。
 
 **コンパイル診断：**
 
@@ -68,7 +68,7 @@ second`
 struct Point { x: i32 }
 fn main() -> u8 {
     fix p = Point { x: 1 }
-    log info `${p}`
+    log info "${p}"
     return 0
 }
 ```
@@ -97,7 +97,7 @@ fn main() -> u8 {
 fn action() -> void {}
 
 fn main() -> u8 {
-    log info `${action()}`
+    log info "${action()}"
     return 0
 }
 ```
@@ -126,13 +126,13 @@ fn main() -> u8 {
 
 ```suz
 fn value() -> u8 {
-    log info `inner`
+    log info "inner"
     return 3
 }
 
 fn main() -> u8 {
     fix result = value()
-    log info `outer: ${result}`
+    log info "outer: ${result}"
     return 0
 }
 ```
@@ -162,13 +162,13 @@ info log-005.suz:8: outer: 3
 
 ```suz
 fn divide(divisor: i32) -> i32 {
-    log info `inner`
+    log info "inner"
     return 1 / divisor
 }
 
 fn main() -> u8 {
     fix result = divide(0)
-    log info `outer: ${result}`
+    log info "outer: ${result}"
     return 0
 }
 ```
@@ -203,7 +203,7 @@ info log-006.suz:2: inner
 
 ```suz
 fn main() -> u8 {
-    log info `invalid: \q`
+    log info "invalid: \q"
     return 0
 }
 ```
@@ -232,7 +232,7 @@ fn main() -> u8 {
 
 ```suz
 fn main() -> u8 {
-    log info `literal: \${value} // text\nnext`
+    log info "literal: \${value} // text\nnext"
     return 0
 }
 ```
@@ -266,7 +266,7 @@ fn main() -> u8 {
     fix no = false
     fix count = 1_234
     fix negative = -7
-    log info `${yes} ${no} ${Wave.Saw} ${count} ${negative}`
+    log info "${yes} ${no} ${Wave.Saw} ${count} ${negative}"
     return 0
 }
 ```
@@ -299,7 +299,7 @@ fn main() -> u8 {
     fix fraction = 0.125
     fix tiny = 1.0e-8
     fix negative = -1.0e-8
-    log info `${whole} ${fraction} ${tiny} ${negative}`
+    log info "${whole} ${fraction} ${tiny} ${negative}"
     return 0
 }
 ```
@@ -327,7 +327,7 @@ info log-010.suz:6: 1.0 0.125 1.0e-8 -1.0e-8
 ```suz
 fn main() -> u8 {
     fix warn: u8 = 7
-    log warn `count: ${warn}`
+    log warn "count: ${warn}"
     return 0
 }
 ```
@@ -359,10 +359,10 @@ fn main() -> u8 {
     fix debug = 1
     fix info = 2
     fix warn = 3
-    log debug `${debug}`
-    log info `${info}`
-    log warn `${warn}`
-    log error `failed`
+    log debug "${debug}"
+    log info "${info}"
+    log warn "${warn}"
+    log error "failed"
     return 7
 }
 ```
@@ -392,7 +392,7 @@ error log-012.suz:8: failed
 ```suz
 fn main() -> u8 {
     fix count = 1
-    panic `count: ${count + 1}`
+    panic "count: ${count + 1}"
 }
 ```
 

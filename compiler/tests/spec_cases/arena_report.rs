@@ -143,7 +143,7 @@ fn arena_report_counts_growth_reuse_and_suppresses_empty_runs() {
         "fn main() -> u8 { arena {}\nreturn 0 }",
         "fn main() -> u8 { if false { fix p = new 1 }\nreturn 0 }",
         "fn main() -> u8 { for i in 0..<3 { arena { fix p = new (1 as u8)\nfix q = new (2 as i64) } }\nreturn 0 }",
-        "fn main() -> u8 { fix p = new 1\npanic `stop` }",
+        "fn main() -> u8 { fix p = new 1\npanic \"stop\" }",
     ];
     let mut files = Vec::new();
     for (id, source) in sources.iter().enumerate() {
