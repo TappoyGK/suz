@@ -5,6 +5,33 @@
 use super::{ExpressionContext, expressions::expression};
 use crate::check::CheckedExpression;
 
+fn c_bound_literal(value: i128, signed: bool) -> String {
+    if !signed {
+        format!("UINT64_C({})", value as u64)
+    } else if value == i64::MIN as i128 {
+        "INT64_MIN".into()
+    } else {
+        format!("INT64_C({value})")
+    }
+}
+
+fn clamp_range_expr(expr: &str, range: crate::ast::RangeType) -> String {
+    let (lo, hi) = range.bounds();
+    let signed = range.base.bounds().0 < 0;
+    let c_base = range.base.c_name();
+    let lo_lit = c_bound_literal(lo, signed);
+    let hi_lit = c_bound_literal(hi, signed);
+    let (base_lo, base_hi) = range.base.bounds();
+    let mut body = format!("({c_base})({expr})");
+    if hi < base_hi {
+        body = format!("(({expr}) > {hi_lit} ? ({c_base}){hi_lit} : {body})");
+    }
+    if lo > base_lo {
+        body = format!("(({expr}) < {lo_lit} ? ({c_base}){lo_lit} : {body})");
+    }
+    body
+}
+
 // 元の値の評価・成功判定・変換を別々に返し、値の代替処理と早期returnで同じ値域検査を使う。
 pub(super) fn cast_parts(
     operand: &CheckedExpression,
@@ -65,7 +92,7 @@ pub(super) fn cast_parts(
                 format!("suz_cmp_{output}"),
             );
         }
-        let (result_type, function, arguments, converted) = match target {
+        let (result_type, function, arguments, converted, extra_cond) = match target {
             Type::Float(ty) => (
                 Type::Float(ty),
                 match ty {
@@ -74,18 +101,21 @@ pub(super) fn cast_parts(
                 },
                 String::new(),
                 format!("suz_cmp_{output}"),
+                None,
             ),
             Type::Char => (
                 Type::Char,
                 "suz_parse_char",
                 String::new(),
                 format!("suz_cmp_{output}"),
+                None,
             ),
             Type::Bool => (
                 Type::Bool,
                 "suz_parse_bool",
                 String::new(),
                 format!("suz_cmp_{output}"),
+                None,
             ),
             Type::Integer(ty) => {
                 context.bit_helpers.insert(ty);
@@ -95,6 +125,7 @@ pub(super) fn cast_parts(
                         "suz_parse_integer_sat",
                         format!(", {}, {}", ty.bits(), u8::from(ty.bounds().0 < 0)),
                         format!("suz_bits_{}(suz_cmp_{output})", ty.name()),
+                        None,
                     )
                 } else {
                     (
@@ -107,6 +138,41 @@ pub(super) fn cast_parts(
                             u8::from(kind == crate::ast::CastKind::Wrap)
                         ),
                         format!("suz_bits_{}(suz_cmp_{output})", ty.name()),
+                        None,
+                    )
+                }
+            }
+            Type::Range(r) => {
+                let signed = r.base.bounds().0 < 0;
+                let (lo, hi) = r.bounds();
+                let lo_lit = c_bound_literal(lo, signed);
+                let hi_lit = c_bound_literal(hi, signed);
+                let val_expr = if signed {
+                    format!("((int64_t)suz_cmp_{output})")
+                } else {
+                    format!("suz_cmp_{output}")
+                };
+                if kind == crate::ast::CastKind::Saturating {
+                    let clamped = format!(
+                        "({})({val_expr} < {lo_lit} ? {lo_lit} : ({val_expr} > {hi_lit} ? {hi_lit} : {val_expr}))",
+                        r.base.c_name()
+                    );
+                    (
+                        Type::Integer(IntegerType::U64),
+                        "suz_parse_integer_sat",
+                        format!(", 64, {}", u8::from(signed)),
+                        clamped,
+                        None,
+                    )
+                } else {
+                    (
+                        Type::Integer(IntegerType::U64),
+                        "suz_parse_integer",
+                        format!(", 64, {}, 0", u8::from(signed)),
+                        format!("({}){val_expr}", r.base.c_name()),
+                        Some(format!(
+                            "({val_expr} >= {lo_lit} && {val_expr} <= {hi_lit})"
+                        )),
                     )
                 }
             }
@@ -114,7 +180,12 @@ pub(super) fn cast_parts(
         };
         context.temporaries.push(result_type);
         let (bytes, length) = super::text::contents(operand.ty, &local);
-        let condition = format!("{function}({bytes}, {length}{arguments}, &suz_cmp_{output})");
+        let base_cond = format!("{function}({bytes}, {length}{arguments}, &suz_cmp_{output})");
+        let condition = if let Some(extra) = extra_cond {
+            format!("({base_cond} && {extra})")
+        } else {
+            base_cond
+        };
         return (format!("{local} = {source}"), condition, converted);
     }
     let mut converted = format!("({}){local}", target.c_name());
@@ -172,7 +243,44 @@ pub(super) fn cast_parts(
                 conditions.join(" && ")
             }
         }
-        (Type::Integer(_), Type::Float(_)) | (Type::Float(_), Type::Float(_)) => "1".into(),
+        (Type::Float(from), Type::Range(r)) if kind == crate::ast::CastKind::Saturating => {
+            let to = r.base;
+            context.float_types.insert(from);
+            context.float_sat_casts.insert((from, to));
+            let base_sat = format!(
+                "suz_sat_f2i_{}_{}({local}, ({})0)",
+                from.name(),
+                to.name(),
+                to.c_name()
+            );
+            let sat_tmp = context.temporaries.len();
+            context.temporaries.push(Type::Integer(to));
+            let clamped = clamp_range_expr(&format!("suz_cmp_{sat_tmp}"), r);
+            converted = format!("(suz_cmp_{sat_tmp} = {base_sat}, {clamped})");
+            format!("{local} == {local}")
+        }
+        (Type::Float(_), Type::Range(r)) => {
+            let to = r.base;
+            context.float_types.insert(FloatType::F64);
+            let (base_min, base_max) = to.bounds();
+            let lower = if to == IntegerType::I64 {
+                format!("(double){local} >= {base_min}.0")
+            } else {
+                format!("(double){local} > {}.0", base_min - 1)
+            };
+            let base_check = format!("({lower} && (double){local} < {}.0)", base_max + 1);
+            let (lo, hi) = r.bounds();
+            let signed = to.bounds().0 < 0;
+            let lo_lit = c_bound_literal(lo, signed);
+            let hi_lit = c_bound_literal(hi, signed);
+            let c_base = to.c_name();
+            format!(
+                "({base_check} && ({c_base}){local} >= {lo_lit} && ({c_base}){local} <= {hi_lit})"
+            )
+        }
+        (Type::Integer(_) | Type::Range(_), Type::Float(_)) | (Type::Float(_), Type::Float(_)) => {
+            "1".into()
+        }
         _ => unreachable!(),
     };
     (format!("{local} = {source}"), condition, converted)

@@ -174,22 +174,29 @@ pub(super) fn check(
                 _ => None,
             };
             let type_error = |ty: Type| {
-                if ty == Type::Integer(IntegerType::Len)
+                if matches!(ty, Type::Integer(IntegerType::Len) | Type::Range(_))
                     && (!arithmetic
                         || matches!(&expr.kind, ExpressionKind::Binary { operator, .. } if operator.is_shift()))
                 {
                     return Some(expr.location.error(
                         ErrorKind::InvalidSource,
-                        crate::diagnostic!(
-                            "expr.operator-types",
-                            "len_t does not support bit-width operations"
-                        ),
+                        if matches!(ty, Type::Range(_)) {
+                            crate::diagnostic!(
+                                "range.operations",
+                                "range types do not support bit-width, wrapping or saturating operations"
+                            )
+                        } else {
+                            crate::diagnostic!(
+                                "expr.operator-types",
+                                "len_t does not support bit-width operations"
+                            )
+                        },
                     ));
                 }
                 if matches!(
                     &expr.kind,
                     ExpressionKind::Negate(_) | ExpressionKind::SaturatingNegate(_)
-                ) && matches!(ty, Type::Integer(integer) if integer.bounds().0 == 0)
+                ) && ty.integer_storage().is_some_and(|i| i.bounds().0 == 0)
                 {
                     return Some(expr.location.error(
                         ErrorKind::InvalidSource,

@@ -11,17 +11,20 @@ use crate::{Diagnostic, ErrorKind};
 
 // Rustの飽和するfloatからi128への変換は値域の確認だけに使う。
 // Suzのすべての整数型の値域はi128の範囲の内側に収まる。
-pub(super) fn float_to_integer(value: f64, ty: IntegerType) -> Option<i128> {
+pub(super) fn float_to_integer_bounds(value: f64, min: i128, max: i128) -> Option<i128> {
     let integer = value.trunc() as i128;
-    let (min, max) = ty.bounds();
     (value.is_finite() && (min..=max).contains(&integer)).then_some(integer)
 }
 
-pub(super) fn float_to_integer_sat(value: f64, ty: IntegerType) -> i128 {
+pub(super) fn float_to_integer(value: f64, ty: IntegerType) -> Option<i128> {
+    let (min, max) = ty.bounds();
+    float_to_integer_bounds(value, min, max)
+}
+
+pub(super) fn float_to_integer_sat_bounds(value: f64, min: i128, max: i128) -> i128 {
     if value.is_nan() {
         return 0;
     }
-    let (min, max) = ty.bounds();
     (value.trunc() as i128).clamp(min, max)
 }
 
@@ -137,14 +140,23 @@ fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
     match &expr.value {
         Value::IntegerArithmetic {
             operation, handler, ..
-        } => operation_result(operation, ty).or_else(|| match handler {
-            Some(CheckedHandler::Value(fallback)) => constant_integer_raw(fallback),
-            _ => None,
-        }),
+        } => operation_result(operation, ty)
+            .filter(|&v| {
+                expr.ty
+                    .integer_bounds()
+                    .is_none_or(|(lo, hi)| v >= lo && v <= hi)
+            })
+            .or_else(|| match handler {
+                Some(CheckedHandler::Value(fallback)) => constant_integer_raw(fallback),
+                _ => None,
+            }),
         Value::Integer { value, .. } => Some(*value),
         Value::Cast(inner) => match inner.ty {
             Type::Exact => super::exact::constant(inner)?.to_i128(),
-            Type::Float(_) => float_to_integer(constant_float_raw(inner)?, ty),
+            Type::Float(_) => {
+                let (min, max) = expr.ty.integer_bounds()?;
+                float_to_integer_bounds(constant_float_raw(inner)?, min, max)
+            }
             _ => constant_integer_raw(inner),
         },
         Value::CheckedCast {
@@ -161,14 +173,16 @@ fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
             // 両辺とも定数式の文法に従っていなければならない。
             if matches!(operand.ty, Type::Float(_)) {
                 let value = constant_float_raw(operand)?;
+                let (min, max) = expr.ty.integer_bounds()?;
                 if *kind == crate::ast::CastKind::Saturating {
                     return if value.is_nan() {
                         constant_integer_raw(fallback)
                     } else {
-                        Some(float_to_integer_sat(value, ty))
+                        Some(float_to_integer_sat_bounds(value, min, max))
                     };
                 }
-                return float_to_integer(value, ty).or_else(|| constant_integer_raw(fallback));
+                return float_to_integer_bounds(value, min, max)
+                    .or_else(|| constant_integer_raw(fallback));
             }
             if operand.ty == Type::Exact {
                 let value = super::exact::constant(operand)?;
@@ -186,7 +200,7 @@ fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
             }
         }
         Value::SaturatingCast(inner) => {
-            let (min, max) = ty.bounds();
+            let (min, max) = expr.ty.integer_bounds()?;
             if inner.ty == Type::Exact {
                 let n = super::exact::constant(inner)?;
                 if n < Int::from_i128(min) {
@@ -197,7 +211,11 @@ fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
                     n.to_i128()
                 }
             } else if matches!(inner.ty, Type::Float(_)) {
-                Some(float_to_integer_sat(constant_float_raw(inner)?, ty))
+                Some(float_to_integer_sat_bounds(
+                    constant_float_raw(inner)?,
+                    min,
+                    max,
+                ))
             } else {
                 Some(constant_integer_raw(inner)?.clamp(min, max))
             }
@@ -990,12 +1008,13 @@ fn cast_succeeds(operand: &CheckedExpression, target: Type, kind: crate::ast::Ca
         return crate::numeric::Range::point(Int::from_i128(value)).fits_type(target);
     }
     match (operand.ty, target) {
-        (Type::Float(_), Type::Integer(to)) => {
+        (Type::Float(_), Type::Integer(_) | Type::Range(_)) => {
             let value = constant_float_raw(operand).unwrap();
             if kind == crate::ast::CastKind::Saturating {
                 !value.is_nan()
             } else {
-                float_to_integer(value, to).is_some()
+                let (min, max) = target.integer_bounds().unwrap();
+                float_to_integer_bounds(value, min, max).is_some()
             }
         }
         (Type::Float(_), Type::Float(FloatType::F32)) => {

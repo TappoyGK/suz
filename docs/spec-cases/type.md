@@ -1339,3 +1339,321 @@ fn main() -> u8 {
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
 | 通常 | `[match.exhaustive]` | 5 | 5 |
+
+### type-046 値域制限型の変換・算術・文字列変換・非零除算
+
+主根拠：`[range.operations]`。
+補助根拠：`[range.identity]`、`[conv.widen]`、`[arith.width]`、`[arith.store]`、`[expr.cast-risk]`、`[symbol.cast-range]`、`[symbol.cast-sat]`。
+
+値域制限型から `u8`・`len_t` への暗黙変換、包含が静的に分かる無検査 `as`、`(0..=127) + (0..=127)` の `u8` 格納、`as|` の上下限飽和、文字列からの `as` / `as|`、非零除算の格納失敗 `or` をまとめて確認する。
+
+**ソース：**
+
+```suz
+range Note: u8 = 0..=127
+range Velocity: u8 = 0..=127
+range Wide: u16 = 0..=1000
+range Divisor: u16 = 1..=1000
+
+fn quotient(x: u16, d: Divisor) -> u8 {
+    return x / d or 255
+}
+
+fn main() -> u8 {
+    fix n: Note = 100
+    fix as_u8: u8 = n
+    fix as_len: len_t = n
+    fix v: Velocity = n as Velocity
+    fix w: Wide = as_u8 as Wide
+    fix sum = n + n
+    fix clamped: Note = 200 as| Note
+    fix parsed: Note = "127" as Note or 0
+    fix sat_hi: Note = "1000" as| Note or 0
+    fix sat_lo: Note = "-5" as| Note or 1
+    fix d: Divisor = 1
+    fix q_ok = quotient(200, d)
+    fix q_ovf = quotient(300, d)
+    if as_u8 == 100 && as_len == 100 && v == 100 && w == 100 && sum == 200 && clamped == 127 && parsed == 127 && sat_hi == 127 && sat_lo == 0 && q_ok == 200 && q_ovf == 255 {
+        return 0
+    }
+    return 1
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### type-047 0を含まない値域型への浮動小数点as|でor省略を拒否する
+
+主根拠：`[range.operations]`。
+
+`Divisor`（`1..=1000`）は `0` を含まないため、浮動小数点からの `as|` で NaN ハンドラ `or` を省略するとコンパイルエラーとなる。
+
+**ソース：**
+
+```suz
+range Divisor: u16 = 1..=1000
+
+fn main() -> u8 {
+    fix x: f64 = nan
+    fix d: Divisor = x as| Divisor
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[range.operations]` | 5 | 24 |
+
+### type-048 値域制限型へのラップ算術を拒否する
+
+主根拠：`[range.operations]`。
+
+値域制限型はラップ算術（`+%` 等）の対象外である。
+
+**ソース：**
+
+```suz
+range Note: u8 = 0..=127
+
+fn main() -> u8 {
+    fix n: Note = 60
+    fix m = n +% n
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[range.operations]` | 5 | 15 |
+
+### type-049 値域制限型へのビット演算を拒否する
+
+主根拠：`[range.operations]`。
+
+値域制限型を直接のオペランドとするビット演算は対象外である。
+
+**ソース：**
+
+```suz
+range Note: u8 = 0..=127
+
+fn main() -> u8 {
+    fix n: Note = 60
+    fix m = ~n
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[range.operations]` | 5 | 13 |
+
+### type-050 値域制限型へのas%を拒否する
+
+主根拠：`[range.operations]`。
+
+値域制限型は `as%` の変換先にできない。
+
+**ソース：**
+
+```suz
+range Note: u8 = 0..=127
+
+fn main() -> u8 {
+    fix x: u16 = 200
+    fix n: Note = x as% Note
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[range.operations]` | 5 | 21 |
+
+### type-051 匿名汎用intで値域制限型と通常整数を使い分ける
+
+主根拠：`[range.operations]`。
+補助根拠：`[num.int]`、`[num.fn-resolve]`、`[num.fn-check-judge]`。
+
+`min(note1, note2)` は `Note` を返し、`fix r: u8 = twice(note)` は `u8` で具体化、要求型なしの `twice(note)` は `Note` で具体化される。また、無関係な `range Divisor: u16 = 1..=1000` があっても `zero()` の定義時検査と `u8` での呼び出しに影響しない。
+
+**ソース：**
+
+```suz
+range Note: u8 = 0..=127
+range Divisor: u16 = 1..=1000
+
+fn min(a: int, b: int) -> int {
+    return ifexpr a < b { a } else { b }
+}
+
+fn twice(x: int) -> int {
+    return x + x
+}
+
+fn zero() -> int {
+    return 0
+}
+
+fn main() -> u8 {
+    fix n1: Note = 63
+    fix n2: Note = 40
+    fix m: Note = min(n1, n2)
+    fix n_ok: Note = twice(n1)
+    fix big: Note = 100
+    fix as_u8: u8 = twice(big)
+    fix z: u8 = zero()
+    if m == 40 && n_ok == 126 && as_u8 == 200 && z == 0 {
+        return 0
+    }
+    return 1
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### type-052 匿名汎用intで通常整数候補のない異なる値域型の混在を拒否する
+
+主根拠：`[range.operations]`。
+補助根拠：`[num.fn-resolve]`。
+
+`Note` と `Velocity` のように異なる値域制限型だけが候補にある場合、`[num.fn-resolve]` で拒否する。
+
+**ソース：**
+
+```suz
+range Note: u8 = 0..=127
+range Velocity: u8 = 0..=127
+
+fn min(a: int, b: int) -> int {
+    return ifexpr a < b { a } else { b }
+}
+
+fn main() -> u8 {
+    fix n: Note = 60
+    fix v: Velocity = 80
+    fix m = min(n, v)
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[num.fn-resolve]` | 11 | 13 |
+
+### type-053 匿名汎用intを0を含まない値域型で具体化したときリテラル不適合を拒否する
+
+主根拠：`[range.operations]`。
+補助根拠：`[num.fn-body]`、`[lit.range]`。
+
+`fn zero() -> int { return 0 }` を `Divisor`（`1..=1000`）で具体化すると、`0` が `Divisor` の範囲外であるためコンパイルエラーとなる。
+
+**ソース：**
+
+```suz
+range Divisor: u16 = 1..=1000
+
+fn zero() -> int {
+    return 0
+}
+
+fn main() -> u8 {
+    fix d: Divisor = zero()
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[num.fn-body]` | 8 | 22 |
+
+### type-054 匿名汎用intで値域型へ具体化した算術の結果超過は実行時にパニックする
+
+主根拠：`[range.operations]`。
+補助根拠：`[arith.store]`、`[rt.int-overflow]`。
+
+`twice(note)` を `Note`（`0..=127`）で具体化したとき、`64 + 64 = 128` はコンパイルエラーとせず実行時の格納失敗としてパニックする。
+
+**ソース：**
+
+```suz
+range Note: u8 = 0..=127
+
+fn twice(x: int) -> int {
+    return x + x
+}
+
+fn main() -> u8 {
+    fix n: Note = 64
+    fix r = twice(n)
+    return r
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | パニック | 101 | 0 |
+
+**パニック診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[rt.int-overflow]` | 4 | 14 |

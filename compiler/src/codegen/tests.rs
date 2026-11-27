@@ -500,6 +500,37 @@ fn main() -> u8 {
     );
 }
 
+#[test]
+fn nonzero_range_divisor_omits_division_by_zero_check_in_generated_c() {
+    let source = r#"
+range Divisor: u16 = 1..=1000
+
+fn divide(x: u16, d: Divisor) -> u16 {
+    return x / d
+}
+
+fn main() -> u8 {
+    fix d: Divisor = 5
+    return divide(100, d) as u8 or 0
+}
+"#;
+    let (program, _) =
+        crate::analyze(source.as_bytes(), &crate::CompilationOptions::default()).unwrap();
+    let c = generate(
+        &program,
+        "nonzero-divisor.suz",
+        crate::SymbolPoolLimit::default(),
+        crate::ArenaOptions::default(),
+        crate::LogLevel::default(),
+        false,
+        None,
+    );
+    assert!(
+        !c.contains("suz_exact_div") && !c.contains("rt.div-zero"),
+        "expected no runtime division-by-zero check for nonzero range divisor:\n{c}"
+    );
+}
+
 #[path = "tests/array_bounds.rs"]
 mod array_bounds;
 #[path = "tests/struct_params.rs"]

@@ -72,6 +72,48 @@ pub(super) fn parse(
             }
             integer_value(bits, ty)
         }
+        Type::Range(r) => {
+            let mut bits = 0_u64;
+            let signed = r.base.bounds().0 < 0;
+            let (lo, hi) = r.bounds();
+            // 呼び出しが終わるまで、バイト列と出力先は生存する。
+            let ok = unsafe {
+                match kind {
+                    crate::ast::CastKind::Saturating => suz_parse_integer_sat(
+                        text.as_ptr(),
+                        text.len() as u64,
+                        64,
+                        signed,
+                        &mut bits,
+                    ),
+                    crate::ast::CastKind::Checked => suz_parse_integer(
+                        text.as_ptr(),
+                        text.len() as u64,
+                        64,
+                        signed,
+                        false,
+                        &mut bits,
+                    ),
+                    crate::ast::CastKind::Wrap => return None,
+                }
+            };
+            if !ok {
+                return None;
+            }
+            let parsed = if signed {
+                i128::from(bits as i64)
+            } else {
+                i128::from(bits)
+            };
+            let value = if kind == crate::ast::CastKind::Saturating {
+                parsed.clamp(lo, hi)
+            } else if parsed < lo || parsed > hi {
+                return None;
+            } else {
+                parsed
+            };
+            Value::Integer { value, minus: None }
+        }
         Type::Float(ty) => {
             let width = match ty {
                 FloatType::F32 => 32,
