@@ -194,13 +194,21 @@ impl Parser<'_, '_> {
     pub(super) fn declaration_needs(
         &mut self,
     ) -> Result<Vec<crate::ast::generics::Need>, Diagnostic> {
-        use super::FixedToken;
         use crate::ast::generics::NeedList;
         let saved = self.cursor;
         let mut needs = NeedList::default();
         for (start, end) in std::mem::take(&mut self.pending_needs) {
             self.cursor = start + 1;
-            self.expect(FixedToken::Keyword("needs"))?;
+            if self.token().kind != Kind::Keyword("needs") {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "syntax.grammar",
+                        "expected 'needs', 'expects', or 'ensures'"
+                    ),
+                ));
+            }
+            self.cursor += 1;
             if self.type_parameters.is_empty() {
                 return Err(self.error(
                     ErrorKind::InvalidSource,

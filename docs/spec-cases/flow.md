@@ -3119,41 +3119,6 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | `[contract.expr]` | 1 | 1 |
 
-### flow-132 契約式の&&左辺で非零を保証すれば右辺の除算を許可する
-
-主根拠：`[contract.expr-order]`。
-補助根拠：`[contract.expr]`、`[contract.expects]`、`[contract.proof]`。
-
-`@expects(n != 0 && total / n < 10)` のように短絡評価の左辺で非零を保証すれば右辺の除算を許可し、呼び出し側で同じ条件をガードすれば受理する。
-
-**ソース：**
-
-```suz
-@expects(n != 0 && total / n < 10)
-fn ratio(total: i32, n: i32) -> i32 {
-    return 1
-}
-
-fn check(total: i32, n: i32) -> u8 {
-    if n != 0 && total / n < 10 {
-        if ratio(total, n) == 1 {
-            return 0
-        }
-    }
-    return 1
-}
-
-fn main() -> u8 {
-    return check(20, 4)
-}
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | 正常終了 | 0 | 0 |
-
 ### flow-133 void関数の@ensuresでreturnを参照すると拒否する
 
 主根拠：`[contract.return]`。
@@ -3217,6 +3182,41 @@ fn main() -> u8 {
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
 | 通常 | `[contract.return]` | 1 | 10 |
+
+### flow-132 契約式の&&左辺で非零を保証すれば右辺の除算を許可する
+
+主根拠：`[contract.expr-order]`。
+補助根拠：`[contract.expr]`、`[contract.expects]`、`[contract.proof]`。
+
+`@expects(n != 0 && total / n < 10)` のように短絡評価の左辺で非零を保証すれば右辺の除算を許可し、呼び出し側で同じ条件をガードすれば受理する。
+
+**ソース：**
+
+```suz
+@expects(n != 0 && total / n < 10)
+fn ratio(total: i32, n: i32) -> i32 {
+    return 1
+}
+
+fn check(total: i32, n: i32) -> u8 {
+    if n != 0 && total / n < 10 {
+        if ratio(total, n) == 1 {
+            return 0
+        }
+    }
+    return 1
+}
+
+fn main() -> u8 {
+    return check(20, 4)
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
 
 ### flow-134 @expectsの配列境界条件で本体内の添字orを省略する
 
