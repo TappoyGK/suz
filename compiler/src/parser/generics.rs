@@ -170,7 +170,7 @@ impl Parser<'_, '_> {
             self.cursor += 1;
             self.expect(FixedToken::Symbol("("))?;
             let saved_ensures = self.in_ensures;
-            self.in_ensures = kind == ContractKind::Ensures;
+            self.in_ensures = true;
             let condition = self.expression();
             self.in_ensures = saved_ensures;
             let condition = condition?;

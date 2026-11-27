@@ -450,6 +450,10 @@ fn subst_affine(expr: &Expression, env: &SubstEnv<'_>, scope: &Scope) -> Option<
                 _ => None,
             }
         }
+        ExpressionKind::Field { .. } => {
+            let target = subst_checked_target(expr, env, scope)?;
+            affine(&target, scope)
+        }
         _ => None,
     }
 }
@@ -483,6 +487,14 @@ fn subst_checked_target(
             };
             let s = scope.structs.get(struct_id);
             let idx = s.fields.iter().position(|f| f.name == *name)?;
+            if base.ty.pointee().is_none()
+                && let Value::Struct { fields } = &base.value
+            {
+                return fields
+                    .iter()
+                    .find(|(i, _)| *i == idx)
+                    .map(|(_, e)| e.clone());
+            }
             let ty = s.fields[idx].ty;
             let base = if base.ty.pointee().is_some() {
                 CheckedExpression {
@@ -648,6 +660,10 @@ fn subst_range(expr: &Expression, env: &SubstEnv<'_>, scope: &Scope) -> Option<R
             };
             checked_int_range(&checked, scope)
         }
+        ExpressionKind::Field { .. } => {
+            let target = subst_checked_target(expr, env, scope)?;
+            checked_int_range(&target, scope)
+        }
         _ => None,
     }
 }
@@ -717,6 +733,14 @@ fn subst_pred(expr: &Expression, env: &SubstEnv<'_>, scope: &Scope) -> Option<Pr
                 .fields
                 .iter()
                 .position(|f| f.name == *name)?;
+            if checked_target.ty.pointee().is_none()
+                && let Value::Struct { fields } = &checked_target.value
+            {
+                return fields
+                    .iter()
+                    .find(|(i, _)| *i == idx)
+                    .and_then(|(_, e)| pred_expr_from_checked(e));
+            }
             let base_pred = pred_expr_from_checked(&checked_target)?;
             let base_pred = if checked_target.ty.pointee().is_some() {
                 PredExpr::Deref(Box::new(base_pred))

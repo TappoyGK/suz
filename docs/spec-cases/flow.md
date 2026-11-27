@@ -3187,6 +3187,37 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | `[contract.return]` | 1 | 10 |
 
+### flow-149 @requires内でreturnを参照すると拒否する
+
+主根拠：`[contract.return]`。
+
+`return` は `@ensures` 内でのみ参照でき、`@requires` 内で参照するとコンパイルエラーとなる。
+
+**ソース：**
+
+```suz
+@requires(return > 0)
+fn f(n: i32) -> i32 {
+    return n
+}
+
+fn main() -> u8 {
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[contract.return]` | 1 | 11 |
+
 ### flow-134 @requiresの配列境界条件で本体内の添字orを省略する
 
 主根拠：`[contract.requires]`。
@@ -3659,6 +3690,40 @@ fn main() -> u8 {
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
 | 通常 | `[contract.requires]` | 11 | 12 |
+
+### flow-150 構造体リテラルを返す位置で@ensuresのreturn.フィールドを証明する
+
+主根拠：`[contract.proof]`。
+補助根拠：`[contract.ensures]`。
+
+構造体リテラルを返す位置では `return.x` をそのフィールドの初期値の式として扱うため、`@ensures(return.x >= 1)` を静的に証明できる。
+
+**ソース：**
+
+```suz
+struct Pt {
+    x: u8,
+}
+
+@ensures(return.x >= 1)
+fn mk() -> Pt {
+    return Pt { x: 1 }
+}
+
+fn main() -> u8 {
+    fix p = mk()
+    if p.x == 1 {
+        return 0
+    }
+    return 1
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
 
 ### flow-146 契約を持つ関数を関数値にすると拒否する
 

@@ -2033,6 +2033,7 @@ fn main() -> u8 {
 
 - [array.bounds-proof] の差分制約（2 項の大小・等値・配列長）および [arith.width] の値域推定。
 - 記憶済みの一般 `bool` 条件との構文一致（括弧を除いた一致、`&&` 分解、比較の反転 `<`⇔`>`・`<=`⇔`>=`・`==`・`!=`）。整数の比較に限り `not` による反対向きの比較への反転を認め、浮動小数点数の比較の否定は [expr.nan-comparison] により `not (比較)` の形のまま一致させる。
+- 構造体リテラルを返す位置では、`return.フィールド` をそのフィールドの初期値の式として扱う。
 
 **[contract.fn-value]** 契約を持つ関数は `fn 関数名` で関数値にできない（[fn.value-from-name]）。
 
@@ -3281,7 +3282,7 @@ IntegerType      ::= "i8" | "i16" | "i32" | "i64"
 
 `ArrayType`の`Dimension`に書く`IDENT`は、[name.value] のつづりなら寸法名として [array.dimension-bind]・[array.dimension-equality] を適用し（型の同一性には含めない）、[name.type] のつづりなら列挙型の添字として [array.enum-dimension]・[array.enum-type] を適用する（型の同一性に含める）。
 
-`Needs`と`ContractClause`の改行には [generic.needs-adjacent] の物理行の制約を適用する。`@ensures`の`Expression`の中では、`Primary`として予約語`"return"`も書ける（[contract.return]）。それ以外の式の位置に値としての`"return"`は書けない。演算子の要求にはエラー指定を付けられない。`MethodReceiver`の型引数には [generic.receiver-parameters] を適用する。
+`Needs`と`ContractClause`の改行には [generic.needs-adjacent] の物理行の制約を適用する。`ContractClause`の`Expression`の中では、`Primary`として予約語`"return"`も書ける（`or`の直後の`"return"`は脱出ハンドラとして読む）。`@requires`内および`void`を返す関数の`@ensures`内での参照は [contract.return] で拒否し、`ContractClause`以外の式の位置には値としての`"return"`を書けない。演算子の要求にはエラー指定を付けられない。`MethodReceiver`の型引数には [generic.receiver-parameters] を適用する。
 
 `HEADER`は [ffi.header] のヘッダー名、`CNAME`は [ffi.name] のC側の名前である。
 
