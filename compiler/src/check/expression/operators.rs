@@ -196,7 +196,8 @@ pub(super) fn check(
                 if matches!(
                     &expr.kind,
                     ExpressionKind::Negate(_) | ExpressionKind::SaturatingNegate(_)
-                ) && ty.integer_storage().is_some_and(|i| i.bounds().0 == 0)
+                ) && (matches!(ty, Type::Integer(i) if i.bounds().0 == 0)
+                    || matches!(ty, Type::Range(r) if r.base.bounds().0 == 0))
                 {
                     return Some(expr.location.error(
                         ErrorKind::InvalidSource,

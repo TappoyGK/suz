@@ -531,6 +531,48 @@ fn main() -> u8 {
     );
 }
 
+#[test]
+fn subrange_index_omits_bounds_check_for_known_length_array() {
+    let source = r#"
+range Channel: u8 = 0..<16
+
+struct Voice {
+    ch: Channel,
+}
+
+fix TABLE: .[u8] = .[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+
+fn lookup_param(c: Channel) -> u8 {
+    return TABLE.[c]
+}
+
+fn lookup_field(v: Voice) -> u8 {
+    return TABLE.[v.ch]
+}
+
+fn main() -> u8 {
+    fix c: Channel = 15
+    fix v = Voice { ch: 0 }
+    return lookup_param(c) - lookup_field(v)
+}
+"#;
+    let (program, _) =
+        crate::analyze(source.as_bytes(), &crate::CompilationOptions::default()).unwrap();
+    let c = generate(
+        &program,
+        "range-index.suz",
+        crate::SymbolPoolLimit::default(),
+        crate::ArenaOptions::default(),
+        crate::LogLevel::default(),
+        false,
+        None,
+    );
+    assert!(
+        !c.contains("suz_array_bounds") && !c.contains("rt.array-bounds"),
+        "expected no runtime bounds check for subrange index on known-length array:\n{c}"
+    );
+}
+
 #[path = "tests/array_bounds.rs"]
 mod array_bounds;
 #[path = "tests/struct_params.rs"]

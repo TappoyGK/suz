@@ -110,11 +110,13 @@ pub(in crate::check) struct Facts {
     edges: Vec<(Term, Term, Edge)>,
     /// 符号なし整数型・`len_t` のローカル束縛（常に 0 以上であり、代入でも失われない）。
     nonneg_locals: Vec<usize>,
+    /// 値域制限型のローカル束縛（常に `lo <= x <= hi` であり、代入でも失われない）。
+    range_locals: Vec<(usize, i128, i128)>,
 }
 
 impl Facts {
     pub fn is_empty(&self) -> bool {
-        self.edges.is_empty()
+        self.edges.is_empty() && self.range_locals.is_empty()
     }
 
     pub fn clear_edges(&mut self) {
@@ -125,6 +127,28 @@ impl Facts {
         if !self.nonneg_locals.contains(&id) {
             self.nonneg_locals.push(id);
         }
+    }
+
+    pub fn mark_range(&mut self, id: usize, lo: i128, hi: i128) {
+        if let Some(entry) = self.range_locals.iter_mut().find(|(x, _, _)| *x == id) {
+            entry.1 = lo;
+            entry.2 = hi;
+        } else {
+            self.range_locals.push((id, lo, hi));
+        }
+        if lo >= 0 {
+            self.mark_nonneg(id);
+        }
+    }
+
+    fn range_of(&self, term: &Term) -> Option<(i128, i128)> {
+        let Term::Local(id) = term else {
+            return None;
+        };
+        self.range_locals
+            .iter()
+            .find(|(x, _, _)| *x == *id)
+            .map(|&(_, lo, hi)| (lo, hi))
     }
 
     pub fn unmark_nonneg(&mut self, id: usize) {
@@ -243,13 +267,33 @@ impl Facts {
             terms_set.insert(u.clone());
             terms_set.insert(v.clone());
         }
+        for &(id, _, _) in &self.range_locals {
+            terms_set.insert(Term::Local(id));
+        }
         let terms: Vec<Term> = terms_set.into_iter().collect();
         let n = terms.len();
         let mut adj: Vec<Vec<(usize, Edge)>> = vec![Vec::new(); n];
         let index_of = |t: &Term| terms.binary_search(t).unwrap();
         let zero_idx = index_of(&Term::Zero);
         for (i, term) in terms.iter().enumerate() {
-            if self.is_implicit_nonneg(term) {
+            if let Some((lo, hi)) = self.range_of(term) {
+                if let Some(neg_lo) = lo.checked_neg() {
+                    adj[zero_idx].push((
+                        i,
+                        Edge {
+                            bound: neg_lo,
+                            origins: Origins::Empty,
+                        },
+                    ));
+                }
+                adj[i].push((
+                    zero_idx,
+                    Edge {
+                        bound: hi,
+                        origins: Origins::Empty,
+                    },
+                ));
+            } else if self.is_implicit_nonneg(term) {
                 adj[zero_idx].push((
                     i,
                     Edge {
@@ -317,7 +361,20 @@ impl Facts {
         if left.term == Term::Zero && self.is_implicit_nonneg(&right.term) && 0 <= needed {
             return Some(Vec::new());
         }
-        if self.edges.is_empty() {
+        if left.term == Term::Zero
+            && let Some((lo, _)) = self.range_of(&right.term)
+            && let Some(neg_lo) = lo.checked_neg()
+            && neg_lo <= needed
+        {
+            return Some(Vec::new());
+        }
+        if right.term == Term::Zero
+            && let Some((_, hi)) = self.range_of(&left.term)
+            && hi <= needed
+        {
+            return Some(Vec::new());
+        }
+        if self.edges.is_empty() && self.range_locals.is_empty() {
             return None;
         }
         // 直接辺で満たせる場合は探索を省く。
@@ -367,7 +424,24 @@ impl Facts {
                     outgoing.push((v.clone(), edge.clone()));
                 }
             }
-            if self.is_implicit_nonneg(target) {
+            if let Some((lo, hi)) = self.range_of(target) {
+                if let Some(neg_lo) = lo.checked_neg() {
+                    incoming.push((
+                        Term::Zero,
+                        Edge {
+                            bound: neg_lo,
+                            origins: Origins::Empty,
+                        },
+                    ));
+                }
+                outgoing.push((
+                    Term::Zero,
+                    Edge {
+                        bound: hi,
+                        origins: Origins::Empty,
+                    },
+                ));
+            } else if self.is_implicit_nonneg(target) {
                 incoming.push((
                     Term::Zero,
                     Edge {
@@ -426,15 +500,21 @@ impl Facts {
         for p in rest {
             nonneg_locals.retain(|id| p.nonneg_locals.contains(id));
         }
-        if paths.iter().any(|f| f.is_empty()) {
+        let mut range_locals = first.range_locals.clone();
+        for p in rest {
+            range_locals.retain(|entry| p.range_locals.contains(entry));
+        }
+        if paths.iter().any(|f| f.edges.is_empty()) {
             return Facts {
                 edges: Vec::new(),
                 nonneg_locals,
+                range_locals,
             };
         }
         let mut joined = Facts {
             edges: Vec::new(),
             nonneg_locals,
+            range_locals,
         };
         // 全経路で完全に一致する辺は探索せずそのまま引き継ぐ。
         let mut changed_pairs: BTreeSet<(Term, Term)> = BTreeSet::new();
@@ -503,6 +583,11 @@ impl Facts {
         for &id in &self.nonneg_locals {
             if let Some(Term::Local(new_id)) = map_term(&Term::Local(id)) {
                 out.mark_nonneg(new_id);
+            }
+        }
+        for &(id, lo, hi) in &self.range_locals {
+            if let Some(Term::Local(new_id)) = map_term(&Term::Local(id)) {
+                out.mark_range(new_id, lo, hi);
             }
         }
         if self.edges.is_empty() {

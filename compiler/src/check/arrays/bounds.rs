@@ -211,7 +211,10 @@ fn is_nonneg_int(ty: Type) -> bool {
 }
 
 pub(in crate::check) fn register_nonneg(id: usize, ty: Type, scope: &Scope) {
-    if is_nonneg_int(ty) {
+    if let Type::Range(r) = ty {
+        let (lo, hi) = r.bounds();
+        scope.array_bounds.facts.borrow_mut().mark_range(id, lo, hi);
+    } else if is_nonneg_int(ty) {
         scope.array_bounds.facts.borrow_mut().mark_nonneg(id);
     }
 }
@@ -511,6 +514,31 @@ pub(super) fn index(
         && i < n
     {
         return Some(Proof::default());
+    }
+    // 値域制限型の値（仮引数・構造体フィールド・ローカル等）は常に LO <= x <= HI を満たす。
+    if let Type::Range(r) = value.ty {
+        let (lo, hi) = r.bounds();
+        if lo >= 0 {
+            if let Some(n) = dim_opt.and_then(Dimension::known)
+                && hi < n
+            {
+                return Some(Proof::default());
+            }
+            let dim = match dim_opt {
+                Some(d) => Some(dim_to_affine(d)),
+                None => array_value_path(target)
+                    .map(|(root, fields)| Affine::term(Term::PathDim(root, fields, axis))),
+            };
+            if let Some(dim) = dim
+                && let Some(origins) = scope
+                    .array_bounds
+                    .facts
+                    .borrow()
+                    .proves_lt(&Affine::constant(hi), &dim)
+            {
+                return Some(Proof { origins });
+            }
+        }
     }
     // for ループ変数の直接証明を O(1) で判定する。
     if let Some(dimension) = dim_opt
