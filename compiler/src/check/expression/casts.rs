@@ -27,12 +27,29 @@ pub(in crate::check) fn check(
             use crate::ast::CastKind;
             let target = bindings.resolve_type_at(*annotation, expr.location)?;
             if matches!(*kind, CastKind::Wrap | CastKind::Saturating) {
-                let allowed = |ty| ty != Type::Integer(crate::ast::IntegerType::Len);
+                let allowed = |ty| match *kind {
+                    CastKind::Wrap => !matches!(
+                        ty,
+                        Type::Integer(crate::ast::IntegerType::Len) | Type::Range(_)
+                    ),
+                    CastKind::Saturating => ty != Type::Integer(crate::ast::IntegerType::Len),
+                    CastKind::Checked => true,
+                };
                 let error = || {
                     expr.location.error(
                         ErrorKind::InvalidSource,
                         if *kind == CastKind::Wrap {
-                            crate::diagnostic!("expr.as-trunc", "len_t cannot be the target of as%")
+                            if matches!(target, Type::Range(_)) {
+                                crate::diagnostic!(
+                                    "range.cast",
+                                    "range types cannot be the target of as%"
+                                )
+                            } else {
+                                crate::diagnostic!(
+                                    "expr.as-trunc",
+                                    "len_t cannot be the target of as%"
+                                )
+                            }
                         } else {
                             crate::diagnostic!("expr.as-sat", "len_t cannot be the target of as|")
                         },
@@ -126,6 +143,7 @@ pub(in crate::check) fn check(
                     matches!(
                         target,
                         Type::Integer(_)
+                            | Type::Range(_)
                             | Type::Float(_)
                             | Type::GenericInt
                             | Type::GenericFloat
@@ -220,6 +238,18 @@ pub(in crate::check) fn check(
                     });
                 }
                 if fallback.is_none() {
+                    if let Type::Range(r) = target {
+                        let (lo, hi) = r.bounds();
+                        if lo > 0 || hi < 0 {
+                            return Err(expr.location.error(
+                                ErrorKind::InvalidSource,
+                                crate::diagnostic!(
+                                    "range.cast-float-sat",
+                                    "floating-point as| to a range type that excludes 0 requires or"
+                                ),
+                            ));
+                        }
+                    }
                     let known_non_nan = !target.symbolic()
                         && !super::super::constants::depends_on_generic(&operand)
                         && constant_float(&operand)?.is_some_and(|v| !v.is_nan());
@@ -363,18 +393,23 @@ fn conversion_safety(from: Type, to: Type) -> Option<bool> {
     }
     Some(match (from, to) {
         (Type::Symbol | Type::Text, _) => false,
-        (Type::Char, Type::Integer(_)) | (Type::Integer(_), Type::Char) => {
+        (Type::Char, Type::Integer(_) | Type::Range(_))
+        | (Type::Integer(_) | Type::Range(_), Type::Char) => {
             let (lo, hi) = from.integer_bounds().unwrap();
             crate::numeric::Range::bounds(lo, hi).fits_type(to)
         }
-        (Type::Integer(a), Type::Integer(b)) => {
-            let (lo, hi) = a.bounds();
-            let (min, max) = b.bounds();
+        (Type::Integer(_) | Type::Range(_), Type::Integer(_) | Type::Range(_)) => {
+            let (lo, hi) = from.integer_bounds().unwrap();
+            let (min, max) = to.integer_bounds().unwrap();
             lo >= min && hi <= max
         }
-        (Type::Enum(a), Type::Integer(b)) => a.count as i128 - 1 <= b.bounds().1,
-        (Type::Integer(_), Type::Enum(_)) | (Type::Float(_), Type::Integer(_)) => false,
-        (Type::Integer(_), Type::Float(_)) => true,
+        (Type::Enum(a), Type::Integer(_) | Type::Range(_)) => {
+            let (min, max) = to.integer_bounds().unwrap();
+            0 >= min && a.count as i128 - 1 <= max
+        }
+        (Type::Integer(_) | Type::Range(_), Type::Enum(_))
+        | (Type::Float(_), Type::Integer(_) | Type::Range(_)) => false,
+        (Type::Integer(_) | Type::Range(_), Type::Float(_)) => true,
         (Type::Float(a), Type::Float(b)) => a == b || a == FloatType::F32,
         _ => return None,
     })

@@ -276,9 +276,13 @@ pub(super) fn check(
         let mut known = None;
         let mut incompatible = false;
         exact.leaves(&mut |v| {
+            let leaf_ty = match v.ty {
+                Type::Range(r) => Type::Integer(r.base),
+                ty => ty,
+            };
             known = match known {
-                None => Some(v.ty),
-                Some(a) => match join(a, v.ty) {
+                None => Some(leaf_ty),
+                Some(a) => match join(a, leaf_ty) {
                     Some(t) => Some(t),
                     None => {
                         incompatible = true;
@@ -433,7 +437,16 @@ pub(super) fn widening(from: Type, to: Type) -> bool {
             let (lo, hi) = b.bounds();
             min >= lo && max <= hi
         }
+        (Type::Range(a), Type::Integer(b)) => {
+            let (min, max) = a.bounds();
+            let (lo, hi) = b.bounds();
+            min >= lo && max <= hi
+        }
         (Type::Integer(a), Type::Float(b)) => {
+            let (lo, hi) = a.bounds();
+            Range::bounds(lo, hi).exact_float(b == FloatType::F32)
+        }
+        (Type::Range(a), Type::Float(b)) => {
             let (lo, hi) = a.bounds();
             Range::bounds(lo, hi).exact_float(b == FloatType::F32)
         }
@@ -453,7 +466,12 @@ pub(super) fn join(a: Type, b: Type) -> Option<Type> {
     if a.is_text() && b.is_text() {
         return Some(Type::Text);
     }
-    if matches!((a, b), (Type::Integer(_), Type::Integer(_))) {
+    if matches!(
+        (a, b),
+        (Type::Integer(_), Type::Integer(_))
+            | (Type::Range(_), Type::Integer(_))
+            | (Type::Integer(_), Type::Range(_))
+    ) {
         for ty in [
             IntegerType::U8,
             IntegerType::I8,
@@ -470,8 +488,9 @@ pub(super) fn join(a: Type, b: Type) -> Option<Type> {
                 return Some(ty);
             }
         }
-    } else if matches!(a, Type::Float(_) | Type::Integer(_))
-        && matches!(b, Type::Float(_) | Type::Integer(_))
+    } else if matches!(a, Type::Float(_) | Type::Integer(_) | Type::Range(_))
+        && matches!(b, Type::Float(_) | Type::Integer(_) | Type::Range(_))
+        && (matches!(a, Type::Float(_)) || matches!(b, Type::Float(_)))
     {
         for ty in [Type::Float(FloatType::F32), Type::Float(FloatType::F64)] {
             if widening(a, ty) && widening(b, ty) {
@@ -535,6 +554,7 @@ pub(super) fn cast(
     if !matches!(
         target,
         Type::Integer(_)
+            | Type::Range(_)
             | Type::Float(_)
             | Type::GenericInt
             | Type::GenericFloat

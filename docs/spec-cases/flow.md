@@ -1326,7 +1326,7 @@ fn main() -> u8 {
 
 ```suz
 fn main() -> u8 {
-    fix range = 0..<3
+    fix items = 0..<3
     return 0
 }
 ```

@@ -222,13 +222,15 @@ impl Parser<'_, '_> {
                     "functions and types must be declared at top level"
                 ),
             )),
-            Kind::Keyword("enum" | "error" | "struct" | "fnshape" | "extern") => Err(self.error(
-                ErrorKind::InvalidSource,
-                crate::diagnostic!(
-                    "decl.location",
-                    "functions and types must be declared at top level"
-                ),
-            )),
+            Kind::Keyword("enum" | "range" | "error" | "struct" | "fnshape" | "extern") => {
+                Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "decl.location",
+                        "functions and types must be declared at top level"
+                    ),
+                ))
+            }
             Kind::Keyword("while" | "loop") => {
                 let conditional = self.token().kind == Kind::Keyword("while");
                 self.cursor += 1;

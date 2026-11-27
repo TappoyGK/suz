@@ -174,22 +174,30 @@ pub(super) fn check(
                 _ => None,
             };
             let type_error = |ty: Type| {
-                if ty == Type::Integer(IntegerType::Len)
+                if matches!(ty, Type::Integer(IntegerType::Len) | Type::Range(_))
                     && (!arithmetic
                         || matches!(&expr.kind, ExpressionKind::Binary { operator, .. } if operator.is_shift()))
                 {
                     return Some(expr.location.error(
                         ErrorKind::InvalidSource,
-                        crate::diagnostic!(
-                            "expr.operator-types",
-                            "len_t does not support bit-width operations"
-                        ),
+                        if matches!(ty, Type::Range(_)) {
+                            crate::diagnostic!(
+                                "range.prohibited-ops",
+                                "range types do not support bit-width, wrapping or saturating operations"
+                            )
+                        } else {
+                            crate::diagnostic!(
+                                "expr.operator-types",
+                                "len_t does not support bit-width operations"
+                            )
+                        },
                     ));
                 }
                 if matches!(
                     &expr.kind,
                     ExpressionKind::Negate(_) | ExpressionKind::SaturatingNegate(_)
-                ) && matches!(ty, Type::Integer(integer) if integer.bounds().0 == 0)
+                ) && (matches!(ty, Type::Integer(i) if i.bounds().0 == 0)
+                    || matches!(ty, Type::Range(r) if r.base.bounds().0 == 0))
                 {
                     return Some(expr.location.error(
                         ErrorKind::InvalidSource,
@@ -428,6 +436,21 @@ pub(super) fn check(
                         "numeric comparison requires numeric operands"
                     ),
                 ));
+            }
+            for (pair, location) in operands.windows(2).zip(locations) {
+                if let (Type::Range(a), Type::Range(b)) = (pair[0].ty, pair[1].ty)
+                    && a.id != b.id
+                {
+                    return Err(location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "range.compare",
+                            "cannot compare different range types {} and {}",
+                            bindings.type_name(pair[0].ty),
+                            bindings.type_name(pair[1].ty)
+                        ),
+                    ));
+                }
             }
             if crate::check::arrays::contains_reference(ty, bindings) {
                 return Err(expr.location.error(

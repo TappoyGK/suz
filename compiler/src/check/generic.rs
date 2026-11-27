@@ -21,9 +21,23 @@ pub(super) use analysis::analyze;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 pub(super) use validation::validate;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) enum GenericIntType {
+    Integer(IntegerType),
+    Range(crate::ast::RangeType),
+}
+impl GenericIntType {
+    pub fn to_type(self) -> Type {
+        match self {
+            Self::Integer(t) => Type::Integer(t),
+            Self::Range(r) => Type::Range(r),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct GenericTypes {
-    pub int: Option<IntegerType>,
+    pub int: Option<GenericIntType>,
     pub float: Option<FloatType>,
 }
 impl GenericTypes {
@@ -34,7 +48,10 @@ impl GenericTypes {
                 .pointer()
                 .with_readonly(ty.is_readonly_pointer())
                 .with_nilable(ty.is_nilable()),
-            Type::GenericInt => Type::Integer(self.int.expect("int declared in signature")),
+            Type::GenericInt => match self.int.expect("int declared in signature") {
+                GenericIntType::Integer(t) => Type::Integer(t),
+                GenericIntType::Range(r) => Type::Range(r),
+            },
             Type::GenericFloat => Type::Float(self.float.expect("float declared in signature")),
             _ => ty,
         }
@@ -163,7 +180,8 @@ impl ResolvedTypes {
     pub fn concrete(&self) -> GenericTypes {
         GenericTypes {
             int: self.int.map(|ty| match ty {
-                Type::Integer(t) => t,
+                Type::Integer(t) => GenericIntType::Integer(t),
+                Type::Range(r) => GenericIntType::Range(r),
                 _ => unreachable!("instantiation requires concrete types"),
             }),
             float: self.float.map(|ty| match ty {
@@ -246,6 +264,11 @@ pub(super) fn resolve(
             && family.contains(ty)
         {
             types.push(ty);
+        }
+        // 通常整数型（len_t含む）が候補に含まれる場合は、順序によらず先に通常整数型を処理して
+        // 異なる値域制限型同士の混在（例: fix r: u8 = add(note, velocity)）も共通の通常整数型へ解決する。
+        if family == Family::Int && types.iter().any(|t| matches!(t, Type::Integer(_))) {
+            types.sort_by_key(|t| usize::from(!matches!(t, Type::Integer(_))));
         }
         let mut joined = None;
         for ty in types {

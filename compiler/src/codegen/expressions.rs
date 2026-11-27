@@ -509,48 +509,97 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             if matches!(expr.ty, Type::CInteger(_)) || matches!(inner.ty, Type::CInteger(_)) {
                 return super::ffi::saturating_cast(inner, expr.ty, context);
             }
-            let Type::Integer(to) = expr.ty else {
-                unreachable!()
+            let (to, to_min, to_max) = match expr.ty {
+                Type::Integer(to) => {
+                    let (lo, hi) = to.bounds();
+                    (to, lo, hi)
+                }
+                Type::Range(r) => {
+                    let (lo, hi) = r.bounds();
+                    (r.base, lo, hi)
+                }
+                _ => unreachable!(),
             };
-            let (to_min, to_max) = to.bounds();
             let c_to = to.c_name();
-            let limit = to
-                .name()
-                .to_uppercase()
-                .replace('I', "INT")
-                .replace('U', "UINT");
+            let to_signed = to.bounds().0 < 0;
+            let c_bound = |v: i128| {
+                if !to_signed {
+                    format!("({c_to})UINT64_C({})", v as u64)
+                } else if v == i64::MIN as i128 {
+                    format!("({c_to})INT64_MIN")
+                } else {
+                    format!("({c_to})INT64_C({v})")
+                }
+            };
+            let min_expr = c_bound(to_min);
+            let max_expr = c_bound(to_max);
             let native_ty = super::exact::native_type(inner);
             if inner.ty == Type::Exact && native_ty.is_none() {
                 let id = context.temporaries.len();
                 context.temporaries.push(Type::Exact);
                 let val = expression(inner, context);
-                let neg_branch = if to_min == 0 {
-                    format!("({c_to})0")
+                let neg_branch = if to_min >= 0 {
+                    min_expr.clone()
                 } else {
                     let abs_min = to_min.unsigned_abs();
+                    if to_max < 0 {
+                        let abs_max = to_max.unsigned_abs();
+                        format!(
+                            "(suz_cmp_{id}.magnitude >= {abs_min}ULL ? {min_expr} : (suz_cmp_{id}.magnitude <= {abs_max}ULL ? {max_expr} : ({c_to})-(int64_t)suz_cmp_{id}.magnitude))"
+                        )
+                    } else {
+                        format!(
+                            "(suz_cmp_{id}.magnitude >= {abs_min}ULL ? {min_expr} : ({c_to})-(int64_t)suz_cmp_{id}.magnitude)"
+                        )
+                    }
+                };
+                let pos_branch = if to_max < 0 {
+                    max_expr.clone()
+                } else if to_min > 0 {
                     format!(
-                        "(suz_cmp_{id}.magnitude >= {abs_min}ULL ? {limit}_MIN : ({c_to})-(int64_t)suz_cmp_{id}.magnitude)"
+                        "(suz_cmp_{id}.magnitude <= {}ULL ? {min_expr} : (suz_cmp_{id}.magnitude >= {}ULL ? {max_expr} : ({c_to})suz_cmp_{id}.magnitude))",
+                        to_min as u64, to_max as u64
+                    )
+                } else {
+                    format!(
+                        "(suz_cmp_{id}.magnitude >= {}ULL ? {max_expr} : ({c_to})suz_cmp_{id}.magnitude)",
+                        to_max as u64
                     )
                 };
                 return format!(
-                    "(suz_cmp_{id} = {val}, suz_cmp_{id}.negative ? {neg_branch} : (suz_cmp_{id}.magnitude >= {to_max}ULL ? {limit}_MAX : ({c_to})suz_cmp_{id}.magnitude))"
+                    "(suz_cmp_{id} = {val}, suz_cmp_{id}.negative ? {neg_branch} : {pos_branch})"
                 );
             }
             let inner_ty = native_ty.unwrap_or(inner.ty);
             if let Type::Float(from) = inner_ty {
                 context.float_types.insert(from);
                 context.float_sat_casts.insert((from, to));
-                return format!(
+                let base_sat = format!(
                     "suz_sat_f2i_{}_{}({}, ({c_to})0)",
                     from.name(),
                     to.name(),
                     expression(inner, context)
                 );
+                if matches!(expr.ty, Type::Range(_)) {
+                    let (base_min, base_max) = to.bounds();
+                    if to_min > base_min || to_max < base_max {
+                        let id = context.temporaries.len();
+                        context.temporaries.push(Type::Integer(to));
+                        let local = format!("suz_cmp_{id}");
+                        let mut body = local.clone();
+                        if to_max < base_max {
+                            body = format!("({local} > {max_expr} ? {max_expr} : {body})");
+                        }
+                        if to_min > base_min {
+                            body = format!("({local} < {min_expr} ? {min_expr} : {body})");
+                        }
+                        return format!("({local} = {base_sat}, {body})");
+                    }
+                }
+                return base_sat;
             }
-            let Type::Integer(from) = inner_ty else {
-                unreachable!()
-            };
-            let (from_min, from_max) = from.bounds();
+            let (from_min, from_max) = inner_ty.integer_bounds().unwrap();
+            let from_signed = inner_ty.integer_storage().unwrap().c_signed();
             if from_min >= to_min && from_max <= to_max {
                 let val = if let Some(ty) = native_ty {
                     super::exact::emit_native(inner, ty, context)
@@ -569,20 +618,22 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             let local = format!("suz_cmp_{id}");
             let mut body = format!("({c_to}){local}");
             if from_max > to_max {
-                let prefix = if from.c_signed() {
-                    "INT64_C"
+                let prefix = if from_signed { "INT64_C" } else { "UINT64_C" };
+                let hi_cmp = if to_max == i64::MIN as i128 {
+                    "INT64_MIN".into()
                 } else {
-                    "UINT64_C"
+                    format!("{prefix}({to_max})")
                 };
-                body = format!("({local} > {prefix}({to_max}) ? {limit}_MAX : {body})");
+                body = format!("({local} > {hi_cmp} ? {max_expr} : {body})");
             }
             if from_min < to_min {
-                let min_expr = if to_min == 0 {
-                    format!("({c_to})0")
+                let prefix = if from_signed { "INT64_C" } else { "UINT64_C" };
+                let lo_cmp = if to_min == i64::MIN as i128 {
+                    "INT64_MIN".into()
                 } else {
-                    format!("{limit}_MIN")
+                    format!("{prefix}({to_min})")
                 };
-                body = format!("({local} < INT64_C({to_min}) ? {min_expr} : {body})");
+                body = format!("({local} < {lo_cmp} ? {min_expr} : {body})");
             }
             format!("({local} = {val}, {body})")
         }
@@ -908,7 +959,10 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                 if !floating
                     && !text
                     && structure.is_none()
-                    && !matches!(ty, Type::Integer(_) | Type::Exact | Type::CInteger(_))
+                    && !matches!(
+                        ty,
+                        Type::Integer(_) | Type::Range(_) | Type::Exact | Type::CInteger(_)
+                    )
                 {
                     context.helpers.insert(unsigned);
                 }
@@ -950,7 +1004,10 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                         operators[index].symbol()
                     );
                 }
-                if matches!(ty, Type::Exact | Type::Integer(_) | Type::Float(_)) {
+                if matches!(
+                    ty,
+                    Type::Exact | Type::Integer(_) | Type::Range(_) | Type::Float(_)
+                ) {
                     return super::exact::compare(
                         ty,
                         &names[index],

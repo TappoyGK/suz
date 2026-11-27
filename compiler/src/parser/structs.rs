@@ -146,6 +146,7 @@ impl Parser<'_, '_> {
 pub(super) fn collect(
     tokens: &[Token<'_>],
     enums: &[EnumDeclaration],
+    ranges: &[crate::ast::RangeDeclaration],
     fnshapes: &[crate::ast::FnShapeDeclaration],
     applications: crate::ast::generics::Applications,
     need_groups: std::rc::Rc<super::need_groups::Groups>,
@@ -159,6 +160,7 @@ pub(super) fn collect(
         allows: Vec::new(),
         tokens,
         enums,
+        ranges,
         structs: &[],
         fnshapes,
         fnshape_names: super::function_types::name_index(fnshapes),
@@ -183,7 +185,14 @@ pub(super) fn collect(
             && matches!(
                 p.token().kind,
                 Kind::Keyword(
-                    "fn" | "arena" | "fnshape" | "needs" | "fix" | "extern" | "enum" | "error"
+                    "fn" | "arena"
+                        | "fnshape"
+                        | "needs"
+                        | "fix"
+                        | "extern"
+                        | "enum"
+                        | "range"
+                        | "error"
                 )
             )
         {
@@ -257,6 +266,7 @@ pub(super) fn collect(
             // 列挙型との重複と同じく、構造体の名前の位置で報告する。
             if fnshapes.iter().any(|decl| decl.name == name)
                 || enums.iter().any(|decl| decl.name == name)
+                || ranges.iter().any(|decl| decl.name == name)
                 || headers.iter().any(|decl| decl.name == name)
             {
                 return Err(location.error(

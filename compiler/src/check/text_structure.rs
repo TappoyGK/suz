@@ -21,6 +21,8 @@ struct RawType {
     fields: *const RawField,
     count: usize,
     slots: usize,
+    range_min: u64,
+    range_max: u64,
 }
 #[repr(C)]
 struct RawField {
@@ -65,11 +67,27 @@ impl Schema {
             fields: ptr::null(),
             count: 0,
             slots: 1,
+            range_min: 0,
+            range_max: 0,
         };
         match ty {
             Type::Integer(ty) => {
                 entry.bits = ty.bits();
                 entry.signed_integer = ty.bounds().0 < 0;
+            }
+            Type::Range(ty) => {
+                let (lo, hi) = ty.bounds();
+                let signed = ty.base.bounds().0 < 0;
+                entry.kind = 7;
+                entry.bits = 64;
+                entry.signed_integer = signed;
+                if signed {
+                    entry.range_min = (lo as i64) as u64;
+                    entry.range_max = (hi as i64) as u64;
+                } else {
+                    entry.range_min = lo as u64;
+                    entry.range_max = hi as u64;
+                }
             }
             Type::Float(ty) => {
                 entry.kind = 1;
@@ -189,6 +207,14 @@ pub(super) fn parse(text: &str, id: usize, scope: &Scope) -> Option<CheckedExpre
         let raw = values.next()?;
         let value = match ty {
             Type::Integer(ty) => super::text_parse::integer_value(raw.bits, ty),
+            Type::Range(ty) => Value::Integer {
+                value: if ty.base.bounds().0 < 0 {
+                    i128::from(raw.bits as i64)
+                } else {
+                    i128::from(raw.bits)
+                },
+                minus: None,
+            },
             Type::Enum(_) | Type::Char => Value::Integer {
                 value: i128::from(raw.bits),
                 minus: None,

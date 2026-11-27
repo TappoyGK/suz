@@ -52,8 +52,8 @@ fn missing_range_end_at_eof_points_to_the_operator() {
 fn ranges_used_as_values_report_the_range_rule_at_the_operator() {
     for operator in ["..<", "..="] {
         for (before, after) in [
-            ("fix range = 0", "3"),
-            ("fix range = (0", "3)"),
+            ("fix items = 0", "3"),
+            ("fix items = (0", "3)"),
             ("for i in (0", "3) {}"),
             ("for i in ((0", "3)) {}"),
             ("for i in 0..<(0", "3) {}"),

@@ -3,7 +3,7 @@
 
 use super::{
     expression,
-    generic::GenericTypes,
+    generic::{GenericIntType, GenericTypes},
     ir::{CheckedExpression, Value},
     scope::Scope,
 };
@@ -111,10 +111,18 @@ pub(super) fn value(
             }
             match (from, to) {
                 (Type::GenericInt, Type::Integer(ty)) => {
-                    if types.int.is_some_and(|old| old != ty) {
+                    let chosen = GenericIntType::Integer(ty);
+                    if types.int.is_some_and(|old| old != chosen) {
                         return Err(mismatch());
                     }
-                    types.int = Some(ty);
+                    types.int = Some(chosen);
+                }
+                (Type::GenericInt, Type::Range(r)) => {
+                    let chosen = GenericIntType::Range(r);
+                    if types.int.is_some_and(|old| old != chosen) {
+                        return Err(mismatch());
+                    }
+                    types.int = Some(chosen);
                 }
                 (Type::GenericFloat, Type::Float(ty)) => {
                     if types.float.is_some_and(|old| old != ty) {
@@ -149,7 +157,7 @@ pub(super) fn value(
         if scope.generic_check() {
             scope.defer_call(
                 signature.id,
-                types.int.map(Type::Integer),
+                types.int.map(GenericIntType::to_type),
                 types.float.map(Type::Float),
                 expr.location,
                 true,

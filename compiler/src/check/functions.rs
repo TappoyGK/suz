@@ -16,10 +16,10 @@ use crate::{
 };
 use std::{collections::BTreeMap, rc::Rc};
 
-pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
-    super::generic::validate(program)?;
-    let structs = Rc::new(super::type_parameters::structs::Structs::new(program));
-    structs.prepare()?;
+fn build_signatures(
+    program: &Program,
+    structs: &super::type_parameters::structs::Structs,
+) -> Result<BTreeMap<String, Signature>, Diagnostic> {
     let mut signatures = BTreeMap::new();
     for (id, function) in program.functions.iter().enumerate() {
         let mut method = function.method;
@@ -67,6 +67,7 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
         if signatures.contains_key(&function.name)
             || program.bindings.iter().any(|c| c.name == function.name)
             || program.enums.iter().any(|e| e.name == function.name)
+            || program.ranges.iter().any(|r| r.name == function.name)
             || structs.contains_name(&function.name)
             || structs.shapes.contains_name(&function.name)
         {
@@ -115,6 +116,14 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
         );
     }
     super::ffi::signatures(program, &mut signatures)?;
+    Ok(signatures)
+}
+
+pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
+    super::generic::validate(program)?;
+    let structs = Rc::new(super::type_parameters::structs::Structs::new(program));
+    structs.prepare()?;
+    let signatures = build_signatures(program, &structs)?;
     let main_id = signatures["main"].id;
     let signatures = Rc::new(signatures);
     let scope = Scope {
@@ -130,7 +139,24 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
         ))),
         ..Scope::default()
     };
-    let (globals, mut warnings) = declarations::resolve(&program.bindings, &program.enums, scope)?;
+    let (mut globals, resolved_ranges, mut warnings) =
+        declarations::resolve(&program.bindings, &program.enums, &program.ranges, scope)?;
+    let patched_program;
+    let program = if !resolved_ranges.is_empty() {
+        let mut cloned = program.clone();
+        cloned.patch_ranges(&resolved_ranges);
+        let structs = Rc::new(super::type_parameters::structs::Structs::new(&cloned));
+        structs.prepare()?;
+        let signatures = Rc::new(build_signatures(&cloned, &structs)?);
+        globals.function_types = structs.shapes.types.clone();
+        globals.structs = structs;
+        globals.functions = signatures;
+        globals.ranges = Rc::new(resolved_ranges.clone());
+        patched_program = cloned;
+        &patched_program
+    } else {
+        program
+    };
     for group in &program.need_groups {
         definition_scope(
             &globals,

@@ -1010,6 +1010,48 @@ pub(in crate::check) fn integer_literal(
         },
     })
 }
+fn range_literal(
+    text: &str,
+    negative: bool,
+    ty: crate::ast::RangeType,
+    location: Location,
+) -> Result<CheckedExpression, Diagnostic> {
+    let digits = text.replace('_', "");
+    let value = digits
+        .parse::<i128>()
+        .ok()
+        .and_then(|n| if negative { n.checked_neg() } else { Some(n) });
+    let fail = || {
+        location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "lit.range",
+                "integer literal is out of range for range type"
+            ),
+        )
+    };
+    let value = value.ok_or_else(fail)?;
+    let (min, max) = ty.bounds();
+    if value < min || value > max {
+        return Err(fail());
+    }
+    if negative && ty.base.bounds().0 == 0 {
+        return Err(location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "expr.operator-types",
+                "integer negation requires a signed type"
+            ),
+        ));
+    }
+    Ok(CheckedExpression {
+        ty: Type::Range(ty),
+        value: Value::Integer {
+            value,
+            minus: negative.then_some(location),
+        },
+    })
+}
 fn integer_literal_value(
     value: Option<i128>,
     negative: bool,
@@ -1157,6 +1199,7 @@ pub(in crate::check) fn scalar_literal(
 ) -> Result<CheckedExpression, Diagnostic> {
     match ty {
         Type::Integer(ty) if !floating => integer_literal(text, negative, ty, location),
+        Type::Range(ty) if !floating => range_literal(text, negative, ty, location),
         Type::Float(ty) => {
             let spelling = if negative {
                 format!("-{text}")

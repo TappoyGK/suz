@@ -22,6 +22,7 @@ pub(super) fn name_index(
 fn parser<'a, 's>(
     tokens: &'a [Token<'s>],
     enums: &'a [EnumDeclaration],
+    ranges: &'a [crate::ast::RangeDeclaration],
     structs: &'a [StructDeclaration],
     declarations: &'a [FnShapeDeclaration],
     applications: crate::ast::generics::Applications,
@@ -36,6 +37,7 @@ fn parser<'a, 's>(
         allows: Vec::new(),
         tokens,
         enums,
+        ranges,
         structs,
         fnshapes: declarations,
         fnshape_names: name_index(declarations),
@@ -52,6 +54,7 @@ pub(super) fn headers(tokens: &[Token<'_>]) -> Result<Vec<FnShapeDeclaration>, D
     let mut result = Vec::new();
     let mut p = parser(
         tokens,
+        &[],
         &[],
         &[],
         &[],
@@ -102,6 +105,7 @@ pub(super) fn headers(tokens: &[Token<'_>]) -> Result<Vec<FnShapeDeclaration>, D
 pub(super) fn resolve(
     tokens: &[Token<'_>],
     enums: &[EnumDeclaration],
+    ranges: &[crate::ast::RangeDeclaration],
     structs: &mut [StructDeclaration],
     declarations: &mut [FnShapeDeclaration],
     applications: crate::ast::generics::Applications,
@@ -114,6 +118,7 @@ pub(super) fn resolve(
     for d in declarations.iter() {
         if !names.insert(&d.name)
             || enums.iter().any(|e| e.name == d.name)
+            || ranges.iter().any(|r| r.name == d.name)
             || structs.iter().any(|s| s.name == d.name)
         {
             return Err(d.location.error(
@@ -125,6 +130,7 @@ pub(super) fn resolve(
     let mut p = parser(
         tokens,
         enums,
+        ranges,
         structs,
         declarations,
         applications.clone(),
