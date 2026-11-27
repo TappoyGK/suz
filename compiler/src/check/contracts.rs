@@ -1,7 +1,7 @@
-//! 関数の契約（`@requires`・`@ensures`）の式検証・静的証明・事後条件の引き継ぎを扱う。
+//! 関数の契約（`@expects`・`@ensures`）の式検証・静的証明・事後条件の引き継ぎを扱う。
 //!
 //! 利用元: [`crate::check::functions`]、[`crate::check::type_parameters`]、[`crate::check::statements`]。
-//! 主な対象規則: `[contract.decl]`、`[contract.expr]`、`[contract.requires]`、`[contract.ensures]`、`[contract.fn-value]`。
+//! 主な対象規則: `[contract.decl]`、`[contract.expr]`、`[contract.return]`、`[contract.expects]`、`[contract.ensures]`、`[contract.fn-value]`。
 
 use super::{
     arrays::{
@@ -287,7 +287,7 @@ fn validate_checked(
     }
 }
 
-/// 関数定義の入口で全契約式を検証し、`@requires` の条件を本体スコープへ記憶する。
+/// 関数定義の入口で全契約式を検証し、`@expects` の条件を本体スコープへ記憶する。
 pub(super) fn validate_and_assume(
     contracts: &[Contract],
     scope: &mut Scope,
@@ -295,11 +295,8 @@ pub(super) fn validate_and_assume(
     if contracts.is_empty() {
         return Ok(());
     }
-    // 1. @requires を記述順に検証し、成立した条件を後続と本体スコープへ記憶する。
-    for contract in contracts
-        .iter()
-        .filter(|c| c.kind == ContractKind::Requires)
-    {
+    // 1. @expects を記述順に検証し、成立した条件を後続と本体スコープへ記憶する。
+    for contract in contracts.iter().filter(|c| c.kind == ContractKind::Expects) {
         validate_ast(&contract.condition, false, scope)?;
         let (checked, true_facts, _) = eval_condition(&contract.condition, scope)?;
         if checked.ty != Type::Bool {
@@ -312,7 +309,7 @@ pub(super) fn validate_and_assume(
         *scope.array_bounds.facts.borrow_mut() = true_facts;
     }
 
-    // 2. @ensures を @requires 成立済みスコープ（+ return 束縛）で検証する。
+    // 2. @ensures を @expects 成立済みスコープ（+ return 束縛）で検証する。
     let mut ensures_scope = scope.clone();
     if scope.result != Type::Void {
         let return_id = usize::MAX - 1;
@@ -1006,7 +1003,7 @@ fn prove_condition(expr: &Expression, env: &SubstEnv<'_>, scope: &Scope) -> bool
     }
 }
 
-/// 関数・メソッド呼び出し位置で `@requires` をすべて静的に証明する。
+/// 関数・メソッド呼び出し位置で `@expects` をすべて静的に証明する。
 pub(super) fn check_call(
     signature: &Signature,
     arguments: &[CheckedExpression],
@@ -1024,19 +1021,19 @@ pub(super) fn check_call(
     for contract in signature
         .contracts
         .iter()
-        .filter(|c| c.kind == ContractKind::Requires)
+        .filter(|c| c.kind == ContractKind::Expects)
     {
         if !prove_condition(&contract.condition, &env, scope) {
             let mut diag = call_location.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(
-                    "contract.requires",
-                    "cannot statically prove @requires precondition for this call"
+                    "contract.expects",
+                    "cannot statically prove @expects precondition for this call"
                 ),
             );
             diag.related.push(contract.location.error(
                 ErrorKind::InvalidSource,
-                crate::diagnostic!("contract.requires", "precondition declared here"),
+                crate::diagnostic!("contract.expects", "precondition declared here"),
             ));
             return Err(diag);
         }

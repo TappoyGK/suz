@@ -237,7 +237,7 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(
                     "contract.decl",
-                    "@requires and @ensures must precede a function or method declaration"
+                    "@expects and @ensures must precede a function or method declaration"
                 ),
             ));
         }

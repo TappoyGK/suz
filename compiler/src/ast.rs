@@ -1100,10 +1100,10 @@ pub(crate) struct Parameter {
     pub location: Location,
 }
 
-/// 関数の契約（事前条件 `@requires` / 事後条件 `@ensures`）。
+/// 関数の契約（事前条件 `@expects` / 事後条件 `@ensures`）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ContractKind {
-    Requires,
+    Expects,
     Ensures,
 }
 

@@ -2842,14 +2842,14 @@ fn main() -> u8 {
 ### flow-123 関数の事前条件・事後条件と範囲推定の連携
 
 主根拠：`[contract.decl]`。
-補助根拠：`[contract.requires]`、`[contract.ensures]`、`[arith.width]`、`[expr.cast-risk]`。
+補助根拠：`[contract.expects]`、`[contract.ensures]`、`[arith.width]`、`[expr.cast-risk]`。
 
-`@requires(1 <= n <= 100)` と `@ensures(0 <= return <= 200)` を宣言すると、本体内の `(n * 2) as u8` で `or` を省略でき、呼び出し元でも戻り値の範囲を引き継いで `u8` への `as` の `or` を省略できる。
+`@expects(1 <= n <= 100)` と `@ensures(0 <= return <= 200)` を宣言すると、本体内の `(n * 2) as u8` で `or` を省略でき、呼び出し元でも戻り値の範囲を引き継いで `u8` への `as` の `or` を省略できる。
 
 **ソース：**
 
 ```suz
-@requires(1 <= n <= 100)
+@expects(1 <= n <= 100)
 @ensures(0 <= return <= 200)
 fn scale(n: i32) -> i32 {
     return (n * 2) as u8
@@ -2875,7 +2875,7 @@ fn main() -> u8 {
 
 主根拠：`[contract.decl]`。
 
-`main` 関数には `@requires`・`@ensures` を付けられない。
+`main` 関数には `@expects`・`@ensures` を付けられない。
 
 **ソース：**
 
@@ -2902,12 +2902,12 @@ fn main() -> u8 {
 
 主根拠：`[contract.decl]`。
 
-構造体宣言には `@requires`・`@ensures` を付けられない。
+構造体宣言には `@expects`・`@ensures` を付けられない。
 
 **ソース：**
 
 ```suz
-@requires(true)
+@expects(true)
 struct Box {
     value: i32,
 }
@@ -2933,12 +2933,12 @@ fn main() -> u8 {
 
 主根拠：`[contract.decl]`。
 
-`fnshape` 宣言には `@requires`・`@ensures` を付けられない。
+`fnshape` 宣言には `@expects`・`@ensures` を付けられない。
 
 **ソース：**
 
 ```suz
-@requires(true)
+@expects(true)
 fnshape Callback(i32) -> i32
 
 fn main() -> u8 {
@@ -2962,12 +2962,12 @@ fn main() -> u8 {
 
 主根拠：`[contract.decl]`。
 
-`extern` ブロックには `@requires`・`@ensures` を付けられない。
+`extern` ブロックには `@expects`・`@ensures` を付けられない。
 
 **ソース：**
 
 ```suz
-@requires(true)
+@expects(true)
 extern "stdlib.h" {
     fn abs(x: _int) -> _int
 }
@@ -2999,7 +2999,7 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
-@requires(n > 0)
+@expects(n > 0)
 
 fn pos(n: i32) -> i32 {
     return n
@@ -3035,7 +3035,7 @@ fn ok(n: i32) -> bool {
     return n > 0
 }
 
-@requires(ok(n))
+@expects(ok(n))
 fn use_n(n: i32) -> i32 {
     return n
 }
@@ -3055,7 +3055,7 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[contract.expr]` | 5 | 11 |
+| 通常 | `[contract.expr]` | 5 | 10 |
 
 ### flow-130 契約式で非零保証のない除算を拒否する
 
@@ -3066,7 +3066,7 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
-@requires(total / n < 10)
+@expects(total / n < 10)
 fn ratio(total: i32, n: i32) -> i32 {
     return 0
 }
@@ -3086,7 +3086,7 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[contract.expr]` | 1 | 17 |
+| 通常 | `[contract.expr]` | 1 | 16 |
 
 ### flow-131 契約式で浮動小数点算術を書くと拒否する
 
@@ -3097,7 +3097,7 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
-@requires(x + 1.0 > 0.0)
+@expects(x + 1.0 > 0.0)
 fn f(x: f64) -> u8 {
     return 0
 }
@@ -3122,14 +3122,14 @@ fn main() -> u8 {
 ### flow-132 契約式の&&左辺で非零を保証すれば右辺の除算を許可する
 
 主根拠：`[contract.expr-order]`。
-補助根拠：`[contract.expr]`、`[contract.requires]`、`[contract.proof]`。
+補助根拠：`[contract.expr]`、`[contract.expects]`、`[contract.proof]`。
 
-`@requires(n != 0 && total / n < 10)` のように短絡評価の左辺で非零を保証すれば右辺の除算を許可し、呼び出し側で同じ条件をガードすれば受理する。
+`@expects(n != 0 && total / n < 10)` のように短絡評価の左辺で非零を保証すれば右辺の除算を許可し、呼び出し側で同じ条件をガードすれば受理する。
 
 **ソース：**
 
 ```suz
-@requires(n != 0 && total / n < 10)
+@expects(n != 0 && total / n < 10)
 fn ratio(total: i32, n: i32) -> i32 {
     return 1
 }
@@ -3187,16 +3187,16 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | `[contract.return]` | 1 | 10 |
 
-### flow-149 @requires内でreturnを参照すると拒否する
+### flow-149 @expects内でreturnを参照すると拒否する
 
 主根拠：`[contract.return]`。
 
-`return` は `@ensures` 内でのみ参照でき、`@requires` 内で参照するとコンパイルエラーとなる。
+`return` は `@ensures` 内でのみ参照でき、`@expects` 内で参照するとコンパイルエラーとなる。
 
 **ソース：**
 
 ```suz
-@requires(return > 0)
+@expects(return > 0)
 fn f(n: i32) -> i32 {
     return n
 }
@@ -3216,24 +3216,24 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[contract.return]` | 1 | 11 |
+| 通常 | `[contract.return]` | 1 | 10 |
 
-### flow-134 @requiresの配列境界条件で本体内の添字orを省略する
+### flow-134 @expectsの配列境界条件で本体内の添字orを省略する
 
-主根拠：`[contract.requires]`。
+主根拠：`[contract.expects]`。
 補助根拠：`[array.bounds-proof]`。
 
-`@requires(0 <= idx < len buf)` や `@requires(len dst == len src)` により、関数本体内の配列読み書きで `or` を省略できる。
+`@expects(0 <= idx < len buf)` や `@expects(len dst == len src)` により、関数本体内の配列読み書きで `or` を省略できる。
 
 **ソース：**
 
 ```suz
-@requires(0 <= idx < len buf)
+@expects(0 <= idx < len buf)
 fn read_at(buf: .[u8], idx: i32) -> u8 {
     return buf.[idx]
 }
 
-@requires(len dst == len src)
+@expects(len dst == len src)
 fn copy_all(dst: #[u8], src: .[u8]) -> void {
     for i in 0..<len src {
         dst#[i] = src.[i]
@@ -3262,16 +3262,16 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | 正常終了 | 0 | 0 |
 
-### flow-135 ガードなしで動的な値を@requires付き関数へ渡すと拒否する
+### flow-135 ガードなしで動的な値を@expects付き関数へ渡すと拒否する
 
-主根拠：`[contract.requires]`。
+主根拠：`[contract.expects]`。
 
-動的な値 `n` を `if` ガードなしで `@requires(1 <= n <= 100)` の関数へ渡すとコンパイルエラーとなる。
+動的な値 `n` を `if` ガードなしで `@expects(1 <= n <= 100)` の関数へ渡すとコンパイルエラーとなる。
 
 **ソース：**
 
 ```suz
-@requires(1 <= n <= 100)
+@expects(1 <= n <= 100)
 fn scale(n: i32) -> u8 {
     return (n * 2) as u8
 }
@@ -3295,11 +3295,11 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[contract.requires]` | 7 | 12 |
+| 通常 | `[contract.expects]` | 7 | 12 |
 
-### flow-136 実引数の評価中に参照先が変わり得る場合は先のガードで@requiresを証明しない
+### flow-136 実引数の評価中に参照先が変わり得る場合は先のガードで@expectsを証明しない
 
-主根拠：`[contract.requires]`。
+主根拠：`[contract.expects]`。
 補助根拠：`[contract.proof]`、`[array.bounds-proof]`。
 
 `if v.active` の後に `use_voice(v, disable(v))` を呼ぶと、第 2 引数 `disable(v)` の評価で共有参照先の条件が無効化されるため、コンパイルエラーとなる。
@@ -3316,7 +3316,7 @@ fn disable(v: mut Voice) -> i32 {
     return 0
 }
 
-@requires(v.active)
+@expects(v.active)
 fn use_voice(v: ref Voice, tag: i32) -> u8 {
     return 0
 }
@@ -3340,7 +3340,7 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[contract.requires]` | 18 | 16 |
+| 通常 | `[contract.expects]` | 18 | 16 |
 
 ### flow-137 return前のifガードと代替値で@ensuresを満たす
 
@@ -3445,7 +3445,7 @@ fn main() -> u8 {
 ### flow-140 or returnで束縛した呼び出し結果へ@ensuresを持ち越す
 
 主根拠：`[contract.ensures-propagate]`。
-補助根拠：`[contract.requires]`。
+補助根拠：`[contract.expects]`。
 
 失敗時に脱出する `or return` で束縛した場合、後続の経路は成功確定のため `@ensures` の条件を呼び出し元へ持ち越せる。
 
@@ -3462,7 +3462,7 @@ fn make_pos(x: i32) -> i32 or Fail {
     fail Fail.Bad
 }
 
-@requires(n > 0)
+@expects(n > 0)
 fn need_pos(n: i32) -> u8 {
     return 0
 }
@@ -3482,9 +3482,9 @@ fn main() -> u8 {
 ### flow-141 失敗する関数のor代替値合流後は@ensuresを持ち越さない
 
 主根拠：`[contract.ensures-propagate]`。
-補助根拠：`[contract.requires]`。
+補助根拠：`[contract.expects]`。
 
-`make_pos(5) or 0` のように代替値へ合流すると `@ensures(return > 0)` は持ち越さず、後続の `@requires(n > 0)` はコンパイルエラーとなる。
+`make_pos(5) or 0` のように代替値へ合流すると `@ensures(return > 0)` は持ち越さず、後続の `@expects(n > 0)` はコンパイルエラーとなる。
 
 **ソース：**
 
@@ -3499,7 +3499,7 @@ fn make_pos(x: i32) -> i32 or Fail {
     fail Fail.Bad
 }
 
-@requires(n > 0)
+@expects(n > 0)
 fn need_pos(n: i32) -> u8 {
     return 0
 }
@@ -3520,14 +3520,14 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[contract.requires]` | 18 | 12 |
+| 通常 | `[contract.expects]` | 18 | 12 |
 
-### flow-142 一般のbool状態条件・比較の反転・notと&&の分解で@requiresを証明する
+### flow-142 一般のbool状態条件・比較の反転・notと&&の分解で@expectsを証明する
 
 主根拠：`[contract.proof]`。
-補助根拠：`[contract.requires]`。
+補助根拠：`[contract.expects]`。
 
-`if v.active`、比較の反転（`100 >= n`）、早期退出の `not`（`if not (n >= 1) { return 1 }`）、`&&` の分解によって `@requires` を証明できる。
+`if v.active`、比較の反転（`100 >= n`）、早期退出の `not`（`if not (n >= 1) { return 1 }`）、`&&` の分解によって `@expects` を証明できる。
 
 **ソース：**
 
@@ -3536,12 +3536,12 @@ struct Voice {
     active: bool,
 }
 
-@requires(v.active)
+@expects(v.active)
 fn play(v: ref Voice) -> u8 {
     return 0
 }
 
-@requires(1 <= n && n <= 100)
+@expects(1 <= n && n <= 100)
 fn use_range(n: i32) -> u8 {
     return 0
 }
@@ -3576,14 +3576,14 @@ fn main() -> u8 {
 ### flow-143 配列要素を更新しても配列長lenの保証は失われない
 
 主根拠：`[contract.proof]`。
-補助根拠：`[array.bounds-proof]`、`[contract.requires]`。
+補助根拠：`[array.bounds-proof]`、`[contract.expects]`。
 
-配列の要素へ書き込んでも配列参照の `len` に関する条件は保持されるため、後続の `@requires(len dst == len src)` 呼び出しが受理される。
+配列の要素へ書き込んでも配列参照の `len` に関する条件は保持されるため、後続の `@expects(len dst == len src)` 呼び出しが受理される。
 
 **ソース：**
 
 ```suz
-@requires(len dst == len src)
+@expects(len dst == len src)
 fn copy_all(dst: #[u8], src: .[u8]) -> void {
     for i in 0..<len src {
         dst#[i] = src.[i]
@@ -3613,9 +3613,9 @@ fn main() -> u8 {
 ### flow-144 共有参照先に依存する条件は関数呼び出しをまたぐと忘れる
 
 主根拠：`[contract.proof]`。
-補助根拠：`[array.bounds-proof]`、`[contract.requires]`。
+補助根拠：`[array.bounds-proof]`、`[contract.expects]`。
 
-共有参照先 `v.active` の条件は、別の関数呼び出しをまたぐと忘れられるため、後続の `@requires(v.active)` 呼び出しはコンパイルエラーとなる。
+共有参照先 `v.active` の条件は、別の関数呼び出しをまたぐと忘れられるため、後続の `@expects(v.active)` 呼び出しはコンパイルエラーとなる。
 
 **ソース：**
 
@@ -3628,7 +3628,7 @@ fn touch() -> void {
     return
 }
 
-@requires(v.active)
+@expects(v.active)
 fn play(v: ref Voice) -> u8 {
     return 0
 }
@@ -3653,19 +3653,19 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[contract.requires]` | 18 | 16 |
+| 通常 | `[contract.expects]` | 18 | 16 |
 
 ### flow-145 浮動小数点比較の否定で反対向きの比較を証明済みとみなさない
 
 主根拠：`[contract.proof]`。
-補助根拠：`[expr.nan-comparison]`、`[contract.requires]`。
+補助根拠：`[expr.nan-comparison]`、`[contract.expects]`。
 
 浮動小数点数の `x < 1.0` は `NaN` でも偽となるため、`if x < 1.0 { return 1 }` の後ろでも `x >= 1.0` は証明されずコンパイルエラーとなる。
 
 **ソース：**
 
 ```suz
-@requires(x >= 1.0)
+@expects(x >= 1.0)
 fn h(x: f64) -> u8 {
     return 0
 }
@@ -3689,7 +3689,7 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[contract.requires]` | 11 | 12 |
+| 通常 | `[contract.expects]` | 11 | 12 |
 
 ### flow-150 構造体リテラルを返す位置で@ensuresのreturn.フィールドを証明し呼び出し元へ引き継ぐ
 
@@ -3710,7 +3710,7 @@ fn mk() -> Pt {
     return Pt { x: 1 }
 }
 
-@requires(p.x >= 1)
+@expects(p.x >= 1)
 fn use_pt(p: Pt) -> u8 {
     return p.x - 1
 }
@@ -3730,14 +3730,14 @@ fn main() -> u8 {
 ### flow-151 整数比較のnotを同じ形のガードと反対向きの比較のガードで証明する
 
 主根拠：`[contract.proof]`。
-補助根拠：`[contract.requires]`、`[contract.ensures]`。
+補助根拠：`[contract.expects]`、`[contract.ensures]`。
 
-整数の比較では `not (n < 1)` と `n >= 1` が反転で一致するため、`@requires(not (n < 1))` と `@ensures(not (return < 1))` を同じ形のガードでも反対向きの比較のガードでも証明できる。
+整数の比較では `not (n < 1)` と `n >= 1` が反転で一致するため、`@expects(not (n < 1))` と `@ensures(not (return < 1))` を同じ形のガードでも反対向きの比較のガードでも証明できる。
 
 **ソース：**
 
 ```suz
-@requires(not (n < 1))
+@expects(not (n < 1))
 @ensures(not (return < 1))
 fn keep_pos(n: i32) -> i32 {
     return n
@@ -3768,19 +3768,19 @@ fn main() -> u8 {
 ### flow-152 比較連鎖や&&のnotを同じ形のガードで証明する
 
 主根拠：`[contract.proof]`。
-補助根拠：`[contract.requires]`。
+補助根拠：`[contract.expects]`。
 
-比較連鎖や `&&` の否定は反対向きの比較へ反転せず、`not (...)` の形のまま一般 `bool` 条件として記憶・一致させるため、同じ形のガードで `@requires` を証明できる。
+比較連鎖や `&&` の否定は反対向きの比較へ反転せず、`not (...)` の形のまま一般 `bool` 条件として記憶・一致させるため、同じ形のガードで `@expects` を証明できる。
 
 **ソース：**
 
 ```suz
-@requires(not (0 < n < 10))
+@expects(not (0 < n < 10))
 fn outside_chain(n: i32) -> u8 {
     return 0
 }
 
-@requires(not (n > 0 && n < 10))
+@expects(not (n > 0 && n < 10))
 fn outside_and(n: i32) -> u8 {
     return 0
 }
@@ -3812,7 +3812,7 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
-@requires(n > 0)
+@expects(n > 0)
 fn pos(n: i32) -> i32 {
     return n
 }
@@ -3849,7 +3849,7 @@ struct Boxed {
     value: i32,
 }
 
-@requires(x > 0)
+@expects(x > 0)
 fn Boxed#set(x: i32) -> void {
     self#value = x
 }
@@ -3892,7 +3892,7 @@ struct Num {
     v: i32,
 }
 
-@requires(other.v != 0)
+@expects(other.v != 0)
 fn Num./(other: Num) -> Num {
     return Num { v: self.v }
 }

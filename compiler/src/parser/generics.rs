@@ -79,7 +79,7 @@ impl Parser<'_, '_> {
         let line = self.token().line;
         let is_contract = matches!(
             self.tokens.get(start + 1).map(|t| t.kind),
-            Some(Kind::Ident("requires" | "ensures"))
+            Some(Kind::Ident("expects" | "ensures"))
         );
         self.cursor += 1;
         while !matches!(
@@ -158,12 +158,12 @@ impl Parser<'_, '_> {
             let location = self.location();
             self.cursor = start + 1;
             let kind = match self.token().kind {
-                Kind::Ident("requires") => ContractKind::Requires,
+                Kind::Ident("expects") => ContractKind::Expects,
                 Kind::Ident("ensures") => ContractKind::Ensures,
                 _ => {
                     return Err(self.error(
                         ErrorKind::InvalidSource,
-                        crate::diagnostic!("contract.decl", "expected @requires or @ensures"),
+                        crate::diagnostic!("contract.decl", "expected @expects or @ensures"),
                     ));
                 }
             };
