@@ -452,6 +452,15 @@ pub(super) fn satisfy(
             {
                 return Err(error());
             }
+            if !signature.contracts.is_empty() {
+                return Err(location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "contract.needs",
+                        "methods with contracts cannot satisfy @needs requirements"
+                    ),
+                ));
+            }
             return Ok(());
         }
         RequiredOperation::Operator(op) => operator(op, receiver.clone(), args.clone(), location)?,
@@ -500,6 +509,15 @@ pub(super) fn satisfy(
                 != parameters
         {
             return Err(error());
+        }
+        if !signature.contracts.is_empty() {
+            return Err(location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "contract.needs",
+                    "operator methods with contracts cannot satisfy @needs requirements"
+                ),
+            ));
         }
         return Ok(());
     }

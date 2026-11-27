@@ -113,6 +113,8 @@ pub(super) fn collect(
         applications: Default::default(),
         type_parameters: Vec::new(),
         pending_needs: Vec::new(),
+        pending_contracts: Vec::new(),
+        in_ensures: false,
         need_groups: Default::default(),
         generic_functions: Default::default(),
         allows: Vec::new(),

@@ -73,10 +73,14 @@ impl Parser<'_, '_> {
         Ok(ty)
     }
 
-    /// 要求は一行に収める。型名は後続の宣言を読んでから、その宣言のスコープで解決する。
+    /// 要求・契約は一行に収める。型名は後続の宣言を読んでから、その宣言のスコープで解決する。
     pub(super) fn collect_need(&mut self) -> Result<(), Diagnostic> {
         let start = self.cursor;
         let line = self.token().line;
+        let is_contract = matches!(
+            self.tokens.get(start + 1).map(|t| t.kind),
+            Some(Kind::Ident("expects" | "ensures"))
+        );
         self.cursor += 1;
         while !matches!(
             self.token().kind,
@@ -85,14 +89,25 @@ impl Parser<'_, '_> {
         {
             self.cursor += 1;
         }
-        self.pending_needs.push((start, self.cursor));
+        if is_contract {
+            self.pending_contracts.push((start, self.cursor));
+        } else {
+            self.pending_needs.push((start, self.cursor));
+        }
         if !self.token().kind.is_newline() {
             return Err(self.error(
                 ErrorKind::InvalidSource,
-                crate::diagnostic!(
-                    "generic.needs",
-                    "a requirement must occupy one line before its declaration"
-                ),
+                if is_contract {
+                    crate::diagnostic!(
+                        "contract.decl",
+                        "a contract must occupy one line before its declaration"
+                    )
+                } else {
+                    crate::diagnostic!(
+                        "generic.needs",
+                        "a requirement must occupy one line before its declaration"
+                    )
+                },
             ));
         }
         self.cursor += 1;
@@ -100,10 +115,17 @@ impl Parser<'_, '_> {
             if self.token().kind == Kind::BlankLine {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
-                    crate::diagnostic!(
-                        "generic.needs",
-                        "a blank line separates the requirement from its declaration"
-                    ),
+                    if is_contract {
+                        crate::diagnostic!(
+                            "contract.decl",
+                            "a blank line separates the contract from its declaration"
+                        )
+                    } else {
+                        crate::diagnostic!(
+                            "generic.needs",
+                            "a blank line separates the requirement from its declaration"
+                        )
+                    },
                 ));
             }
             self.cursor += 1;
@@ -111,25 +133,82 @@ impl Parser<'_, '_> {
         if self.token().kind == Kind::End {
             return Err(self.error(
                 ErrorKind::InvalidSource,
-                crate::diagnostic!(
-                    "generic.needs",
-                    "a requirement must precede its declaration"
-                ),
+                if is_contract {
+                    crate::diagnostic!("contract.decl", "a contract must precede its declaration")
+                } else {
+                    crate::diagnostic!(
+                        "generic.needs",
+                        "a requirement must precede its declaration"
+                    )
+                },
             ));
         }
         Ok(())
     }
 
+    pub(super) fn declaration_contracts(
+        &mut self,
+    ) -> Result<Vec<crate::ast::Contract>, Diagnostic> {
+        use super::FixedToken;
+        use crate::ast::{Contract, ContractKind};
+        let saved = self.cursor;
+        let mut contracts = Vec::new();
+        for (start, end) in std::mem::take(&mut self.pending_contracts) {
+            self.cursor = start;
+            let location = self.location();
+            self.cursor = start + 1;
+            let kind = match self.token().kind {
+                Kind::Ident("expects") => ContractKind::Expects,
+                Kind::Ident("ensures") => ContractKind::Ensures,
+                _ => {
+                    return Err(self.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!("contract.decl", "expected @expects or @ensures"),
+                    ));
+                }
+            };
+            self.cursor += 1;
+            self.expect(FixedToken::Symbol("("))?;
+            let saved_ensures = self.in_ensures;
+            self.in_ensures = true;
+            let condition = self.expression();
+            self.in_ensures = saved_ensures;
+            let condition = condition?;
+            self.expect(FixedToken::Symbol(")"))?;
+            if self.cursor != end {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("contract.decl", "unexpected tokens in contract"),
+                ));
+            }
+            contracts.push(Contract {
+                kind,
+                condition,
+                location,
+            });
+        }
+        self.cursor = saved;
+        Ok(contracts)
+    }
+
     pub(super) fn declaration_needs(
         &mut self,
     ) -> Result<Vec<crate::ast::generics::Need>, Diagnostic> {
-        use super::FixedToken;
         use crate::ast::generics::NeedList;
         let saved = self.cursor;
         let mut needs = NeedList::default();
         for (start, end) in std::mem::take(&mut self.pending_needs) {
             self.cursor = start + 1;
-            self.expect(FixedToken::Keyword("needs"))?;
+            if self.token().kind != Kind::Keyword("needs") {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "syntax.grammar",
+                        "expected 'needs', 'expects', or 'ensures'"
+                    ),
+                ));
+            }
+            self.cursor += 1;
             if self.type_parameters.is_empty() {
                 return Err(self.error(
                     ErrorKind::InvalidSource,

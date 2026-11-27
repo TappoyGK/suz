@@ -128,6 +128,8 @@ impl Parser<'_, '_> {
                         applications: self.applications.clone(),
                         type_parameters: self.type_parameters.clone(),
                         pending_needs: Vec::new(),
+                        pending_contracts: Vec::new(),
+                        in_ensures: false,
                         need_groups: self.need_groups.clone(),
                         generic_functions: self.generic_functions.clone(),
                         allows: Vec::new(),

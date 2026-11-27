@@ -12,6 +12,8 @@ pub(super) struct Signature {
     // 診断用の名前は汎用宣言だけに保持し、署名を複製するときも共有する。
     pub type_parameter_names: Option<Rc<Vec<String>>>,
     pub needs: Vec<crate::ast::generics::Need>,
+    pub parameter_names: Option<Rc<Vec<String>>>,
+    pub contracts: Vec<crate::ast::Contract>,
     pub method: Option<crate::ast::Method>,
     pub external: bool,
     pub id: usize,
@@ -170,6 +172,7 @@ pub(super) struct Scope {
     pub functions: Rc<BTreeMap<String, Signature>>,
     pub result: Type,
     pub errors: Rc<Vec<crate::ast::ErrorVariant>>,
+    pub current_ensures: Rc<Vec<crate::ast::Contract>>,
 }
 impl Scope {
     pub fn contains_function(&self, ty: Type) -> bool {
@@ -418,6 +421,7 @@ impl Default for Scope {
             functions: Rc::default(),
             result: Type::Integer(IntegerType::U8),
             errors: Rc::default(),
+            current_ensures: Rc::default(),
         }
     }
 }

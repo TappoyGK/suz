@@ -219,6 +219,12 @@ pub(in crate::check) fn check(
     let _ = (&mut start, &mut end);
 
     context
+        .bindings
+        .array_bounds
+        .facts
+        .borrow_mut()
+        .forget_shared();
+    context
         .output
         .push(CheckedStatement::ArrayBulkWrite(Box::new(
             CheckedBulkWrite {
@@ -425,6 +431,12 @@ pub(in crate::check) fn check_mask(
         lowered_inputs.push(input);
     }
 
+    context
+        .bindings
+        .array_bounds
+        .facts
+        .borrow_mut()
+        .forget_shared();
     context
         .output
         .push(CheckedStatement::ArrayBulkWrite(Box::new(

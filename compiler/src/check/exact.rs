@@ -169,10 +169,12 @@ fn build<const DECLARED_OPERATIONS: bool>(
                 ));
             }
             let (min, max) = domain::bounds(value.ty).unwrap();
-            (
-                ExactKind::Leaf(Box::new(value)),
-                Some(Range::bounds(min, max)),
-            )
+            let range = if !value.ty.symbolic() {
+                super::contracts::narrow_leaf_range(&value, min, max, bindings)
+            } else {
+                Range::bounds(min, max)
+            };
+            (ExactKind::Leaf(Box::new(value)), Some(range))
         }
     };
     let domains = match &kind {

@@ -52,6 +52,7 @@ impl Parser<'_, '_> {
             function: Function {
                 type_parameters: Vec::new(),
                 needs: Vec::new(),
+                contracts: Vec::new(),
                 method: None,
                 name: String::new(),
                 keyword_location: location,

@@ -291,7 +291,24 @@ pub(in crate::check) fn check(
                 });
             }
             if fallback.is_none() && !operand.ty.is_text() {
-                let safe = conversion_safety(operand.ty, target).unwrap_or(false);
+                let mut safe = conversion_safety(operand.ty, target).unwrap_or(false);
+                if !safe
+                    && operand.ty.is_integer()
+                    && target.is_integer()
+                    && !operand.ty.symbolic()
+                    && !target.symbolic()
+                    && let (Some((src_lo, src_hi)), Some((lo, hi))) =
+                        (operand.ty.integer_bounds(), target.integer_bounds())
+                    && {
+                        let proven = super::super::contracts::narrow_leaf_range(
+                            &operand, src_lo, src_hi, bindings,
+                        );
+                        proven.min >= crate::numeric::Int::from_i128(lo)
+                            && proven.max <= crate::numeric::Int::from_i128(hi)
+                    }
+                {
+                    safe = true;
+                }
                 require_handler(&operand, target, safe, expr.location, bindings)?;
             }
             if let Some(FailureHandler::Return {

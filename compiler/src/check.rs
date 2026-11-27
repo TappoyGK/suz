@@ -6,6 +6,7 @@ mod arena;
 mod arrays;
 mod closures;
 mod constants;
+mod contracts;
 mod control;
 mod declarations;
 mod diagnostics;
