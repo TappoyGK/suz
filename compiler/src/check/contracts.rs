@@ -917,6 +917,59 @@ fn prove_condition(expr: &Expression, env: &SubstEnv<'_>, scope: &Scope) -> bool
         } => (0..operators.len()).all(|k| {
             prove_comparison_pair(&operands[k], operators[k], &operands[k + 1], env, scope)
         }),
+        ExpressionKind::Not(inner) => {
+            let mut cur = inner.as_ref();
+            let mut negated = true;
+            loop {
+                match &cur.kind {
+                    ExpressionKind::Group(g) => cur = g,
+                    ExpressionKind::Not(n) => {
+                        negated = !negated;
+                        cur = n;
+                    }
+                    _ => break,
+                }
+            }
+            if !negated {
+                return prove_condition(cur, env, scope);
+            }
+            if let ExpressionKind::Comparison {
+                operators,
+                operands,
+                ..
+            } = &cur.kind
+                && operators.len() == 1
+                && expr_is_integer(&operands[0], env, scope)
+                && expr_is_integer(&operands[1], env, scope)
+            {
+                let inv = match operators[0] {
+                    ComparisonOperator::Less => ComparisonOperator::GreaterEqual,
+                    ComparisonOperator::LessEqual => ComparisonOperator::Greater,
+                    ComparisonOperator::Greater => ComparisonOperator::LessEqual,
+                    ComparisonOperator::GreaterEqual => ComparisonOperator::Less,
+                    ComparisonOperator::Equal => ComparisonOperator::NotEqual,
+                    ComparisonOperator::NotEqual => ComparisonOperator::Equal,
+                };
+                if prove_comparison_pair(&operands[0], inv, &operands[1], env, scope) {
+                    return true;
+                }
+            }
+            if let Some(pred) = subst_pred(expr, env, scope) {
+                if pred == PredExpr::Bool(true) {
+                    return true;
+                }
+                if scope
+                    .array_bounds
+                    .facts
+                    .borrow()
+                    .has_predicate(&pred)
+                    .is_some()
+                {
+                    return true;
+                }
+            }
+            false
+        }
         _ => {
             if let Some(pred) = subst_pred(expr, env, scope) {
                 if pred == PredExpr::Bool(true) {

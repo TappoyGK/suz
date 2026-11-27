@@ -2027,13 +2027,13 @@ fn main() -> u8 {
 
 **[contract.ensures]** `@ensures` は、関数本体のすべての正常 `return` 位置で静的に証明できなければコンパイルエラーとする。失敗する関数（`-> T or Error`）では正常 `return` 経路のみを検査し、`fail` 経路では検査しない。
 
-**[contract.ensures-propagate]** 直接呼び出し（および失敗時に脱出する `or return`・`or fail`）の結果を束縛したとき、`@ensures` のうち `return` と不変な仮引数・`len` の関係のみを呼び出し元へ引き継ぐ（[array.bounds-proof]）。共有参照先・配列要素に依存する条件、および `or 代替値` の合流後は持ち越さない。
+**[contract.ensures-propagate]** 直接呼び出し（および失敗時に脱出する `or return`・`or fail`）の結果を束縛したとき、`@ensures` のうち `return`（そのフィールド `return.フィールド` を含む）と不変な仮引数・`len` の関係のみを呼び出し元へ引き継ぐ（[array.bounds-proof]）。共有参照先・配列要素に依存する条件、および `or 代替値` の合流後は持ち越さない。
 
 **[contract.proof]** 契約の静的証明は、[array.bounds-proof] と同じく最適化設定や実装固有の追加推論に依らない次の固定規則で判定する。条件の記憶と無効化は [array.bounds-proof] に従う。
 
 - [array.bounds-proof] の差分制約（2 項の大小・等値・配列長）および [arith.width] の値域推定。
 - 記憶済みの一般 `bool` 条件との構文一致（括弧を除いた一致、`&&` 分解、比較の反転 `<`⇔`>`・`<=`⇔`>=`・`==`・`!=`）。整数の比較に限り `not` による反対向きの比較への反転を認め、浮動小数点数の比較の否定は [expr.nan-comparison] により `not (比較)` の形のまま一致させる。
-- 構造体リテラルを返す位置では、`return.フィールド` をそのフィールドの初期値の式として扱う。
+- 構造体リテラルを返す位置では、`return.フィールド` をそのフィールドの初期値の式として扱う。初期値の式が [contract.expr] で許す式でない場合は、そのフィールドの条件を証明済みとしない。
 
 **[contract.fn-value]** 契約を持つ関数は `fn 関数名` で関数値にできない（[fn.value-from-name]）。
 
@@ -3282,7 +3282,7 @@ IntegerType      ::= "i8" | "i16" | "i32" | "i64"
 
 `ArrayType`の`Dimension`に書く`IDENT`は、[name.value] のつづりなら寸法名として [array.dimension-bind]・[array.dimension-equality] を適用し（型の同一性には含めない）、[name.type] のつづりなら列挙型の添字として [array.enum-dimension]・[array.enum-type] を適用する（型の同一性に含める）。
 
-`Needs`と`ContractClause`の改行には [generic.needs-adjacent] の物理行の制約を適用する。`ContractClause`の`Expression`の中では、`Primary`として予約語`"return"`も書ける（`or`の直後の`"return"`は脱出ハンドラとして読む）。`@requires`内および`void`を返す関数の`@ensures`内での参照は [contract.return] で拒否し、`ContractClause`以外の式の位置には値としての`"return"`を書けない。演算子の要求にはエラー指定を付けられない。`MethodReceiver`の型引数には [generic.receiver-parameters] を適用する。
+`Needs`と`ContractClause`の改行には [generic.needs-adjacent] の物理行の制約を適用する。`ContractClause`の`Expression`の中では、`Primary`として予約語`"return"`も書ける（`or`の直後の`"return"`は脱出ハンドラとして読む）。参照できる位置は [contract.return] に従い、`ContractClause`以外の式の位置には値としての`"return"`を書けない。演算子の要求にはエラー指定を付けられない。`MethodReceiver`の型引数には [generic.receiver-parameters] を適用する。
 
 `HEADER`は [ffi.header] のヘッダー名、`CNAME`は [ffi.name] のC側の名前である。
 

@@ -3691,12 +3691,12 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | `[contract.requires]` | 11 | 12 |
 
-### flow-150 構造体リテラルを返す位置で@ensuresのreturn.フィールドを証明する
+### flow-150 構造体リテラルを返す位置で@ensuresのreturn.フィールドを証明し呼び出し元へ引き継ぐ
 
 主根拠：`[contract.proof]`。
-補助根拠：`[contract.ensures]`。
+補助根拠：`[contract.ensures]`、`[contract.ensures-propagate]`。
 
-構造体リテラルを返す位置では `return.x` をそのフィールドの初期値の式として扱うため、`@ensures(return.x >= 1)` を静的に証明できる。
+構造体リテラルを返す位置では `return.x` をそのフィールドの初期値の式として扱うため `@ensures(return.x >= 1)` を静的に証明でき、結果を束縛した変数のフィールド条件として呼び出し元へ引き継げる。
 
 **ソース：**
 
@@ -3710,10 +3710,50 @@ fn mk() -> Pt {
     return Pt { x: 1 }
 }
 
+@requires(p.x >= 1)
+fn use_pt(p: Pt) -> u8 {
+    return p.x - 1
+}
+
 fn main() -> u8 {
     fix p = mk()
-    if p.x == 1 {
-        return 0
+    return use_pt(p)
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### flow-151 整数比較のnotを同じ形のガードと反対向きの比較のガードで証明する
+
+主根拠：`[contract.proof]`。
+補助根拠：`[contract.requires]`、`[contract.ensures]`。
+
+整数の比較では `not (n < 1)` と `n >= 1` が反転で一致するため、`@requires(not (n < 1))` と `@ensures(not (return < 1))` を同じ形のガードでも反対向きの比較のガードでも証明できる。
+
+**ソース：**
+
+```suz
+@requires(not (n < 1))
+@ensures(not (return < 1))
+fn keep_pos(n: i32) -> i32 {
+    return n
+}
+
+fn main() -> u8 {
+    fix a: i32 = 5
+    fix b: i32 = 7
+    if not (a < 1) {
+        fix r1 = keep_pos(a)
+        if b >= 1 {
+            fix r2 = keep_pos(b)
+            if r1 == 5 && r2 == 7 {
+                return 0
+            }
+        }
     }
     return 1
 }
