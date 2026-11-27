@@ -104,3 +104,13 @@ fn named_function_values_reuse_direct_call_instances() {
         3
     );
 }
+
+#[test]
+fn unrelated_range_declaration_does_not_change_generic_check() {
+    let base = "fn zero() -> int {\n    return 0\n}\nfn main() -> u8 {\n    return 0\n}\n";
+    let with_range = format!("range Divisor: u16 = 1..=1000\n{base}");
+    let (_, w1) = crate::analyze(base.as_bytes(), &crate::CompilationOptions::default()).unwrap();
+    let (_, w2) =
+        crate::analyze(with_range.as_bytes(), &crate::CompilationOptions::default()).unwrap();
+    assert_eq!(w1.len(), w2.len());
+}

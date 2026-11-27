@@ -4,7 +4,8 @@
 #include <stddef.h>
 
 enum suz_parse_kind { SUZ_PARSE_INTEGER, SUZ_PARSE_FLOAT, SUZ_PARSE_BOOL,
-                      SUZ_PARSE_TEXT, SUZ_PARSE_ENUM, SUZ_PARSE_STRUCT, SUZ_PARSE_CHAR };
+                      SUZ_PARSE_TEXT, SUZ_PARSE_ENUM, SUZ_PARSE_STRUCT, SUZ_PARSE_CHAR,
+                      SUZ_PARSE_RANGE };
 
 typedef struct suz_parse_type suz_parse_type;
 typedef struct {
@@ -21,6 +22,8 @@ struct suz_parse_type {
     const suz_parse_field *fields;
     size_t count;
     size_t slots;
+    uint64_t range_min;
+    uint64_t range_max;
 };
 
 typedef struct {

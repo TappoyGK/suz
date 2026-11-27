@@ -1069,12 +1069,12 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | `[num.places]` | 2 | 9 |
 
-### type-038 値域制限型の宣言・利用・比較・match
+### type-038 値域制限型の宣言・構造体・関数・配列要素
 
 主根拠：`[range.decl]`。
-補助根拠：`[range.bounds]`、`[range.identity]`、`[range.operations]`、`[match.pattern]`、`[match.exhaustive]`。
+補助根拠：`[range.bounds]`、`[range.places]`。
 
-半開区間 `0..<256`（`u8` に収まる `0..=255`）や 1 値型 `3..=3` を含む値域制限型を宣言し、構造体フィールド・仮引数・戻り値・配列要素・比較・テンプレート埋め込み・`match` / `matchexpr` で使える。
+半開区間 `0..<256`（`u8` に収まる `0..=255`）や 1 値型 `3..=3` を含む値域制限型を宣言し、構造体フィールド・仮引数・戻り値・配列要素として利用できる。
 
 **ソース：**
 
@@ -1087,29 +1087,16 @@ struct Packet {
     tag: Three,
 }
 
-fn classify(v: ByteValue) -> ByteValue {
-    return matchexpr v {
-        0 => 1
-        255 => 255
-        _ => v
-    }
+fn pass(v: ByteValue) -> ByteValue {
+    return v
 }
 
 fn main() -> u8 {
     fix p = Packet { value: 255, tag: 3 }
     fix arr: #[ByteValue] = new #[0; 2]
-    arr#[0] = classify(p.value)
-    arr#[1] = 0
-    if arr.[0] == 255 && arr.[1] == 0 {
-        fix s: symbol = "${arr.[0]}:${p.tag}"
-        match p.tag {
-            3 => {
-                if s == "255:3" {
-                    return 0
-                }
-            }
-            _ => {}
-        }
+    arr#[0] = pass(p.value)
+    if arr.[0] == 255 {
+        return p.tag
     }
     return 1
 }
@@ -1119,7 +1106,7 @@ fn main() -> u8 {
 
 | 設定 | 結果 | 終了コード | 警告数 |
 |---|---|---:|---:|
-| 通常 | 正常終了 | 0 | 0 |
+| 通常 | 正常終了 | 3 | 0 |
 
 ### type-039 値域制限型の空区間を拒否する
 
@@ -1207,7 +1194,8 @@ fn main() -> u8 {
 
 ### type-042 同範囲の別名値域型の取り違えを拒否する
 
-主根拠：`[range.identity]`。
+主根拠：`[type.expected]`。
+補助根拠：`[range.widen]`。
 
 同じ範囲 `0..=127` を持つ `Note` と `Velocity` でも別の名前付き型として区別し、暗黙に受け渡せない。
 
@@ -1241,7 +1229,7 @@ fn main() -> u8 {
 
 ### type-043 異なる値域型の直接比較を拒否する
 
-主根拠：`[range.identity]`。
+主根拠：`[range.compare]`。
 
 同じ範囲を持つ `Note` と `Velocity` でも直接比較できない。
 
@@ -1271,12 +1259,12 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[range.identity]` | 7 | 10 |
+| 通常 | `[range.compare]` | 7 | 10 |
 
 ### type-044 値域制限型のmatchで範囲外パターンを拒否する
 
-主根拠：`[range.operations]`。
-補助根拠：`[match.pattern]`、`[lit.range]`。
+主根拠：`[lit.range]`。
+補助根拠：`[range.bounds]`、`[range.places]`、`[match.pattern]`。
 
 値域制限型を対象とする `match` のパターンには対象と同じ値域制限型を要求するため、範囲外リテラルは拒否する。
 
@@ -1309,8 +1297,8 @@ fn main() -> u8 {
 
 ### type-045 値域制限型のmatchで全値列挙時も_を必須とする
 
-主根拠：`[range.operations]`。
-補助根拠：`[match.exhaustive]`。
+主根拠：`[match.exhaustive]`。
+補助根拠：`[range.places]`。
 
 値域制限型の `match` ではすべての値を列挙しても末尾の `_` が必須である。
 
@@ -1340,12 +1328,12 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | `[match.exhaustive]` | 5 | 5 |
 
-### type-046 値域制限型の変換・算術・文字列変換・非零除算
+### type-046 値域制限型の変換・算術・文字列変換・非零除算・match・埋め込み
 
-主根拠：`[range.operations]`。
-補助根拠：`[range.identity]`、`[conv.widen]`、`[arith.width]`、`[arith.store]`、`[expr.cast-risk]`、`[symbol.cast-range]`、`[symbol.cast-sat]`。
+主根拠：`[range.cast]`。
+補助根拠：`[range.widen]`、`[range.cast-float-sat]`、`[range.cast-text]`、`[range.arith]`、`[range.places]`、`[conv.widen]`、`[arith.width]`、`[arith.store]`、`[expr.cast-risk]`。
 
-値域制限型から `u8`・`len_t` への暗黙変換、包含が静的に分かる無検査 `as`、`(0..=127) + (0..=127)` の `u8` 格納、`as|` の上下限飽和、文字列からの `as` / `as|`、非零除算の格納失敗 `or` をまとめて確認する。
+値域制限型から `u8`・`len_t`・`f64` への暗黙変換、包含が静的に分かる無検査 `as`、`(0..=127) + (0..=127)` の `u8` 格納、`x %% 24` の `Hour`（`0..=23`）への無失敗格納、`as|` の上下限飽和（整数および浮動小数点 `inf` / `-inf`）、文字列からの `as` / `as|`、非零除算の格納失敗 `or`、テンプレート埋め込みと `match` / `matchexpr` を確認する。
 
 **ソース：**
 
@@ -1354,26 +1342,42 @@ range Note: u8 = 0..=127
 range Velocity: u8 = 0..=127
 range Wide: u16 = 0..=1000
 range Divisor: u16 = 1..=1000
+range Hour: u8 = 0..=23
 
 fn quotient(x: u16, d: Divisor) -> u8 {
     return x / d or 255
+}
+
+fn wrap_hour(x: i32) -> Hour {
+    return x %% 24
 }
 
 fn main() -> u8 {
     fix n: Note = 100
     fix as_u8: u8 = n
     fix as_len: len_t = n
+    fix as_f64: f64 = n
     fix v: Velocity = n as Velocity
     fix w: Wide = as_u8 as Wide
     fix sum = n + n
     fix clamped: Note = 200 as| Note
+    fix pos_inf: f64 = inf
+    fix neg_inf: f64 = -inf
+    fix finf_hi: Note = pos_inf as| Note or 0
+    fix finf_lo: Divisor = neg_inf as| Divisor or 50
     fix parsed: Note = "127" as Note or 0
     fix sat_hi: Note = "1000" as| Note or 0
     fix sat_lo: Note = "-5" as| Note or 1
     fix d: Divisor = 1
     fix q_ok = quotient(200, d)
     fix q_ovf = quotient(300, d)
-    if as_u8 == 100 && as_len == 100 && v == 100 && w == 100 && sum == 200 && clamped == 127 && parsed == 127 && sat_hi == 127 && sat_lo == 0 && q_ok == 200 && q_ovf == 255 {
+    fix h: Hour = wrap_hour(-1)
+    fix s: symbol = "${n}:${h}"
+    fix m = matchexpr h {
+        23 => 1
+        _ => 0
+    }
+    if as_u8 == 100 && as_len == 100 && as_f64 == 100.0 && v == 100 && w == 100 && sum == 200 && clamped == 127 && finf_hi == 127 && finf_lo == 1 && parsed == 127 && sat_hi == 127 && sat_lo == 0 && q_ok == 200 && q_ovf == 255 && h == 23 && s == "100:23" && m == 1 {
         return 0
     }
     return 1
@@ -1388,7 +1392,7 @@ fn main() -> u8 {
 
 ### type-047 0を含まない値域型への浮動小数点as|でor省略を拒否する
 
-主根拠：`[range.operations]`。
+主根拠：`[range.cast-float-sat]`。
 
 `Divisor`（`1..=1000`）は `0` を含まないため、浮動小数点からの `as|` で NaN ハンドラ `or` を省略するとコンパイルエラーとなる。
 
@@ -1414,11 +1418,11 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[range.operations]` | 5 | 24 |
+| 通常 | `[range.cast-float-sat]` | 5 | 24 |
 
 ### type-048 値域制限型へのラップ算術を拒否する
 
-主根拠：`[range.operations]`。
+主根拠：`[range.prohibited-ops]`。
 
 値域制限型はラップ算術（`+%` 等）の対象外である。
 
@@ -1444,11 +1448,11 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[range.operations]` | 5 | 15 |
+| 通常 | `[range.prohibited-ops]` | 5 | 15 |
 
 ### type-049 値域制限型へのビット演算を拒否する
 
-主根拠：`[range.operations]`。
+主根拠：`[range.prohibited-ops]`。
 
 値域制限型を直接のオペランドとするビット演算は対象外である。
 
@@ -1474,11 +1478,11 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[range.operations]` | 5 | 13 |
+| 通常 | `[range.prohibited-ops]` | 5 | 13 |
 
 ### type-050 値域制限型へのas%を拒否する
 
-主根拠：`[range.operations]`。
+主根拠：`[range.cast]`。
 
 値域制限型は `as%` の変換先にできない。
 
@@ -1504,14 +1508,14 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[range.operations]` | 5 | 21 |
+| 通常 | `[range.cast]` | 5 | 21 |
 
-### type-051 匿名汎用intで値域制限型と通常整数を使い分ける
+### type-051 匿名汎用intと明示的な型引数Tで値域制限型を扱う
 
-主根拠：`[range.operations]`。
+主根拠：`[range.generic]`。
 補助根拠：`[num.int]`、`[num.fn-resolve]`、`[num.fn-check-judge]`。
 
-`min(note1, note2)` は `Note` を返し、`fix r: u8 = twice(note)` は `u8` で具体化、要求型なしの `twice(note)` は `Note` で具体化される。また、無関係な `range Divisor: u16 = 1..=1000` があっても `zero()` の定義時検査と `u8` での呼び出しに影響しない。
+`min(note1, note2)` は `Note` を返し、`fix r: u8 = twice(note)` は `u8` で具体化、要求型なしの `twice(note)` は `Note` で具体化される。無関係な `range Divisor: u16 = 1..=1000` があっても `zero()` の定義時検査と `u8` での呼び出しに影響しない。明示的な型引数 `T` も値域制限型をそのまま保持する。
 
 **ソース：**
 
@@ -1531,6 +1535,10 @@ fn zero() -> int {
     return 0
 }
 
+fn keep[T](x: T) -> T {
+    return x
+}
+
 fn main() -> u8 {
     fix n1: Note = 63
     fix n2: Note = 40
@@ -1539,7 +1547,8 @@ fn main() -> u8 {
     fix big: Note = 100
     fix as_u8: u8 = twice(big)
     fix z: u8 = zero()
-    if m == 40 && n_ok == 126 && as_u8 == 200 && z == 0 {
+    fix kept: Note = keep(n1)
+    if m == 40 && n_ok == 126 && as_u8 == 200 && z == 0 && kept == 63 {
         return 0
     }
     return 1
@@ -1554,8 +1563,8 @@ fn main() -> u8 {
 
 ### type-052 匿名汎用intで通常整数候補のない異なる値域型の混在を拒否する
 
-主根拠：`[range.operations]`。
-補助根拠：`[num.fn-resolve]`。
+主根拠：`[num.fn-resolve]`。
+補助根拠：`[range.generic]`。
 
 `Note` と `Velocity` のように異なる値域制限型だけが候補にある場合、`[num.fn-resolve]` で拒否する。
 
@@ -1591,8 +1600,8 @@ fn main() -> u8 {
 
 ### type-053 匿名汎用intを0を含まない値域型で具体化したときリテラル不適合を拒否する
 
-主根拠：`[range.operations]`。
-補助根拠：`[num.fn-body]`、`[lit.range]`。
+主根拠：`[num.fn-body]`。
+補助根拠：`[range.generic]`、`[lit.range]`。
 
 `fn zero() -> int { return 0 }` を `Divisor`（`1..=1000`）で具体化すると、`0` が `Divisor` の範囲外であるためコンパイルエラーとなる。
 
@@ -1625,7 +1634,7 @@ fn main() -> u8 {
 
 ### type-054 匿名汎用intで値域型へ具体化した算術の結果超過は実行時にパニックする
 
-主根拠：`[range.operations]`。
+主根拠：`[range.generic]`。
 補助根拠：`[arith.store]`、`[rt.int-overflow]`。
 
 `twice(note)` を `Note`（`0..=127`）で具体化したとき、`64 + 64 = 128` はコンパイルエラーとせず実行時の格納失敗としてパニックする。
@@ -1658,36 +1667,30 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | `[rt.int-overflow]` | 4 | 14 |
 
-### type-055 値域制限型の仮引数・構造体フィールドで既知長配列の添字のorを省略する
+### type-055 値域制限型フィールドを持つ構造体への文字列変換で値域を照合する
 
-主根拠：`[array.bounds-proof]`。
-補助根拠：`[range.decl]`、`[range.bounds]`。
+主根拠：`[range.cast-text]`。
+補助根拠：`[symbol.cast]`、`[text.cast-view]`。
 
-値域制限型 `Channel`（`0..<16`）の仮引数や構造体フィールドを長さ 16 の既知長配列の添字に使うと、`0 <= x <= 15 < 16` が常に成り立つため `or` なしで読み出せる。
+値域制限型フィールドを持つ構造体へ `symbol`・`text` から `as` で変換すると、範囲内は成功し、範囲外（`200`）は失敗して `or` へ進む。
 
 **ソース：**
 
 ```suz
-range Channel: u8 = 0..<16
+range Note: u8 = 0..=127
 
-struct Voice {
-    ch: Channel,
-}
-
-fix TABLE: .[u8] = .[10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
-
-fn lookup_param(c: Channel) -> u8 {
-    return TABLE.[c]
-}
-
-fn lookup_field(v: Voice) -> u8 {
-    return TABLE.[v.ch]
+struct Pk {
+    n: Note,
 }
 
 fn main() -> u8 {
-    fix c: Channel = 15
-    fix v = Voice { ch: 0 }
-    if lookup_param(c) == 25 && lookup_field(v) == 10 {
+    fix ok_sym: Pk = "Pk { n: 5 }" as Pk or Pk { n: 9 }
+    fix bad_sym: Pk = "Pk { n: 200 }" as Pk or Pk { n: 9 }
+    fix t_ok: text = "Pk { n: 127 }"
+    fix t_bad: text = "Pk { n: 128 }"
+    fix ok_txt = t_ok as Pk or Pk { n: 0 }
+    fix bad_txt = t_bad as Pk or Pk { n: 7 }
+    if ok_sym.n == 5 && bad_sym.n == 9 && ok_txt.n == 127 && bad_txt.n == 7 {
         return 0
     }
     return 1
@@ -1700,27 +1703,22 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | 正常終了 | 0 | 0 |
 
-### type-056 値域上限が配列長を超える場合は添字にorを要求する
+### type-056 通常整数型の変数から値域制限型への暗黙変換を拒否する
 
-主根拠：`[array.access-handler]`。
-補助根拠：`[array.bounds-proof]`、`[range.decl]`。
+主根拠：`[type.expected]`。
+補助根拠：`[range.widen]`。
 
-値域制限型 `Channel`（`0..<16`）の上限 `15` が配列長 `8` 以上であるため、`or` を省略するとコンパイルエラーとなる。
+`u8` の全範囲が `Wide`（`0..=1000`）に含まれていても、名前付きの値域制限型へは暗黙変換できない。
 
 **ソース：**
 
 ```suz
-range Channel: u8 = 0..<16
-
-fix SMALL: .[u8] = .[0, 1, 2, 3, 4, 5, 6, 7]
-
-fn lookup(c: Channel) -> u8 {
-    return SMALL.[c]
-}
+range Wide: u16 = 0..=1000
 
 fn main() -> u8 {
-    fix c: Channel = 3
-    return lookup(c)
+    fix x: u8 = 10
+    fix w: Wide = x
+    return 0
 }
 ```
 
@@ -1734,4 +1732,221 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[array.access-handler]` | 6 | 17 |
+| 通常 | `[type.expected]` | 5 | 19 |
+
+### type-057 文字列から値域制限型へのas%を拒否する
+
+主根拠：`[range.cast]`。
+補助根拠：`[range.cast-text]`。
+
+`symbol`・`text` からも値域制限型への `as%` は対象外である。
+
+**ソース：**
+
+```suz
+range Note: u8 = 0..=127
+
+fn main() -> u8 {
+    fix n: Note = "10" as% Note or 0
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[range.cast]` | 4 | 24 |
+
+### type-058 値域制限型への飽和算術を拒否する
+
+主根拠：`[range.prohibited-ops]`。
+
+値域制限型は飽和算術（`+|` 等）の対象外である。
+
+**ソース：**
+
+```suz
+range Note: u8 = 0..=127
+
+fn main() -> u8 {
+    fix n: Note = 60
+    fix m = n +| n
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[range.prohibited-ops]` | 5 | 15 |
+
+### type-059 値域制限型を左辺とするシフトを拒否する
+
+主根拠：`[range.prohibited-ops]`。
+
+値域制限型はシフトの左オペランドにできない。
+
+**ソース：**
+
+```suz
+range Note: u8 = 0..=127
+
+fn main() -> u8 {
+    fix n: Note = 1
+    fix m = n << 1
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[range.prohibited-ops]` | 5 | 15 |
+
+### type-060 値域制限型の基底型にlen_tを指定すると拒否する
+
+主根拠：`[range.decl]`。
+
+値域制限型の基底型には固定幅整数型のみを指定でき、`len_t` は使えない。
+
+**ソース：**
+
+```suz
+range Bad: len_t = 0..=10
+
+fn main() -> u8 {
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[range.decl]` | 1 | 12 |
+
+### type-061 値域制限型の基底型に値域制限型を指定すると拒否する
+
+主根拠：`[range.decl]`。
+
+値域制限型の基底型に別の値域制限型は使えない。
+
+**ソース：**
+
+```suz
+range Note: u8 = 0..=127
+range Sub: Note = 0..=10
+
+fn main() -> u8 {
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[range.decl]` | 2 | 12 |
+
+### type-062 extern関数の引数に値域制限型を指定すると拒否する
+
+主根拠：`[ffi.type]`。
+補助根拠：`[range.places]`。
+
+値域制限型は `extern` 関数の引数・戻り値に直接使えない。
+
+**ソース：**
+
+```suz
+range Note: u8 = 0..=127
+
+extern "stdint.h" {
+    fn f(n: Note) -> u8
+}
+
+fn main() -> u8 {
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[ffi.type]` | 4 | 8 |
+
+### type-063 値域制限型の範囲だけで決まる比較で定数比較警告を出す
+
+主根拠：`[range.compare]`。
+補助根拠：`[diagnostic.constant-comparison]`。
+
+`Channel`（`0..<16`）に対する `c < 16` は常に真であるため、通常設定でも `[diagnostic.constant-comparison]` を警告する。
+
+**ソース：**
+
+```suz
+range Channel: u8 = 0..<16
+
+fn check(c: Channel) -> u8 {
+    if c < 16 {
+        return 0
+    }
+    return 1
+}
+
+fn main() -> u8 {
+    fix c: Channel = 3
+    return check(c)
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 1 |
+
+**警告：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[diagnostic.constant-comparison]` | 4 | 10 |

@@ -182,7 +182,7 @@ pub(super) fn check(
                         ErrorKind::InvalidSource,
                         if matches!(ty, Type::Range(_)) {
                             crate::diagnostic!(
-                                "range.operations",
+                                "range.prohibited-ops",
                                 "range types do not support bit-width, wrapping or saturating operations"
                             )
                         } else {
@@ -444,7 +444,7 @@ pub(super) fn check(
                     return Err(location.error(
                         ErrorKind::InvalidSource,
                         crate::diagnostic!(
-                            "range.identity",
+                            "range.compare",
                             "cannot compare different range types {} and {}",
                             bindings.type_name(pair[0].ty),
                             bindings.type_name(pair[1].ty)

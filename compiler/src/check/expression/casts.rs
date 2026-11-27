@@ -41,7 +41,7 @@ pub(in crate::check) fn check(
                         if *kind == CastKind::Wrap {
                             if matches!(target, Type::Range(_)) {
                                 crate::diagnostic!(
-                                    "range.operations",
+                                    "range.cast",
                                     "range types cannot be the target of as%"
                                 )
                             } else {
@@ -244,7 +244,7 @@ pub(in crate::check) fn check(
                             return Err(expr.location.error(
                                 ErrorKind::InvalidSource,
                                 crate::diagnostic!(
-                                    "range.operations",
+                                    "range.cast-float-sat",
                                     "floating-point as| to a range type that excludes 0 requires or"
                                 ),
                             ));
