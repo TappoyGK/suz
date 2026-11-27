@@ -147,14 +147,14 @@ fn validate_ast(expr: &Expression, allow_return: bool, scope: &Scope) -> Result<
     }
 }
 
-fn validate_exact(exact: &Exact, scope: &Scope) -> Result<(), Diagnostic> {
+fn validate_exact(exact: &Exact, location: Location, scope: &Scope) -> Result<(), Diagnostic> {
     match &exact.kind {
         ExactKind::Literal(_) => Ok(()),
-        ExactKind::Leaf(value) => validate_checked(value, scope),
-        ExactKind::Negate(inner) => validate_exact(inner, scope),
+        ExactKind::Leaf(value) => validate_checked(value, location, scope),
+        ExactKind::Negate(inner) => validate_exact(inner, location, scope),
         ExactKind::Binary(op, left, right) => {
-            validate_exact(left, scope)?;
-            validate_exact(right, scope)?;
+            validate_exact(left, location, scope)?;
+            validate_exact(right, location, scope)?;
             if matches!(
                 op,
                 BinaryOperator::Divide
@@ -188,7 +188,11 @@ fn exact_leaf_nonzero(exact: &Exact, scope: &Scope) -> bool {
 }
 
 /// 検査済み IR が失敗しうる操作やユーザー定義呼び出しを含まないことを確認する。
-fn validate_checked(expr: &CheckedExpression, scope: &Scope) -> Result<(), Diagnostic> {
+fn validate_checked(
+    expr: &CheckedExpression,
+    location: Location,
+    scope: &Scope,
+) -> Result<(), Diagnostic> {
     match &expr.value {
         Value::Bool(_)
         | Value::Integer { .. }
@@ -202,25 +206,39 @@ fn validate_checked(expr: &CheckedExpression, scope: &Scope) -> Result<(), Diagn
         | Value::Receiver { target, .. }
         | Value::Len(target)
         | Value::ArrayLength { target, .. }
-        | Value::Negate(target)
         | Value::Not(target)
-        | Value::Cast(target) => validate_checked(target, scope),
-        Value::Exact(e) => validate_exact(e, scope),
+        | Value::Cast(target) => validate_checked(target, location, scope),
+        Value::Negate(target) => {
+            if expr.ty.is_float() {
+                return Err(expr_error(
+                    location,
+                    "floating-point arithmetic is not allowed in contract expressions",
+                ));
+            }
+            validate_checked(target, location, scope)
+        }
+        Value::Exact(e) => validate_exact(e, location, scope),
         Value::IntegerArithmetic {
             operation: IntegerOperation::Exact(e),
             handler: None,
             ..
-        } => validate_exact(e, scope),
+        } => validate_exact(e, location, scope),
         Value::Binary { left, right, .. } => {
-            validate_checked(left, scope)?;
-            validate_checked(right, scope)
+            if expr.ty.is_float() {
+                return Err(expr_error(
+                    location,
+                    "floating-point arithmetic is not allowed in contract expressions",
+                ));
+            }
+            validate_checked(left, location, scope)?;
+            validate_checked(right, location, scope)
         }
         Value::Logical {
             operator,
             left,
             right,
         } => {
-            validate_checked(left, scope)?;
+            validate_checked(left, location, scope)?;
             if matches!(*operator, LogicalOperator::And) {
                 let saved = scope.array_bounds.facts.borrow().clone();
                 if let Some(pred) = pred_expr_from_checked(left) {
@@ -228,36 +246,36 @@ fn validate_checked(expr: &CheckedExpression, scope: &Scope) -> Result<(), Diagn
                         .array_bounds
                         .facts
                         .borrow_mut()
-                        .add_predicate(pred, Location { line: 1, column: 1 });
+                        .add_predicate(pred, location);
                 }
-                let res = validate_checked(right, scope);
+                let res = validate_checked(right, location, scope);
                 *scope.array_bounds.facts.borrow_mut() = saved;
                 res
             } else {
-                validate_checked(right, scope)
+                validate_checked(right, location, scope)
             }
         }
         Value::Comparison { operands, .. } => {
             for op in operands {
-                validate_checked(op, scope)?;
+                validate_checked(op, location, scope)?;
             }
             Ok(())
         }
         Value::ArrayRead { address, .. } => {
             let Value::ArrayElement { target, indices } = &address.value else {
                 return Err(expr_error(
-                    Location { line: 1, column: 1 },
+                    location,
                     "this array operation is not allowed in contract expressions",
                 ));
             };
-            validate_checked(target, scope)?;
+            validate_checked(target, location, scope)?;
             for (idx, _, _) in indices {
-                validate_checked(idx, scope)?;
+                validate_checked(idx, location, scope)?;
             }
             Ok(())
         }
         _ => Err(expr_error(
-            Location { line: 1, column: 1 },
+            location,
             "calls, operator methods, and fallible operations are not allowed in contract expressions",
         )),
     }
@@ -284,7 +302,7 @@ pub(super) fn validate_and_assume(
                 "contract condition must have type bool",
             ));
         }
-        validate_checked(&checked, scope)?;
+        validate_checked(&checked, contract.location, scope)?;
         *scope.array_bounds.facts.borrow_mut() = true_facts;
     }
 
@@ -322,7 +340,7 @@ pub(super) fn validate_and_assume(
                 "contract condition must have type bool",
             ));
         }
-        validate_checked(&checked, &ensures_scope)?;
+        validate_checked(&checked, contract.location, &ensures_scope)?;
         *ensures_scope.array_bounds.facts.borrow_mut() = true_facts;
     }
     Ok(())
@@ -628,6 +646,35 @@ fn subst_range(expr: &Expression, env: &SubstEnv<'_>, scope: &Scope) -> Option<R
     }
 }
 
+fn expr_is_integer(expr: &Expression, env: &SubstEnv<'_>, scope: &Scope) -> bool {
+    match &expr.kind {
+        ExpressionKind::Group(inner) | ExpressionKind::Negate(inner) => {
+            expr_is_integer(inner, env, scope)
+        }
+        ExpressionKind::Integer { .. } | ExpressionKind::Len(_) => true,
+        ExpressionKind::Float(_) => false,
+        ExpressionKind::Name(name) => {
+            if let Some(bound) = env.bindings.get(name.as_str()) {
+                return bound.ty.is_integer() || bound.ty == Type::Exact;
+            }
+            scope
+                .get(name)
+                .is_some_and(|b| b.ty.is_integer() || b.ty == Type::Exact)
+        }
+        ExpressionKind::Binary { left, right, .. } => {
+            expr_is_integer(left, env, scope) && expr_is_integer(right, env, scope)
+        }
+        ExpressionKind::Cast { target, .. } => scope
+            .resolve_type_at(*target, expr.location)
+            .is_ok_and(|t| t.is_integer()),
+        ExpressionKind::Field { .. } | ExpressionKind::Deref(_) => {
+            subst_checked_target(expr, env, scope)
+                .is_some_and(|c| c.ty.is_integer() || c.ty == Type::Exact)
+        }
+        _ => false,
+    }
+}
+
 /// 契約式内の式を、仮引数・`return` 置換済みの正規化 `PredExpr` へ変換する。
 fn subst_pred(expr: &Expression, env: &SubstEnv<'_>, scope: &Scope) -> Option<PredExpr> {
     match &expr.kind {
@@ -695,11 +742,16 @@ fn subst_pred(expr: &Expression, env: &SubstEnv<'_>, scope: &Scope) -> Option<Pr
             operators,
             operands,
             ..
-        } if operators.len() == 1 => Some(PredExpr::compare(
-            operators[0],
-            subst_pred(&operands[0], env, scope)?,
-            subst_pred(&operands[1], env, scope)?,
-        )),
+        } if operators.len() == 1 => {
+            let invertible = expr_is_integer(&operands[0], env, scope)
+                && expr_is_integer(&operands[1], env, scope);
+            Some(PredExpr::compare(
+                operators[0],
+                subst_pred(&operands[0], env, scope)?,
+                subst_pred(&operands[1], env, scope)?,
+                invertible,
+            ))
+        }
         ExpressionKind::Logical {
             operator: LogicalOperator::Or,
             left,
@@ -784,7 +836,8 @@ fn prove_comparison_pair(
 
     // 3. 一般条件の構文一致（括弧除去・比較反転・&& 分解済み）
     if let (Some(lp), Some(rp)) = (subst_pred(left, env, scope), subst_pred(right, env, scope)) {
-        let target = PredExpr::compare(op, lp, rp);
+        let invertible = expr_is_integer(left, env, scope) && expr_is_integer(right, env, scope);
+        let target = PredExpr::compare(op, lp, rp, invertible);
         if scope
             .array_bounds
             .facts
@@ -1017,7 +1070,9 @@ fn record_ensures_expr(expr: &Expression, env: &SubstEnv<'_>, location: Location
                     subst_pred(&operands[k], env, scope),
                     subst_pred(&operands[k + 1], env, scope),
                 ) {
-                    let pred = PredExpr::compare(operators[k], lp, rp);
+                    let invertible = expr_is_integer(&operands[k], env, scope)
+                        && expr_is_integer(&operands[k + 1], env, scope);
+                    let pred = PredExpr::compare(operators[k], lp, rp, invertible);
                     let mut locals = Vec::new();
                     let mut shared = false;
                     pred.collect_deps(&mut locals, &mut shared);

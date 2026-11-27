@@ -340,11 +340,16 @@ pub(in crate::check) fn pred_expr_from_checked(expr: &CheckedExpression) -> Opti
             operators,
             operands,
             ..
-        } if operators.len() == 1 => Some(PredExpr::compare(
-            operators[0],
-            pred_expr_from_checked(&operands[0])?,
-            pred_expr_from_checked(&operands[1])?,
-        )),
+        } if operators.len() == 1 => {
+            let invertible =
+                is_integer_operand(operands[0].ty) && is_integer_operand(operands[1].ty);
+            Some(PredExpr::compare(
+                operators[0],
+                pred_expr_from_checked(&operands[0])?,
+                pred_expr_from_checked(&operands[1])?,
+                invertible,
+            ))
+        }
         Value::Logical {
             operator: LogicalOperator::Or,
             left,
@@ -368,36 +373,62 @@ pub(in crate::check) fn pred_expr_from_checked(expr: &CheckedExpression) -> Opti
     }
 }
 
+fn is_integer_operand(ty: Type) -> bool {
+    ty.is_integer() || ty == Type::Exact
+}
+
 #[inline(never)]
 fn record_comparison_predicates(
     operators: &[ComparisonOperator],
     locations: &[Location],
     checked_operands: &[CheckedExpression],
     ast_operands: &[Expression],
+    affines: &[Option<Affine>],
     scope: &Scope,
-    true_facts: &mut Facts,
-    false_facts: &mut Facts,
+    (true_facts, false_facts): (&mut Facts, &mut Facts),
 ) {
+    // すでに差分制約（Affine）で完全に表現済みの比較（!= 以外）は PredExpr へ重複登録しない。
+    let mut need_any = false;
+    for k in 0..operators.len() {
+        let affine_pair = affines[k].is_some() && affines[k + 1].is_some();
+        if !affine_pair || operators[k] == ComparisonOperator::NotEqual {
+            need_any = true;
+            break;
+        }
+    }
+    let need_false = operators.len() == 1
+        && (!(affines[0].is_some() && affines[1].is_some())
+            || operators[0] == ComparisonOperator::Equal);
+    if !need_any && !need_false {
+        return;
+    }
     let preds: Vec<Option<PredExpr>> = checked_operands
         .iter()
         .map(pred_expr_from_checked)
         .collect();
-    for k in 0..operators.len() {
-        if let (Some(l), Some(r)) = (&preds[k], &preds[k + 1]) {
-            true_facts.add_predicate(
-                PredExpr::compare(operators[k], l.clone(), r.clone()),
-                locations[k],
-            );
-        }
-        for later in &ast_operands[k + 1..] {
-            forget_expr_writes_into(later, scope, true_facts);
+    if need_any {
+        for k in 0..operators.len() {
+            let affine_pair = affines[k].is_some() && affines[k + 1].is_some();
+            if (!affine_pair || operators[k] == ComparisonOperator::NotEqual)
+                && let (Some(l), Some(r)) = (&preds[k], &preds[k + 1])
+            {
+                let invertible = is_integer_operand(checked_operands[k].ty)
+                    && is_integer_operand(checked_operands[k + 1].ty);
+                true_facts.add_predicate(
+                    PredExpr::compare(operators[k], l.clone(), r.clone(), invertible),
+                    locations[k],
+                );
+            }
+            for later in &ast_operands[k + 1..] {
+                forget_expr_writes_into(later, scope, true_facts);
+            }
         }
     }
-    if operators.len() == 1
-        && let (Some(l), Some(r)) = (&preds[0], &preds[1])
-    {
+    if need_false && let (Some(l), Some(r)) = (&preds[0], &preds[1]) {
+        let invertible = is_integer_operand(checked_operands[0].ty)
+            && is_integer_operand(checked_operands[1].ty);
         false_facts.add_predicate(
-            PredExpr::compare(operators[0], l.clone(), r.clone()).negate(),
+            PredExpr::compare(operators[0], l.clone(), r.clone(), invertible).negate(),
             locations[0],
         );
         forget_expr_writes_into(&ast_operands[1], scope, false_facts);
@@ -551,9 +582,9 @@ pub(in crate::check) fn eval_condition(
                     locations,
                     checked_operands,
                     ast_operands,
+                    &affines,
                     scope,
-                    &mut true_facts,
-                    &mut false_facts,
+                    (&mut true_facts, &mut false_facts),
                 );
             }
             Ok((checked, true_facts, false_facts))

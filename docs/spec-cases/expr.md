@@ -2423,6 +2423,40 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | `[arith.width]` | 3 | 38 |
 
+### expr-089 通常のifガードで算術とasの範囲を狭めてorを省略できる
+
+主根拠：`[arith.width]`。
+補助根拠：`[expr.cast-risk]`、`[array.bounds-proof]`。
+
+通常の `if 1 <= n <= 100` の本体内でも `n` の範囲が狭まり、`(n * 2) as u8` や `n as u8` の `or` を省略できる。
+
+**ソース：**
+
+```suz
+fn double_if_small(n: i32) -> u8 {
+    if 1 <= n <= 100 {
+        fix copy = n as u8
+        if copy == n {
+            return (n * 2) as u8
+        }
+    }
+    return 0
+}
+
+fn main() -> u8 {
+    if double_if_small(25) == 50 && double_if_small(200) == 0 {
+        return 0
+    }
+    return 1
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
 ### expr-076 型の範囲から必ずゼロで割る式を拒否する
 
 主根拠：`[arith.div-zero-always]`。
