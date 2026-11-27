@@ -90,6 +90,9 @@ fn build_signatures(
                     )
                 }),
                 needs: function.needs.clone(),
+                parameter_names: (!function.contracts.is_empty())
+                    .then(|| Rc::new(function.parameters.iter().map(|p| p.name.clone()).collect())),
+                contracts: function.contracts.clone(),
                 method,
                 external: false,
                 id,
@@ -606,6 +609,15 @@ pub(super) fn check_with_captures(
             Some(&mut dimension_names),
         )?;
     }
+    super::contracts::validate_and_assume(&function.contracts, &mut scope)?;
+    scope.current_ensures = Rc::new(
+        function
+            .contracts
+            .iter()
+            .filter(|c| c.kind == crate::ast::ContractKind::Ensures)
+            .cloned()
+            .collect(),
+    );
     statements.extend(statements::block_with_bindings(
         &function.statements,
         &mut scope,
@@ -695,7 +707,7 @@ pub(super) fn call(
     let generic = signature.is_generic();
     let types = super::generic::resolve(signature, arguments, expected, scope, expr.location)?;
     let concrete = |ty| types.resolve(ty);
-    let arguments = arguments
+    let arguments: Vec<_> = arguments
         .iter()
         .zip(&signature.parameters)
         .map(|(argument, ty)| {
@@ -706,6 +718,7 @@ pub(super) fn call(
             }
         })
         .collect::<Result<_, _>>()?;
+    super::contracts::check_call(signature, &arguments, expr.location, scope)?;
     if generic && scope.generic_check() {
         scope.defer_call(signature.id, types.int, types.float, expr.location, false);
     }
@@ -752,7 +765,9 @@ pub(super) fn return_value(
             ),
         ));
     }
-    expression(value, Some(scope.result), scope)
+    let checked = expression(value, Some(scope.result), scope)?;
+    super::contracts::check_return(&checked, value.location, scope)?;
+    Ok(checked)
 }
 
 /// 要求のある定義だけで要求検査を行い、通常の宣言は呼び出し元のスコープを使う。

@@ -549,6 +549,7 @@ impl Parser<'_, '_> {
             }
         }
         let mut needs = self.declaration_needs()?;
+        let contracts = self.declaration_contracts()?;
         // 継承がなければ、解析済みの要求を再び確保・重複除去しない。
         if !inherited.is_empty() {
             let mut combined = crate::ast::generics::NeedList::default();
@@ -649,10 +650,17 @@ impl Parser<'_, '_> {
                 crate::diagnostic!("prog.main", "main cannot return errors"),
             ));
         }
+        if name == "main" && !contracts.is_empty() {
+            return Err(contracts[0].location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("contract.decl", "main cannot have contracts"),
+            ));
+        }
         let (statements, end) = self.block()?;
         Ok(Function {
             type_parameters: std::mem::take(&mut self.type_parameters),
             needs,
+            contracts,
             method,
             keyword_location,
             name,

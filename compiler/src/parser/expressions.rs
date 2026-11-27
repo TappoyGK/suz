@@ -570,6 +570,10 @@ impl Parser<'_, '_> {
                 self.cursor += 1;
                 constructor(Box::new(self.unary()?))
             }
+            Kind::Keyword("return") if self.in_ensures => {
+                self.cursor += 1;
+                ExpressionKind::Name("return".into())
+            }
             Kind::Ident(name) | Kind::Keyword(name @ "self") => {
                 self.cursor += 1;
                 if self.constant_expression && self.token().kind == Kind::Symbol("(") {

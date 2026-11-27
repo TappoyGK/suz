@@ -792,6 +792,9 @@ impl Program {
                 p.ty.patch_ranges(ranges);
             }
             f.result.patch_ranges(ranges);
+            for c in &mut f.contracts {
+                patch_expr(&mut c.condition, ranges);
+            }
             patch_statements(&mut f.statements, ranges);
         }
         for e in &mut self.externs {
@@ -1097,11 +1100,26 @@ pub(crate) struct Parameter {
     pub location: Location,
 }
 
+/// 関数の契約（事前条件 `@requires` / 事後条件 `@ensures`）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ContractKind {
+    Requires,
+    Ensures,
+}
+
+#[derive(Clone)]
+pub(crate) struct Contract {
+    pub kind: ContractKind,
+    pub condition: Expression,
+    pub location: Location,
+}
+
 /// 関数の構文。仮引数・戻り値型・本体の文と、宣言の開始・終了位置を保持する。
 #[derive(Clone)]
 pub(crate) struct Function {
     pub type_parameters: Vec<generics::TypeParameter>,
     pub needs: Vec<generics::Need>,
+    pub contracts: Vec<Contract>,
     pub method: Option<Method>,
     pub keyword_location: Location,
     pub name: String,
@@ -1305,7 +1323,7 @@ impl LogicalOperator {
 }
 
 /// 等値・順序比較の演算子。比較の連鎖では各境界の演算子として保持する。
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub(crate) enum ComparisonOperator {
     Equal,
     NotEqual,
@@ -1350,7 +1368,7 @@ impl ComparisonOperator {
 }
 
 /// 算術・ラップ・シフト・ビット演算の二項演算子。構文の優先順位もここで定める。
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub(crate) enum BinaryOperator {
     Add,
     Subtract,

@@ -5,8 +5,8 @@ mod conditions;
 mod writes;
 
 pub(in crate::check) use conditions::{
-    block_exits, eval_condition, is_facts_pure, record_binding_remainder, record_checked_access,
-    record_match_arm, with_fallback,
+    block_exits, eval_condition, is_facts_pure, pred_expr_from_checked, record_binding_remainder,
+    record_checked_access, record_match_arm, with_fallback,
 };
 pub(in crate::check) use writes::{forget_call, forget_loop_writes, forget_mutable_receiver};
 

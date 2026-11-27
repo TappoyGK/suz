@@ -38,6 +38,8 @@ struct Parser<'a, 's> {
     applications: crate::ast::generics::Applications,
     type_parameters: Vec<crate::ast::generics::TypeParameter>,
     pending_needs: Vec<(usize, usize)>,
+    pending_contracts: Vec<(usize, usize)>,
+    in_ensures: bool,
     need_groups: std::rc::Rc<need_groups::Groups>,
     generic_functions: std::rc::Rc<std::collections::BTreeSet<String>>,
     allows: Vec<crate::warnings::AllowScope>,
@@ -190,6 +192,8 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
         applications: applications.clone(),
         type_parameters: Vec::new(),
         pending_needs: Vec::new(),
+        pending_contracts: Vec::new(),
+        in_ensures: false,
         generic_functions: std::rc::Rc::new(generics::function_names(tokens)),
         allows: Vec::new(),
         enums: &enums,
@@ -223,6 +227,17 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
                 crate::diagnostic!(
                     "generic.needs",
                     "requirements must precede a generic declaration"
+                ),
+            ));
+        }
+        if !p.pending_contracts.is_empty()
+            && !matches!(p.token().kind, Kind::Symbol("@") | Kind::Keyword("fn"))
+        {
+            return Err(p.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "contract.decl",
+                    "@requires and @ensures must precede a function or method declaration"
                 ),
             ));
         }

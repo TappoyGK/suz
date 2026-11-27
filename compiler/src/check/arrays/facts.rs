@@ -1,8 +1,169 @@
 //! 制御の流れの中で判定済みの整数・配列寸法の条件を疎な差分制約グラフ（u - v <= c）として保持し、
 //! 推移・定数加減算・合流・忘却と関連診断の由来位置を管理する。
 
-use crate::ast::{ComparisonOperator, Location};
+use crate::ast::{BinaryOperator, ComparisonOperator, Location, Type};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+
+/// 一般の bool 条件を正規化して保持するための式表現。
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub(in crate::check) enum PredExpr {
+    Bool(bool),
+    Int(i128),
+    FloatBits(u64),
+    Char(u32),
+    Symbol(String),
+    Nil,
+    Local(usize),
+    Field(Box<PredExpr>, usize),
+    Deref(Box<PredExpr>),
+    Len(Box<PredExpr>, usize),
+    Index(Box<PredExpr>, Vec<PredExpr>),
+    Not(Box<PredExpr>),
+    Neg(Box<PredExpr>),
+    Binary(BinaryOperator, Box<PredExpr>, Box<PredExpr>),
+    Compare(ComparisonOperator, Box<PredExpr>, Box<PredExpr>),
+    Or(Box<PredExpr>, Box<PredExpr>),
+    Cast(Box<PredExpr>, Type),
+}
+
+impl PredExpr {
+    pub fn compare(op: ComparisonOperator, left: PredExpr, right: PredExpr) -> Self {
+        match op {
+            ComparisonOperator::Greater => {
+                Self::Compare(ComparisonOperator::Less, Box::new(right), Box::new(left))
+            }
+            ComparisonOperator::GreaterEqual => Self::Compare(
+                ComparisonOperator::LessEqual,
+                Box::new(right),
+                Box::new(left),
+            ),
+            ComparisonOperator::Equal | ComparisonOperator::NotEqual => {
+                if left <= right {
+                    Self::Compare(op, Box::new(left), Box::new(right))
+                } else {
+                    Self::Compare(op, Box::new(right), Box::new(left))
+                }
+            }
+            ComparisonOperator::Less | ComparisonOperator::LessEqual => {
+                Self::Compare(op, Box::new(left), Box::new(right))
+            }
+        }
+    }
+
+    pub fn negate(self) -> Self {
+        match self {
+            Self::Bool(b) => Self::Bool(!b),
+            Self::Not(inner) => *inner,
+            Self::Compare(op, l, r) => {
+                let inv = match op {
+                    ComparisonOperator::Less => ComparisonOperator::GreaterEqual,
+                    ComparisonOperator::LessEqual => ComparisonOperator::Greater,
+                    ComparisonOperator::Greater => ComparisonOperator::LessEqual,
+                    ComparisonOperator::GreaterEqual => ComparisonOperator::Less,
+                    ComparisonOperator::Equal => ComparisonOperator::NotEqual,
+                    ComparisonOperator::NotEqual => ComparisonOperator::Equal,
+                };
+                Self::compare(inv, *l, *r)
+            }
+            other => Self::Not(Box::new(other)),
+        }
+    }
+
+    pub fn collect_deps(&self, locals: &mut Vec<usize>, shared: &mut bool) {
+        match self {
+            Self::Bool(_)
+            | Self::Int(_)
+            | Self::FloatBits(_)
+            | Self::Char(_)
+            | Self::Symbol(_)
+            | Self::Nil => {}
+            Self::Local(id) => {
+                if !locals.contains(id) {
+                    locals.push(*id);
+                }
+            }
+            Self::Field(target, _)
+            | Self::Not(target)
+            | Self::Neg(target)
+            | Self::Cast(target, _) => {
+                target.collect_deps(locals, shared);
+            }
+            Self::Len(target, _) => {
+                // 配列参照の len は配列要素の内容には依存しない（ポインタ経由で配列参照自体を読む場合のみ shared）。
+                target.collect_deps(locals, shared);
+            }
+            Self::Deref(target) => {
+                *shared = true;
+                target.collect_deps(locals, shared);
+            }
+            Self::Index(target, indices) => {
+                *shared = true;
+                target.collect_deps(locals, shared);
+                for idx in indices {
+                    idx.collect_deps(locals, shared);
+                }
+            }
+            Self::Binary(_, l, r) | Self::Compare(_, l, r) | Self::Or(l, r) => {
+                l.collect_deps(locals, shared);
+                r.collect_deps(locals, shared);
+            }
+        }
+    }
+
+    pub fn map_locals(&self, f: &mut impl FnMut(usize) -> Option<PredExpr>) -> Option<PredExpr> {
+        Some(match self {
+            Self::Bool(b) => Self::Bool(*b),
+            Self::Int(n) => Self::Int(*n),
+            Self::FloatBits(b) => Self::FloatBits(*b),
+            Self::Char(c) => Self::Char(*c),
+            Self::Symbol(s) => Self::Symbol(s.clone()),
+            Self::Nil => Self::Nil,
+            Self::Local(id) => f(*id)?,
+            Self::Field(t, idx) => Self::Field(Box::new(t.map_locals(f)?), *idx),
+            Self::Deref(t) => Self::Deref(Box::new(t.map_locals(f)?)),
+            Self::Len(t, dim) => Self::Len(Box::new(t.map_locals(f)?), *dim),
+            Self::Index(t, indices) => {
+                let t = Box::new(t.map_locals(f)?);
+                let mut out = Vec::with_capacity(indices.len());
+                for idx in indices {
+                    out.push(idx.map_locals(f)?);
+                }
+                Self::Index(t, out)
+            }
+            Self::Not(t) => t.map_locals(f)?.negate(),
+            Self::Neg(t) => Self::Neg(Box::new(t.map_locals(f)?)),
+            Self::Binary(op, l, r) => {
+                Self::Binary(*op, Box::new(l.map_locals(f)?), Box::new(r.map_locals(f)?))
+            }
+            Self::Compare(op, l, r) => Self::compare(*op, l.map_locals(f)?, r.map_locals(f)?),
+            Self::Or(l, r) => Self::Or(Box::new(l.map_locals(f)?), Box::new(r.map_locals(f)?)),
+            Self::Cast(t, ty) => Self::Cast(Box::new(t.map_locals(f)?), *ty),
+        })
+    }
+}
+
+/// 判定済みの一般 bool 条件。
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub(in crate::check) struct Predicate {
+    pub expr: PredExpr,
+    pub locals: Vec<usize>,
+    pub depends_on_shared: bool,
+    pub location: Location,
+}
+
+impl Predicate {
+    pub fn new(expr: PredExpr, location: Location) -> Self {
+        let mut locals = Vec::new();
+        let mut depends_on_shared = false;
+        expr.collect_deps(&mut locals, &mut depends_on_shared);
+        Self {
+            expr,
+            locals,
+            depends_on_shared,
+            location,
+        }
+    }
+}
 
 /// 差分制約グラフの頂点。
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
@@ -112,15 +273,49 @@ pub(in crate::check) struct Facts {
     nonneg_locals: Vec<usize>,
     /// 値域制限型のローカル束縛（常に `lo <= x <= hi` であり、代入でも失われない）。
     range_locals: Vec<(usize, i128, i128)>,
+    /// 判定済みの一般 bool 条件（構文一致・`&&` 分解・比較反転用）。空のときは確保しない。
+    #[allow(clippy::box_collection)]
+    predicates: Option<Box<Vec<Predicate>>>,
 }
 
 impl Facts {
     pub fn is_empty(&self) -> bool {
-        self.edges.is_empty() && self.range_locals.is_empty()
+        self.edges.is_empty()
+            && self.range_locals.is_empty()
+            && self.predicates.as_deref().is_none_or(Vec::is_empty)
     }
 
     pub fn clear_edges(&mut self) {
         self.edges.clear();
+        self.predicates = None;
+    }
+
+    pub fn add_predicate(&mut self, expr: PredExpr, location: Location) {
+        if matches!(expr, PredExpr::Bool(true)) {
+            return;
+        }
+        let preds = self.predicates.get_or_insert_with(|| Box::new(Vec::new()));
+        if !preds.iter().any(|p| p.expr == expr) {
+            preds.push(Predicate::new(expr, location));
+        }
+    }
+
+    pub fn has_predicate(&self, expr: &PredExpr) -> Option<Location> {
+        self.predicates
+            .as_deref()?
+            .iter()
+            .find(|p| &p.expr == expr)
+            .map(|p| p.location)
+    }
+
+    /// 共有された参照先・配列要素に依存する条件を忘れる（配列参照の `len` は忘れない）。
+    pub fn forget_shared(&mut self) {
+        if let Some(preds) = &mut self.predicates {
+            preds.retain(|p| !p.depends_on_shared);
+            if preds.is_empty() {
+                self.predicates = None;
+            }
+        }
     }
 
     pub fn mark_nonneg(&mut self, id: usize) {
@@ -397,6 +592,79 @@ impl Facts {
         self.proves_le(left, &shifted)
     }
 
+    /// `left == right` が導けるなら、その根拠となった条件のソース位置を返す。
+    pub fn proves_eq(&self, left: &Affine, right: &Affine) -> Option<Vec<Location>> {
+        let mut a = self.proves_le(left, right)?;
+        let b = self.proves_le(right, left)?;
+        a.extend(b);
+        a.sort_by_key(|l| (l.line, l.column));
+        a.dedup();
+        Some(a)
+    }
+
+    /// `term` の証明済み定数上下限 `(min, max)` を返す（`edges` が空なら高速に返す）。
+    pub fn proven_bounds(&self, term: &Term) -> (Option<i128>, Option<i128>) {
+        if *term == Term::Zero {
+            return (Some(0), Some(0));
+        }
+        let mut lo = self
+            .range_of(term)
+            .map(|(l, _)| l)
+            .or_else(|| self.is_implicit_nonneg(term).then_some(0));
+        let mut hi = self.range_of(term).map(|(_, h)| h);
+        if self.edges.is_empty() {
+            return (lo, hi);
+        }
+        let (terms, adj) = self.adjacency();
+        let Ok(zero_i) = terms.binary_search(&Term::Zero) else {
+            return (lo, hi);
+        };
+        let Ok(ti) = terms.binary_search(term) else {
+            return (lo, hi);
+        };
+        // 0 - term <= bound  <=>  term >= -bound
+        let from_zero = Self::shortest_from(zero_i, terms.len(), &adj);
+        if let Some(edge) = &from_zero[ti]
+            && let Some(bound_lo) = edge.bound.checked_neg()
+        {
+            lo = Some(lo.map_or(bound_lo, |cur| cur.max(bound_lo)));
+        }
+        // term - 0 <= bound  <=>  term <= bound
+        let from_term = Self::shortest_from(ti, terms.len(), &adj);
+        if let Some(edge) = &from_term[zero_i] {
+            hi = Some(hi.map_or(edge.bound, |cur| cur.min(edge.bound)));
+        }
+        (lo, hi)
+    }
+
+    /// `term + offset != 0` が導けるかを返す。
+    pub fn proves_nonzero(&self, affine: &Affine) -> bool {
+        let (lo, hi) = self.proven_bounds(&affine.term);
+        if let Some(l) = lo.and_then(|v| v.checked_add(affine.offset))
+            && l > 0
+        {
+            return true;
+        }
+        if let Some(h) = hi.and_then(|v| v.checked_add(affine.offset))
+            && h < 0
+        {
+            return true;
+        }
+        if affine.offset == 0
+            && let Term::Local(id) = affine.term
+        {
+            let target = PredExpr::compare(
+                ComparisonOperator::NotEqual,
+                PredExpr::Local(id),
+                PredExpr::Int(0),
+            );
+            if self.has_predicate(&target).is_some() {
+                return true;
+            }
+        }
+        false
+    }
+
     /// 特定の条件を満たす項を削除する（削除対象ノードのみ局所的に Fourier-Motzkin 消去する）。
     pub fn forget_where(&mut self, mut predicate: impl FnMut(&Term) -> bool) {
         if self.edges.is_empty() {
@@ -469,6 +737,12 @@ impl Facts {
 
     /// ローカル変数 `id`（およびそれを根とするフィールド経路）に関する条件を忘れる。
     pub fn forget_local(&mut self, id: usize) {
+        if let Some(preds) = &mut self.predicates {
+            preds.retain(|p| !p.locals.contains(&id));
+            if preds.is_empty() {
+                self.predicates = None;
+            }
+        }
         self.forget_where(|t| {
             matches!(t, Term::Local(x) if *x == id) || matches!(t, Term::PathDim(x, ..) if *x == id)
         });
@@ -479,6 +753,12 @@ impl Facts {
         if fields.is_empty() {
             self.forget_local(root_id);
             return;
+        }
+        if let Some(preds) = &mut self.predicates {
+            preds.retain(|p| !p.locals.contains(&root_id));
+            if preds.is_empty() {
+                self.predicates = None;
+            }
         }
         self.forget_where(|t| match t {
             Term::PathDim(x, path, _) if *x == root_id => {
@@ -504,17 +784,26 @@ impl Facts {
         for p in rest {
             range_locals.retain(|entry| p.range_locals.contains(entry));
         }
+        let predicates = first.predicates.as_deref().and_then(|first_preds| {
+            let mut kept = first_preds.clone();
+            for p in rest {
+                kept.retain(|pred| p.has_predicate(&pred.expr).is_some());
+            }
+            (!kept.is_empty()).then(|| Box::new(kept))
+        });
         if paths.iter().any(|f| f.edges.is_empty()) {
             return Facts {
                 edges: Vec::new(),
                 nonneg_locals,
                 range_locals,
+                predicates,
             };
         }
         let mut joined = Facts {
             edges: Vec::new(),
             nonneg_locals,
             range_locals,
+            predicates,
         };
         // 全経路で完全に一致する辺は探索せずそのまま引き継ぐ。
         let mut changed_pairs: BTreeSet<(Term, Term)> = BTreeSet::new();
@@ -588,6 +877,22 @@ impl Facts {
         for &(id, lo, hi) in &self.range_locals {
             if let Some(Term::Local(new_id)) = map_term(&Term::Local(id)) {
                 out.mark_range(new_id, lo, hi);
+            }
+        }
+        if let Some(preds) = &self.predicates {
+            for pred in preds.iter() {
+                if pred.depends_on_shared {
+                    continue;
+                }
+                if let Some(mapped_expr) = pred.expr.map_locals(&mut |id| {
+                    if let Some(Term::Local(new_id)) = map_term(&Term::Local(id)) {
+                        Some(PredExpr::Local(new_id))
+                    } else {
+                        None
+                    }
+                }) {
+                    out.add_predicate(mapped_expr, pred.location);
+                }
             }
         }
         if self.edges.is_empty() {

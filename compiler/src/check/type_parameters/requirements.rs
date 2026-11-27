@@ -445,7 +445,8 @@ pub(super) fn satisfy(
             let key = format!("{}.{}", scope.method_owner_name(target), name);
             let signature = scope.functions.get(&key).ok_or_else(error)?;
             let signature = super::method_signature(signature, target, scope, location)?;
-            if signature.method.is_none_or(|m| m.mutable != *mutable)
+            if !signature.contracts.is_empty()
+                || signature.method.is_none_or(|m| m.mutable != *mutable)
                 || signature.parameters[1..] != parameters
                 || signature.result != result
                 || signature.errors != need.errors
@@ -480,6 +481,9 @@ pub(super) fn satisfy(
     };
     if let Some(name) = selected {
         let signature = scope.functions.get(&name).ok_or_else(error)?;
+        if !signature.contracts.is_empty() {
+            return Err(error());
+        }
         let signature = super::method_signature(signature, target, scope, location)?;
         let mut arguments = vec![receiver];
         arguments.extend(args);

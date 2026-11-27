@@ -104,6 +104,7 @@ pub(super) fn call(
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
+    super::contracts::check_call(signature, &checked_arguments, expr.location, scope)?;
     let symbolic = types.iter().any(|t| scope.structs.unresolved(*t));
     let id = if symbolic {
         signature.id
@@ -411,6 +412,15 @@ pub(super) fn function_value(
     expected: Option<Type>,
     scope: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
+    if !signature.contracts.is_empty() {
+        return Err(expr.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "contract.fn-value",
+                "functions with contracts cannot be used as function values"
+            ),
+        ));
+    }
     let arguments = value_arguments(signature, explicit, scope, expr.location)?;
     check_requirements(signature, &arguments, scope, expr.location)?;
     let ty = specialized_function_type(signature, &arguments, scope, expr.location)?;

@@ -581,6 +581,7 @@ fn check_binding(
         ));
     }
     let dimensions_known = super::arrays::bounds::shape(&initializer, context.bindings);
+    let ensures_call = super::contracts::extract_ensures_call(&initializer, context.bindings);
     lower_return_handler(
         &mut initializer,
         &mut context.output,
@@ -597,6 +598,7 @@ fn check_binding(
     );
     super::arrays::bounds::register(id, ty, *mutable, dimensions_known, context.bindings);
     super::arrays::bounds::record_binding_remainder(id, &initializer, *location, context.bindings);
+    super::contracts::record_ensures_for_call(id, ty, ensures_call, *location, context.bindings);
     context.output.push(CheckedStatement::Binding {
         location: *location,
         mutable: *mutable,

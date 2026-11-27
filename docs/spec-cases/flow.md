@@ -2838,3 +2838,645 @@ fn main() -> u8 {
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
 | 通常 | `[fnshape.recursion]` | 1 | 9 |
+
+### flow-123 関数の事前条件・事後条件と範囲推定の連携
+
+主根拠：`[contract.decl]`。
+補助根拠：`[contract.requires]`、`[contract.ensures]`、`[arith.width]`。
+
+`@requires(1 <= n <= 100)` と `@ensures(0 <= return <= 200)` を宣言すると、本体内の `(n * 2) as u8` で `or` を省略でき、呼び出し元でも戻り値の範囲を引き継いで `u8` への `as` の `or` を省略できる。
+
+**ソース：**
+
+```suz
+@requires(1 <= n <= 100)
+@ensures(0 <= return <= 200)
+fn scale(n: i32) -> i32 {
+    return (n * 2) as u8
+}
+
+fn main() -> u8 {
+    fix r = scale(50)
+    fix out: u8 = r as u8
+    if out == 100 {
+        return 0
+    }
+    return 1
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### flow-124 mainに契約を付けると拒否する
+
+主根拠：`[contract.decl]`。
+
+`main` 関数には `@requires`・`@ensures` を付けられない。
+
+**ソース：**
+
+```suz
+@ensures(return == 0)
+fn main() -> u8 {
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[contract.decl]` | 1 | 1 |
+
+### flow-125 契約と関数宣言の間の空行を拒否する
+
+主根拠：`[contract.decl]`。
+
+契約の行と対象関数の間に空行を置くとコンパイルエラーとなる。
+
+**ソース：**
+
+```suz
+@requires(n > 0)
+
+fn pos(n: i32) -> i32 {
+    return n
+}
+
+fn main() -> u8 {
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[contract.decl]` | 2 | 1 |
+
+### flow-126 契約式に関数呼び出しを書くと拒否する
+
+主根拠：`[contract.expr]`。
+
+契約式には通常の関数・メソッド呼び出しを書けない。
+
+**ソース：**
+
+```suz
+fn ok(n: i32) -> bool {
+    return n > 0
+}
+
+@requires(ok(n))
+fn use_n(n: i32) -> i32 {
+    return n
+}
+
+fn main() -> u8 {
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[contract.expr]` | 5 | 11 |
+
+### flow-127 契約式で非零保証のない除算を拒否する
+
+主根拠：`[contract.expr]`。
+
+除数が `0` になり得る除算は契約式に書けない。
+
+**ソース：**
+
+```suz
+@requires(total / n < 10)
+fn ratio(total: i32, n: i32) -> i32 {
+    return 0
+}
+
+fn main() -> u8 {
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[contract.expr]` | 1 | 17 |
+
+### flow-128 契約式の&&左辺で非零を保証すれば右辺の除算を許可する
+
+主根拠：`[contract.expr]`。
+補助根拠：`[contract.requires]`、`[contract.proof]`。
+
+`@requires(n != 0 && total / n < 10)` のように短絡評価の左辺で非零を保証すれば右辺の除算を許可し、呼び出し側で同じ条件をガードすれば受理する。
+
+**ソース：**
+
+```suz
+@requires(n != 0 && total / n < 10)
+fn ratio(total: i32, n: i32) -> i32 {
+    return 1
+}
+
+fn check(total: i32, n: i32) -> u8 {
+    if n != 0 && total / n < 10 {
+        if ratio(total, n) == 1 {
+            return 0
+        }
+    }
+    return 1
+}
+
+fn main() -> u8 {
+    return check(20, 4)
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### flow-129 void関数の@ensuresでreturnを参照すると拒否する
+
+主根拠：`[contract.expr]`。
+
+`void` を返す関数の `@ensures` では `return` を参照できない。
+
+**ソース：**
+
+```suz
+@ensures(return == 0)
+fn noop() -> void {
+    return
+}
+
+fn main() -> u8 {
+    noop()
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[contract.expr]` | 1 | 10 |
+
+### flow-130 ガードなしで動的な値を@requires付き関数へ渡すと拒否する
+
+主根拠：`[contract.requires]`。
+
+動的な値 `n` を `if` ガードなしで `@requires(1 <= n <= 100)` の関数へ渡すとコンパイルエラーとなる。
+
+**ソース：**
+
+```suz
+@requires(1 <= n <= 100)
+fn scale(n: i32) -> u8 {
+    return (n * 2) as u8
+}
+
+fn run(n: i32) -> u8 {
+    return scale(n)
+}
+
+fn main() -> u8 {
+    return run(10)
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[contract.requires]` | 7 | 12 |
+
+### flow-131 @requiresの配列境界条件で本体内の添字orを省略する
+
+主根拠：`[contract.requires]`。
+補助根拠：`[array.bounds-proof]`。
+
+`@requires(0 <= idx < len buf)` や `@requires(len dst == len src)` により、関数本体内の配列読み書きで `or` を省略できる。
+
+**ソース：**
+
+```suz
+@requires(0 <= idx < len buf)
+fn read_at(buf: .[u8], idx: i32) -> u8 {
+    return buf.[idx]
+}
+
+@requires(len dst == len src)
+fn copy_all(dst: #[u8], src: .[u8]) -> void {
+    for i in 0..<len src {
+        dst#[i] = src.[i]
+    }
+}
+
+fn main() -> u8 {
+    fix src: .[u8] = .[10, 20, 30]
+    fix dst: #[u8] = new #[0; 3]
+    if len dst == len src {
+        copy_all(dst, src)
+    }
+    fix idx: i32 = 2
+    if 0 <= idx < len dst {
+        if read_at(dst, idx) == 30 {
+            return 0
+        }
+    }
+    return 1
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### flow-132 実引数の評価中に参照先が変わり得る場合は先のガードで@requiresを証明しない
+
+主根拠：`[contract.requires]`。
+補助根拠：`[contract.proof]`。
+
+`if v.active` の後に `use_voice(v, disable(v))` を呼ぶと、第 2 引数 `disable(v)` の評価で共有参照先の条件が無効化されるため、コンパイルエラーとなる。
+
+**ソース：**
+
+```suz
+struct Voice {
+    active: bool,
+}
+
+fn disable(v: mut Voice) -> i32 {
+    v#active = false
+    return 0
+}
+
+@requires(v.active)
+fn use_voice(v: ref Voice, tag: i32) -> u8 {
+    return 0
+}
+
+fn main() -> u8 {
+    fix v = new Voice { active: true }
+    if v.active {
+        return use_voice(v, disable(v))
+    }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[contract.requires]` | 18 | 16 |
+
+### flow-133 return前のifガードと代替値で@ensuresを満たす
+
+主根拠：`[contract.ensures]`。
+
+動的な計算結果を返す場合でも、`return` 前の `if` ガードと範囲内の代替値によって `@ensures` を静的に満たせる。
+
+**ソース：**
+
+```suz
+@ensures(0 <= return <= 200)
+fn clamp_even(x: i32) -> i32 {
+    if 0 <= x <= 200 {
+        return x
+    }
+    return 0
+}
+
+fn main() -> u8 {
+    fix a = clamp_even(42)
+    fix b = clamp_even(999)
+    fix ua: u8 = a as u8
+    fix ub: u8 = b as u8
+    if ua == 42 && ub == 0 {
+        return 0
+    }
+    return 1
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### flow-134 @ensuresを証明できないreturnを拒否する
+
+主根拠：`[contract.ensures]`。
+
+`@ensures(0 <= return <= 200)` を満たすことを証明できない `return` はコンパイルエラーとなる。
+
+**ソース：**
+
+```suz
+@ensures(0 <= return <= 200)
+fn bad(x: i32) -> i32 {
+    return x
+}
+
+fn main() -> u8 {
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[contract.ensures]` | 3 | 12 |
+
+### flow-135 失敗する関数のor代替値合流後は@ensuresを持ち越さない
+
+主根拠：`[contract.ensures]`。
+補助根拠：`[contract.requires]`。
+
+`@ensures(return > 0)` の失敗する関数で `fail` 経路は検査しないが、呼び出し側で `make_pos(x) or 0` と代替値に合流すると `x > 0` は持ち越さない。
+
+**ソース：**
+
+```suz
+error Fail { Bad }
+
+@ensures(return > 0)
+fn make_pos(x: i32) -> i32 or Fail {
+    if x > 0 {
+        return x
+    }
+    fail Fail.Bad
+}
+
+@requires(n > 0)
+fn need_pos(n: i32) -> u8 {
+    return 0
+}
+
+fn main() -> u8 {
+    fix v = make_pos(5) or 0
+    return need_pos(v)
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[contract.requires]` | 18 | 12 |
+
+### flow-136 一般のbool状態条件をifガードで証明して@requiresへ渡す
+
+主根拠：`[contract.proof]`。
+補助根拠：`[contract.requires]`。
+
+`if v.active` の直後に `@requires(v.active)` の関数を呼ぶと、構文一致で証明済みとなり受理する。
+
+**ソース：**
+
+```suz
+struct Voice {
+    active: bool,
+}
+
+@requires(v.active)
+fn play(v: ref Voice) -> u8 {
+    return 0
+}
+
+fn main() -> u8 {
+    fix v = new Voice { active: true }
+    if v.active {
+        return play(v)
+    }
+    return 1
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### flow-137 共有参照先に依存する条件は関数呼び出しをまたぐと忘れる
+
+主根拠：`[contract.proof]`。
+補助根拠：`[contract.requires]`。
+
+共有参照先 `v.active` の条件は、別の関数呼び出しをまたぐと忘れられるため、後続の `@requires(v.active)` 呼び出しはコンパイルエラーとなる。
+
+**ソース：**
+
+```suz
+struct Voice {
+    active: bool,
+}
+
+fn touch() -> void {
+    return
+}
+
+@requires(v.active)
+fn play(v: ref Voice) -> u8 {
+    return 0
+}
+
+fn main() -> u8 {
+    fix v = new Voice { active: true }
+    if v.active {
+        touch()
+        return play(v)
+    }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[contract.requires]` | 18 | 16 |
+
+### flow-138 通常のifガードでも算術とasの範囲を狭めてorを省略できる
+
+主根拠：`[arith.width]`。
+補助根拠：`[contract.proof]`。
+
+契約に限らず、通常の `if 1 <= n <= 100` の本体内でも `n` の範囲が狭まり、`(n * 2) as u8` の `or` を省略できる。
+
+**ソース：**
+
+```suz
+fn double_if_small(n: i32) -> u8 {
+    if 1 <= n <= 100 {
+        return (n * 2) as u8
+    }
+    return 0
+}
+
+fn main() -> u8 {
+    if double_if_small(25) == 50 && double_if_small(200) == 0 {
+        return 0
+    }
+    return 1
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### flow-139 契約を持つ関数を関数値にすると拒否する
+
+主根拠：`[contract.fn-value]`。
+
+契約を持つ関数は `fn 名前` で関数値にできない。
+
+**ソース：**
+
+```suz
+@requires(n > 0)
+fn pos(n: i32) -> i32 {
+    return n
+}
+
+fn main() -> u8 {
+    fix f = fn pos
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[contract.fn-value]` | 7 | 13 |
+
+### flow-140 契約を持つメソッドは@needsの要求を満たさない
+
+主根拠：`[contract.fn-value]`。
+補助根拠：`[generic.needs-check]`。
+
+契約を持つメソッドは `@needs` を経由した無検査呼び出しを防ぐため、`@needs` の要求を満たさない。
+
+**ソース：**
+
+```suz
+struct Boxed {
+    value: i32,
+}
+
+@requires(x > 0)
+fn Boxed#set(x: i32) -> void {
+    self#value = x
+}
+
+@needs T: #set(i32) -> void
+fn apply[T](target: mut T) -> void {
+    target#set(10)
+}
+
+fn main() -> u8 {
+    fix b = new Boxed { value: 0 }
+    apply(b)
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[generic.needs-check]` | 17 | 5 |

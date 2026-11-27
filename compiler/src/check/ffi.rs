@@ -35,6 +35,8 @@ pub(super) fn signatures(
                 type_parameters: 0,
                 type_parameter_names: None,
                 needs: Vec::new(),
+                parameter_names: None,
+                contracts: Vec::new(),
                 method: None,
                 external: true,
                 id: program.functions.len() + index,

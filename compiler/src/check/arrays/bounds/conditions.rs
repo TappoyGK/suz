@@ -9,7 +9,7 @@ use super::{
             ir::{CheckedExpression, CheckedStatement, IntegerOperation, Value},
             scope::Scope,
         },
-        facts::{Affine, Facts, Origins, Term},
+        facts::{Affine, Facts, Origins, PredExpr, Term},
     },
     affine, constant, dim_to_affine, exact_constant, is_nonneg_int, target_dim_affine,
     writes::forget_expr_writes_into,
@@ -275,6 +275,150 @@ pub(in crate::check) fn record_checked_access(expr: &CheckedExpression, scope: &
     }
 }
 
+fn pred_expr_from_exact(exact: &Exact) -> Option<PredExpr> {
+    match &exact.kind {
+        ExactKind::Literal(n) => Some(PredExpr::Int(n.to_i128()?)),
+        ExactKind::Leaf(value) => pred_expr_from_checked(value),
+        ExactKind::Negate(inner) => Some(PredExpr::Neg(Box::new(pred_expr_from_exact(inner)?))),
+        ExactKind::Binary(op, left, right) => Some(PredExpr::Binary(
+            *op,
+            Box::new(pred_expr_from_exact(left)?),
+            Box::new(pred_expr_from_exact(right)?),
+        )),
+    }
+}
+
+/// 検査済みの純粋な式から、条件一致判定用の正規化済み `PredExpr` を構築する。
+pub(in crate::check) fn pred_expr_from_checked(expr: &CheckedExpression) -> Option<PredExpr> {
+    match &expr.value {
+        Value::Bool(b) => Some(PredExpr::Bool(*b)),
+        Value::Integer { value, .. } => Some(PredExpr::Int(*value)),
+        Value::Float(bits) => Some(PredExpr::FloatBits(*bits)),
+        Value::Text { text } => Some(PredExpr::Symbol(text.clone())),
+        Value::Nil => Some(PredExpr::Nil),
+        Value::Local(id) => Some(PredExpr::Local(*id)),
+        Value::Field { target, index } => Some(PredExpr::Field(
+            Box::new(pred_expr_from_checked(target)?),
+            *index,
+        )),
+        Value::Deref(target) => Some(PredExpr::Deref(Box::new(pred_expr_from_checked(target)?))),
+        Value::Receiver { target, .. } => pred_expr_from_checked(target),
+        Value::Len(target) => Some(PredExpr::Len(Box::new(pred_expr_from_checked(target)?), 0)),
+        Value::ArrayLength { target, dimension } => Some(PredExpr::Len(
+            Box::new(pred_expr_from_checked(target)?),
+            *dimension,
+        )),
+        Value::ArrayRead { address, .. } => {
+            let Value::ArrayElement { target, indices } = &address.value else {
+                return None;
+            };
+            let t = Box::new(pred_expr_from_checked(target)?);
+            let mut out = Vec::with_capacity(indices.len());
+            for (idx, _, _) in indices {
+                out.push(pred_expr_from_checked(idx)?);
+            }
+            Some(PredExpr::Index(t, out))
+        }
+        Value::Exact(e) => pred_expr_from_exact(e),
+        Value::IntegerArithmetic {
+            operation: IntegerOperation::Exact(e),
+            handler: None,
+            ..
+        } => pred_expr_from_exact(e),
+        Value::Negate(inner) => Some(PredExpr::Neg(Box::new(pred_expr_from_checked(inner)?))),
+        Value::Not(inner) => Some(pred_expr_from_checked(inner)?.negate()),
+        Value::Binary {
+            operator,
+            left,
+            right,
+        } => Some(PredExpr::Binary(
+            *operator,
+            Box::new(pred_expr_from_checked(left)?),
+            Box::new(pred_expr_from_checked(right)?),
+        )),
+        Value::Comparison {
+            operators,
+            operands,
+            ..
+        } if operators.len() == 1 => Some(PredExpr::compare(
+            operators[0],
+            pred_expr_from_checked(&operands[0])?,
+            pred_expr_from_checked(&operands[1])?,
+        )),
+        Value::Logical {
+            operator: LogicalOperator::Or,
+            left,
+            right,
+        } => Some(PredExpr::Or(
+            Box::new(pred_expr_from_checked(left)?),
+            Box::new(pred_expr_from_checked(right)?),
+        )),
+        Value::Cast(inner) => {
+            let inner_pred = pred_expr_from_checked(inner)?;
+            if (expr.ty.is_integer() && inner.ty.is_integer())
+                || (expr.ty.pointee().is_some() && inner.ty.pointee().is_some())
+                || (expr.ty.array_id().is_some() && inner.ty.array_id().is_some())
+            {
+                Some(inner_pred)
+            } else {
+                Some(PredExpr::Cast(Box::new(inner_pred), expr.ty))
+            }
+        }
+        _ => None,
+    }
+}
+
+#[inline(never)]
+fn record_comparison_predicates(
+    operators: &[ComparisonOperator],
+    locations: &[Location],
+    checked_operands: &[CheckedExpression],
+    ast_operands: &[Expression],
+    scope: &Scope,
+    true_facts: &mut Facts,
+    false_facts: &mut Facts,
+) {
+    let preds: Vec<Option<PredExpr>> = checked_operands
+        .iter()
+        .map(pred_expr_from_checked)
+        .collect();
+    for k in 0..operators.len() {
+        if let (Some(l), Some(r)) = (&preds[k], &preds[k + 1]) {
+            true_facts.add_predicate(
+                PredExpr::compare(operators[k], l.clone(), r.clone()),
+                locations[k],
+            );
+        }
+        for later in &ast_operands[k + 1..] {
+            forget_expr_writes_into(later, scope, true_facts);
+        }
+    }
+    if operators.len() == 1
+        && let (Some(l), Some(r)) = (&preds[0], &preds[1])
+    {
+        false_facts.add_predicate(
+            PredExpr::compare(operators[0], l.clone(), r.clone()).negate(),
+            locations[0],
+        );
+        forget_expr_writes_into(&ast_operands[1], scope, false_facts);
+    }
+}
+
+#[inline(never)]
+fn record_bool_predicate(
+    checked: &CheckedExpression,
+    location: Location,
+    true_facts: &mut Facts,
+    false_facts: &mut Facts,
+) {
+    if checked.ty == Type::Bool
+        && let Some(pred) = pred_expr_from_checked(checked)
+    {
+        true_facts.add_predicate(pred.clone(), location);
+        false_facts.add_predicate(pred.negate(), location);
+    }
+}
+
 /// 論理式・比較式を評価順（短絡評価・比較連鎖を含む）で検査し、
 /// 真の側・偽の側で成り立つ `Facts` をそれぞれ返す。
 pub(in crate::check) fn eval_condition(
@@ -402,13 +546,25 @@ pub(in crate::check) fn eval_condition(
                     false_facts.add_comparison(l, operators[0], r, true, locations[0]);
                     forget_expr_writes_into(&ast_operands[1], scope, &mut false_facts);
                 }
+                record_comparison_predicates(
+                    operators,
+                    locations,
+                    checked_operands,
+                    ast_operands,
+                    scope,
+                    &mut true_facts,
+                    &mut false_facts,
+                );
             }
             Ok((checked, true_facts, false_facts))
         }
         _ => {
             let checked = super::super::super::expression::expression(expr, None, scope)?;
             let after = scope.array_bounds.facts.borrow().clone();
-            Ok((checked, after.clone(), after))
+            let mut true_facts = after.clone();
+            let mut false_facts = after;
+            record_bool_predicate(&checked, expr.location, &mut true_facts, &mut false_facts);
+            Ok((checked, true_facts, false_facts))
         }
     }
 }

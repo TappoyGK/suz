@@ -33,6 +33,8 @@ fn parser<'a, 's>(
         applications,
         type_parameters: Vec::new(),
         pending_needs: Vec::new(),
+        pending_contracts: Vec::new(),
+        in_ensures: false,
         generic_functions: Default::default(),
         allows: Vec::new(),
         tokens,

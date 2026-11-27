@@ -51,6 +51,15 @@ pub(super) fn value(
             ),
         ));
     }
+    if !signature.contracts.is_empty() {
+        return Err(expr.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "contract.fn-value",
+                "functions with contracts cannot be used as function values"
+            ),
+        ));
+    }
     if signature.type_parameters != 0 || !explicit.is_empty() {
         return super::type_parameters::function_value(expr, signature, explicit, expected, scope);
     }

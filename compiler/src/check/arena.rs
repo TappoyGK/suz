@@ -462,6 +462,12 @@ fn store(
     let mut value = result?;
     let mut body = Vec::new();
     super::control::lower_return_handler(&mut value, &mut body, context.next_id, location);
+    context
+        .bindings
+        .array_bounds
+        .facts
+        .borrow_mut()
+        .forget_shared();
     context.output.push(CheckedStatement::Store {
         target: Box::new(target),
         id,

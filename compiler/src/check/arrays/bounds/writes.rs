@@ -12,26 +12,25 @@ use crate::{
     },
 };
 
-/// 関数呼び出しにより書き換わりうる、参照キャプチャー済みの var の条件を忘れる。
+/// 関数呼び出しにより書き換わりうる、参照キャプチャー済みの var と共有参照先の条件を忘れる。
 pub(in crate::check) fn forget_call(scope: &Scope) {
+    let mut facts = scope.array_bounds.facts.borrow_mut();
+    facts.forget_shared();
     let captured = scope.ref_captured.borrow();
     if captured.is_empty() {
         return;
     }
-    let mut facts = scope.array_bounds.facts.borrow_mut();
     for &id in captured.iter() {
         facts.forget_local(id);
     }
 }
 
-/// `#` メソッドの受け手が `var` 変数またはそのフィールド経路であれば、その条件を忘れる。
+/// `#` メソッドの受け手が `var` 変数またはそのフィールド経路であれば、その条件と共有参照先の条件を忘れる。
 pub(in crate::check) fn forget_mutable_receiver(receiver: &Expression, scope: &Scope) {
+    let mut facts = scope.array_bounds.facts.borrow_mut();
+    facts.forget_shared();
     if let Some((id, fields)) = mutable_ast_path(receiver, scope) {
-        scope
-            .array_bounds
-            .facts
-            .borrow_mut()
-            .forget_path(id, &fields);
+        facts.forget_path(id, &fields);
     }
 }
 
@@ -109,6 +108,9 @@ impl WriteForgetter<'_> {
 
 impl Visitor for WriteForgetter<'_> {
     fn statement(&mut self, stmt: &Statement) -> Result<(), Diagnostic> {
+        if matches!(stmt, Statement::Store { .. } | Statement::ArrayBulkWrite(_)) {
+            self.facts.forget_shared();
+        }
         if let Statement::Assign { name, fields, .. } = stmt
             && let Some(binding) = self.scope.locals.get(name)
             && binding.mutable
@@ -146,6 +148,7 @@ impl Visitor for WriteForgetter<'_> {
         match &expr.kind {
             ExpressionKind::Call { .. } | ExpressionKind::Invoke { .. } => {
                 visit::walk_expression(self, expr)?;
+                self.facts.forget_shared();
                 self.forget_ref_captured();
                 Ok(())
             }
@@ -153,6 +156,7 @@ impl Visitor for WriteForgetter<'_> {
                 target, mutable, ..
             } => {
                 visit::walk_expression(self, expr)?;
+                self.facts.forget_shared();
                 if *mutable && let Some((id, fields)) = mutable_ast_path(target, self.scope) {
                     self.facts.forget_path(id, &fields);
                 }
