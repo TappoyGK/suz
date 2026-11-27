@@ -772,16 +772,32 @@ fn subst_pred(expr: &Expression, env: &SubstEnv<'_>, scope: &Scope) -> Option<Pr
             operators,
             operands,
             ..
-        } if operators.len() == 1 => {
-            let invertible = expr_is_integer(&operands[0], env, scope)
-                && expr_is_integer(&operands[1], env, scope);
-            Some(PredExpr::compare(
-                operators[0],
-                subst_pred(&operands[0], env, scope)?,
-                subst_pred(&operands[1], env, scope)?,
-                invertible,
-            ))
+        } if !operators.is_empty() => {
+            let mut acc: Option<PredExpr> = None;
+            for k in 0..operators.len() {
+                let invertible = expr_is_integer(&operands[k], env, scope)
+                    && expr_is_integer(&operands[k + 1], env, scope);
+                let pair = PredExpr::compare(
+                    operators[k],
+                    subst_pred(&operands[k], env, scope)?,
+                    subst_pred(&operands[k + 1], env, scope)?,
+                    invertible,
+                );
+                acc = Some(match acc {
+                    Some(prev) => PredExpr::And(Box::new(prev), Box::new(pair)),
+                    None => pair,
+                });
+            }
+            acc
         }
+        ExpressionKind::Logical {
+            operator: LogicalOperator::And,
+            left,
+            right,
+        } => Some(PredExpr::And(
+            Box::new(subst_pred(left, env, scope)?),
+            Box::new(subst_pred(right, env, scope)?),
+        )),
         ExpressionKind::Logical {
             operator: LogicalOperator::Or,
             left,

@@ -32,6 +32,7 @@ pub(in crate::check) enum PredExpr {
         right: Box<PredExpr>,
         invertible: bool,
     },
+    And(Box<PredExpr>, Box<PredExpr>),
     Or(Box<PredExpr>, Box<PredExpr>),
     Cast(Box<PredExpr>, Type),
 }
@@ -140,7 +141,7 @@ impl PredExpr {
                     idx.collect_deps(locals, shared);
                 }
             }
-            Self::Binary(_, l, r) | Self::Or(l, r) => {
+            Self::Binary(_, l, r) | Self::And(l, r) | Self::Or(l, r) => {
                 l.collect_deps(locals, shared);
                 r.collect_deps(locals, shared);
             }
@@ -182,6 +183,7 @@ impl PredExpr {
                 right,
                 invertible,
             } => Self::compare(*op, left.map_locals(f)?, right.map_locals(f)?, *invertible),
+            Self::And(l, r) => Self::And(Box::new(l.map_locals(f)?), Box::new(r.map_locals(f)?)),
             Self::Or(l, r) => Self::Or(Box::new(l.map_locals(f)?), Box::new(r.map_locals(f)?)),
             Self::Cast(t, ty) => Self::Cast(Box::new(t.map_locals(f)?), *ty),
         })

@@ -340,16 +340,32 @@ pub(in crate::check) fn pred_expr_from_checked(expr: &CheckedExpression) -> Opti
             operators,
             operands,
             ..
-        } if operators.len() == 1 => {
-            let invertible =
-                is_integer_operand(operands[0].ty) && is_integer_operand(operands[1].ty);
-            Some(PredExpr::compare(
-                operators[0],
-                pred_expr_from_checked(&operands[0])?,
-                pred_expr_from_checked(&operands[1])?,
-                invertible,
-            ))
+        } if !operators.is_empty() => {
+            let mut acc: Option<PredExpr> = None;
+            for k in 0..operators.len() {
+                let invertible =
+                    is_integer_operand(operands[k].ty) && is_integer_operand(operands[k + 1].ty);
+                let pair = PredExpr::compare(
+                    operators[k],
+                    pred_expr_from_checked(&operands[k])?,
+                    pred_expr_from_checked(&operands[k + 1])?,
+                    invertible,
+                );
+                acc = Some(match acc {
+                    Some(prev) => PredExpr::And(Box::new(prev), Box::new(pair)),
+                    None => pair,
+                });
+            }
+            acc
         }
+        Value::Logical {
+            operator: LogicalOperator::And,
+            left,
+            right,
+        } => Some(PredExpr::And(
+            Box::new(pred_expr_from_checked(left)?),
+            Box::new(pred_expr_from_checked(right)?),
+        )),
         Value::Logical {
             operator: LogicalOperator::Or,
             left,
@@ -396,9 +412,10 @@ fn record_comparison_predicates(
             break;
         }
     }
-    let need_false = operators.len() == 1
+    let need_false = (operators.len() == 1
         && (!(affines[0].is_some() && affines[1].is_some())
-            || operators[0] == ComparisonOperator::Equal);
+            || operators[0] == ComparisonOperator::Equal))
+        || operators.len() > 1;
     if !need_any && !need_false {
         return;
     }
@@ -424,14 +441,34 @@ fn record_comparison_predicates(
             }
         }
     }
-    if need_false && let (Some(l), Some(r)) = (&preds[0], &preds[1]) {
-        let invertible = is_integer_operand(checked_operands[0].ty)
-            && is_integer_operand(checked_operands[1].ty);
-        false_facts.add_predicate(
-            PredExpr::compare(operators[0], l.clone(), r.clone(), invertible).negate(),
-            locations[0],
-        );
-        forget_expr_writes_into(&ast_operands[1], scope, false_facts);
+    if need_false {
+        if operators.len() == 1
+            && let (Some(l), Some(r)) = (&preds[0], &preds[1])
+        {
+            let invertible = is_integer_operand(checked_operands[0].ty)
+                && is_integer_operand(checked_operands[1].ty);
+            false_facts.add_predicate(
+                PredExpr::compare(operators[0], l.clone(), r.clone(), invertible).negate(),
+                locations[0],
+            );
+            forget_expr_writes_into(&ast_operands[1], scope, false_facts);
+        } else if operators.len() > 1 && preds.iter().all(Option::is_some) {
+            let mut chain: Option<PredExpr> = None;
+            for k in 0..operators.len() {
+                let l = preds[k].as_ref().unwrap().clone();
+                let r = preds[k + 1].as_ref().unwrap().clone();
+                let invertible = is_integer_operand(checked_operands[k].ty)
+                    && is_integer_operand(checked_operands[k + 1].ty);
+                let pair = PredExpr::compare(operators[k], l, r, invertible);
+                chain = Some(match chain {
+                    Some(prev) => PredExpr::And(Box::new(prev), Box::new(pair)),
+                    None => pair,
+                });
+            }
+            if let Some(chain) = chain {
+                false_facts.add_predicate(chain.negate(), locations[0]);
+            }
+        }
     }
 }
 
@@ -529,10 +566,27 @@ pub(in crate::check) fn eval_condition(
                     ),
                 ));
             }
-            let (true_facts, false_facts) = match operator {
+            let (mut true_facts, mut false_facts) = match operator {
                 LogicalOperator::And => (right_t, Facts::join_all(&[left_f, right_f])),
                 LogicalOperator::Or => (Facts::join_all(&[left_t, right_t]), right_f),
             };
+            if let (Some(lp), Some(rp)) = (
+                pred_expr_from_checked(&checked_left),
+                pred_expr_from_checked(&checked_right),
+            ) {
+                match operator {
+                    LogicalOperator::And => {
+                        false_facts.add_predicate(
+                            PredExpr::And(Box::new(lp), Box::new(rp)).negate(),
+                            expr.location,
+                        );
+                    }
+                    LogicalOperator::Or => {
+                        true_facts
+                            .add_predicate(PredExpr::Or(Box::new(lp), Box::new(rp)), expr.location);
+                    }
+                }
+            }
             Ok((
                 CheckedExpression {
                     ty: Type::Bool,

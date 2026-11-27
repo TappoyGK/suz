@@ -3765,6 +3765,44 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | 正常終了 | 0 | 0 |
 
+### flow-152 比較連鎖や&&のnotを同じ形のガードで証明する
+
+主根拠：`[contract.proof]`。
+補助根拠：`[contract.requires]`。
+
+比較連鎖や `&&` の否定は反対向きの比較へ反転せず、`not (...)` の形のまま一般 `bool` 条件として記憶・一致させるため、同じ形のガードで `@requires` を証明できる。
+
+**ソース：**
+
+```suz
+@requires(not (0 < n < 10))
+fn outside_chain(n: i32) -> u8 {
+    return 0
+}
+
+@requires(not (n > 0 && n < 10))
+fn outside_and(n: i32) -> u8 {
+    return 0
+}
+
+fn main() -> u8 {
+    fix a: i32 = 15
+    fix b: i32 = -1
+    if not (0 < a < 10) {
+        if outside_chain(a) == 0 && not (b > 0 && b < 10) {
+            return outside_and(b)
+        }
+    }
+    return 1
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
 ### flow-146 契約を持つ関数を関数値にすると拒否する
 
 主根拠：`[contract.fn-value]`。
