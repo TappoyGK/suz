@@ -73,6 +73,15 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
                 0,
                 1,
             ),
+            Type::Range(ty) => (
+                "SUZ_PARSE_INTEGER",
+                ty.base.bits(),
+                ty.base.bounds().0 < 0,
+                "NULL".into(),
+                "NULL".into(),
+                0,
+                1,
+            ),
             Type::Float(ty) => (
                 "SUZ_PARSE_FLOAT",
                 if ty == FloatType::F32 { 32 } else { 64 },

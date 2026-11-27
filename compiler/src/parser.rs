@@ -19,6 +19,7 @@ mod logs;
 pub(crate) mod names;
 mod need_groups;
 pub(crate) mod nesting;
+mod ranges;
 mod statements;
 pub(crate) mod structs;
 
@@ -42,6 +43,7 @@ struct Parser<'a, 's> {
     allows: Vec<crate::warnings::AllowScope>,
     tokens: &'a [Token<'s>],
     enums: &'a [crate::ast::EnumDeclaration],
+    ranges: &'a [crate::ast::RangeDeclaration],
     structs: &'a [crate::ast::StructDeclaration],
     fnshapes: &'a [crate::ast::FnShapeDeclaration],
     fnshape_names: std::rc::Rc<std::collections::BTreeMap<String, usize>>,
@@ -153,6 +155,7 @@ impl<'a, 's> Parser<'a, 's> {
 pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
     let need_groups = need_groups::collect(tokens)?;
     let enums = enums::collect(tokens)?;
+    let ranges = ranges::collect(tokens, &enums)?;
     let mut fnshapes = function_types::headers(tokens)?;
     let applications = crate::ast::generics::Applications::default();
     for (id, declaration) in fnshapes.iter_mut().enumerate() {
@@ -168,6 +171,7 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
     let mut structs = structs::collect(
         tokens,
         &enums,
+        &ranges,
         &fnshapes,
         applications.clone(),
         need_groups.clone(),
@@ -175,6 +179,7 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
     let function_types = function_types::resolve(
         tokens,
         &enums,
+        &ranges,
         &mut structs,
         &mut fnshapes,
         applications.clone(),
@@ -188,6 +193,7 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
         generic_functions: std::rc::Rc::new(generics::function_names(tokens)),
         allows: Vec::new(),
         enums: &enums,
+        ranges: &ranges,
         structs: &structs,
         fnshapes: &fnshapes,
         fnshape_names: function_types::name_index(&fnshapes),
@@ -251,6 +257,13 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
                     .unwrap()
                     .end;
             }
+            Kind::Keyword("range") => {
+                p.cursor = ranges
+                    .iter()
+                    .find(|decl| decl.start == p.cursor)
+                    .unwrap()
+                    .end;
+            }
             Kind::Keyword("arena") => {
                 return Err(p.location().error(
                     ErrorKind::InvalidSource,
@@ -276,7 +289,7 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
                     ErrorKind::InvalidSource,
                     crate::diagnostic!(
                         "decl.top-level",
-                        "expected a fix, fn, fnshape, needs, struct, enum, error or extern declaration"
+                        "expected a fix, fn, fnshape, needs, struct, enum, range, error or extern declaration"
                     ),
                 ));
             }
@@ -308,6 +321,7 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
         function_types,
         structs,
         enums,
+        ranges,
         bindings,
         functions,
     })

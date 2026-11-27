@@ -71,6 +71,10 @@ impl Schema {
                 entry.bits = ty.bits();
                 entry.signed_integer = ty.bounds().0 < 0;
             }
+            Type::Range(ty) => {
+                entry.bits = ty.base.bits();
+                entry.signed_integer = ty.base.bounds().0 < 0;
+            }
             Type::Float(ty) => {
                 entry.kind = 1;
                 entry.bits = if ty == FloatType::F32 { 32 } else { 64 };

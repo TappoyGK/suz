@@ -5,12 +5,14 @@
 
 use crate::{ArithmeticMode, Diagnostic, ErrorKind, Warning, ast::Location};
 
+#[derive(Clone)]
 pub(crate) struct AllowItem {
     pub rule: String,
     pub reason: String,
     pub location: Location,
 }
 
+#[derive(Clone)]
 pub(crate) struct AllowScope {
     pub start: Location,
     pub end: Location,

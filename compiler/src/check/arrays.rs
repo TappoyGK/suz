@@ -742,6 +742,7 @@ pub(super) fn write_target(
 fn minimum_size(ty: Type, scope: &Scope) -> u64 {
     match ty {
         Type::Integer(t) => u64::from(t.bits().div_ceil(8)),
+        Type::Range(t) => u64::from(t.base.bits().div_ceil(8)),
         Type::Enum(t) => u64::from(t.base.bits().div_ceil(8)),
         Type::Float(crate::ast::FloatType::F64) => 8,
         Type::Float(crate::ast::FloatType::F32) | Type::Char => 4,

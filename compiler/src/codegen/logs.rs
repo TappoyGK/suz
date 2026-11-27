@@ -104,6 +104,10 @@ fn output(ty: Type, name: &str, context: &mut ExpressionContext) -> String {
             "suz_log_{}({name});",
             if ty.bounds().0 < 0 { "i64" } else { "u64" }
         ),
+        Type::Range(ty) => format!(
+            "suz_log_{}({name});",
+            if ty.base.bounds().0 < 0 { "i64" } else { "u64" }
+        ),
         Type::Float(ty) => {
             context.float_types.insert(ty);
             format!("suz_log_{}({name});", ty.name())

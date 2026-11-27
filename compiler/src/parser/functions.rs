@@ -359,6 +359,12 @@ impl Parser<'_, '_> {
                 .find(|decl| decl.name == name)
                 .map(|decl| Type::Enum(decl.ty))
                 .or_else(|| {
+                    self.ranges
+                        .iter()
+                        .find(|decl| decl.name == name)
+                        .map(|decl| Type::Range(decl.ty))
+                })
+                .or_else(|| {
                     self.structs
                         .iter()
                         .position(|decl| decl.name == name)

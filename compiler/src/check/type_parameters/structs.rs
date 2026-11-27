@@ -25,6 +25,7 @@ pub(in crate::check) struct Structs {
     need_names: BTreeSet<String>,
     original_count: usize,
     enums: Vec<crate::ast::EnumDeclaration>,
+    ranges: Vec<crate::ast::RangeDeclaration>,
 }
 impl From<Vec<StructDeclaration>> for Structs {
     fn from(declarations: Vec<StructDeclaration>) -> Self {
@@ -44,6 +45,7 @@ impl Structs {
             applications: program.applications.clone(),
             shapes: super::shapes::Shapes::new(program),
             enums: program.enums.clone(),
+            ranges: program.ranges.clone(),
             ..Self::from(program.structs.clone())
         }
     }
@@ -317,6 +319,7 @@ impl Structs {
             }
             Type::Struct(id) => self.get(id).name.clone(),
             Type::Enum(ty) => self.enums[ty.id].name.clone(),
+            Type::Range(ty) => self.ranges[ty.id].name.clone(),
             Type::Parameter(id) => format!("T{}", id + 1),
             Type::Application(id) => {
                 let app = &self.applications[id];

@@ -525,7 +525,7 @@ fn constant_bool_raw(expr: &CheckedExpression) -> Option<bool> {
                             continue;
                         }
                         Type::Void | Type::Exact => return None,
-                        Type::Integer(_) | Type::Enum(_) | Type::Char => {
+                        Type::Integer(_) | Type::Range(_) | Type::Enum(_) | Type::Char => {
                             Some(constant_integer_raw(&left)?.cmp(&constant_integer_raw(&right)?))
                         }
                         Type::Float(_) => {
@@ -909,7 +909,7 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
             }))
         }
         Type::Void => return None,
-        Type::Integer(_) | Type::Enum(_) | Type::Char => Value::Integer {
+        Type::Integer(_) | Type::Range(_) | Type::Enum(_) | Type::Char => Value::Integer {
             value: constant_integer_raw(expr)?,
             minus: None,
         },

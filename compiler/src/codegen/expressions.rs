@@ -908,7 +908,10 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                 if !floating
                     && !text
                     && structure.is_none()
-                    && !matches!(ty, Type::Integer(_) | Type::Exact | Type::CInteger(_))
+                    && !matches!(
+                        ty,
+                        Type::Integer(_) | Type::Range(_) | Type::Exact | Type::CInteger(_)
+                    )
                 {
                     context.helpers.insert(unsigned);
                 }
@@ -950,7 +953,10 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                         operators[index].symbol()
                     );
                 }
-                if matches!(ty, Type::Exact | Type::Integer(_) | Type::Float(_)) {
+                if matches!(
+                    ty,
+                    Type::Exact | Type::Integer(_) | Type::Range(_) | Type::Float(_)
+                ) {
                     return super::exact::compare(
                         ty,
                         &names[index],

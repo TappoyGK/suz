@@ -44,6 +44,7 @@ pub(super) fn collect(tokens: &[Token<'_>]) -> Result<Rc<Groups>, Diagnostic> {
         allows: Vec::new(),
         tokens,
         enums: &[],
+        ranges: &[],
         structs: &[],
         fnshapes: &[],
         fnshape_names: Default::default(),

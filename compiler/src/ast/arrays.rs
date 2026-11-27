@@ -43,6 +43,13 @@ impl Types {
     pub fn get(&self, id: usize) -> ArrayType {
         self.entries[id]
     }
+    pub fn patch_ranges(&mut self, ranges: &[super::RangeDeclaration]) {
+        self.ids.clear();
+        for (id, entry) in self.entries.iter_mut().enumerate() {
+            entry.element.patch_ranges(ranges);
+            self.ids.insert(*entry, id);
+        }
+    }
 }
 
 /// 型の同一性には含めず、仮引数または不変の参照の宣言で束縛する寸法名。

@@ -133,6 +133,7 @@ impl Parser<'_, '_> {
                         allows: Vec::new(),
                         tokens: &tokens,
                         enums: self.enums,
+                        ranges: self.ranges,
                         structs: self.structs,
                         fnshapes: self.fnshapes,
                         fnshape_names: self.fnshape_names.clone(),

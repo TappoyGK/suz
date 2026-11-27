@@ -173,6 +173,28 @@ pub(super) fn fits(ty: Type, name: &str) -> String {
     match ty {
         Type::Float(_) => format!("!{name}.failed"),
         Type::Integer(t) => format!("suz_exact_fits({name}, {}, {})", t.bounds().0 < 0, t.bits()),
+        Type::Range(t) => {
+            let (lo, hi) = t.bounds();
+            let lo_cond = if lo < 0 {
+                format!(
+                    "(!{name}.negative || {name}.magnitude <= {}ULL)",
+                    lo.unsigned_abs()
+                )
+            } else if lo == 0 {
+                format!("!{name}.negative")
+            } else {
+                format!("(!{name}.negative && {name}.magnitude >= {}ULL)", lo as u64)
+            };
+            let hi_cond = if hi < 0 {
+                format!(
+                    "({name}.negative && {name}.magnitude >= {}ULL)",
+                    hi.unsigned_abs()
+                )
+            } else {
+                format!("({name}.negative || {name}.magnitude <= {}ULL)", hi as u64)
+            };
+            format!("(!{name}.failed && {lo_cond} && {hi_cond})")
+        }
         Type::Enum(t) => format!(
             "(!{name}.failed && !{name}.negative && {name}.magnitude < {})",
             t.count
@@ -266,12 +288,23 @@ pub(super) fn compare(
     op: crate::ast::ComparisonOperator,
 ) -> String {
     use crate::ast::ComparisonOperator::*;
-    if (a == b && matches!(a, Type::Integer(_)))
+    if (a == b && matches!(a, Type::Integer(_) | Type::Range(_)))
         || matches!((a, b), (Type::Float(_), Type::Float(_)))
     {
         return format!("{left} {} {right}", op.symbol());
     }
-    if let (Type::Integer(a), Type::Integer(b)) = (a, b) {
+    if let (Some(a), Some(b)) = (
+        match a {
+            Type::Integer(t) => Some(t),
+            Type::Range(r) => Some(r.base),
+            _ => None,
+        },
+        match b {
+            Type::Integer(t) => Some(t),
+            Type::Range(r) => Some(r.base),
+            _ => None,
+        },
+    ) {
         let signed_a = a.c_signed();
         let signed_b = b.c_signed();
         // 非負の値同士は符号なしにそろえる。32ビットに収まる比較を

@@ -134,6 +134,7 @@ pub(super) fn collect(tokens: &[Token<'_>]) -> Result<Vec<EnumDeclaration>, Diag
         allows: Vec::new(),
         tokens,
         enums: &[],
+        ranges: &[],
         structs: &[],
         fnshapes: &[],
         fnshape_names: Default::default(),

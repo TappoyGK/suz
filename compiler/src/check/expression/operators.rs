@@ -429,6 +429,21 @@ pub(super) fn check(
                     ),
                 ));
             }
+            for (pair, location) in operands.windows(2).zip(locations) {
+                if let (Type::Range(a), Type::Range(b)) = (pair[0].ty, pair[1].ty)
+                    && a.id != b.id
+                {
+                    return Err(location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "range.identity",
+                            "cannot compare different range types {} and {}",
+                            bindings.type_name(pair[0].ty),
+                            bindings.type_name(pair[1].ty)
+                        ),
+                    ));
+                }
+            }
             if crate::check::arrays::contains_reference(ty, bindings) {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,

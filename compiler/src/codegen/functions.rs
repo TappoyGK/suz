@@ -32,6 +32,7 @@ fn type_layout(ty: Type, context: &ExpressionContext) -> (usize, usize) {
         Type::Float(FloatType::F32) => (4, 4),
         Type::Float(FloatType::F64) => (8, 8),
         Type::Enum(e) => type_layout(Type::Integer(e.base), context),
+        Type::Range(r) => type_layout(Type::Integer(r.base), context),
         Type::CInteger(t) => match t {
             CIntegerType::Char => (1, 1),
             CIntegerType::Int | CIntegerType::Uint => (4, 4),

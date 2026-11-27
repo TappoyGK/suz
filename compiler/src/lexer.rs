@@ -31,6 +31,7 @@ const KEYWORDS: &[&str] = &[
     "static",
     "struct",
     "enum",
+    "range",
     "error",
     "fail",
     "ignore",

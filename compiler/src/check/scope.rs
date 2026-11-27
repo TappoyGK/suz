@@ -165,6 +165,7 @@ pub(super) struct Scope {
     // 不変の宣言は共有し、ローカル束縛の状態だけを複製する。
     pub constants: Rc<BTreeMap<String, Binding>>,
     pub enums: Rc<Vec<crate::ast::EnumDeclaration>>,
+    pub ranges: Rc<Vec<crate::ast::RangeDeclaration>>,
     pub structs: Rc<super::type_parameters::structs::Structs>,
     pub functions: Rc<BTreeMap<String, Signature>>,
     pub result: Type,
@@ -224,6 +225,9 @@ impl Scope {
         ty: Type,
         location: crate::ast::Location,
     ) -> Result<Type, crate::Diagnostic> {
+        if let Type::Range(r) = ty {
+            return Ok(Type::Range(self.ranges[r.id].ty));
+        }
         if !matches!(
             ty,
             Type::Parameter(_)
@@ -321,6 +325,7 @@ impl Scope {
                 self.type_name(ty.pointee().unwrap())
             ),
             Type::Enum(ty) => self.enums[ty.id].name.clone(),
+            Type::Range(ty) => self.ranges[ty.id].name.clone(),
             Type::Struct(id) => {
                 let declaration = self.structs.get(id);
                 if declaration.symbolic {
@@ -372,6 +377,7 @@ impl Scope {
     pub fn is_type_name(&self, name: &str) -> bool {
         self.structs.shapes.contains_name(name)
             || self.enums.iter().any(|decl| decl.name == name)
+            || self.ranges.iter().any(|decl| decl.name == name)
             || self.structs.contains_name(name)
     }
 }
@@ -407,6 +413,7 @@ impl Default for Scope {
             uncaptured: Default::default(),
             constants: Rc::default(),
             enums: Rc::default(),
+            ranges: Rc::default(),
             structs,
             functions: Rc::default(),
             result: Type::Integer(IntegerType::U8),

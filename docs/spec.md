@@ -83,7 +83,7 @@ Suzが備える機能の代表例を以下に示す。構文全体は[付録A](#
 **[src.keywords]** 次の語はキーワードであり、識別子には使えない。
 
 ```text
-fix var fn fnshape needs self static struct enum error extern trusted arena new textbuf ref mut nil let objection
+fix var fn fnshape needs self static struct enum range error extern trusted arena new textbuf ref mut nil let objection
 if ifexpr elif else while loop for rev in break continue return match matchexpr
 as or not len c_bytes c_byte_len log panic fail ignore recover allow expr with
 true false nan inf
@@ -682,6 +682,16 @@ fn clear_optional(grid: #[u8; _, _]?) -> void {
 **[array.enum-len]** 列挙型を添字にする配列`a`に対して、`len a`は列挙子の数を`len_t`で返す。
 
 不一致を回復可能な失敗にしたい関数は、別の寸法名で受け取り、本体で比較してfailする。一致条件に専用のorを付ける構文は設けない。
+
+### 5.9 値域制限型
+
+**[range.decl]** 値域制限型はトップレベルで `range Name: Base = LO..=HI`（閉区間）または `range Name: Base = LO..<HI`（半開区間）と宣言する。名前は [name.type] に従う。基底型 `Base` には固定幅整数型（`i8`〜`i64`・`u8`〜`u64`）のいずれかを必ず指定する。`len_t`・C固有型・値域制限型は基底型にできない。表現サイズと配置は基底型と一致する。値域制限型は列挙型の基底型には使えない。
+
+**[range.bounds]** 値域制限型の下限 `LO` と上限 `HI` は整数の定数式に限る。範囲記号には `..=` と `..<` を使い、[for.range-spacing] の隣接規則に従う。半開区間 `LO..<HI` では上限の式そのものではなく、実際に含まれる最小値 `LO` と最大値 `HI - 1` が基底型の範囲に収まるかを検査する。含まれる値が 1 つもない空区間・逆転区間、および基底型の範囲を超える区間はコンパイルエラーとする。`3..=3` のように 1 値だけを含む型は認める。
+
+**[range.identity]** 値域制限型は名前で区別する整数型である。同じ値域制限型の値はそのまま受け渡し・比較できる。異なる値域制限型同士（範囲が一致する別名型を含む）の暗黙変換および直接比較はコンパイルエラーとする。通常の整数型を経由する暗黙変換の連鎖も認めない。同じ値域制限型同士、および値域制限型と通常の整数型・整数リテラル・浮動小数点数との比較は [conv.compare] に従い、[diagnostic.constant-comparison] も適用する。
+
+**[range.operations]** 値域制限型は整数型に含める。変数・定数・構造体フィールド・仮引数・戻り値・配列要素・テンプレート埋め込み（10進数表示）・明示的な型引数 `T`・`match` / `matchexpr` に使える。`match` / `matchexpr` のパターンには対象と同じ値域制限型の定数式を要求し、すべての値を列挙した場合や 1 値だけの型でも末尾の `_` を必須とする（[match.pattern]・[match.exhaustive]）。`extern` の引数・戻り値および [ffi.arena-pointer] のCポインタ参照先には使えない。
 
 ## 6. 定数と変数
 
@@ -3137,7 +3147,7 @@ CharEscape ::= "\" ( "0" | "n" | "r" | "t" | "\" | "'"
 
 ```ebnf
 Program          ::= NL* ( Declaration NL+ )* Declaration? EOF
-Declaration      ::= TopLevelBinding | NeedsDeclaration | EnumDeclaration | ErrorDeclaration | ExternBlock
+Declaration      ::= TopLevelBinding | NeedsDeclaration | EnumDeclaration | RangeDeclaration | ErrorDeclaration | ExternBlock
                    | Needs* ( FunctionDeclaration | StructDeclaration | FnShapeDeclaration )
 
 ExternBlock      ::= "extern" HEADER "{" NL* ( ExternDeclaration NL+ )* ExternDeclaration? "}"
@@ -3168,6 +3178,7 @@ Field            ::= IDENT ":" Type
 
 EnumDeclaration  ::= "enum" IDENT ":" IntegerType
                      "{" NL* Variants "}"
+RangeDeclaration ::= "range" IDENT ":" IntegerType "=" ConstExpression ( "..=" | "..<" ) ConstExpression
 ErrorDeclaration ::= "error" IDENT "{" NL* Variants "}"
 ReturnType       ::= Type ( "or" ErrorSpec )?
 ErrorSpec        ::= ErrorSpecItem ( "," ErrorSpecItem )*

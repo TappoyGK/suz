@@ -75,6 +75,7 @@ pub(super) fn template(
                         writeln!(body, "    suz_text_buffer_append(&buffer, suz_enum_{}_names[{name}], suz_enum_{}_lengths[{name}], location);", ty.id, ty.id).unwrap();
                     }
                     Type::Integer(ty) => writeln!(body, "    suz_text_buffer_{}(&buffer, {name}, location);", if ty.bounds().0 < 0 { "i64" } else { "u64" }).unwrap(),
+                    Type::Range(ty) => writeln!(body, "    suz_text_buffer_{}(&buffer, {name}, location);", if ty.base.bounds().0 < 0 { "i64" } else { "u64" }).unwrap(),
                     Type::Float(ty) => {
                         context.float_types.insert(ty);
                         writeln!(body, "    {{\n        char digits[32];\n        size_t length = suz_format_{}({name}, digits);\n        suz_text_buffer_append(&buffer, digits, length, location);\n    }}", ty.name()).unwrap();
@@ -226,6 +227,10 @@ fn compose(
                     Type::Integer(ty) => format!(
                         "suz_text_format_{}",
                         if ty.bounds().0 < 0 { "i64" } else { "u64" }
+                    ),
+                    Type::Range(ty) => format!(
+                        "suz_text_format_{}",
+                        if ty.base.bounds().0 < 0 { "i64" } else { "u64" }
                     ),
                     Type::Float(ty) => {
                         context.float_types.insert(ty);
