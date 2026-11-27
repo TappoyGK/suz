@@ -55,15 +55,21 @@ fn validate_ast(expr: &Expression, allow_return: bool, scope: &Scope) -> Result<
         }
         ExpressionKind::Name(name) => {
             if name == "return" && !allow_return {
-                return Err(expr_error(
-                    expr.location,
-                    "return can only be referenced in @ensures",
+                return Err(expr.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "contract.return",
+                        "return can only be referenced in @ensures"
+                    ),
                 ));
             }
             if name == "return" && scope.result == Type::Void {
-                return Err(expr_error(
-                    expr.location,
-                    "void functions cannot reference return in @ensures",
+                return Err(expr.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "contract.return",
+                        "void functions cannot reference return in @ensures"
+                    ),
                 ));
             }
             Ok(())

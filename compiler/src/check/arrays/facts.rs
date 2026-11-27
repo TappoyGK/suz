@@ -211,10 +211,187 @@ impl Predicate {
 
 type BoundsCache = BTreeMap<Term, (Option<i128>, Option<i128>)>;
 
+/// O(1) 複製・O(log n) 挿入・検索を提供する永続 AVL 木。
+#[derive(Clone, Debug)]
+struct PMapNode<K, V> {
+    key: K,
+    val: V,
+    height: u8,
+    left: Option<Rc<PMapNode<K, V>>>,
+    right: Option<Rc<PMapNode<K, V>>>,
+}
+
+#[derive(Clone, Debug)]
+struct PMap<K, V> {
+    root: Option<Rc<PMapNode<K, V>>>,
+}
+
+impl<K, V> Default for PMap<K, V> {
+    fn default() -> Self {
+        Self { root: None }
+    }
+}
+
+impl<K: Ord + Clone, V: Clone> PMap<K, V> {
+    fn is_empty(&self) -> bool {
+        self.root.is_none()
+    }
+
+    fn ptr_eq(&self, other: &Self) -> bool {
+        match (&self.root, &other.root) {
+            (None, None) => true,
+            (Some(a), Some(b)) => Rc::ptr_eq(a, b),
+            _ => false,
+        }
+    }
+
+    fn get(&self, key: &K) -> Option<&V> {
+        let mut cur = self.root.as_deref();
+        while let Some(node) = cur {
+            match key.cmp(&node.key) {
+                std::cmp::Ordering::Less => cur = node.left.as_deref(),
+                std::cmp::Ordering::Greater => cur = node.right.as_deref(),
+                std::cmp::Ordering::Equal => return Some(&node.val),
+            }
+        }
+        None
+    }
+
+    fn insert(&self, key: K, val: V) -> Self {
+        Self {
+            root: Some(Self::insert_node(self.root.as_ref(), key, val)),
+        }
+    }
+
+    fn node_height(node: Option<&Rc<PMapNode<K, V>>>) -> i32 {
+        node.map_or(0, |n| i32::from(n.height))
+    }
+
+    fn make_node(
+        key: K,
+        val: V,
+        left: Option<Rc<PMapNode<K, V>>>,
+        right: Option<Rc<PMapNode<K, V>>>,
+    ) -> Rc<PMapNode<K, V>> {
+        let hl = Self::node_height(left.as_ref());
+        let hr = Self::node_height(right.as_ref());
+        let height = (hl.max(hr) + 1) as u8;
+        Rc::new(PMapNode {
+            key,
+            val,
+            height,
+            left,
+            right,
+        })
+    }
+
+    fn balance(
+        key: K,
+        val: V,
+        left: Option<Rc<PMapNode<K, V>>>,
+        right: Option<Rc<PMapNode<K, V>>>,
+    ) -> Rc<PMapNode<K, V>> {
+        let bf = Self::node_height(left.as_ref()) - Self::node_height(right.as_ref());
+        if bf > 1 {
+            let l = left.expect("left child exists when bf > 1");
+            if Self::node_height(l.left.as_ref()) >= Self::node_height(l.right.as_ref()) {
+                let new_r = Self::make_node(key, val, l.right.clone(), right);
+                Self::make_node(l.key.clone(), l.val.clone(), l.left.clone(), Some(new_r))
+            } else {
+                let lr = l.right.as_ref().expect("left-right child exists");
+                let new_l = Self::make_node(
+                    l.key.clone(),
+                    l.val.clone(),
+                    l.left.clone(),
+                    lr.left.clone(),
+                );
+                let new_r = Self::make_node(key, val, lr.right.clone(), right);
+                Self::make_node(lr.key.clone(), lr.val.clone(), Some(new_l), Some(new_r))
+            }
+        } else if bf < -1 {
+            let r = right.expect("right child exists when bf < -1");
+            if Self::node_height(r.right.as_ref()) >= Self::node_height(r.left.as_ref()) {
+                let new_l = Self::make_node(key, val, left, r.left.clone());
+                Self::make_node(r.key.clone(), r.val.clone(), Some(new_l), r.right.clone())
+            } else {
+                let rl = r.left.as_ref().expect("right-left child exists");
+                let new_l = Self::make_node(key, val, left, rl.left.clone());
+                let new_r = Self::make_node(
+                    r.key.clone(),
+                    r.val.clone(),
+                    rl.right.clone(),
+                    r.right.clone(),
+                );
+                Self::make_node(rl.key.clone(), rl.val.clone(), Some(new_l), Some(new_r))
+            }
+        } else {
+            Self::make_node(key, val, left, right)
+        }
+    }
+
+    fn insert_node(node: Option<&Rc<PMapNode<K, V>>>, key: K, val: V) -> Rc<PMapNode<K, V>> {
+        let Some(n) = node else {
+            return Self::make_node(key, val, None, None);
+        };
+        match key.cmp(&n.key) {
+            std::cmp::Ordering::Less => {
+                let new_l = Self::insert_node(n.left.as_ref(), key, val);
+                Self::balance(n.key.clone(), n.val.clone(), Some(new_l), n.right.clone())
+            }
+            std::cmp::Ordering::Greater => {
+                let new_r = Self::insert_node(n.right.as_ref(), key, val);
+                Self::balance(n.key.clone(), n.val.clone(), n.left.clone(), Some(new_r))
+            }
+            std::cmp::Ordering::Equal => Self::make_node(key, val, n.left.clone(), n.right.clone()),
+        }
+    }
+
+    fn for_each(&self, f: &mut impl FnMut(&K, &V)) {
+        fn walk<K, V>(node: Option<&Rc<PMapNode<K, V>>>, f: &mut impl FnMut(&K, &V)) {
+            if let Some(n) = node {
+                walk(n.left.as_ref(), f);
+                f(&n.key, &n.val);
+                walk(n.right.as_ref(), f);
+            }
+        }
+        walk(self.root.as_ref(), f);
+    }
+}
+
 #[derive(Clone, Default, Debug)]
 struct ExtraFacts {
-    predicates: BTreeMap<PredExpr, Predicate>,
+    predicates: PMap<PredExpr, Predicate>,
+    /// 各ローカル変数に依存する述語の個数（未依存の `forget_local` を O(log V) で打ち切る）。
+    local_counts: PMap<usize, u32>,
+    /// 共有参照先・配列要素に依存する述語の個数（0 なら `forget_shared` を O(1) で打ち切る）。
+    shared_count: usize,
     bounds_cache: RefCell<Option<Rc<BoundsCache>>>,
+}
+
+impl ExtraFacts {
+    fn rebuild_from_kept(
+        predicates: &PMap<PredExpr, Predicate>,
+        mut keep: impl FnMut(&PredExpr, &Predicate) -> bool,
+    ) -> Self {
+        let mut out = Self::default();
+        predicates.for_each(&mut |expr, pred| {
+            if keep(expr, pred) {
+                out.insert_predicate(expr.clone(), pred.clone());
+            }
+        });
+        out
+    }
+
+    fn insert_predicate(&mut self, expr: PredExpr, meta: Predicate) {
+        if meta.depends_on_shared {
+            self.shared_count += 1;
+        }
+        for &id in &meta.locals {
+            let next = self.local_counts.get(&id).copied().unwrap_or(0) + 1;
+            self.local_counts = self.local_counts.insert(id, next);
+        }
+        self.predicates = self.predicates.insert(expr, meta);
+    }
 }
 
 /// 差分制約グラフの頂点。
@@ -361,7 +538,7 @@ impl Facts {
             return;
         }
         if let Some(extra) = &self.extra
-            && extra.predicates.contains_key(&expr)
+            && extra.predicates.get(&expr).is_some()
         {
             return;
         }
@@ -370,7 +547,7 @@ impl Facts {
             self.extra
                 .get_or_insert_with(|| Rc::new(ExtraFacts::default())),
         );
-        extra.predicates.entry(expr).or_insert(meta);
+        extra.insert_predicate(expr, meta);
     }
 
     pub fn has_predicate(&self, expr: &PredExpr) -> Option<Location> {
@@ -384,12 +561,16 @@ impl Facts {
     /// 共有された参照先・配列要素に依存する条件を忘れる（配列参照の `len` は忘れない）。
     pub fn forget_shared(&mut self) {
         if let Some(extra) = &mut self.extra
-            && extra.predicates.values().any(|p| p.depends_on_shared)
+            && extra.shared_count > 0
         {
-            let e = Rc::make_mut(extra);
-            e.predicates.retain(|_, p| !p.depends_on_shared);
-            if e.predicates.is_empty() && e.bounds_cache.get_mut().is_none() {
+            let rebuilt =
+                ExtraFacts::rebuild_from_kept(&extra.predicates, |_, p| !p.depends_on_shared);
+            let cache = extra.bounds_cache.borrow().clone();
+            if rebuilt.predicates.is_empty() && cache.is_none() {
                 self.extra = None;
+            } else {
+                *rebuilt.bounds_cache.borrow_mut() = cache;
+                *extra = Rc::new(rebuilt);
             }
         }
     }
@@ -877,12 +1058,16 @@ impl Facts {
     /// ローカル変数 `id`（およびそれを根とするフィールド経路）に関する条件を忘れる。
     pub fn forget_local(&mut self, id: usize) {
         if let Some(extra) = &mut self.extra
-            && extra.predicates.values().any(|p| p.locals.contains(&id))
+            && extra.local_counts.get(&id).is_some()
         {
-            let e = Rc::make_mut(extra);
-            e.predicates.retain(|_, p| !p.locals.contains(&id));
-            if e.predicates.is_empty() && e.bounds_cache.get_mut().is_none() {
+            let rebuilt =
+                ExtraFacts::rebuild_from_kept(&extra.predicates, |_, p| !p.locals.contains(&id));
+            let cache = extra.bounds_cache.borrow().clone();
+            if rebuilt.predicates.is_empty() && cache.is_none() {
                 self.extra = None;
+            } else {
+                *rebuilt.bounds_cache.borrow_mut() = cache;
+                *extra = Rc::new(rebuilt);
             }
         }
         self.forget_where(|t| {
@@ -897,15 +1082,17 @@ impl Facts {
             return;
         }
         if let Some(extra) = &mut self.extra
-            && extra
-                .predicates
-                .values()
-                .any(|p| p.locals.contains(&root_id))
+            && extra.local_counts.get(&root_id).is_some()
         {
-            let e = Rc::make_mut(extra);
-            e.predicates.retain(|_, p| !p.locals.contains(&root_id));
-            if e.predicates.is_empty() && e.bounds_cache.get_mut().is_none() {
+            let rebuilt = ExtraFacts::rebuild_from_kept(&extra.predicates, |_, p| {
+                !p.locals.contains(&root_id)
+            });
+            let cache = extra.bounds_cache.borrow().clone();
+            if rebuilt.predicates.is_empty() && cache.is_none() {
                 self.extra = None;
+            } else {
+                *rebuilt.bounds_cache.borrow_mut() = cache;
+                *extra = Rc::new(rebuilt);
             }
         }
         self.forget_where(|t| match t {
@@ -932,20 +1119,21 @@ impl Facts {
         for p in rest {
             range_locals.retain(|entry| p.range_locals.contains(entry));
         }
-        let extra = first.extra.as_deref().and_then(|first_extra| {
-            if first_extra.predicates.is_empty() {
+        let extra = first.extra.as_ref().and_then(|first_rc| {
+            if first_rc.predicates.is_empty() {
                 return None;
             }
-            let mut kept = first_extra.predicates.clone();
-            for p in rest {
-                kept.retain(|expr, _| p.has_predicate(expr).is_some());
+            if rest.iter().all(|p| {
+                p.extra
+                    .as_ref()
+                    .is_some_and(|e| e.predicates.ptr_eq(&first_rc.predicates))
+            }) {
+                return Some(first_rc.clone());
             }
-            (!kept.is_empty()).then(|| {
-                Rc::new(ExtraFacts {
-                    predicates: kept,
-                    bounds_cache: RefCell::new(None),
-                })
-            })
+            let rebuilt = ExtraFacts::rebuild_from_kept(&first_rc.predicates, |expr, _| {
+                rest.iter().all(|p| p.has_predicate(expr).is_some())
+            });
+            (!rebuilt.predicates.is_empty()).then(|| Rc::new(rebuilt))
         });
         if paths.iter().any(|f| f.edges.is_empty()) {
             return Facts {
@@ -1036,9 +1224,9 @@ impl Facts {
             }
         }
         if let Some(extra) = &self.extra {
-            for (expr, pred) in extra.predicates.iter() {
+            extra.predicates.for_each(&mut |expr, pred| {
                 if pred.depends_on_shared {
-                    continue;
+                    return;
                 }
                 if let Some(mapped_expr) = expr.map_locals(&mut |id| {
                     if let Some(Term::Local(new_id)) = map_term(&Term::Local(id)) {
@@ -1049,7 +1237,7 @@ impl Facts {
                 }) {
                     out.add_predicate(mapped_expr, pred.location);
                 }
-            }
+            });
         }
         if self.edges.is_empty() {
             return out;

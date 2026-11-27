@@ -3156,7 +3156,7 @@ fn main() -> u8 {
 
 ### flow-133 void関数の@ensuresでreturnを参照すると拒否する
 
-主根拠：`[contract.expr-order]`。
+主根拠：`[contract.return]`。
 補助根拠：`[contract.expr]`。
 
 `void` を返す関数の `@ensures` では `return` を参照できない。
@@ -3185,7 +3185,7 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[contract.expr]` | 1 | 10 |
+| 通常 | `[contract.return]` | 1 | 10 |
 
 ### flow-134 @requiresの配列境界条件で本体内の添字orを省略する
 
@@ -3733,7 +3733,7 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[generic.needs-check]` | 17 | 5 |
+| 通常 | `[contract.needs]` | 17 | 5 |
 
 ### flow-148 契約を持つ演算子メソッドは@needsの要求を満たさない
 
@@ -3777,4 +3777,4 @@ fn main() -> u8 {
 
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
-| 通常 | `[generic.needs-check]` | 18 | 13 |
+| 通常 | `[contract.needs]` | 18 | 13 |

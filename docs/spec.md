@@ -78,7 +78,7 @@ Suzが備える機能の代表例を以下に示す。構文全体は[付録A](#
 
 **[src.whitespace]** テンプレートの本文と文字リテラル以外では、スペースとタブはトークンの区切りとして扱う。`for` と `rev` の範囲演算子との境界には、[for.range-spacing] の隣接規則を適用する。
 
-**[src.longest-match]** トークンは、現在の位置から一致する最も長いものを読む。たとえば、`+%=` は1つの複合代入演算子、`<-` は1つの追記記号として読む。負数との比較は `x < -1` と書き、`x<-1` は比較にはならない。`?`と`@`はそれぞれ単独の記号トークンであり、`mut?`は`mut`と`?`、`@needs`は`@`とキーワード`needs`、`@requires`・`@ensures`は`@`と識別子`requires`・`ensures`に分かれる（[contract.decl]）。
+**[src.longest-match]** トークンは、現在の位置から一致する最も長いものを読む。たとえば、`+%=` は1つの複合代入演算子、`<-` は1つの追記記号として読む。負数との比較は `x < -1` と書き、`x<-1` は比較にはならない。`?`と`@`はそれぞれ単独の記号トークンであり、`mut?`は`mut`と`?`、`@needs`は`@`とキーワード`needs`、`@requires`・`@ensures`は`@`と識別子`requires`・`ensures`に分かれる。
 
 **[src.keywords]** 次の語はキーワードであり、識別子には使えない。
 
@@ -2015,11 +2015,13 @@ fn main() -> u8 {
 
 ### 8.10 関数の契約
 
-**[contract.decl]** 関数・メソッドの直前に `@requires(条件式)`（事前条件）および `@ensures(条件式)`（事後条件）を 1 行 1 条件で複数並べられる。`@needs` と混在でき、行の隣接規則（コメント行の許可・空行の禁止）は [generic.needs-adjacent] に従う。`requires` と `ensures` は予約語ではなく、`@` の直後でのみ契約の語として解釈する。`main`・構造体・`fnshape`・`extern` には付けられない。
+**[contract.decl]** 関数・メソッドの直前に `@requires(条件式)`（事前条件）および `@ensures(条件式)`（事後条件）を 1 行 1 条件で複数並べられる。`@needs` と混在でき、行の隣接規則（コメント行の許可・空行の禁止）は [generic.needs-adjacent] に従う。`requires` と `ensures` の字句の扱いは [src.longest-match] に従い、`@` の直後でのみ契約の語として解釈する。`main`・構造体・`fnshape`・`extern` には付けられない。
 
-**[contract.expr]** 契約式は `bool` 型とし、副作用がなく失敗しない組み込み操作に限定する。リテラル、定数、仮引数・`self`・`@ensures` 内の `return`、フィールド読み取り、組み込み配列の `len`、組み込みの比較・比較連鎖・論理演算（`&&`・`||`・`not`）、正確な整数算術（除算・剰余は除数が静的に非零と保証される場合に限る）、失敗しない `or` なしの `as`、範囲が静的に保証される配列添字を許可する。通常の関数・メソッド・演算子メソッド呼び出し、浮動小数点算術、代入、`new`、`log`、失敗しうる演算（未保証の除算・添字、`or` 付き `as`、nil 参照解除等）はコンパイルエラーとする。
+**[contract.expr]** 契約式は `bool` 型とし、副作用がなく失敗しない組み込み操作に限定する。リテラル、定数、仮引数・`self`・`@ensures` 内の `return`（[contract.return]）、フィールド読み取り、組み込み配列の `len`、組み込みの比較・比較連鎖・論理演算（`&&`・`||`・`not`）、正確な整数算術（除算・剰余は除数が静的に非零と保証される場合に限る）、失敗しない `or` なしの `as`、範囲が静的に保証される配列添字を許可する。通常の関数・メソッド・演算子メソッド呼び出し、浮動小数点算術、代入、`new`、`log`、失敗しうる演算（未保証の除算・添字、`or` 付き `as`、nil 参照解除等）はコンパイルエラーとする。
 
-**[contract.expr-order]** `@ensures` 内では予約語 `return` で戻り値を参照できるが、`void` を返す関数の `@ensures` では `return` を参照できない。複数の契約および `&&` では、記述順に前の条件が成立したことを後続の契約・右辺の検査に使える。
+**[contract.return]** `@ensures` 内では予約語 `return` で戻り値を参照できる。`@requires` 内、および `void` を返す関数の `@ensures` では `return` を参照できない。
+
+**[contract.expr-order]** 複数の契約および `&&` では、記述順に前の条件が成立したことを後続の契約・右辺の検査に使える。
 
 **[contract.requires]** `@requires` は、すべての呼び出し位置で静的に証明できなければコンパイルエラーとする。呼び出しの証明は、すべての実引数の評価に伴う条件の無効化を反映したうえで、保持済みの実引数値について判定する。契約用の暗黙の実行時検査は生成しない。関数本体の入口では、`@requires` の条件が成立しているものとして記憶する（[array.bounds-proof]）。
 
@@ -2029,7 +2031,7 @@ fn main() -> u8 {
 
 **[contract.proof]** 契約の静的証明は、[array.bounds-proof] と同じく最適化設定や実装固有の追加推論に依らない次の固定規則で判定する。条件の記憶と無効化は [array.bounds-proof] に従う。
 
-- `[array.bounds-proof]` の差分制約（2 項の大小・等値・配列長）および `[arith.width]` の値域推定。
+- [array.bounds-proof] の差分制約（2 項の大小・等値・配列長）および [arith.width] の値域推定。
 - 記憶済みの一般 `bool` 条件との構文一致（括弧を除いた一致、`&&` 分解、比較の反転 `<`⇔`>`・`<=`⇔`>=`・`==`・`!=`）。整数の比較に限り `not` による反対向きの比較への反転を認め、浮動小数点数の比較の否定は [expr.nan-comparison] により `not (比較)` の形のまま一致させる。
 
 **[contract.fn-value]** 契約を持つ関数は `fn 関数名` で関数値にできない（[fn.value-from-name]）。
@@ -3185,7 +3187,7 @@ CharEscape ::= "\" ( "0" | "n" | "r" | "t" | "\" | "'"
                     | "u{" HEX HEX? HEX? HEX? HEX? HEX? "}" )
 ```
 
-`WORD` のうち、[src.keywords] と [src.type-names] の語は、そのつづりの予約トークンとして扱う。`_` 単独はワイルドカードのトークン、それ以外は `IDENT` である。構文規則の `"debug"`・`"info"`・`"warn"` は、それぞれのつづりの `IDENT` に一致する。
+`WORD` のうち、[src.keywords] と [src.type-names] の語は、そのつづりの予約トークンとして扱う。`_` 単独はワイルドカードのトークン、それ以外は `IDENT` である。構文規則の `"debug"`・`"info"`・`"warn"`・`"requires"`・`"ensures"` は、それぞれのつづりの `IDENT` に一致する。
 
 演算子と区切り記号は、次のトークンである。
 
@@ -3279,7 +3281,7 @@ IntegerType      ::= "i8" | "i16" | "i32" | "i64"
 
 `ArrayType`の`Dimension`に書く`IDENT`は、[name.value] のつづりなら寸法名として [array.dimension-bind]・[array.dimension-equality] を適用し（型の同一性には含めない）、[name.type] のつづりなら列挙型の添字として [array.enum-dimension]・[array.enum-type] を適用する（型の同一性に含める）。
 
-`Needs`の改行には [generic.needs-adjacent] の物理行の制約を適用する。演算子の要求にはエラー指定を付けられない。`MethodReceiver`の型引数には [generic.receiver-parameters] を適用する。
+`Needs`と`ContractClause`の改行には [generic.needs-adjacent] の物理行の制約を適用する。`@ensures`の`Expression`の中では、`Primary`として予約語`"return"`も書ける（[contract.return]）。それ以外の式の位置に値としての`"return"`は書けない。演算子の要求にはエラー指定を付けられない。`MethodReceiver`の型引数には [generic.receiver-parameters] を適用する。
 
 `HEADER`は [ffi.header] のヘッダー名、`CNAME`は [ffi.name] のC側の名前である。
 
@@ -3375,7 +3377,7 @@ ArrayItems       ::= ArrayItem ( "," ArrayItem )* ","?
 ArrayItem        ::= Expression | "[" ArrayItems "]"
 Index            ::= Expression | Expression? ":" Expression?
 IndexHandler     ::= "or" ( Expression | "return" Expression? | "panic" TEMPLATE )
-Primary          ::= "self" | "return" | Literal | IDENT | FunctionCall | StructLiteral | TEMPLATE | "." ArrayInitializer
+Primary          ::= "self" | Literal | IDENT | FunctionCall | StructLiteral | TEMPLATE | "." ArrayInitializer
                    | "(" Expression ")" | IfExpression | MatchExpression | BlockExpression
 Literal          ::= INTEGER | FLOAT | CHAR | "true" | "false" | "nan" | "inf" | "nil"
 
