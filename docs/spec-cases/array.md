@@ -1831,6 +1831,84 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | `[array.access-handler]` | 2 | 19 |
 
+### array-092 値域制限型の添字で既知長配列の範囲内を静的に保証する
+
+主根拠：`[array.bounds-proof]`。
+補助根拠：`[range.decl]`、`[range.bounds]`。
+
+値域制限型 `Channel`（`0..<16`）の仮引数や構造体フィールドを長さ 16 の既知長配列の添字に使うと、`0 <= x <= 15 < 16` が常に成り立つため `or` なしで読み出せる。
+
+**ソース：**
+
+```suz
+range Channel: u8 = 0..<16
+
+struct Voice {
+    ch: Channel,
+}
+
+fix TABLE: .[u8] = .[10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
+
+fn lookup_param(c: Channel) -> u8 {
+    return TABLE.[c]
+}
+
+fn lookup_field(v: Voice) -> u8 {
+    return TABLE.[v.ch]
+}
+
+fn main() -> u8 {
+    fix c: Channel = 15
+    fix v = Voice { ch: 0 }
+    if lookup_param(c) == 25 && lookup_field(v) == 10 {
+        return 0
+    }
+    return 1
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### array-093 値域上限が配列長を超える場合は添字にorを要求する
+
+主根拠：`[array.access-handler]`。
+補助根拠：`[array.bounds-proof]`、`[range.decl]`。
+
+値域制限型 `Channel`（`0..<16`）の上限 `15` が配列長 `8` 以上であるため、`or` を省略するとコンパイルエラーとなる。
+
+**ソース：**
+
+```suz
+range Channel: u8 = 0..<16
+
+fix SMALL: .[u8] = .[0, 1, 2, 3, 4, 5, 6, 7]
+
+fn lookup(c: Channel) -> u8 {
+    return SMALL.[c]
+}
+
+fn main() -> u8 {
+    fix c: Channel = 3
+    return lookup(c)
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[array.access-handler]` | 6 | 17 |
+
 ### array-057 列挙型を添字にする定数関数表と配列参照の読み書き
 
 主根拠：`[array.enum-type]`。
@@ -2945,81 +3023,3 @@ fn main() -> u8 {
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
 | 強制 | `[diagnostic.arithmetic]` | 4 | 16 |
-
-### array-092 値域制限型の仮引数・構造体フィールドで既知長配列の添字のorを省略する
-
-主根拠：`[array.bounds-proof]`。
-補助根拠：`[range.decl]`、`[range.bounds]`。
-
-値域制限型 `Channel`（`0..<16`）の仮引数や構造体フィールドを長さ 16 の既知長配列の添字に使うと、`0 <= x <= 15 < 16` が常に成り立つため `or` なしで読み出せる。
-
-**ソース：**
-
-```suz
-range Channel: u8 = 0..<16
-
-struct Voice {
-    ch: Channel,
-}
-
-fix TABLE: .[u8] = .[10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
-
-fn lookup_param(c: Channel) -> u8 {
-    return TABLE.[c]
-}
-
-fn lookup_field(v: Voice) -> u8 {
-    return TABLE.[v.ch]
-}
-
-fn main() -> u8 {
-    fix c: Channel = 15
-    fix v = Voice { ch: 0 }
-    if lookup_param(c) == 25 && lookup_field(v) == 10 {
-        return 0
-    }
-    return 1
-}
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | 正常終了 | 0 | 0 |
-
-### array-093 値域上限が配列長を超える場合は添字にorを要求する
-
-主根拠：`[array.access-handler]`。
-補助根拠：`[array.bounds-proof]`、`[range.decl]`。
-
-値域制限型 `Channel`（`0..<16`）の上限 `15` が配列長 `8` 以上であるため、`or` を省略するとコンパイルエラーとなる。
-
-**ソース：**
-
-```suz
-range Channel: u8 = 0..<16
-
-fix SMALL: .[u8] = .[0, 1, 2, 3, 4, 5, 6, 7]
-
-fn lookup(c: Channel) -> u8 {
-    return SMALL.[c]
-}
-
-fn main() -> u8 {
-    fix c: Channel = 3
-    return lookup(c)
-}
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | コンパイルエラー | — | 0 |
-
-**コンパイル診断：**
-
-| 設定 | 規則 | 行 | 列 |
-|---|---|---:|---:|
-| 通常 | `[array.access-handler]` | 6 | 17 |
