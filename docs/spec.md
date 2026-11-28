@@ -83,7 +83,7 @@ Suzが備える機能の代表例を以下に示す。構文全体は[付録A](#
 **[src.keywords]** 次の語はキーワードであり、識別子には使えない。
 
 ```text
-fix var fn fnshape needs self static struct enum range error extern trusted arena new textbuf ref mut nil let objection
+fix var fn fnshape needs self static struct enum range error extern trusted arena new soa textbuf ref mut nil let objection
 if ifexpr elif else while loop for rev in break continue return match matchexpr
 as or not len c_bytes c_byte_len log panic fail ignore recover allow expr with
 true false nan inf
@@ -683,6 +683,32 @@ fn clear_optional(grid: #[u8; _, _]?) -> void {
 **[array.enum-dimension]** 配列型の寸法指定の位置、および反復初期化のセミコロンの後に [name.type] のつづり（大文字で始まり小文字を1文字以上含む名前）を書いた場合は列挙型の添字として解釈し、宣言済みの列挙型でなければコンパイルエラーとする。配列型の列挙型添字は名前の束縛ではなく型の一部であり、戻り値・フィールド・`fnshape`・`var`・nil許容参照・型引数や要素型の中にも書ける。
 
 **[array.enum-len]** 列挙型を添字にする配列`a`に対して、`len a`は列挙子の数を`len_t`で返す。
+
+**[array.soa-type]** `soa #[T]`・`soa .[T]`・`soa #[T]?`・`soa .[T]?`・`soa #[T; n]`・`soa #[T; h, w]`・`soa #[T; E]`は、要素をフィールドごとの連続列（Structure of Arrays）として保持する配列への参照型である。生成には`new soa #[初期値; 長さ, ...]`・`new soa #[値, ...]`・`new soa .[...]`（列挙型添字の形式を含む）、定数配列には`soa .[...]`を使う。要素型`T`は構造体型（通常の構造体、汎用構造体の具体化、および [ffi.struct] の`extern`構造体）に限る。構造体以外の型を要素にする`soa`配列はコンパイルエラーとする。`soa #[T]`と`#[T]`は異なる型であり、相互の暗黙変換は認めない。同じ`soa`レイアウト内では、[array.readonly-conversion] の権限・nil許容性の暗黙変換、`len`、添字、切り出し、部分配列、反復（`for`・`rev`）、寸法名（[array.dimension-bind]・[array.dimension-equality]）、範囲証明（[array.bounds-proof]）、一括書き込み（[array.bulk]）、初期化子の評価順・評価回数（[array.new]・[array.enumeration]）、および寿命検査（[array.lifetime]）に通常の配列と同じ規則を適用する。
+
+**[array.soa-layout]** SoA配列は、要素の構造体`T`の値フィールドを再帰的に展開した各葉フィールド（構造体でないフィールド）ごとに連続した要素列を保持する。`new soa`による確保では、各葉列の必要バイト数・アライメントのパディング・合計バイト数の`size_t`オーバーフローを検査した上で、作業領域から1回の確保で単一の連続ブロックを取得する（[rt.array-size]）。参照値は各葉列の先頭位置と共通の寸法を保持し、参照のコピー・切り出し・部分配列の取得は要素をコピーせず動的確保もしない。
+
+**処理量の上限を定める。**
+
+| 項目 | 内容 |
+|---|---|
+| 対象・条件 | `new soa` による確保と初期化（作業領域の追加確保と失敗時のパニック処理を除く） |
+| 内部の計算量 | 次元数d、葉列数k、要素数n、要素の格納サイズ合計sとしてO(d+k+n·s+1)。作業領域の確保は1回のみ行う |
+| 外部処理 | なし |
+| 利用者の制御 | 配列の寸法と要素の構造体定義で葉列数とメモリ使用量を決められる |
+
+**[array.soa-column]** 非nilのSoA配列参照`a`に対して`a.field`と書くと、`T`のフィールド`field`に対応する列参照を取り出す。`field`が葉フィールドなら通常の配列参照（`#[FieldType]` / `.[FieldType]`）、入れ子の構造体フィールドならSoA配列参照（`soa #[SubStruct]` / `soa .[SubStruct]`）を返す。列参照は`a`と同じ寸法由来（[array.dimension-origin]）・書き込み権限・利用期間（[array.lifetime]）を共有し、元の配列と実体を共有する。nil許容の`soa #[T]?`・`soa .[T]?`に対する列参照は、[arena.let] で非nilを確認してから行う（未確認のままの列参照はコンパイルエラーとする）。長さ0の非nilなSoA配列に対する列参照は、長さ0の非nilな列参照を返す。異なる葉列同士はメモリ上で重ならないが、同じ葉列を指す別名や切り出し同士は重なり得るため、[array.value]・[array.bulk-eval] の順序と別名可視性を維持する。
+
+**処理量の上限を定める。**
+
+| 項目 | 内容 |
+|---|---|
+| 対象・条件 | SoA配列参照に対する列取り出し（`a.field`）、および参照のコピー・切り出し・部分配列の取得 |
+| 内部の計算量 | 次元数d、結果の葉列数kに対してO(d+k+1)（葉列の取り出しではk=1のためO(d+1)）。要素数には依存せず、動的確保・要素のコピーは行わない |
+| 外部処理 | なし |
+| 利用者の制御 | 葉列を取り出して一括書き込み（[array.bulk]）へ渡すことで、必要な列だけを連続アクセスできる |
+
+**[array.soa-extern]** [ffi.struct] の`extern`構造体（入れ子を含む）を要素にするSoA配列では、各葉フィールドを独立した連続列として保持し、C固有整数型（[ffi.c-integer]）の列には対応するC固有整数型の制約を維持する。要素の読み出し（`a.[i]`）はC配置の独立した値コピーを返し、`new a.[i]`で作業領域へ確保したポインタをC関数へ渡して書き換えても、元のSoA配列は自動更新されない。SoA配列へ反映するには要素への明示的な代入（`a#[i] = .p`など）を行う。
 
 不一致を回復可能な失敗にしたい関数は、別の寸法名で受け取り、本体で比較してfailする。一致条件に専用のorを付ける構文は設けない。
 
@@ -3264,7 +3290,7 @@ PointerType      ::= ( "ref" | "mut" ) "?"? Type
 ValueType        ::= IntegerType | "len_t" | "f32" | "f64" | "bool" | "char" | "symbol" | "text" | "void"
                    | "int" | "float" | IDENT TypeArguments?
                    | "static" "fn" IDENT TypeArguments? | "fn" IDENT TypeArguments? | CIntegerType | "*" "const" "void"
-ArrayType        ::= ( "." | "#" ) "[" Type ( ";" Dimensions )? "]" "?"?
+ArrayType        ::= "soa"? ( "." | "#" ) "[" Type ( ";" Dimensions )? "]" "?"?
 Dimensions       ::= Dimension ( "," Dimension )* ","?
 Dimension        ::= "_" | IDENT
 TypeParameters   ::= "[" IDENT ( "," IDENT )* ","? "]"
@@ -3366,7 +3392,7 @@ Sum              ::= Product ( ( "+" | "-" | "+%" | "-%" | "+|" | "-|" ) Product
 Product          ::= Cast ( ( "*" | "/" | "%" | "%%" | "*%" | "*|" ) Cast )*
 Cast             ::= Unary ( "as%" Type CastHandler? | "as|" Type CastHandler? | "as" Type CastHandler? )*
 CastHandler      ::= "or" ( Expression | "return" Expression? | "panic" TEMPLATE )
-Unary            ::= ( "-" | "-%" | "-|" | "not" | "~" | "len" | "c_bytes" | "c_byte_len" | "new" | "." ) Unary | "new" ( "#" | "." ) ArrayInitializer | "textbuf" ( "[" Expression "]" )? Unary | "fn" IDENT TypeArguments? | Postfix
+Unary            ::= ( "-" | "-%" | "-|" | "not" | "~" | "len" | "c_bytes" | "c_byte_len" | "new" | "." ) Unary | "new" "soa"? ( "#" | "." ) ArrayInitializer | "textbuf" ( "[" Expression "]" )? Unary | "fn" IDENT TypeArguments? | Postfix
 Postfix          ::= Primary ( "." IDENT | "#" IDENT "(" Arguments? ")" | "." "[" Index "]" IndexHandler?
                              | "(" Arguments? ")"
                              | "with" "{" NL* Initializers "}" )*
@@ -3378,7 +3404,7 @@ ArrayItems       ::= ArrayItem ( "," ArrayItem )* ","?
 ArrayItem        ::= Expression | "[" ArrayItems "]"
 Index            ::= Expression | Expression? ":" Expression?
 IndexHandler     ::= "or" ( Expression | "return" Expression? | "panic" TEMPLATE )
-Primary          ::= "self" | Literal | IDENT | FunctionCall | StructLiteral | TEMPLATE | "." ArrayInitializer
+Primary          ::= "self" | Literal | IDENT | FunctionCall | StructLiteral | TEMPLATE | "soa"? "." ArrayInitializer
                    | "(" Expression ")" | IfExpression | MatchExpression | BlockExpression
 Literal          ::= INTEGER | FLOAT | CHAR | "true" | "false" | "nan" | "inf" | "nil"
 

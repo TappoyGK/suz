@@ -1593,6 +1593,7 @@ pub(crate) enum ExpressionKind {
         keys: Option<Vec<Expression>>,
         repeated: bool,
         readonly: bool,
+        soa: bool,
     },
     New(Box<Expression>),
     /// 追記文の型検査用。ソースから値式として書くことはできない。

@@ -66,7 +66,7 @@ pub(super) fn collect(expr: &CheckedExpression, locations: &mut Vec<Location>) {
                 collect(field, locations);
             }
         }
-        Value::Field { target, .. } => collect(target, locations),
+        Value::Field { target, .. } | Value::SoaColumn { target, .. } => collect(target, locations),
         Value::Invoke {
             target, arguments, ..
         } => {

@@ -47,6 +47,18 @@ pub(super) fn emit_block(
                 body,
                 ..
             } => {
+                if super::soa::try_emit_store(
+                    c,
+                    target,
+                    *id,
+                    value,
+                    body,
+                    depth,
+                    next_assignment,
+                    context,
+                ) {
+                    continue;
+                }
                 writeln!(
                     c,
                     "{indent}{{\n{indent}    {} const suz_local_{id} = &({});",

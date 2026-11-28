@@ -208,6 +208,7 @@ fn validate_checked(
         | Value::Local(_)
         | Value::Void => Ok(()),
         Value::Field { target, .. }
+        | Value::SoaColumn { target, .. }
         | Value::Deref(target)
         | Value::Receiver { target, .. }
         | Value::Len(target)

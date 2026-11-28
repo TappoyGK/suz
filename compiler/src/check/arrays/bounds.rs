@@ -128,7 +128,7 @@ pub(in crate::check) fn shape(v: &CheckedExpression, scope: &Scope) -> Vec<Optio
             .get(id)
             .cloned()
             .unwrap_or_else(unknown),
-        Value::Cast(inner) => shape(inner, scope),
+        Value::Cast(inner) | Value::SoaColumn { target: inner, .. } => shape(inner, scope),
         Value::New { value, .. } => {
             let Value::Array { lengths, .. } = &value.value else {
                 return unknown();
@@ -303,7 +303,7 @@ fn array_value_path(target: &CheckedExpression) -> Option<(usize, Vec<usize>)> {
     let mut cur = target;
     loop {
         match &cur.value {
-            Value::Cast(inner) => cur = inner,
+            Value::Cast(inner) | Value::SoaColumn { target: inner, .. } => cur = inner,
             Value::Local(id) => {
                 fields.reverse();
                 return Some((*id, fields));

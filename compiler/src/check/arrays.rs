@@ -25,6 +25,7 @@ pub(super) fn initializer(
         lengths,
         keys,
         repeated,
+        soa,
         ..
     } = &expr.kind
     else {
@@ -168,6 +169,15 @@ pub(super) fn initializer(
     };
 
     let required = if let Some(array) = expected_array {
+        if array.soa != *soa {
+            return Err(expr.location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "array.soa-type",
+                    "soa array initializer does not match required array layout"
+                ),
+            ));
+        }
         if let Some(actual_enum) = index_enum {
             if array.rank != 1 || array.index_enum != Some(actual_enum) {
                 return Err(expr.location.error(
@@ -215,6 +225,12 @@ pub(super) fn initializer(
         return Err(expr.location.error(
             ErrorKind::InvalidSource,
             crate::diagnostic!("array.type", "array elements must be stored values"),
+        ));
+    }
+    if *soa && !matches!(element, Type::Struct(_)) {
+        return Err(expr.location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!("array.soa-type", "soa array elements must be structs"),
         ));
     }
     if initial.iter().any(|v| v.ty != element) {
@@ -285,7 +301,7 @@ pub(super) fn initializer(
         .structs
         .arrays
         .borrow_mut()
-        .intern_indexed(element, rank, index_enum);
+        .intern_full(element, rank, index_enum, *soa);
     Ok(CheckedExpression {
         ty,
         value: Value::Array {
@@ -512,7 +528,7 @@ fn access(
                     .structs
                     .arrays
                     .borrow_mut()
-                    .intern(array.element, array.rank - 1)
+                    .intern_full(array.element, array.rank - 1, None, array.soa)
                     .array_reference(target.ty.is_readonly_array())
             } else {
                 target.ty

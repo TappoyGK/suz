@@ -357,6 +357,10 @@ impl Analysis {
                 }
                 self.alternatives(value.ty, alternatives)
             }
+            Value::SoaColumn { target, .. } => {
+                let result = self.expr(target, region, arena);
+                self.alternatives(value.ty, vec![result])
+            }
             Value::ArrayRead { address, handler } => {
                 let p = self.expr(address, region, arena);
                 let read = self.read(value.ty, Place::Indirect(p[&vec![]], vec![]));

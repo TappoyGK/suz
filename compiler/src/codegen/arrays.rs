@@ -14,6 +14,25 @@ pub(super) fn declarations(c: &mut String, context: &ExpressionContext) {
         c.push_str("#include <string.h>\n");
     }
     for (id, array) in context.arrays.entries.iter().enumerate() {
+        if array.soa {
+            let Type::Struct(struct_id) = array.element else {
+                continue;
+            };
+            let leaf_count = super::soa::leaves(struct_id, context).len();
+            writeln!(
+                c,
+                "typedef struct {{ const void *cols[{leaf_count}]; int32_t lengths[{}]; }} suz_readonly_array_{id};",
+                array.rank
+            )
+            .unwrap();
+            writeln!(
+                c,
+                "typedef struct {{ void *cols[{leaf_count}]; int32_t lengths[{}]; }} suz_array_{id};",
+                array.rank
+            )
+            .unwrap();
+            continue;
+        }
         writeln!(
             c,
             "typedef struct {{ const void *data; int32_t lengths[{}]; }} suz_readonly_array_{id};",
@@ -39,25 +58,27 @@ pub(super) fn cache(
 ) {
     let array = context.arrays.get(ty.array_id().unwrap());
     let source = context.local(id);
-    writeln!(
-        c,
-        "{indent}{} *const suz_array_data_{id} = ({source}).data;\n{indent}(void)suz_array_data_{id};",
-        element_type(array.element, ty)
-    )
-    .unwrap();
+    if !array.soa {
+        writeln!(
+            c,
+            "{indent}{} *const suz_array_data_{id} = ({source}).data;\n{indent}(void)suz_array_data_{id};",
+            element_type(array.element, ty)
+        )
+        .unwrap();
+    }
     for dimension in 0..array.rank {
         writeln!(c, "{indent}const int32_t suz_array_length_{id}_{dimension} = ({source}).lengths[{dimension}];\n{indent}(void)suz_array_length_{id}_{dimension};").unwrap();
     }
 }
 
-fn temporary(ty: Type, context: &mut ExpressionContext) -> String {
+pub(super) fn temporary(ty: Type, context: &mut ExpressionContext) -> String {
     let id = context.temporaries.len();
     context.temporaries.push(ty);
     format!("suz_cmp_{id}")
 }
 
 /// 呼び出しや添字の検査を含まない参照は、先頭位置と寸法を直接読み出せる。
-fn direct_reference(value: &CheckedExpression) -> bool {
+pub(super) fn direct_reference(value: &CheckedExpression) -> bool {
     match &value.value {
         Value::Local(_) => true,
         Value::Field { target, .. } | Value::Deref(target) => direct_reference(target),
@@ -68,7 +89,8 @@ fn direct_reference(value: &CheckedExpression) -> bool {
 /// 先頭位置と寸法だけを移す。副作用を持ち得る変換元は一時変数で評価を1回に保つ。
 pub(super) fn readonly(value: &CheckedExpression, context: &mut ExpressionContext) -> String {
     let id = value.ty.array_id().unwrap();
-    let rank = context.arrays.get(id).rank;
+    let array = context.arrays.get(id);
+    let rank = array.rank;
     let (setup, source) = if direct_reference(value) {
         (String::new(), format!("({})", expression(value, context)))
     } else {
@@ -80,6 +102,19 @@ pub(super) fn readonly(value: &CheckedExpression, context: &mut ExpressionContex
         .map(|axis| format!("{source}.lengths[{axis}]"))
         .collect::<Vec<_>>()
         .join(", ");
+    if array.soa {
+        let Type::Struct(struct_id) = array.element else {
+            unreachable!("soa array element must be a struct");
+        };
+        let leaf_count = super::soa::leaves(struct_id, context).len();
+        let cols = (0..leaf_count)
+            .map(|c| format!("{source}.cols[{c}]"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return format!(
+            "({setup}(suz_readonly_array_{id}){{ .cols = {{ {cols} }}, .lengths = {{ {lengths} }} }})"
+        );
+    }
     format!(
         "({setup}(suz_readonly_array_{id}){{ .data = {source}.data, .lengths = {{ {lengths} }} }})"
     )
@@ -135,6 +170,10 @@ pub(super) fn proven_index(
     }
 }
 
+pub(super) fn panic_call(location: Location, reason: &str, context: &ExpressionContext) -> String {
+    panic(location, reason, context)
+}
+
 fn panic(location: Location, reason: &str, context: &ExpressionContext) -> String {
     format!(
         "suz_panic({}, {}, {}, {})",
@@ -152,6 +191,9 @@ pub(super) fn allocate(
     location: Location,
     context: &mut ExpressionContext,
 ) -> String {
+    if context.arrays.get(ty.array_id().unwrap()).soa {
+        return super::soa::allocate(value, ty, location, context);
+    }
     let Value::Array {
         values,
         lengths,
@@ -225,17 +267,15 @@ pub(super) fn allocate(
     c
 }
 
-/// 失敗した添字より後の式を実行せず、全検査に成功したときだけ要素のアドレスを作る。
-fn parts(
+/// 失敗した添字より後の式を実行せず、全検査に成功したときだけ要素のオフセットと対象参照を作る。
+pub(super) fn element_offset_parts(
     expr: &CheckedExpression,
     write: bool,
     context: &mut ExpressionContext,
-) -> (String, String, String) {
+) -> (String, String, String, String) {
     let Value::ArrayElement { target, indices } = &expr.value else {
         unreachable!()
     };
-    // 不変の参照は添字評価で変わらないので直接読む。可変の参照・関数呼び出し・
-    // 要素から取り出す参照は、添字を評価する前の値を保存する。
     let cached = match target.value {
         Value::Local(id) if context.immutable_locals.contains(&id) => Some(id),
         _ => None,
@@ -262,7 +302,6 @@ fn parts(
     };
     let mut offset = String::new();
     for (dimension, (index, location, proven)) in indices.iter().enumerate() {
-        // 不変の添字もそのまま読む。可変の添字は後続の添字で変わり得るため保存する。
         let direct = proven.then(|| proven_index(index, context)).flatten();
         let (local, evaluate) = if let Some(direct) = direct {
             (direct, String::new())
@@ -307,6 +346,35 @@ fn parts(
             format!("({offset} * (size_t){length} + (size_t){local})")
         };
     }
+    let condition = if write {
+        format!(
+            "({}, true)",
+            tests
+                .iter()
+                .map(|t| format!("(void)({t})"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    } else {
+        tests.join(" && ")
+    };
+    (setup, condition, source, offset)
+}
+
+/// 失敗した添字より後の式を実行せず、全検査に成功したときだけ要素のアドレスを作る。
+fn parts(
+    expr: &CheckedExpression,
+    write: bool,
+    context: &mut ExpressionContext,
+) -> (String, String, String) {
+    let Value::ArrayElement { target, .. } = &expr.value else {
+        unreachable!()
+    };
+    let cached = match target.value {
+        Value::Local(id) if context.immutable_locals.contains(&id) => Some(id),
+        _ => None,
+    };
+    let (setup, condition, source, offset) = element_offset_parts(expr, write, context);
     let data = cached.map_or_else(
         || {
             format!(
@@ -317,22 +385,7 @@ fn parts(
         |id| format!("suz_array_data_{id}"),
     );
     let pointer = format!("({data} + {offset})");
-    (
-        setup,
-        if write {
-            format!(
-                "({}, true)",
-                tests
-                    .iter()
-                    .map(|t| format!("(void)({t})"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        } else {
-            tests.join(" && ")
-        },
-        pointer,
-    )
+    (setup, condition, pointer)
 }
 
 pub(super) fn address(expr: &CheckedExpression, context: &mut ExpressionContext) -> String {
@@ -369,6 +422,18 @@ fn access_parts(
     context: &mut ExpressionContext,
 ) -> (String, String, String) {
     if let Value::ArrayRead { address, .. } = &expr.value {
+        if let Value::ArrayElement { target, .. } = &address.value
+            && let Some(aid) = target.ty.array_id()
+            && context.arrays.get(aid).soa
+        {
+            let Type::Struct(struct_id) = context.arrays.get(aid).element else {
+                unreachable!("soa array element must be a struct");
+            };
+            let (setup, condition, source, offset) = element_offset_parts(address, write, context);
+            let (gathered, _) =
+                super::soa::gather_expr(struct_id, &format!("{source}.cols"), &offset, 0, context);
+            return (setup, condition, gathered);
+        }
         let (setup, condition, pointer) = parts(address, write, context);
         return (setup, condition, format!("(*{pointer})"));
     }
@@ -456,11 +521,33 @@ fn access_parts(
             .collect::<Vec<_>>()
             .join(", ")
     };
-    let value = format!(
-        "({}){{ .data = ({} *){source}.data + (size_t){first} * ({stride}), .lengths = {{ {lengths} }} }}",
-        expr.ty.c_name(),
-        element_type(array.element, target.ty)
-    );
+    let value = if array.soa {
+        let Type::Struct(struct_id) = array.element else {
+            unreachable!("soa array element must be a struct");
+        };
+        let all_leaves = super::soa::leaves(struct_id, context);
+        let cols = all_leaves
+            .iter()
+            .enumerate()
+            .map(|(c, leaf)| {
+                format!(
+                    "({} *){source}.cols[{c}] + (size_t){first} * ({stride})",
+                    element_type(leaf.ty, target.ty)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(
+            "({}){{ .cols = {{ {cols} }}, .lengths = {{ {lengths} }} }}",
+            expr.ty.c_name()
+        )
+    } else {
+        format!(
+            "({}){{ .data = ({} *){source}.data + (size_t){first} * ({stride}), .lengths = {{ {lengths} }} }}",
+            expr.ty.c_name(),
+            element_type(array.element, target.ty)
+        )
+    };
     (setup, condition, value)
 }
 
@@ -498,12 +585,14 @@ pub(super) fn emit_loop(
     )
     .unwrap();
     // データと各寸法は反復中に変わらない。構造体からの読み取りを入口で済ませる。
-    writeln!(
-        c,
-        "{indent}    {} *const suz_iter_data_{id} = suz_iter_{id}.data;",
-        element
-    )
-    .unwrap();
+    if !array.soa {
+        writeln!(
+            c,
+            "{indent}    {} *const suz_iter_data_{id} = suz_iter_{id}.data;",
+            element
+        )
+        .unwrap();
+    }
     for dimension in 0..array.rank {
         writeln!(c, "{indent}    const int32_t suz_iter_length_{id}_{dimension} = suz_iter_{id}.lengths[{dimension}];").unwrap();
     }
@@ -521,7 +610,47 @@ pub(super) fn emit_loop(
         )
     };
     writeln!(c, "{indent}    int32_t suz_cursor_{id} = {initial};\n{indent}    while ({condition}) {{\n{indent}        const size_t suz_pos_{id} = {position};").unwrap();
-    let value = if array.rank == 1 {
+    let value = if array.soa {
+        let Type::Struct(struct_id) = array.element else {
+            unreachable!("soa array element must be a struct");
+        };
+        if array.rank == 1 {
+            super::soa::gather_expr(
+                struct_id,
+                &format!("suz_iter_{id}.cols"),
+                &format!("suz_pos_{id}"),
+                0,
+                context,
+            )
+            .0
+        } else {
+            let lengths = (1..array.rank)
+                .map(|i| format!("suz_iter_length_{id}_{i}"))
+                .collect::<Vec<_>>();
+            let stride = lengths
+                .iter()
+                .map(|s| format!("(size_t){s}"))
+                .collect::<Vec<_>>()
+                .join(" * ");
+            let all_leaves = super::soa::leaves(struct_id, context);
+            let cols = all_leaves
+                .iter()
+                .enumerate()
+                .map(|(c, leaf)| {
+                    format!(
+                        "({} *)suz_iter_{id}.cols[{c}] + suz_pos_{id} * ({stride})",
+                        element_type(leaf.ty, item)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "({}){{ .cols = {{ {cols} }}, .lengths = {{ {} }} }}",
+                item.c_name(),
+                lengths.join(", ")
+            )
+        }
+    } else if array.rank == 1 {
         format!("suz_iter_data_{id}[suz_pos_{id}]")
     } else {
         let lengths = (1..array.rank)
@@ -563,6 +692,9 @@ fn element_type(element: Type, reference: Type) -> String {
 /// 配列本体は関数の外に一度だけ置く。参照を得る場所では先頭と寸法だけを返す。
 /// symbolの登録と非有限floatのビット復元は起動時に行い、静的領域へ保存する。
 pub(super) fn constant(value: &CheckedExpression, context: &mut ExpressionContext) -> String {
+    if context.arrays.get(value.ty.array_id().unwrap()).soa {
+        return super::soa::constant(value, context);
+    }
     let Value::Array {
         values,
         lengths,
@@ -670,7 +802,10 @@ pub(super) fn constant(value: &CheckedExpression, context: &mut ExpressionContex
     )
 }
 
-fn constant_element(value: &CheckedExpression, context: &mut ExpressionContext) -> (String, bool) {
+pub(super) fn constant_element(
+    value: &CheckedExpression,
+    context: &mut ExpressionContext,
+) -> (String, bool) {
     match &value.value {
         Value::Struct { fields } => {
             let mut literal = true;
@@ -781,11 +916,12 @@ pub(super) fn emit_bulk_write(
         Own {
             array_id: usize,
             elem_ty: Type,
+            soa: bool,
             length_proven: bool,
             location: Location,
         },
     }
-    let mut seen_immutable_inputs: std::collections::BTreeMap<(usize, Type), usize> =
+    let mut seen_immutable_inputs: std::collections::BTreeMap<(usize, Type, bool), usize> =
         std::collections::BTreeMap::new();
     let mut array_inputs: Vec<(usize, BulkArraySource)> = Vec::new();
     for input in &bulk.inputs {
@@ -797,16 +933,19 @@ pub(super) fn emit_bulk_write(
                 length_proven,
                 location,
             } => {
-                let elem_ty = context.arrays.get(expr.ty.array_id().unwrap()).element;
+                let in_array = context.arrays.get(expr.ty.array_id().unwrap());
+                let elem_ty = in_array.element;
+                let in_soa = in_array.soa;
                 let source = if immutable_target_local.is_some_and(|target_id| {
                     matches!(expr.value, Value::Local(in_id) if in_id == target_id)
                         && elem_ty == out_elem_ty
+                        && in_soa == out_array.soa
                 }) {
                     BulkArraySource::SameAsDst
                 } else if let Value::Local(in_id) = expr.value
                     && context.immutable_locals.contains(&in_id)
                 {
-                    if let Some(&first_idx) = seen_immutable_inputs.get(&(in_id, elem_ty)) {
+                    if let Some(&first_idx) = seen_immutable_inputs.get(&(in_id, elem_ty, in_soa)) {
                         BulkArraySource::Shared(first_idx)
                     } else {
                         let expr_c = expression(expr, context);
@@ -816,10 +955,11 @@ pub(super) fn emit_bulk_write(
                             expr.ty.c_name()
                         )
                         .unwrap();
-                        seen_immutable_inputs.insert((in_id, elem_ty), array_inputs.len());
+                        seen_immutable_inputs.insert((in_id, elem_ty, in_soa), array_inputs.len());
                         BulkArraySource::Own {
                             array_id: *array_id,
                             elem_ty,
+                            soa: in_soa,
                             length_proven: *length_proven,
                             location: *location,
                         }
@@ -835,6 +975,7 @@ pub(super) fn emit_bulk_write(
                     BulkArraySource::Own {
                         array_id: *array_id,
                         elem_ty,
+                        soa: in_soa,
                         length_proven: *length_proven,
                         location: *location,
                     }
@@ -910,6 +1051,150 @@ pub(super) fn emit_bulk_write(
             )
             .unwrap();
         }
+    }
+
+    let any_soa = out_array.soa
+        || array_inputs
+            .iter()
+            .any(|(_, s)| matches!(s, BulkArraySource::Own { soa: true, .. }));
+    if any_soa {
+        let idx_var = format!("suz_bulk_i_{bid}");
+        let dst_idx = if bulk.slice {
+            format!("((size_t){start_var} + {idx_var})")
+        } else {
+            idx_var.clone()
+        };
+        let dst_elem_expr = |context: &ExpressionContext| {
+            if out_array.soa {
+                let Type::Struct(sid) = out_elem_ty else {
+                    unreachable!()
+                };
+                super::soa::gather_expr(
+                    sid,
+                    &format!("suz_bulk_out_{bid}.cols"),
+                    &dst_idx,
+                    0,
+                    context,
+                )
+                .0
+            } else {
+                format!("(({dst_c_ty} *)suz_bulk_out_{bid}.data)[{dst_idx}]")
+            }
+        };
+        let mut saved = Vec::new();
+        if let Some(out_id) = bulk.out_elem_id {
+            let expr_str = dst_elem_expr(context);
+            saved.push((out_id, context.bulk_bindings.insert(out_id, expr_str)));
+        }
+        for &(elem_id, ref source) in &array_inputs {
+            let in_expr = match source {
+                BulkArraySource::SameAsDst => dst_elem_expr(context),
+                BulkArraySource::Shared(first) => match &array_inputs[*first].1 {
+                    BulkArraySource::Own {
+                        array_id,
+                        elem_ty,
+                        soa,
+                        ..
+                    } => {
+                        if *soa {
+                            let Type::Struct(sid) = *elem_ty else {
+                                unreachable!()
+                            };
+                            super::soa::gather_expr(
+                                sid,
+                                &format!("suz_bulk_arr_{array_id}.cols"),
+                                &idx_var,
+                                0,
+                                context,
+                            )
+                            .0
+                        } else {
+                            format!(
+                                "((const {} *)suz_bulk_arr_{array_id}.data)[{idx_var}]",
+                                elem_ty.c_name()
+                            )
+                        }
+                    }
+                    _ => unreachable!(),
+                },
+                BulkArraySource::Own {
+                    array_id,
+                    elem_ty,
+                    soa,
+                    ..
+                } => {
+                    if *soa {
+                        let Type::Struct(sid) = *elem_ty else {
+                            unreachable!()
+                        };
+                        super::soa::gather_expr(
+                            sid,
+                            &format!("suz_bulk_arr_{array_id}.cols"),
+                            &idx_var,
+                            0,
+                            context,
+                        )
+                        .0
+                    } else {
+                        format!(
+                            "((const {} *)suz_bulk_arr_{array_id}.data)[{idx_var}]",
+                            elem_ty.c_name()
+                        )
+                    }
+                }
+            };
+            saved.push((elem_id, context.bulk_bindings.insert(elem_id, in_expr)));
+        }
+        let mask_c = bulk.mask.as_ref().map(|mask| emit_bulk_mask(mask, context));
+        let rhs_c = expression(&bulk.element_value, context);
+        for (id, prev) in saved.into_iter().rev() {
+            if let Some(prev) = prev {
+                context.bulk_bindings.insert(id, prev);
+            } else {
+                context.bulk_bindings.remove(&id);
+            }
+        }
+        writeln!(
+            c,
+            "{inner}for (size_t {idx_var} = 0; {idx_var} < suz_bulk_n_{bid}; ++{idx_var}) {{"
+        )
+        .unwrap();
+        let body_indent = if mask_c.is_some() {
+            format!("{inner}        ")
+        } else {
+            format!("{inner}    ")
+        };
+        if let Some(mask_c) = mask_c {
+            writeln!(c, "{inner}    if ({mask_c}) {{").unwrap();
+        }
+        if out_array.soa {
+            let Type::Struct(sid) = out_elem_ty else {
+                unreachable!()
+            };
+            let val_var = format!("suz_bulk_val_{bid}");
+            writeln!(c, "{body_indent}const {dst_c_ty} {val_var} = {rhs_c};").unwrap();
+            let scatter = super::soa::scatter_stmts(
+                sid,
+                &format!("suz_bulk_out_{bid}.cols"),
+                &dst_idx,
+                &val_var,
+                0,
+                context,
+            );
+            writeln!(c, "{body_indent}{scatter}").unwrap();
+        } else {
+            writeln!(
+                c,
+                "{body_indent}(({dst_c_ty} *)suz_bulk_out_{bid}.data)[{dst_idx}] = {rhs_c};"
+            )
+            .unwrap();
+        }
+        if bulk.mask.is_some() {
+            writeln!(c, "{inner}    }}").unwrap();
+        }
+        writeln!(c, "{inner}}}").unwrap();
+        writeln!(c, "{indent}}}").unwrap();
+        return;
     }
 
     // ポインタ準備

@@ -196,8 +196,18 @@ fn emit_argument(
     external: bool,
     setup: &mut Vec<String>,
     names: &mut Vec<String>,
+    writebacks: &mut Vec<String>,
     context: &mut ExpressionContext,
 ) {
+    if let crate::check::ir::Value::Receiver {
+        target,
+        mutable: true,
+    } = &argument.value
+        && let Some(wb) = super::soa::try_mutable_receiver(target, setup, names, context)
+    {
+        writebacks.push(wb);
+        return;
+    }
     let by_reference = matches!(
         argument.value,
         crate::check::ir::Value::Receiver { mutable: true, .. }
@@ -257,20 +267,42 @@ fn emit_argument(
 pub(super) fn call(
     id: usize,
     arguments: &[CheckedExpression],
+    result_ty: Type,
     context: &mut ExpressionContext,
     error: Option<&str>,
 ) -> String {
     let external = context.external_ids.contains(&id);
     let mut setup = Vec::new();
     let mut names = Vec::new();
+    let mut writebacks = Vec::new();
     for argument in arguments {
-        emit_argument(argument, external, &mut setup, &mut names, context);
+        emit_argument(
+            argument,
+            external,
+            &mut setup,
+            &mut names,
+            &mut writebacks,
+            context,
+        );
     }
     if let Some(error) = error {
         names.push(format!("&{error}"));
     }
     let call = format!("suz_fn_{id}({})", names.join(", "));
-    if setup.is_empty() {
+    if !writebacks.is_empty() {
+        if result_ty == Type::Void {
+            setup.push(call);
+            setup.extend(writebacks);
+        } else {
+            let ret_idx = context.temporaries.len();
+            context.temporaries.push(result_ty);
+            let ret_tmp = format!("suz_cmp_{ret_idx}");
+            setup.push(format!("{ret_tmp} = {call}"));
+            setup.extend(writebacks);
+            setup.push(ret_tmp);
+        }
+        format!("({})", setup.join(", "))
+    } else if setup.is_empty() {
         call
     } else {
         setup.push(call);
@@ -289,8 +321,16 @@ pub(super) fn invoke(
     context.temporaries.push(target.ty);
     let mut setup = vec![format!("suz_cmp_{id} = {}", expression(target, context))];
     let mut names = Vec::new();
+    let mut writebacks = Vec::new();
     for argument in arguments {
-        emit_argument(argument, false, &mut setup, &mut names, context);
+        emit_argument(
+            argument,
+            false,
+            &mut setup,
+            &mut names,
+            &mut writebacks,
+            context,
+        );
     }
     if let Some(error) = error {
         names.push(format!("&{error}"));

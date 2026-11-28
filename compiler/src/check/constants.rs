@@ -801,6 +801,40 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
     if let Value::Field { target, index } = &expr.value {
         return constant_field(target, *index);
     }
+    if let Value::SoaColumn {
+        target,
+        field_index,
+        ..
+    } = &expr.value
+    {
+        let evaluated = evaluate_raw(target)?;
+        let Value::Array {
+            values,
+            lengths,
+            repeated,
+            metadata,
+        } = evaluated.value
+        else {
+            return None;
+        };
+        let mut col_values = Vec::with_capacity(values.len());
+        for item in values {
+            let Value::Struct { fields } = item.value else {
+                return None;
+            };
+            let (_, val) = fields.into_iter().find(|(i, _)| *i == *field_index)?;
+            col_values.push(val);
+        }
+        return Some(CheckedExpression {
+            ty: expr.ty,
+            value: Value::Array {
+                values: col_values,
+                lengths,
+                repeated,
+                metadata,
+            },
+        });
+    }
     if let Value::TextView(inner) | Value::Intern { operand: inner, .. } = &expr.value {
         let mut value = evaluate_raw(inner)?;
         value.ty = expr.ty;

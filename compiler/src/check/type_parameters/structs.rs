@@ -70,9 +70,12 @@ impl Structs {
             Type::Array(id) => {
                 let array = self.arrays.borrow().get(id);
                 let element = self.normalize(array.element);
-                self.arrays
-                    .borrow_mut()
-                    .intern_indexed(element, array.rank, array.index_enum)
+                self.arrays.borrow_mut().intern_full(
+                    element,
+                    array.rank,
+                    array.index_enum,
+                    array.soa,
+                )
             }
             Type::ArrayRef {
                 id,
@@ -81,11 +84,12 @@ impl Structs {
             } => {
                 let array = self.arrays.borrow().get(id);
                 let element = self.normalize(array.element);
-                let Type::Array(id) =
-                    self.arrays
-                        .borrow_mut()
-                        .intern_indexed(element, array.rank, array.index_enum)
-                else {
+                let Type::Array(id) = self.arrays.borrow_mut().intern_full(
+                    element,
+                    array.rank,
+                    array.index_enum,
+                    array.soa,
+                ) else {
                     unreachable!()
                 };
                 Type::ArrayRef {
@@ -591,10 +595,17 @@ impl Structs {
                     crate::diagnostic!("array.type", "array elements require stored value types"),
                 ));
             }
-            return Ok(self.arrays.borrow_mut().intern_indexed(
+            if array.soa && !matches!(element, Type::Struct(_) | Type::Parameter(_)) {
+                return Err(location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("array.soa-type", "soa array elements must be structs"),
+                ));
+            }
+            return Ok(self.arrays.borrow_mut().intern_full(
                 element,
                 array.rank,
                 array.index_enum,
+                array.soa,
             ));
         }
         if let Type::ArrayRef {
@@ -612,11 +623,18 @@ impl Structs {
                     crate::diagnostic!("array.type", "array elements require stored value types"),
                 ));
             }
-            let Type::Array(id) =
-                self.arrays
-                    .borrow_mut()
-                    .intern_indexed(element, array.rank, array.index_enum)
-            else {
+            if array.soa && !matches!(element, Type::Struct(_) | Type::Parameter(_)) {
+                return Err(location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("array.soa-type", "soa array elements must be structs"),
+                ));
+            }
+            let Type::Array(id) = self.arrays.borrow_mut().intern_full(
+                element,
+                array.rank,
+                array.index_enum,
+                array.soa,
+            ) else {
                 unreachable!()
             };
             return Ok(Type::ArrayRef {

@@ -67,6 +67,44 @@ pub(super) fn check(expr: &Expression, scope: &Scope) -> Result<CheckedExpressio
         }
         ExpressionKind::Field { target, name } => {
             let target = expression(target, None, scope)?;
+            if let Some(array_id) = target.ty.array_id() {
+                let array = scope.structs.arrays.borrow().get(array_id);
+                if array.soa {
+                    if target.ty.is_nilable() {
+                        return Err(expr.location.error(
+                            ErrorKind::InvalidSource,
+                            crate::diagnostic!(
+                                "array.value",
+                                "use let before accessing a column of a nilable soa array"
+                            ),
+                        ));
+                    }
+                    let Type::Struct(struct_id) = array.element else {
+                        unreachable!("soa array element must be a struct");
+                    };
+                    let (index, field_ty) = field(array.element, name, expr.location, scope)?;
+                    let (leaf_offset, leaf_count) =
+                        crate::ast::arrays::soa_field_range(struct_id, index, &|sid| {
+                            scope.structs.get(sid).fields.iter().map(|f| f.ty).collect()
+                        });
+                    let col_soa = matches!(field_ty, Type::Struct(_));
+                    let ty = scope
+                        .structs
+                        .arrays
+                        .borrow_mut()
+                        .intern_full(field_ty, array.rank, array.index_enum, col_soa)
+                        .array_reference(target.ty.is_readonly_array());
+                    return Ok(CheckedExpression {
+                        ty,
+                        value: Value::SoaColumn {
+                            target: Box::new(target),
+                            field_index: index,
+                            leaf_offset,
+                            leaf_count,
+                        },
+                    });
+                }
+            }
             let target = if target.ty.pointee().is_some() {
                 crate::check::arena::deref(target, expr.location)?
             } else {
