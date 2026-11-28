@@ -33,7 +33,7 @@ pub(super) fn initializer(
     };
     let expected_array = match expected {
         Some(Type::Array(id) | Type::ArrayRef { id, .. }) => {
-            Some(scope.structs.arrays.borrow().get(id))
+            Some(scope.structs.arrays.borrow().get(id).clone())
         }
         _ => None,
     };
@@ -453,7 +453,7 @@ fn access(
                 crate::diagnostic!("array.value", "use let before accessing a nilable array"),
             ));
         }
-        let array = scope.structs.arrays.borrow().get(id);
+        let array = scope.structs.arrays.borrow().get(id).clone();
         let rank = array.rank();
         let indices = steps[position..]
             .iter()

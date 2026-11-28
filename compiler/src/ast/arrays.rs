@@ -57,19 +57,20 @@ pub(crate) struct Types {
 impl Types {
     pub fn intern_dims(&mut self, element: Type, dims: Vec<Option<EnumType>>, soa: bool) -> Type {
         let array = ArrayType { element, dims, soa };
-        let id = *self.ids.entry(array.clone()).or_insert_with(|| {
-            let id = self.entries.len();
-            self.entries.push(array);
-            id
-        });
+        if let Some(&id) = self.ids.get(&array) {
+            return Type::Array(id);
+        }
+        let id = self.entries.len();
+        self.ids.insert(array.clone(), id);
+        self.entries.push(array);
         Type::Array(id)
     }
     pub fn truncate(&mut self, length: usize) {
         self.entries.truncate(length);
         self.ids.retain(|_, id| *id < length);
     }
-    pub fn get(&self, id: usize) -> ArrayType {
-        self.entries[id].clone()
+    pub fn get(&self, id: usize) -> &ArrayType {
+        &self.entries[id]
     }
     pub fn patch_ranges(&mut self, ranges: &[super::RangeDeclaration]) {
         self.ids.clear();

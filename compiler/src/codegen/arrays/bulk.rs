@@ -24,7 +24,10 @@ pub(in crate::codegen) fn emit_bulk_write(
     *next_assignment += 1;
     let indent = "    ".repeat(depth);
     let inner = "    ".repeat(depth + 1);
-    let out_array = context.arrays.get(bulk.target.ty.array_id().unwrap());
+    let out_array = context
+        .arrays
+        .get(bulk.target.ty.array_id().unwrap())
+        .clone();
     let out_elem_ty = out_array.element;
     let dst_c_ty = out_elem_ty.c_name();
 

@@ -118,8 +118,11 @@ pub(super) fn column(
     result_ty: Type,
     context: &mut ExpressionContext,
 ) -> String {
-    let target_array = context.arrays.get(target.ty.array_id().unwrap());
-    let result_array = context.arrays.get(result_ty.array_id().unwrap());
+    let rt_dim_count = context
+        .arrays
+        .get(target.ty.array_id().unwrap())
+        .runtime_dim_count();
+    let result_soa = context.arrays.get(result_ty.array_id().unwrap()).soa;
     let (setup, source) = if direct_reference(target) {
         (String::new(), format!("({})", expression(target, context)))
     } else {
@@ -127,11 +130,11 @@ pub(super) fn column(
         let value = expression(target, context);
         (format!("{source} = {value}, "), source)
     };
-    let lengths: Vec<String> = (0..target_array.runtime_dim_count())
+    let lengths: Vec<String> = (0..rt_dim_count)
         .map(|ridx| format!("{source}.lengths[{ridx}]"))
         .collect();
     let lengths_init = super::arrays::lengths_field_init(&lengths);
-    if result_array.soa {
+    if result_soa {
         let cols = (leaf_offset..leaf_offset + leaf_count)
             .map(|c| format!("{source}.cols[{c}]"))
             .collect::<Vec<_>>()

@@ -1483,12 +1483,29 @@ enum Wave: u8 { Sine, Saw }
 enum Ch: u8 { Left, Right }
 struct Frame { l: i32, r: i32 }
 
+fix TOP_1D: .[i32; Ch] = .[5; Ch]
+fix TOP_CH_3: .[i32; Ch, _] = .[0; Ch, 3]
+fix TOP_3_CH: .[i32; _, Ch] = .[7; 3, Ch]
+fix TOP_WAVE_CH: .[i32; Wave, Ch] = .[9; Wave, Ch]
+fix TOP_INFER = .[4; Ch, 3]
+fix TOP_SOA_1D: soa .[Frame; Ch] = soa .[Frame { l: 1, r: 2 }; Ch]
+fix TOP_SOA_2D: soa .[Frame; Ch, _] = soa .[Frame { l: 3, r: 4 }; Ch, 3]
+
 fn pick_wave(c: mut i32) -> Wave {
     #c = .c + 1 or 0
     return Wave.Saw
 }
 
 fn main() -> u8 {
+    // トップレベルの定数反復初期化（1次元・多次元・型注釈省略・SoA）
+    if len TOP_1D != 2 || TOP_1D.[Ch.Right] != 5 { return 11 }
+    if len TOP_CH_3 != 2 || len TOP_CH_3.[Ch.Left] != 3 || TOP_CH_3.[Ch.Right].[2] != 0 { return 12 }
+    if len TOP_3_CH != 3 || TOP_3_CH.[2].[Ch.Left] != 7 { return 13 }
+    if len TOP_WAVE_CH != 2 || TOP_WAVE_CH.[Wave.Saw].[Ch.Right] != 9 { return 14 }
+    if len TOP_INFER != 2 || len TOP_INFER.[Ch.Left] != 3 || TOP_INFER.[Ch.Left].[1] != 4 { return 15 }
+    if len TOP_SOA_1D != 2 || TOP_SOA_1D.[Ch.Left].r != 2 { return 16 }
+    if len TOP_SOA_2D != 2 || len TOP_SOA_2D.[Ch.Right] != 3 || TOP_SOA_2D.[Ch.Right].[2].l != 3 { return 17 }
+
     // 1次元配列の配列（.[...] は独立した定数配列の値式）
     fix jagged: #[.[i32]; Wave] = new #[
         Wave.Sine: .[1, 2, 3],
@@ -1560,10 +1577,20 @@ fn main() -> u8 {
             "enum Wave: u8 { Sine, Saw }\nenum Ch: u8 { Left, Right }\nfn main() -> u8 {\nfix a = new #[[Wave.Sine: 1, Wave.Saw: 2], [Ch.Left: 3, Ch.Right: 4]]\nreturn 0\n}",
             "array.enum-init",
         ),
-        // 内側の行で列挙子が欠落
+        // 内側の行で列挙子が欠落（長さが違っても欠落として array.enum-init）
         (
             "enum Ch: u8 { Left, Right }\nfn main() -> u8 {\nfix a = new #[[Ch.Left: 1, Ch.Right: 2], [Ch.Left: 3]]\nreturn 0\n}",
-            "array.enumeration",
+            "array.enum-init",
+        ),
+        // 全行で同じ列挙子が欠落
+        (
+            "enum Ch: u8 { Left, Right }\nfn main() -> u8 {\nfix a = new #[[Ch.Left: 1], [Ch.Left: 2]]\nreturn 0\n}",
+            "array.enum-init",
+        ),
+        // 同じ角括弧内でキー付きとキーなしを混在
+        (
+            "enum Ch: u8 { Left, Right }\nfn main() -> u8 {\nfix a = new #[Ch.Left: 1, 2]\nreturn 0\n}",
+            "array.enum-init",
         ),
         // 要求型と次元順が異なる
         (

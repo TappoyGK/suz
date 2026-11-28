@@ -305,11 +305,8 @@ impl Parser<'_, '_> {
                                 ..
                             } if !values.is_empty() => {
                                 if let Some(previous) = &shape {
-                                    if previous
-                                        .iter()
-                                        .map(dimension)
-                                        .ne(lengths.iter().map(dimension))
-                                    {
+                                    let prev_keys = child_key_groups.as_mut().unwrap();
+                                    if previous.len() != lengths.len() {
                                         return Err(location.error(
                                             ErrorKind::InvalidSource,
                                             crate::diagnostic!(
@@ -318,11 +315,24 @@ impl Parser<'_, '_> {
                                             ),
                                         ));
                                     }
-                                    let prev_keys = child_key_groups.as_mut().unwrap();
-                                    for (slot, sub) in prev_keys.iter_mut().zip(sub_keys) {
+                                    for (d, (slot, sub)) in
+                                        prev_keys.iter_mut().zip(sub_keys).enumerate()
+                                    {
                                         match (slot, sub) {
                                             (Some(acc), Some(more)) => acc.extend(more),
-                                            (None, None) => {}
+                                            (None, None) => {
+                                                if dimension(&previous[d])
+                                                    != dimension(&lengths[d])
+                                                {
+                                                    return Err(location.error(
+                                                        ErrorKind::InvalidSource,
+                                                        crate::diagnostic!(
+                                                            "array.enumeration",
+                                                            "array rows must have equal shapes"
+                                                        ),
+                                                    ));
+                                                }
+                                            }
                                             _ => {
                                                 return Err(location.error(
                                                     ErrorKind::InvalidSource,

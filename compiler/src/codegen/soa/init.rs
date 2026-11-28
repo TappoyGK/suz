@@ -27,7 +27,7 @@ pub(in crate::codegen) fn allocate(
         unreachable!()
     };
     context.uses_arena = true;
-    let array = context.arrays.get(ty.array_id().unwrap());
+    let array = context.arrays.get(ty.array_id().unwrap()).clone();
     let Type::Struct(struct_id) = array.element else {
         unreachable!("soa array element must be a struct");
     };

@@ -20,10 +20,24 @@ pub(super) fn dependencies(
 ) -> Result<(), Diagnostic> {
     match &expr.kind {
         ExpressionKind::ArrayInit {
-            values, lengths, ..
+            values,
+            lengths,
+            repeated,
+            ..
         } => {
-            for value in values.iter().chain(lengths) {
+            for value in values {
                 dependencies(value, names)?;
+            }
+            for length in lengths {
+                if *repeated
+                    && matches!(
+                        &length.kind,
+                        ExpressionKind::Name(name) if crate::parser::names::is_type_spelling(name)
+                    )
+                {
+                    continue;
+                }
+                dependencies(length, names)?;
             }
         }
         ExpressionKind::TextBuffer { .. } => {

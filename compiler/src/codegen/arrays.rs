@@ -222,7 +222,7 @@ pub(super) fn allocate(
         unreachable!()
     };
     context.uses_arena = true;
-    let array = context.arrays.get(ty.array_id().unwrap());
+    let array = context.arrays.get(ty.array_id().unwrap()).clone();
     let element = array.element.c_name();
     let mut c = String::from("({ ");
     for count in &metadata.constant_counts {
@@ -328,7 +328,7 @@ pub(super) fn element_offset_parts(
     } else {
         format!("{source} = {}", expression(target, context))
     };
-    let array = context.arrays.get(target.ty.array_id().unwrap());
+    let array = context.arrays.get(target.ty.array_id().unwrap()).clone();
     let mut offset = String::new();
     for (dimension, (index, location, proven)) in indices.iter().enumerate() {
         let direct = proven.then(|| proven_index(index, context)).flatten();
@@ -475,7 +475,7 @@ fn access_parts(
     else {
         unreachable!()
     };
-    let array = context.arrays.get(target.ty.array_id().unwrap());
+    let array = context.arrays.get(target.ty.array_id().unwrap()).clone();
     let source = temporary(target.ty, context);
     let (setup, previous) = if unhandled(target) {
         let (setup, valid, value) = access_parts(target, write, context);
@@ -610,7 +610,7 @@ pub(super) fn emit_loop(
     context: &mut ExpressionContext,
 ) {
     let indent = "    ".repeat(depth);
-    let array = context.arrays.get(source.ty.array_id().unwrap());
+    let array = context.arrays.get(source.ty.array_id().unwrap()).clone();
     let element = element_type(array.element, source.ty);
     let ty = source.ty.c_name();
     let source = expression(source, context);

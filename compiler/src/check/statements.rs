@@ -483,21 +483,30 @@ fn check_for(statement: &Statement, context: &mut StatementContext<'_>) -> Resul
             super::ranges::check_references(start, context.bindings)?;
             let value = expression(start, None, context.bindings)?;
             if let Some(id) = value.ty.array_id().filter(|_| !value.ty.is_nilable()) {
-                let array = context.bindings.structs.arrays.borrow().get(id);
-                let elem_ty = if array.rank() == 1 {
-                    array.element
+                let (rank, element, sub_dims, soa, first_enum) = {
+                    let arrays = context.bindings.structs.arrays.borrow();
+                    let array = arrays.get(id);
+                    (
+                        array.rank(),
+                        array.element,
+                        (array.rank() > 1).then(|| array.sub_dims()),
+                        array.soa,
+                        array.first_enum(),
+                    )
+                };
+                let elem_ty = if rank == 1 {
+                    element
                 } else {
                     context
                         .bindings
                         .structs
                         .arrays
                         .borrow_mut()
-                        .intern_dims(array.element, array.sub_dims(), array.soa)
+                        .intern_dims(element, sub_dims.unwrap(), soa)
                         .array_reference(value.ty.is_readonly_array())
                 };
                 let idx_ty = index.as_ref().map(|_| {
-                    array
-                        .first_enum()
+                    first_enum
                         .map(Type::Enum)
                         .unwrap_or(Type::Integer(crate::ast::IntegerType::Len))
                 });

@@ -68,7 +68,7 @@ pub(super) fn check(expr: &Expression, scope: &Scope) -> Result<CheckedExpressio
         ExpressionKind::Field { target, name } => {
             let target = expression(target, None, scope)?;
             if let Some(array_id) = target.ty.array_id() {
-                let array = scope.structs.arrays.borrow().get(array_id);
+                let array = scope.structs.arrays.borrow().get(array_id).clone();
                 if array.soa {
                     if target.ty.is_nilable() {
                         return Err(expr.location.error(

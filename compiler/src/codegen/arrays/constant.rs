@@ -24,11 +24,11 @@ pub(in crate::codegen) fn constant(
     else {
         unreachable!()
     };
-    let array = context.arrays.get(value.ty.array_id().unwrap());
     let initial = values
         .iter()
         .map(|v| constant_element(v, context))
         .collect::<Vec<_>>();
+    let array = context.arrays.get(value.ty.array_id().unwrap());
     let static_initial = initial.iter().all(|(_, literal)| *literal);
     let all_lengths: Vec<String> = lengths
         .iter()

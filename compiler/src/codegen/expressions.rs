@@ -416,8 +416,8 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             ref target,
             dimension,
         } => {
-            let array = context.arrays.get(target.ty.array_id().unwrap());
             let value = expression(target, context);
+            let array = context.arrays.get(target.ty.array_id().unwrap());
             if let Some(enum_ty) = array.dims[dimension] {
                 format!("((void)({value}), (int32_t){})", enum_ty.count)
             } else {

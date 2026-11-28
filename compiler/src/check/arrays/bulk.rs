@@ -55,26 +55,27 @@ pub(in crate::check) fn check(
             ),
         ));
     }
-    let target_array = context
-        .bindings
-        .structs
-        .arrays
-        .borrow()
-        .get(target_array_id);
-    if target_array.rank() != 1 {
+    let (target_rank, target_enum, out_elem_ty) = {
+        let arrays = context.bindings.structs.arrays.borrow();
+        let target_array = arrays.get(target_array_id);
+        (
+            target_array.rank(),
+            target_array.first_enum(),
+            target_array.element,
+        )
+    };
+    if target_rank != 1 {
         return Err(bulk.location.error(
             ErrorKind::InvalidSource,
             crate::diagnostic!("array.write", "bulk write requires a 1D array"),
         ));
     }
-    let target_enum = target_array.first_enum();
     if target_enum.is_some() && matches!(bulk.selector, BulkSelector::Slice { .. }) {
         return Err(bulk.location.error(
             ErrorKind::InvalidSource,
             crate::diagnostic!("array.enum-index", "enum-indexed arrays cannot be sliced"),
         ));
     }
-    let out_elem_ty = target_array.element;
 
     lower_return_handler(
         &mut target,
@@ -319,20 +320,21 @@ pub(in crate::check) fn check_mask(
             ),
         ));
     }
-    let target_array = context
-        .bindings
-        .structs
-        .arrays
-        .borrow()
-        .get(target_array_id);
-    if target_array.rank() != 1 {
+    let (target_rank, target_enum, out_elem_ty) = {
+        let arrays = context.bindings.structs.arrays.borrow();
+        let target_array = arrays.get(target_array_id);
+        (
+            target_array.rank(),
+            target_array.first_enum(),
+            target_array.element,
+        )
+    };
+    if target_rank != 1 {
         return Err(location.error(
             ErrorKind::InvalidSource,
             crate::diagnostic!("array.write", "bulk write requires a 1D array"),
         ));
     }
-    let target_enum = target_array.first_enum();
-    let out_elem_ty = target_array.element;
 
     lower_return_handler(
         &mut target,
@@ -692,20 +694,18 @@ impl Lowerer<'_, '_> {
                 crate::diagnostic!("array.value", "use let before reading a possibly nil array"),
             ));
         }
-        let array = self
-            .context
-            .bindings
-            .structs
-            .arrays
-            .borrow()
-            .get(array_id_ty);
-        if array.rank() != 1 {
+        let (rank, first_enum, elem_ty) = {
+            let arrays = self.context.bindings.structs.arrays.borrow();
+            let array = arrays.get(array_id_ty);
+            (array.rank(), array.first_enum(), array.element)
+        };
+        if rank != 1 {
             return Err(expr.location.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!("array.bulk", "bulk write requires 1D arrays"),
             ));
         }
-        if array.first_enum() != self.target_enum {
+        if first_enum != self.target_enum {
             return Err(expr.location.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(
@@ -726,7 +726,7 @@ impl Lowerer<'_, '_> {
         let name = format!("$bulk_elem_{elem_id}");
         self.context.bindings.locals.insert(
             name.clone(),
-            Binding::local(elem_id, array.element, false, false, expr.location),
+            Binding::local(elem_id, elem_ty, false, false, expr.location),
         );
         self.temp_names.push(name.clone());
         self.inputs.push(BulkInput::Array {
