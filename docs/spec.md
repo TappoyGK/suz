@@ -686,7 +686,7 @@ fn clear_optional(grid: #[u8; _, _]?) -> void {
 
 不一致を回復可能な失敗にしたい関数は、別の寸法名で受け取り、本体で比較してfailする。一致条件に専用のorを付ける構文は設けない。
 
-**[array.soa-type]** `soa #[T]`・`soa .[T]`・`soa #[T]?`・`soa .[T]?`・`soa #[T; n]`・`soa #[T; h, w]`・`soa #[T; E]`は、要素をフィールドごとの連続列（Structure of Arrays）として保持する配列への参照型である。生成には`new soa #[初期値; 長さ, ...]`・`new soa #[値, ...]`・`new soa .[...]`（列挙型添字の形式を含む）、定数配列には`soa .[...]`を使う。要素型`T`は構造体型（通常の構造体、汎用構造体の具体化、および [ffi.struct] の`extern`構造体）に限る。構造体以外の型を要素にする`soa`配列はコンパイルエラーとする。`soa #[T]`と`#[T]`は異なる型であり、相互の暗黙変換は認めない。SoA特有の規則（[array.soa-layout]・[array.soa-value]・[array.soa-access]・[array.soa-column]・[array.soa-extern]）で置き換える点を除き、同じ`soa`レイアウト内では5.8節および7.19節の配列の規則を適用する。
+**[array.soa-type]** `soa #[T]`・`soa .[T]`・`soa #[T]?`・`soa .[T]?`・`soa #[T; n]`・`soa #[T; h, w]`・`soa #[T; E]`は、要素をフィールドごとの連続列（Structure of Arrays）として保持する配列への参照型である。生成には`new soa #[初期値; 長さ, ...]`・`new soa #[値, ...]`・`new soa .[...]`（列挙型添字の形式を含む）、定数配列には`soa .[...]`を使う。要素型`T`は構造体型（通常の構造体、汎用構造体の具体化、および [ffi.struct] の`extern`構造体）に限る。構造体以外の型を要素にする`soa`配列はコンパイルエラーとする。`soa #[T]`と`#[T]`は異なる型であり、相互の暗黙変換は認めない。SoA特有の規則（[array.soa-layout]・[array.soa-value]・[array.soa-access]・[array.soa-column]・[array.soa-extern]）で置き換える点を除き、同じ`soa`レイアウト内では5.8節・6.1節・7.19節の配列の規則、および [array.redundant-handler] を適用する。
 
 **[array.soa-layout]** SoA配列は、要素の構造体`T`の値フィールドを再帰的に展開した各葉フィールド（構造体でないフィールド）ごとに独立した連続列を保持する。各葉列の内部では外側の次元から並べ、最後の次元の要素が隣接する。1つの要素を構成する構造体全体はメモリ上に連続しない。`new soa`による確保では、各葉列の必要バイト数・アラインメントの余白・合計バイト数の`size_t`オーバーフローを検査した上で、作業領域から1回の確保で単一の連続ブロックを取得する（[rt.array-size]）。定数配列`soa .[...]`の配置とサイズ検査も同じ規則に従う。
 
