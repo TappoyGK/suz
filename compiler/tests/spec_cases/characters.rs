@@ -306,7 +306,6 @@ fn mutable_loop_inputs_have_a_diagnostic_shared_by_symbol_and_ranges() {
     }
 }
 
-/// 仕様例集（旧 `lex-043`・`lex-045`）から移管した文字リテラルの派生拒否ケース。
 #[test]
 fn migrated_char_literal_error_derivatives() {
     for (id, source, line, column) in [

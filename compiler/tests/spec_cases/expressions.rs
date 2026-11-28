@@ -515,7 +515,6 @@ fn main() -> u8 {
     }
 }
 
-/// 仕様例集（旧 `expr-006`・`expr-008`・`expr-011`・`expr-070`・`expr-055`〜`expr-058`・`text-014`）から移管した派生拒否ケース。
 #[test]
 fn migrated_jump_and_or_return_position_diagnostics() {
     for (id, source, rule, line, column) in [
