@@ -406,10 +406,12 @@ pub(super) fn check(
                 !numeric && crate::check::arrays::contains_reference(ty, bindings);
             if !has_array_operand {
                 for operand in operands {
-                    if let Some(op_ty) = operand_type(operand, bindings)
-                        && op_ty != ty
-                        && !op_ty.is_numeric()
-                        && crate::check::arrays::contains_reference(op_ty, bindings)
+                    if is_empty_array_literal(operand)
+                        || operand_type(operand, bindings).is_some_and(|op_ty| {
+                            op_ty != ty
+                                && !op_ty.is_numeric()
+                                && crate::check::arrays::contains_reference(op_ty, bindings)
+                        })
                     {
                         has_array_operand = true;
                         break;
@@ -422,36 +424,26 @@ pub(super) fn check(
                     .map(|operand| operand_type(operand, bindings).filter(|ty| ty.is_float())),
             )
             .unwrap_or(Type::Float(FloatType::F64));
+            let mut first_empty_array: Option<usize> = None;
             let operands = operands
                 .iter()
                 .enumerate()
                 .map(|(index, operand)| {
                     if is_empty_array_literal(operand) {
-                        let location = locations[index.saturating_sub(1)];
-                        return Err(location.error(
-                            ErrorKind::InvalidSource,
-                            crate::diagnostic!(
-                                "array.value",
-                                "array references and structs containing them cannot be compared"
-                            ),
-                        ));
+                        first_empty_array.get_or_insert(index);
+                        return Ok(CheckedExpression {
+                            ty: Type::Void,
+                            value: Value::Void,
+                        });
                     }
-                    if numeric {
+                    if has_array_operand && is_nil_literal(operand) {
+                        return Ok(CheckedExpression {
+                            ty: Type::Void,
+                            value: Value::Void,
+                        });
+                    }
+                    if numeric || has_array_operand {
                         if operand_type(operand, bindings).is_none()
-                            && has_float_source(operand, bindings)
-                        {
-                            expression(operand, Some(float_type), bindings)
-                        } else {
-                            super::super::exact::comparison_value(operand, bindings)
-                        }
-                    } else if has_array_operand {
-                        let mut inner = operand;
-                        while let ExpressionKind::Group(grouped) = &inner.kind {
-                            inner = grouped;
-                        }
-                        if matches!(inner.kind, ExpressionKind::Nil) && ty.is_nilable() {
-                            expression(operand, Some(ty), bindings)
-                        } else if operand_type(operand, bindings).is_none()
                             && has_float_source(operand, bindings)
                         {
                             expression(operand, Some(float_type), bindings)
@@ -464,15 +456,21 @@ pub(super) fn check(
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             if has_array_operand {
-                let index = operands
-                    .iter()
-                    .position(|operand| {
-                        !operand.ty.is_numeric()
-                            && operand.ty != Type::Exact
-                            && crate::check::arrays::contains_reference(operand.ty, bindings)
-                    })
-                    .unwrap_or(0);
-                let location = locations[index.saturating_sub(1)];
+                let mut first_index = first_empty_array;
+                for (index, operand) in operands.iter().enumerate() {
+                    if first_index.is_some_and(|first| index >= first) {
+                        break;
+                    }
+                    if !operand.ty.is_numeric()
+                        && operand.ty != Type::Exact
+                        && operand.ty != Type::Void
+                        && crate::check::arrays::contains_reference(operand.ty, bindings)
+                    {
+                        first_index = Some(index);
+                        break;
+                    }
+                }
+                let location = locations[first_index.unwrap_or(0).saturating_sub(1)];
                 return Err(location.error(
                     ErrorKind::InvalidSource,
                     crate::diagnostic!(
@@ -600,6 +598,13 @@ pub(super) fn check(
         }
         _ => unreachable!(),
     })
+}
+
+fn is_nil_literal(mut expr: &Expression) -> bool {
+    while let ExpressionKind::Group(inner) = &expr.kind {
+        expr = inner;
+    }
+    matches!(expr.kind, ExpressionKind::Nil)
 }
 
 fn is_empty_array_literal(mut expr: &Expression) -> bool {
