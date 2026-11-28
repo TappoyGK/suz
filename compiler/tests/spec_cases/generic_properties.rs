@@ -34,7 +34,7 @@ fn generic_instantiations_agree_with_explicit_scalar_functions() {
         "ifexpr n == 0 { n } else { 300 }",
         "expr { fix a = n +% 300\na }",
         "\"v=${n},${x}\"",
-        "`abc`[n] or 'x'",
+        "`abc`[n] or \\x",
         "n as u8 or 0",
         "x as f32 or 0.0",
     ] {

@@ -296,7 +296,7 @@ mod tests {
             ("run(fn []() -> i32 { return 1 })", 5),
             ("matchexpr a { _ => 1 }", 4),
             ("x as u8 or 0", 4),
-            ("s.[0] or 'a'", 4),
+            ("s.[0] or \\a", 4),
             ("-1", 3),
         ] {
             let source = format!("fn main() -> u8 {{ fix value = {expression}\nreturn 0 }}");

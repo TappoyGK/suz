@@ -928,13 +928,13 @@ fn main() -> u8 {
 
 ```suz
 fn main() -> u8 {
-    fix same = 'é' == '\u{E9}'
-    fix kana = 'あ'
-    fix emoji = '\u{1f600}'
+    fix same = \é == \u{E9}
+    fix kana = \あ
+    fix emoji = \u{1f600}
     log info "${same} ${kana} ${emoji}"
-    fix brace = '}'
-    fix quote = '\''
-    fix slash = '\\'
+    fix brace = \}
+    fix quote = \'
+    fix slash = \\
     log info "${brace} ${quote} ${slash}"
     return 0
 }
@@ -953,6 +953,30 @@ info lex-033.suz:5: true あ 😀
 info lex-033.suz:9: } ' \
 ```
 
+### lex-041 名前つき文字リテラル・\u単独・単独結合文字と直後のトークン
+
+主根拠：`[char.literal]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix a = \a
+    if a != \u{61} { return 1 }
+    if (\nul as u32) != 0 || (\tab as u32) != 9 { return 2 }
+    if (\newline as u32) != 10 || (\return as u32) != 13 || (\space as u32) != 32 { return 3 }
+    if \n != \u{6e} || \u != \u{75} { return 4 }
+    if (\́ as u32) != 769 { return 5 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
 ### lex-034 見た目が1文字でも複数のスカラー値なら拒否する
 
 主根拠：`[char.literal]`。
@@ -961,7 +985,7 @@ info lex-033.suz:9: } ' \
 
 ```suz
 fn main() -> u8 {
-    fix ch = 'é'
+    fix ch = \é
     return 0
 }
 ```
@@ -986,7 +1010,7 @@ fn main() -> u8 {
 
 ```suz
 fn main() -> u8 {
-    fix ch = '\u{D800}'
+    fix ch = \u{D800}
     return 0
 }
 ```
@@ -1002,6 +1026,58 @@ fn main() -> u8 {
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
 | 通常 | `[char.literal]` | 2 | 14 |
+
+### lex-042 バックスラッシュ直後の空白は文字リテラルとして拒否する
+
+主根拠：`[char.literal]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix ch = (\ )
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[char.literal]` | 2 | 15 |
+
+### lex-043 テンプレート外のシングルクォートはコンパイルエラーになる
+
+主根拠：`[syntax.grammar]`。
+
+補助根拠：`[char.literal]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix ch = 'a'
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[syntax.grammar]` | 2 | 14 |
 
 
 ### lex-036 整数リテラルの正確な表現と明示的な丸め

@@ -298,7 +298,7 @@ fn widening_is_not_applied_to_loop_bounds_or_match_patterns() {
             "{source}: {err:?}"
         );
     }
-    for pattern in ["'a'", "Color.Red", "true", "1.0", "\"a\""] {
+    for pattern in ["\\a", "Color.Red", "true", "1.0", "\"a\""] {
         for value_match in [false, true] {
             let arms = if value_match {
                 format!("fix result = matchexpr x + 1 {{ {pattern} => 1\n_ => 2 }}")

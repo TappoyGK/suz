@@ -557,7 +557,7 @@ fn generic_rule_judgments_agree_with_scalar_checks() {
                 "x as float",
                 "ifexpr x == 0 { x } else { 300 }",
                 "(1 as int) as u8",
-                "\"abc\"[x] or 'a'",
+                "\"abc\"[x] or \\a",
                 "x << x",
                 "~x",
                 "-x",

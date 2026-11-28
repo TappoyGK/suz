@@ -28,6 +28,7 @@ bundled!(
     "runtime/suz_textbuf.h",
     "runtime/suz_parse.h",
     "runtime/suz_char.h",
+    "runtime/suz_unicode_cat.h",
     "runtime/suz_parse_struct.h",
     "runtime/suz_text.c",
     "runtime/suz_parse.c",

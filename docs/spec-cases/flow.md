@@ -604,13 +604,13 @@ info flow-019.suz:9: second
 
 ```suz
 fn main() -> u8 {
-    fix ch = '5'
+    fix ch = \5
     fix kind = matchexpr ch {
-        ' ' => 1
-        '5' => 2
+        \space => 1
+        \5 => 2
         _ => 0
     }
-    fix digit = '0' <= ch <= '9'
+    fix digit = \0 <= ch <= \9
     log info "${kind} ${digit}"
     return 0
 }
@@ -1447,17 +1447,17 @@ info flow-062.suz:11: 256 -128
 
 ```suz
 fn main() -> u8 {
-    for ch in '\u{D7FF}'..='\u{E000}' {
+    for ch in \u{D7FF}..=\u{E000} {
         fix code = ch as u32
         log info "${code}"
     }
-    rev ch in '\u{D7FF}'..='\u{E000}' {
+    rev ch in \u{D7FF}..=\u{E000} {
         fix code = ch as u32
         log info "${code}"
     }
-    for ch in '\u{10FFFF}'..='\u{10FFFF}' { continue }
-    rev ch in '\0'..='\0' { continue }
-    rev ch in '\0'..<'\0' { return 1 }
+    for ch in \u{10FFFF}..=\u{10FFFF} { continue }
+    rev ch in \nul..=\nul { continue }
+    rev ch in \nul..<\nul { return 1 }
     return 0
 }
 ```
@@ -1892,7 +1892,7 @@ fn main() -> u8 {
         continue
     }
     rev ch in read(target) {
-        if ch == 'a' { break }
+        if ch == \a { break }
         log info "${ch}"
     }
     for ch in "" { return 1 }

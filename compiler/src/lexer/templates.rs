@@ -58,6 +58,95 @@ pub(crate) fn scan(
                 }
                 b'\\' => match bytes.get(cursor + 1) {
                     Some(b'0' | b'n' | b'r' | b't' | b'\\' | b'"' | b'$') => cursor += 2,
+                    Some(b'u') => {
+                        if bytes.get(cursor + 2) != Some(&b'{') {
+                            return Err(fail(
+                                cursor,
+                                crate::diagnostic!(
+                                    "symbol.escape",
+                                    "Unicode escape requires braces: \\u{{...}}"
+                                ),
+                            ));
+                        }
+                        let mut i = cursor + 3;
+                        let mut value: u32 = 0;
+                        let mut digits: u32 = 0;
+                        while i < bytes.len() && bytes[i] != b'}' {
+                            let c = bytes[i];
+                            if c == b'\n' {
+                                return Err(fail(
+                                    i,
+                                    crate::diagnostic!(
+                                        "symbol.template-line",
+                                        "template must fit on one source line"
+                                    ),
+                                ));
+                            }
+                            let digit = match c {
+                                b'0'..=b'9' => (c - b'0') as u32,
+                                b'a'..=b'f' => (c - b'a' + 10) as u32,
+                                b'A'..=b'F' => (c - b'A' + 10) as u32,
+                                _ => {
+                                    return Err(fail(
+                                        cursor,
+                                        crate::diagnostic!(
+                                            "symbol.escape",
+                                            "invalid hexadecimal digit in Unicode escape"
+                                        ),
+                                    ));
+                                }
+                            };
+                            digits += 1;
+                            if digits > 6 {
+                                return Err(fail(
+                                    cursor,
+                                    crate::diagnostic!(
+                                        "symbol.escape",
+                                        "Unicode escape accepts at most six hexadecimal digits"
+                                    ),
+                                ));
+                            }
+                            value = (value << 4) | digit;
+                            i += 1;
+                        }
+                        if i >= bytes.len() {
+                            return Err(fail(
+                                cursor,
+                                crate::diagnostic!(
+                                    "symbol.escape",
+                                    "unclosed Unicode escape in template"
+                                ),
+                            ));
+                        }
+                        if digits == 0 {
+                            return Err(fail(
+                                cursor,
+                                crate::diagnostic!(
+                                    "symbol.escape",
+                                    "Unicode escape requires at least one hexadecimal digit"
+                                ),
+                            ));
+                        }
+                        if (0xd800..=0xdfff).contains(&value) {
+                            return Err(fail(
+                                cursor,
+                                crate::diagnostic!(
+                                    "symbol.escape",
+                                    "Unicode escape cannot represent a surrogate (U+D800..U+DFFF)"
+                                ),
+                            ));
+                        }
+                        if value > 0x10ffff {
+                            return Err(fail(
+                                cursor,
+                                crate::diagnostic!(
+                                    "symbol.escape",
+                                    "Unicode escape exceeds U+10FFFF"
+                                ),
+                            ));
+                        }
+                        cursor = i + 1;
+                    }
                     Some(b'\n') => {
                         return Err(fail(
                             cursor + 1,
@@ -137,7 +226,7 @@ pub(crate) fn scan(
                         }
                     }
                 }
-                b'\'' => {
+                b'\\' => {
                     let (_, length) = super::char_literal(&source[cursor..])
                         .map_err(|message| fail(cursor, message))?;
                     cursor += length;
@@ -217,6 +306,17 @@ pub(crate) fn decode(text: &str) -> String {
                 'n' => '\n',
                 'r' => '\r',
                 't' => '\t',
+                'u' => {
+                    assert_eq!(chars.next(), Some('{'));
+                    let mut value: u32 = 0;
+                    for hex in chars.by_ref() {
+                        if hex == '}' {
+                            break;
+                        }
+                        value = (value << 4) | hex.to_digit(16).unwrap();
+                    }
+                    char::from_u32(value).unwrap()
+                }
                 ch @ ('\\' | '"' | '$') => ch,
                 _ => unreachable!("template escapes are validated by the scanner"),
             }
