@@ -300,6 +300,11 @@ fn inventory_is_checked_against_the_parsed_cases() {
             "| 欠番ID | 移管先テスト |\n|---|---|\n",
             "| 欠番ID | 移管先テスト |\n|---|---|\n| `lex-002` | test |\n\nメモ\n\n| `lex-003` | test |\n",
         ),
+        doc.replace(
+            "| 欠番ID | 移管先テスト |\n|---|---|\n",
+            "| 欠番ID | 移管先テスト |\n|---|---|\n| `lex-002` | test |\n\n  | `lex-003` | test |\n",
+        ),
+        format!("{doc}\n## 欠番一覧\n\n| 欠番ID | 移管先テスト |\n|---|---|\n| `lex-002` | test |\n"),
     ] {
         assert!(
             validate_inventory(&bad_retired, &cases).is_err(),

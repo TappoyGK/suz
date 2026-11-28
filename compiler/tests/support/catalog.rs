@@ -93,6 +93,14 @@ pub fn validate_inventory(markdown: &str, sources: &BTreeMap<String, Source>) ->
 }
 
 pub fn retired_ids(markdown: &str) -> Result<BTreeSet<String>> {
+    if markdown
+        .lines()
+        .filter(|line| *line == "## 欠番一覧")
+        .count()
+        > 1
+    {
+        return Err("duplicate retired IDs section".into());
+    }
     let mut lines = markdown.lines().skip_while(|line| *line != "## 欠番一覧");
     lines.next().ok_or("missing retired IDs section")?;
     let lines: Vec<_> = lines.take_while(|line| !line.starts_with('#')).collect();
@@ -140,7 +148,10 @@ pub fn retired_ids(markdown: &str) -> Result<BTreeSet<String>> {
             }
         }
     }
-    if lines[i..].iter().any(|line| line.starts_with('|')) {
+    if lines[i..]
+        .iter()
+        .any(|line| line.trim_start().starts_with('|'))
+    {
         return Err("unexpected table row after retired IDs table".into());
     }
     Ok(retired)
