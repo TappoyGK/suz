@@ -1,6 +1,8 @@
 use super::{
     Outcome, Result, Source,
-    expectations::{diagnostic_table, table, validate},
+    expectations::{
+        diagnostic_table, is_supported_warning_rule, parse_result_line, table, validate,
+    },
     markdown::{block, fence, heading, unique},
 };
 use std::collections::BTreeMap;
@@ -47,6 +49,7 @@ fn decode_diagram(body: &str) -> Result<Vec<u8>> {
 fn source(lines: &[&str]) -> Result<Source> {
     let mut bytes = None;
     let mut runs = None;
+    let mut compact_runs = Vec::new();
     let mut rule = None;
     let mut stdout = None;
     let mut stderr = None;
@@ -115,20 +118,47 @@ fn source(lines: &[&str]) -> Result<Source> {
                 )?;
             }
             _ => {
-                if let Some(value) = line.trim().strip_prefix("主根拠：") {
+                let trimmed = line.trim();
+                if let Some(value) = trimmed
+                    .strip_prefix("- 主根拠：")
+                    .or_else(|| trimmed.strip_prefix("主根拠："))
+                {
                     let value = value.trim().trim_end_matches('。').trim();
                     let value = value
                         .strip_prefix("`[")
                         .and_then(|s| s.strip_suffix("]`"))
                         .ok_or("invalid primary rule")?;
                     unique(&mut rule, value.to_owned(), "primary rule")?;
+                } else if trimmed.starts_with("- 結果") {
+                    compact_runs.push(parse_result_line(trimmed)?);
+                } else if trimmed.starts_with("**") && trimmed.ends_with("：**") {
+                    return Err("unsupported or unlabelled fence".into());
+                } else if line == "```suz" {
+                    i -= 1;
+                    let code = block(lines, &mut i, "suz")?;
+                    if code.is_empty() {
+                        return Err("empty source".into());
+                    }
+                    unique(&mut bytes, code.into_bytes(), "source")?;
                 } else if line.starts_with("```") {
                     return Err("unsupported or unlabelled fence".into());
                 }
             }
         }
     }
-    let mut runs = runs.ok_or("missing expectation table")?;
+    if !compact_runs.is_empty()
+        && (runs.is_some()
+            || diagnostics.is_some()
+            || panic_diagnostics.is_some()
+            || warnings.is_some())
+    {
+        return Err("cannot mix compact result lines with expectation tables".into());
+    }
+    let mut runs = if !compact_runs.is_empty() {
+        compact_runs
+    } else {
+        runs.ok_or("missing expectation table")?
+    };
     for (mode, diagnostic) in diagnostics.unwrap_or_default() {
         let run = runs
             .iter_mut()
@@ -155,15 +185,7 @@ fn source(lines: &[&str]) -> Result<Source> {
             .iter_mut()
             .find(|r| r.mode == mode)
             .ok_or("warning does not apply to any run")?;
-        if !matches!(
-            warning.rule.as_str(),
-            "diagnostic.arithmetic"
-                | "diagnostic.constant-comparison"
-                | "diagnostic.integer-division-to-float"
-                | "diagnostic.float-sat-nan"
-                | "arena.loop-allocation"
-                | "array.redundant-handler"
-        ) {
+        if !is_supported_warning_rule(&warning.rule) {
             return Err("expected a supported warning rule".into());
         }
         if run.warnings.contains(&warning) {
@@ -261,7 +283,10 @@ pub fn extract(markdown: &str) -> Result<BTreeMap<String, Source>> {
                 current = (level == 3).then_some(title);
                 continue;
             }
-            if current.is_some() && line.trim().starts_with("主根拠：") {
+            let trimmed = line.trim();
+            if current.is_some()
+                && (trimmed.starts_with("主根拠：") || trimmed.starts_with("- 主根拠："))
+            {
                 has_rule = true;
             }
         }

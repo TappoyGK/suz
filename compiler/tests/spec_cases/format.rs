@@ -434,3 +434,137 @@ This is not an expectation table.
         assert!(error.contains(reason), "{error}");
     }
 }
+
+#[test]
+fn compact_format_parses_all_variants_and_rejects_malformed_lines() {
+    let doc = r#"### lex-001 exit default
+- 主根拠：`[src.encoding]`
+- 結果：正常終了
+
+```suz
+fn main() -> u8 { return 0 }
+```
+
+### lex-002 exit code with warning
+- 主根拠：`[src.encoding]`
+- 結果：正常終了 7 / 警告：`[diagnostic.arithmetic]` 2:10, `[array.redundant-handler]` 3:5
+
+```suz
+fn main() -> u8 { return 7 }
+```
+
+### lex-003 compile error
+- 主根拠：`[char.literal]`
+- 結果：コンパイルエラー `[char.literal]` 2:14
+
+```suz
+fn main() -> u8 { return 0 }
+```
+
+### lex-004 panic
+- 主根拠：`[rt.div-zero]`
+- 結果：パニック `[rt.div-zero]` 2:12
+
+```suz
+fn main() -> u8 { return 0 }
+```
+
+**パニック前の標準エラー：**
+
+```text
+before
+```
+
+### array-090 multi mode
+- 主根拠：`[diagnostic.arithmetic-target]`
+- 補助根拠：`[array.bulk-handler]`
+- 結果（通常）：正常終了
+- 結果（警告）：正常終了 / 警告：`[diagnostic.arithmetic]` 4:16
+- 結果（強制）：コンパイルエラー `[diagnostic.arithmetic]` 4:16
+
+```suz
+fn main() -> u8 { return 0 }
+```
+"#;
+    let cases = extract(doc).unwrap();
+    assert_eq!(cases.len(), 5);
+    assert_eq!(cases["lex-001"].runs[0].code, Some(0));
+    assert_eq!(cases["lex-001"].runs[0].warning_count, 0);
+    assert_eq!(cases["lex-002"].runs[0].code, Some(7));
+    assert_eq!(cases["lex-002"].runs[0].warning_count, 2);
+    assert_eq!(cases["lex-002"].runs[0].warnings.len(), 2);
+    assert_eq!(cases["lex-003"].runs[0].result, Outcome::CompileError);
+    assert_eq!(
+        cases["lex-003"].runs[0].diagnostic.as_ref().unwrap().column,
+        14
+    );
+    assert_eq!(cases["lex-004"].runs[0].result, Outcome::Panic);
+    assert_eq!(cases["lex-004"].runs[0].code, Some(101));
+    assert_eq!(
+        cases["lex-004"].runs[0].stderr_prefix.as_deref(),
+        Some("before\n")
+    );
+    assert_eq!(cases["array-090"].runs.len(), 3);
+    assert_eq!(cases["array-090"].runs[1].mode, Mode::Warn);
+    assert_eq!(cases["array-090"].runs[2].mode, Mode::Deny);
+
+    let base = "### lex-001 test\n- 主根拠：`[src.encoding]`\n- 結果：正常終了\n\n```suz\nfn main() -> u8 { return 0 }\n```\n";
+    for (bad, reason) in [
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：正常終了\n- 結果（通常）：正常終了",
+            ),
+            "duplicate mode",
+        ),
+        (base.replace("- 結果：", "- 結果（未知）："), "unknown mode"),
+        (
+            base.replace("- 結果：正常終了", "- 結果：コンパイルエラー"),
+            "unknown outcome",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：コンパイルエラー `[char.literal]`",
+            ),
+            "missing diagnostic position",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：コンパイルエラー `[char.literal]` 0:1",
+            ),
+            "positive",
+        ),
+        (
+            base.replace("- 結果：正常終了", "- 結果：パニック `[char.literal]` 2:1"),
+            "runtime panic rule",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：正常終了 / 警告：`[char.literal]` 2:1",
+            ),
+            "supported warning rule",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：正常終了 / 警告：`[diagnostic.arithmetic]` 2:1, `[diagnostic.arithmetic]` 2:1",
+            ),
+            "duplicate warning expectation",
+        ),
+        (
+            base.replace("- 結果：正常終了", "- 結果：正常終了 / 警告："),
+            "empty warning list",
+        ),
+        (
+            format!("{base}\n```suz\nfn other() -> void {{}}\n```\n"),
+            "duplicate source",
+        ),
+        (format!("{base}\n```text\nhello\n```\n"), "unlabelled fence"),
+    ] {
+        let error = extract(&bad).unwrap_err();
+        assert!(error.contains(reason), "expected {reason}, got {error}");
+    }
+}
