@@ -415,7 +415,7 @@ pub(super) fn constant(value: &CheckedExpression, context: &mut ExpressionContex
         id
     };
     let cols = (0..all_leaves.len())
-        .map(|c| format!("suz_constant_array_{id}_col_{c}"))
+        .map(|c| format!("(void *)suz_constant_array_{id}_col_{c}"))
         .collect::<Vec<_>>()
         .join(", ");
     format!(
@@ -526,25 +526,12 @@ pub(super) fn try_emit_store(
     writeln!(c, "{indent}    (void)({condition});").unwrap();
     writeln!(c, "{indent}    const size_t suz_soa_off_{id} = {offset};").unwrap();
     if let Type::Struct(sub_id) = target.ty {
-        let cols_expr = if matches!(
-            array_target.value,
-            Value::Local(lid) if context.immutable_locals.contains(&lid)
-        ) {
-            writeln!(
-                c,
-                "{indent}    void *const *const suz_soa_cols_{id} = {source}.cols;"
-            )
-            .unwrap();
-            format!("suz_soa_cols_{id}")
-        } else {
-            writeln!(
-                c,
-                "{indent}    const {} suz_soa_src_{id} = {source};",
-                array_target.ty.c_name()
-            )
-            .unwrap();
-            format!("suz_soa_src_{id}.cols")
-        };
+        writeln!(
+            c,
+            "{indent}    void *const *const suz_soa_cols_{id} = {source}.cols;"
+        )
+        .unwrap();
+        let cols_expr = format!("suz_soa_cols_{id}");
         if !body.is_empty() {
             let gathered = gather_expr(
                 sub_id,

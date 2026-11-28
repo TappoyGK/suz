@@ -112,6 +112,18 @@ pub(super) fn immutable_struct_place(
         crate::check::ir::Value::Field { target, .. } => {
             matches!(target.ty, Type::Struct(_)) && immutable_struct_place(target, context)
         }
+        crate::check::ir::Value::Cast(target)
+            if expr
+                .ty
+                .array_id()
+                .is_some_and(|id| context.arrays.get(id).soa)
+                && target
+                    .ty
+                    .array_id()
+                    .is_some_and(|id| context.arrays.get(id).soa) =>
+        {
+            immutable_struct_place(target, context)
+        }
         _ => false,
     }
 }

@@ -21,16 +21,11 @@ pub(super) fn declarations(c: &mut String, context: &ExpressionContext) {
             let leaf_count = super::soa::leaves(struct_id, context).len();
             writeln!(
                 c,
-                "typedef struct {{ const void *cols[{leaf_count}]; int32_t lengths[{}]; }} suz_readonly_array_{id};",
-                array.rank
-            )
-            .unwrap();
-            writeln!(
-                c,
                 "typedef struct {{ void *cols[{leaf_count}]; int32_t lengths[{}]; }} suz_array_{id};",
                 array.rank
             )
             .unwrap();
+            writeln!(c, "typedef suz_array_{id} suz_readonly_array_{id};").unwrap();
             continue;
         }
         writeln!(
@@ -90,6 +85,9 @@ pub(super) fn direct_reference(value: &CheckedExpression) -> bool {
 pub(super) fn readonly(value: &CheckedExpression, context: &mut ExpressionContext) -> String {
     let id = value.ty.array_id().unwrap();
     let array = context.arrays.get(id);
+    if array.soa {
+        return expression(value, context);
+    }
     let rank = array.rank;
     let (setup, source) = if direct_reference(value) {
         (String::new(), format!("({})", expression(value, context)))
@@ -102,19 +100,6 @@ pub(super) fn readonly(value: &CheckedExpression, context: &mut ExpressionContex
         .map(|axis| format!("{source}.lengths[{axis}]"))
         .collect::<Vec<_>>()
         .join(", ");
-    if array.soa {
-        let Type::Struct(struct_id) = array.element else {
-            unreachable!("soa array element must be a struct");
-        };
-        let leaf_count = super::soa::leaves(struct_id, context).len();
-        let cols = (0..leaf_count)
-            .map(|c| format!("{source}.cols[{c}]"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        return format!(
-            "({setup}(suz_readonly_array_{id}){{ .cols = {{ {cols} }}, .lengths = {{ {lengths} }} }})"
-        );
-    }
     format!(
         "({setup}(suz_readonly_array_{id}){{ .data = {source}.data, .lengths = {{ {lengths} }} }})"
     )
@@ -532,7 +517,7 @@ fn access_parts(
             .map(|(c, leaf)| {
                 format!(
                     "({} *){source}.cols[{c}] + (size_t){first} * ({stride})",
-                    element_type(leaf.ty, target.ty)
+                    leaf.ty.c_name()
                 )
             })
             .collect::<Vec<_>>()
@@ -639,7 +624,7 @@ pub(super) fn emit_loop(
                 .map(|(c, leaf)| {
                     format!(
                         "({} *)suz_iter_{id}.cols[{c}] + suz_pos_{id} * ({stride})",
-                        element_type(leaf.ty, item)
+                        leaf.ty.c_name()
                     )
                 })
                 .collect::<Vec<_>>()

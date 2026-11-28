@@ -215,6 +215,9 @@ fn main() -> u8 {
     let soa_codegen_src = br#"
 struct Vec2 { x: f32, y: f32 }
 struct Particle { pos: Vec2, vel: Vec2, life: f32 }
+fn read_first(p: soa .[Particle; n]) -> f32 {
+    return ifexpr n > 0 { p.[0].life } else { 0.0 }
+}
 fn step(p: soa #[Particle; n], dt: f32) -> void {
     p.pos.x#[p.life > 0.0] += p.vel.x * dt
     for i in 0..<n {
@@ -224,13 +227,18 @@ fn step(p: soa #[Particle; n], dt: f32) -> void {
 fn main() -> u8 {
     fix p = new soa #[Particle { pos: Vec2 { x: 1.0, y: 2.0 }, vel: Vec2 { x: 3.0, y: 4.0 }, life: 1.0 }; 4]
     step(p, 0.5)
-    return 0
+    fix v = read_first(p)
+    return ifexpr v == 0.5 { 0 } else { 1 }
 }
 "#;
     let c_code = suz::compile(soa_codegen_src).unwrap();
     assert!(
         c_code.contains("void *cols[5];"),
         "expected 5 leaf columns in SoA ref:\n{c_code}"
+    );
+    assert!(
+        c_code.contains("typedef suz_array_0 suz_readonly_array_0;"),
+        "expected readonly SoA ref to alias mutable SoA ref:\n{c_code}"
     );
     assert!(
         c_code.contains("float *restrict suz_bulk_dst_"),
@@ -243,5 +251,9 @@ fn main() -> u8 {
     assert!(
         !c_code.contains("suz_soa_src_"),
         "expected single-leaf field store to avoid copying whole SoA ref:\n{c_code}"
+    );
+    assert!(
+        !c_code.contains("(suz_readonly_array_0){"),
+        "expected readonly SoA conversion to avoid compound literal copy:\n{c_code}"
     );
 }

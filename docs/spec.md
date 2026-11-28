@@ -686,7 +686,7 @@ fn clear_optional(grid: #[u8; _, _]?) -> void {
 
 不一致を回復可能な失敗にしたい関数は、別の寸法名で受け取り、本体で比較してfailする。一致条件に専用のorを付ける構文は設けない。
 
-**[array.soa-type]** `soa #[T]`・`soa .[T]`・`soa #[T]?`・`soa .[T]?`・`soa #[T; n]`・`soa #[T; h, w]`・`soa #[T; E]`は、要素をフィールドごとの連続列（Structure of Arrays）として保持する配列への参照型である。生成には`new soa #[初期値; 長さ, ...]`・`new soa #[値, ...]`・`new soa .[...]`（列挙型添字の形式を含む）、定数配列には`soa .[...]`を使う。要素型`T`は構造体型（通常の構造体、汎用構造体の具体化、および [ffi.struct] の`extern`構造体）に限る。構造体以外の型を要素にする`soa`配列はコンパイルエラーとする。`soa #[T]`と`#[T]`は異なる型であり、相互の暗黙変換は認めない。SoA特有の規則（[array.soa-layout]・[array.soa-value]・[array.soa-access]・[array.soa-column]・[array.soa-extern]）で置き換える点を除き、同じ`soa`レイアウト内では [array.value]・[array.readonly]・[array.readonly-conversion]・[array.dimension-bind]・[array.dimension-equality]・[array.enum-type]・[array.enum-index]・[array.index]・[array.write]・[array.slice]・[array.iteration]・[array.bounds-proof]・[array.bulk]・[array.bulk-ops]・[array.bulk-mask]・[array.bulk-eval]・[array.bulk-bounds]・[array.bulk-handler]・[array.new]・[array.enumeration]・[array.constant]・[array.lifetime] を適用する。
+**[array.soa-type]** `soa #[T]`・`soa .[T]`・`soa #[T]?`・`soa .[T]?`・`soa #[T; n]`・`soa #[T; h, w]`・`soa #[T; E]`は、要素をフィールドごとの連続列（Structure of Arrays）として保持する配列への参照型である。生成には`new soa #[初期値; 長さ, ...]`・`new soa #[値, ...]`・`new soa .[...]`（列挙型添字の形式を含む）、定数配列には`soa .[...]`を使う。要素型`T`は構造体型（通常の構造体、汎用構造体の具体化、および [ffi.struct] の`extern`構造体）に限る。構造体以外の型を要素にする`soa`配列はコンパイルエラーとする。`soa #[T]`と`#[T]`は異なる型であり、相互の暗黙変換は認めない。SoA特有の規則（[array.soa-layout]・[array.soa-value]・[array.soa-access]・[array.soa-column]・[array.soa-extern]）で置き換える点を除き、同じ`soa`レイアウト内では5.8節および7.19節の配列の規則を適用する。
 
 **[array.soa-layout]** SoA配列は、要素の構造体`T`の値フィールドを再帰的に展開した各葉フィールド（構造体でないフィールド）ごとに独立した連続列を保持する。各葉列の内部では外側の次元から並べ、最後の次元の要素が隣接する。1つの要素を構成する構造体全体はメモリ上に連続しない。`new soa`による確保では、各葉列の必要バイト数・アラインメントの余白・合計バイト数の`size_t`オーバーフローを検査した上で、作業領域から1回の確保で単一の連続ブロックを取得する（[rt.array-size]）。定数配列`soa .[...]`の配置とサイズ検査も同じ規則に従う。
 
@@ -719,7 +719,7 @@ fn clear_optional(grid: #[u8; _, _]?) -> void {
 - 1次元での全体書き込み`a#[i] = 値`は、右辺を評価した後に各葉列の`i`番目へ書き込む。
 - フィールドへの書き込み`a.[i]#field = 値`（入れ子の`a.[i].pos#x = 値`や複合代入を含む）は、該当フィールドに属する葉列の`i`番目だけに書き込む。
 - 2次元以上での`grid.[y]`は、残る次元を持つSoA配列参照（`soa #[T]` / `soa .[T]`）の部分配列を返す。
-- 同じ要素型・同じ添字種別のSoA配列と通常の配列を混ぜた一括書き込み（[array.bulk]）では、各位置で要素ごとの読み取りと書き込み（gather・scatter）を行う。
+- [array.bulk] でSoA配列と通常の配列を混ぜた一括書き込みでは、各位置で要素ごとの読み取りと書き込み（gather・scatter）を行う。
 
 **処理量の上限を定める。**
 
@@ -732,7 +732,7 @@ fn clear_optional(grid: #[u8; _, _]?) -> void {
 
 **[array.soa-column]** 非nilのSoA配列参照`a`に対して`a.field`と書くと、`T`のフィールド`field`に対応する列参照を取り出す。`field`が葉フィールドなら通常の配列参照（`#[FieldType]` / `.[FieldType]`）、入れ子の構造体フィールドならSoA配列参照（`soa #[SubStruct]` / `soa .[SubStruct]`）を返す。列参照は`a`と同じ寸法由来（[array.dimension-origin]）・書き込み権限・利用期間（[array.lifetime]）を共有し、元の配列と実体を共有する。nil許容の`soa #[T]?`・`soa .[T]?`に対する列参照は、[array.value]・[arena.let] に従って非nilを確認してから行う。長さ0の非nilなSoA配列に対する列参照は、長さ0の非nilな列参照を返す。異なる葉列同士はメモリ上で重ならないが、同じ葉列を指す別名や切り出し同士は重なり得るため、[array.value]・[array.bulk-eval] の順序と別名可視性を維持する。
 
-**[array.soa-extern]** [ffi.struct] の`extern`構造体（入れ子を含む）を要素にするSoA配列では、各葉フィールドを独立した連続列として保持し、C固有整数型（[ffi.c-integer]）の列には対応するC固有整数型の制約を維持する。要素の読み出し（`a.[i]`）はC配置の独立した値コピーを返し、`new a.[i]`で作業領域へ確保したポインタをC関数へ渡して書き換えても、元のSoA配列は自動更新されない。SoA配列へ反映するには要素への明示的な代入（`a#[i] = .p`など）を行う。
+**[array.soa-extern]** [ffi.struct] の`extern`構造体（入れ子を含む）を要素にするSoA配列では、C固有整数型（[ffi.c-integer]）の列に対応するC固有整数型の制約を維持する。要素の読み出し（`a.[i]`）はC配置の独立した値コピーを返し、`new a.[i]`で作業領域へ確保したポインタをC関数へ渡して書き換えても、元のSoA配列は自動更新されない。SoA配列へ反映するには要素への明示的な代入（`a#[i] = .p`など）を行う。
 
 ### 5.9 値域制限型
 
