@@ -201,12 +201,18 @@ fn collect_statements(statements: &[CheckedStatement], locations: &mut Vec<Locat
                     collect_statements(body, locations);
                 }
             }
-            CheckedStatement::For {
-                start, end, body, ..
-            } => {
-                collect(start, locations);
-                if let Some(end) = end {
-                    collect(end, locations);
+            CheckedStatement::For(for_stmt) => {
+                let crate::check::ir::CheckedFor { target, body, .. } = for_stmt.as_ref();
+                match target {
+                    super::ir::CheckedForTarget::Range { start, end, .. } => {
+                        collect(start, locations);
+                        collect(end, locations);
+                    }
+                    super::ir::CheckedForTarget::Array(expr)
+                    | super::ir::CheckedForTarget::Text(expr) => {
+                        collect(expr, locations);
+                    }
+                    super::ir::CheckedForTarget::TypeRange { .. } => {}
                 }
                 collect_statements(body, locations);
             }

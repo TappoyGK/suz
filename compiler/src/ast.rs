@@ -861,14 +861,16 @@ fn patch_statements(statements: &mut [Statement], ranges: &[RangeDeclaration]) {
                     patch_statements(&mut arm.body, ranges);
                 }
             }
-            Statement::For {
-                start, end, body, ..
-            } => {
-                patch_expr(start, ranges);
-                if let Some(e) = end {
-                    patch_expr(e, ranges);
+            Statement::For(for_stmt) => {
+                match &mut for_stmt.target {
+                    ForTarget::Range { start, end, .. } => {
+                        patch_expr(start, ranges);
+                        patch_expr(end, ranges);
+                    }
+                    ForTarget::Expression(expr) => patch_expr(expr, ranges),
+                    ForTarget::Type { .. } => {}
                 }
-                patch_statements(body, ranges);
+                patch_statements(&mut for_stmt.body, ranges);
             }
             Statement::Loop { condition, body } => {
                 if let Some(c) = condition {
@@ -1168,6 +1170,33 @@ pub(crate) enum LogLevel {
     Panic,
 }
 
+/// `for`・`rev` 文の反復対象。
+#[derive(Clone)]
+pub(crate) enum ForTarget {
+    Range {
+        start: Expression,
+        // メモリ効率を高めるため、終了式をBoxに置き、Forを含まない文の格納サイズも抑える。
+        end: Box<Expression>,
+        inclusive: bool,
+    },
+    Expression(Expression),
+    Type {
+        name: String,
+        location: Location,
+    },
+}
+
+/// `for`・`rev` 文。`Statement` 全体のサイズを抑えるため `Box` で保持する。
+#[derive(Clone)]
+pub(crate) struct ForStatement {
+    pub index: Option<(String, Location)>,
+    pub name: String,
+    pub location: Location,
+    pub target: ForTarget,
+    pub reverse: bool,
+    pub body: Vec<Statement>,
+}
+
 /// 構文解析済みの文。束縛やフィールドの参照はまだソース上の名前で保持する。
 #[derive(Clone)]
 pub(crate) enum Statement {
@@ -1204,16 +1233,7 @@ pub(crate) enum Statement {
         arms: Vec<MatchArm>,
         location: Location,
     },
-    For {
-        name: String,
-        location: Location,
-        start: Expression,
-        // メモリ効率を高めるため、終了式をBoxに置き、Forを含まない文の格納サイズも抑える。
-        end: Option<Box<Expression>>,
-        inclusive: bool,
-        reverse: bool,
-        body: Vec<Statement>,
-    },
+    For(Box<ForStatement>),
     Loop {
         condition: Option<Expression>,
         body: Vec<Statement>,

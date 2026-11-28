@@ -420,7 +420,7 @@ fn main() -> u8 {
         (
             "fn main() -> u8 { fix a: .[i32]? = nil\nfor x in a { }\nreturn 0 }",
             "char.for-type",
-            "iteration without a range requires text or a non-nil array",
+            "iteration without a range requires text, a non-nil array, or an enum/range type",
         ),
         (
             "fix BAD: .[mut i32] = .[]\nfn main() -> u8 { return 0 }",

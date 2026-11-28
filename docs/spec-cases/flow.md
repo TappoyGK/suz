@@ -1872,6 +1872,117 @@ iを参照できるのはループ本体の中だけ。
 |---|---|---:|---:|
 | 通常 | `[decl.local-scope]` | 4 | 12 |
 
+### flow-153 列挙型名と値域制限型名をfor・revで反復する
+
+主根拠：`[char.for-type]`。
+
+補助根拠：`[for.variable]`、`[array.enum-index]`。
+
+**ソース：**
+
+```suz
+enum Wave: u8 { Sine, Saw, Square }
+range Step: u8 = 0..<4
+range Byte: u8 = 0..=255
+
+fn main() -> u8 {
+    fix a: #[i32; Wave] = new #[0; Wave]
+    for w in Wave {
+        a#[w] = (w as i32) + 1 or return 1
+    }
+    if a.[Wave.Sine] != 1 || a.[Wave.Saw] != 2 || a.[Wave.Square] != 3 { return 2 }
+
+    var rev_wave: i32 = 0
+    rev w in Wave {
+        fix v = a.[w]
+        rev_wave = rev_wave * 10 + v or return 3
+    }
+    if rev_wave != 321 { return 4 }
+
+    var step_fwd: i32 = 0
+    for s in Step {
+        step_fwd = step_fwd * 10 + (s as i32) or return 5
+    }
+    var step_rev: i32 = 0
+    rev s in Step {
+        step_rev = step_rev * 10 + (s as i32) or return 6
+    }
+    if step_fwd != 123 || step_rev != 3210 { return 7 }
+
+    var count_fwd: i32 = 0
+    for b in Byte {
+        count_fwd = count_fwd + 1 or return 8
+        if b == 255 { continue }
+    }
+    var count_rev: i32 = 0
+    rev b in Byte {
+        count_rev = count_rev + 1 or return 9
+        if b == 0 { continue }
+    }
+    if count_fwd != 256 || count_rev != 256 { return 10 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### flow-154 範囲式に対する2変数反復は拒否する
+
+主根拠：`[char.for-type]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    for i, x in 0..<3 {}
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[char.for-type]` | 2 | 9 |
+
+### flow-155 2変数反復で同じ変数名を重複させると拒否する
+
+主根拠：`[for.variable]`。
+
+補助根拠：`[decl.duplicate]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix a = new .[1, 2]
+    for x, x in a {}
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[decl.duplicate]` | 3 | 12 |
+
 ### flow-066 textをスカラー値単位で前後に反復する
 
 主根拠：`[char.for]`。

@@ -216,14 +216,16 @@ pub(crate) fn walk_statement<V: Visitor + ?Sized>(
             }
             visitor.scope(body, None)?;
         }
-        Statement::For {
-            start, end, body, ..
-        } => {
-            visitor.expression(start)?;
-            if let Some(end) = end {
-                visitor.expression(end)?;
+        Statement::For(for_stmt) => {
+            match &for_stmt.target {
+                crate::ast::ForTarget::Range { start, end, .. } => {
+                    visitor.expression(start)?;
+                    visitor.expression(end)?;
+                }
+                crate::ast::ForTarget::Expression(expr) => visitor.expression(expr)?,
+                crate::ast::ForTarget::Type { .. } => {}
             }
-            visitor.scope(body, None)?;
+            visitor.scope(&for_stmt.body, None)?;
         }
         Statement::If {
             branches,

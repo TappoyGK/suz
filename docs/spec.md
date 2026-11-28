@@ -1692,7 +1692,7 @@ fix narrow: u8 = a + b or 0 // 格納に失敗し、代替値0を使う
 
 - 項は、整数型の`fix`・`var`・仮引数・ループ変数、`len a`、`a`の寸法名、整数の定数式、およびそれぞれに整数の定数を足し引きしたもの（`i + 1`、`len a - 2` など。`or`付きの算術は含めない）とする。寸法名と`len a`は [array.dimension-bind]・[array.dimension-origin] が対応づける次元について同じ値として扱う。
 - `a`は、`fix`・`var`の名前、仮引数、ループ変数、定数式（[const.expression]）である配列参照、およびこれらの名前から構造体の値フィールドをたどった配列参照とする。定数式である配列参照（定数配列の名前とリテラル、定数の添字で読み出した要素と部分配列、定数の境界による切り出し、定数の構造体のフィールド）では、各次元の長さを整数の定数式として扱う。途中でポインタ（`mut`・`ref`）の参照先をたどる配列参照、および定数式でない配列の要素として読み出した配列参照は含めない。
-- `if`・`elif`・`ifexpr`・`while`の本体ではその条件を、`else`・`elif`の後ろ、`while`を条件で抜けた後ろ、および`return`・`fail`・`break`・`continue`・`panic`で抜ける腕の後ろではそれまでの条件の否定を覚える。比較の否定を反対向きの比較へ置き換えるのは整数の単独比較に限る。項の比較でない `bool` 条件のうち、変数の読み出しと [contract.expr] が許す操作だけからなるもの（フィールドの `bool`、浮動小数点数の比較、`!=` など）や、比較の連鎖・`&&`・浮動小数点数の比較の否定（[expr.nan-comparison]）は、否定を覚える各位置でもその形のまま（`not (...)` の形で）一般の `bool` 条件として覚える。関数の入口では `@expects`（[contract.expects]）の条件を、呼び出しの束縛の後では `@ensures`（[contract.ensures-propagate]）の条件を覚える。`for i in s..<e`・`..=`・`rev`の本体では`s <= i < e`（`..=`では`s <= i <= e`）を、整数の`match`・`matchexpr`で定数パターンに一致した腕では`対象 == パターン`を覚える。`a.[i] or return …`・`a.[i] or panic …`のように範囲外で抜ける読み出し・切り出しの後ろでは`0 <= i < len a`（切り出しでは`0 <= s <= e <= len a`）を覚える。符号なし整数型と`len_t`の値については常に`0 <= 値`を覚え、値域制限型の値については常に`LO <= 値 <= HI`を覚える。
+- `if`・`elif`・`ifexpr`・`while`の本体ではその条件を、`else`・`elif`の後ろ、`while`を条件で抜けた後ろ、および`return`・`fail`・`break`・`continue`・`panic`で抜ける腕の後ろではそれまでの条件の否定を覚える。比較の否定を反対向きの比較へ置き換えるのは整数の単独比較に限る。項の比較でない `bool` 条件のうち、変数の読み出しと [contract.expr] が許す操作だけからなるもの（フィールドの `bool`、浮動小数点数の比較、`!=` など）や、比較の連鎖・`&&`・浮動小数点数の比較の否定（[expr.nan-comparison]）は、否定を覚える各位置でもその形のまま（`not (...)` の形で）一般の `bool` 条件として覚える。関数の入口では `@expects`（[contract.expects]）の条件を、呼び出しの束縛の後では `@ensures`（[contract.ensures-propagate]）の条件を覚える。`for i in s..<e`・`..=`・`rev`の本体では`s <= i < e`（`..=`では`s <= i <= e`）を、通常の配列を対象とする2変数反復`for i, x in a`・`rev i, x in a`（[array.iteration]）で対象式が上記の項`a`であるときは`0 <= i < len a`を、整数の`match`・`matchexpr`で定数パターンに一致した腕では`対象 == パターン`を覚える。`a.[i] or return …`・`a.[i] or panic …`のように範囲外で抜ける読み出し・切り出しの後ろでは`0 <= i < len a`（切り出しでは`0 <= s <= e <= len a`）を覚える。符号なし整数型と`len_t`の値については常に`0 <= 値`を覚え、値域制限型の値については常に`LO <= 値 <= HI`を覚える。
 - 条件は短絡評価と比較の連鎖を含む評価の順に1つずつ覚える。`&&`で分けて覚え、`not`は否定として扱う。`||`の真の側では両辺を分解して覚えず式全体を一般の `bool` 条件として覚え、偽の側（および `not (a || b)`）では両辺の否定に分けて覚える。
 - 条件に出てくる項が変わりうる場所（`var`の変数・配列参照・構造体フィールドへの代入および複合代入、参照でキャプチャーされている`var`に対するどの関数の呼び出し、`var`やそのフィールドを受け手にした`#`メソッドの呼び出し）では、その条件を忘れる（条件式の評価途中や式の中の代入にも同じ規則を適用する）。共有された参照先や配列要素に依存する一般の `bool` 条件は、書き込みまたは関数・メソッドの呼び出しをまたぐと忘れる（配列要素の更新で配列参照の`len`の保証は失わない）。
 - 制御の流れが合流する場所（`if`・`match`の後ろ、ループの先頭、ループの後ろ）では、すべての経路から導ける条件のみを残す。関数とメソッドの本体は`@expects`（[contract.expects]）で宣言された条件を記憶した状態（契約がなければ空の状態）から始め、クロージャの本体は作成時点で覚えている条件のうち値キャプチャーされた項（と定数・`len`・寸法名）だけからなる条件を引き継ぐ。
@@ -1718,6 +1718,8 @@ fix narrow: u8 = a + b or 0 // 格納に失敗し、代替値0を使う
 
 1次元では各反復の開始時に要素の値をコピーし、2次元以上ではその部分配列への非nil参照を束縛する。束縛は不変で、部分配列の要素の更新は認める。要素値に含まれる参照は同じ実体を指す。先の反復で書き換えた要素を後の反復が読む場合、書き換え後の値を読む。通常の添字ループも記述された順序で読み書きし、配列同士が重ならないとは仮定しない。
 
+2変数形式`for 添字変数, 要素変数 in a`・`rev 添字変数, 要素変数 in a`も書ける。通常の配列（1次元・多次元・SoA配列を含む）では、添字変数の型を`len_t`（[len.type]）とし、反復対象の参照の先頭を0とする位置（`rev`では末尾の位置から0まで逆順。切り出し元の配列へのオフセットは付けない）を束縛する。要素変数の型と取得時点は1変数形式と同じとする。対象式が [array.bounds-proof] の項`a`のときだけ、本体で`0 <= 添字変数 < len a`を覚える。列挙型添字配列の2変数形式は [array.enum-iteration] に従い、2つのループ変数には [for.variable] を適用する。
+
 **[array.enum-init]** 列挙型`E`を添字にする配列は、作業領域に確保する`new #[...]`・`new .[...]`および定数配列`.[...]`（[array.constant]）で次の2つの形により生成する。
 
 - `new #[E.A: 式, E.B: 式, ...]` / `new .[E.A: 式, ...]` / `.[E.A: 式, ...]`：すべての列挙子をちょうど1回ずつ書く。欠落、重複、別の列挙型の列挙子、整数や任意の式をキーにすることはコンパイルエラーとする。書く順は宣言順と違ってもよい。
@@ -1729,7 +1731,7 @@ fix narrow: u8 = a + b or 0 // 格納に失敗し、代替値0を使う
 
 **[array.enum-index]** 列挙型`E`を添字にする配列`a`に対する`a.[e]`・`a#[e] = 値`・`a.[e]#field = 値`は、`e`の型が`E`のときだけ書ける。範囲外にならないため`or`は不要であり、実行時の範囲検査も生成しない。`or`を書いた場合は [array.access-handler] に従い、連続するアクセスの全段の成功が保証される場合に [array.redundant-handler] の警告を出す。要素型が配列参照の`rows.[wave].[i] or 0.0`のように後段に保証がない場合は`or`を必須とし、警告しない。切り出し`a.[start:end]`（[array.slice]）はコンパイルエラーとする。
 
-**[array.enum-iteration]** 列挙型を添字にする非nil配列参照`a`に対し、`for x in a`・`rev x in a`は [array.iteration] に従って要素の値を反復する。順序は列挙子の宣言順（`rev`はその逆）とする。
+**[array.enum-iteration]** 列挙型`E`を添字にする非nil配列参照`a`に対し、`for x in a`・`rev x in a`および2変数形式の`for e, x in a`・`rev e, x in a`は [array.iteration] に従って要素を反復する。順序は列挙子の宣言順（`rev`はその逆）とし、2変数形式では第1変数の型を`E`、第2変数の型を要素型とする。
 
 **[array.enum-dispatch]** 要素が関数値（`static fn`）の列挙型添字配列では、`a.[e](実引数)`で呼べる。配列と添字から関数値を決めてから、実引数を左から1回ずつ評価する（[fn.value-evaluation] と同じ）。
 
@@ -1914,7 +1916,7 @@ for i in 0..<limit {
 }
 ```
 
-**[for.variable]** ループ変数の型は両端の型であり、値は変更できない。名前はループ本体の中だけで参照でき、名前の重複とシャドーイングの規則に従う。
+**[for.variable]** 範囲反復のループ変数の型は両端の型とする。すべての`for`・`rev`のループ変数（2変数形式の両方を含む）は値を変更できず、名前はループ本体の中だけで参照でき、[name.value]・[decl.duplicate]・[decl.shadowing] に従う。2変数形式で同じ名前を重複させることはコンパイルエラーとする。
 
 ```suz
 for i in 0..<10 {
@@ -1926,7 +1928,7 @@ for i in 0..=10 {
 }
 ```
 
-**[char.for-type]** 範囲演算子を付けずに `for 名前 in 式 { ... }` または `rev 名前 in 式 { ... }` と書く場合、式の型は `symbol`・`text`または非nilの配列参照でなければならない。配列の反復は [array.iteration] に従う。文字列の場合、`for` は先頭から、`rev` は末尾から、Unicodeスカラー値を1つずつ反復する。ループ変数の型は `char` で、値の変更と参照範囲には [for.variable] を適用する。
+**[char.for-type]** 範囲演算子を付けずに反復を書く場合、1変数形式（`for 名前 in 対象 { ... }`・`rev 名前 in 対象 { ... }`）の対象は `symbol`・`text`・非nilの配列参照の式、または列挙型・値域制限型の型名（[name.type] のつづり）でなければならない。2変数形式（`for 添字変数, 要素変数 in 対象 { ... }`・`rev 添字変数, 要素変数 in 対象 { ... }`）の対象は非nilの配列参照の式に限られ、範囲式・`symbol`・`text`・型名に対する2変数形式はコンパイルエラーとする。配列の反復は [array.iteration]・[array.enum-iteration] に従う。文字列の場合、`for` は先頭から、`rev` は末尾から、Unicodeスカラー値を1つずつ反復し、ループ変数の型は `char` とする。列挙型名 `E` を対象とする場合は宣言順（`rev` は逆順）に、値域制限型名 `R` を対象とする場合は `LO` から `HI` まで1ずつ（`rev` は逆順）反復し、ループ変数の型はその型とする。型名による反復の位置更新は1回O(1)で動的確保をせず、終了規則は [for.bounds]・[rev.bounds]・[loop.continue] に従い、最後の値の後に範囲外の値を作らず終了する（1値の型や基底型の最小値・最大値、`u64`全域を含む）。列挙型・値域制限型以外の型名はコンパイルエラーとする。ループ変数の変更禁止と参照範囲には [for.variable] を適用する。
 
 **[char.for]** 反復対象の式は開始時に1回だけ評価し、その値を最後まで読む。空の `symbol` または `text` では反復しない。反復対象の式にも [for.bound-reference] を適用する。`var` の値を使う場合は、事前に `fix` へコピーする。元の変数への後続の代入は反復対象を変えない。
 
@@ -3384,8 +3386,10 @@ RecoverStatement ::= "recover" Expression
 IgnoreStatement  ::= "ignore" IGNORE_REASON
 WhileStatement   ::= "while" Condition Block
 LoopStatement    ::= "loop" Block
-ForStatement     ::= "for" IDENT "in" Condition ( RangeOperator Condition )? Block
-RevStatement     ::= "rev" IDENT "in" Condition ( RangeOperator Condition )? Block
+ForStatement     ::= "for" LoopVars "in" LoopTarget Block
+RevStatement     ::= "rev" LoopVars "in" LoopTarget Block
+LoopVars         ::= IDENT ( "," IDENT )?
+LoopTarget       ::= Condition ( RangeOperator Condition )? | IDENT
 RangeOperator    ::= "..<" | "..="
 PanicStatement   ::= "panic" TEMPLATE
 LogStatement     ::= "log" LogLevel TEMPLATE
@@ -3403,7 +3407,7 @@ AllowItem        ::= ALLOW_ITEM
 
 `ALLOW_ITEM` は [allow.item] に従って読む1つのトークンである。`AllowClause` には [allow.clause] と [allow.contains-block]、`AllowStatement` には [allow.block]、`AllowItem` には [allow.item]・[allow.reason]・[allow.rule-check] を適用する。`LogLevel` の `"debug"`・`"info"`・`"warn"` はそのつづりの `IDENT`、`"error"` は予約語トークンに一致する。
 
-`RangeOperator` は [for.range-spacing] に従い、左右の式の境界に隣接する。`Assignment` と `TextAppend` の右辺には [assign.rhs-write] の代入先の制約を適用する。`TextAppend` は [text.append]・[text.append-arena] に従う。`ForStatement` と `RevStatement` のすべての `Condition` には [for.bound-reference] の参照の制約も適用する。範囲演算子のない形は [char.for-type]・[char.for]・[array.iteration] に従う。`Condition` の扱いは A.6 に定める。
+`RangeOperator` は [for.range-spacing] に従い、左右の式の境界に隣接する。`Assignment` と `TextAppend` の右辺には [assign.rhs-write] の代入先の制約を適用する。`TextAppend` は [text.append]・[text.append-arena] に従う。`ForStatement` と `RevStatement` の `LoopTarget` で `in` の直後に [name.type] のつづりの `IDENT` があり、その直後が `{` のときは型名として読む。それ以外のすべての `Condition` には [for.bound-reference] の参照の制約も適用する。範囲演算子のない形と2変数形式は [char.for-type]・[char.for]・[array.iteration]・[array.enum-iteration] に従う。`Condition` の扱いは A.6 に定める。
 
 ### A.5 式
 

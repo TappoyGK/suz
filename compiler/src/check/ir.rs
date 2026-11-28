@@ -62,6 +62,34 @@ pub(crate) struct CheckedFunction {
 /// [`crate::ast::Statement`] の検査結果。
 /// 束縛と参照を番号へ解決し、束縛・代入の型を確定する。
 /// 式内の失敗時returnは専用の文へ移し、C生成で制御を組み立てられるようにする。
+/// 型検査済みの `for`・`rev` 文の反復対象。
+#[derive(Clone)]
+pub(crate) enum CheckedForTarget {
+    Range {
+        start: Box<CheckedExpression>,
+        end: Box<CheckedExpression>,
+        inclusive: bool,
+    },
+    Array(Box<CheckedExpression>),
+    Text(Box<CheckedExpression>),
+    TypeRange {
+        ty: Type,
+        lo: i128,
+        hi: i128,
+    },
+}
+
+/// 型検査済みの `for`・`rev` 文。`CheckedStatement` 全体のサイズを抑えるため `Box` で保持する。
+#[derive(Clone)]
+pub(crate) struct CheckedFor {
+    pub index: Option<(usize, Type)>,
+    pub id: usize,
+    pub variable_type: Type,
+    pub target: CheckedForTarget,
+    pub reverse: bool,
+    pub body: Vec<CheckedStatement>,
+}
+
 /// メモリ効率を高めるため、大きな列挙子の式をBoxに置き、全ての文の格納サイズを抑える。
 /// 失敗時returnの式は、検査中に作ったBoxをそのまま使う。
 #[derive(Clone)]
@@ -106,15 +134,7 @@ pub(crate) enum CheckedStatement {
         arms: Vec<(Option<CheckedExpression>, Vec<CheckedStatement>)>,
         pattern_warnings: Vec<Location>,
     },
-    For {
-        id: usize,
-        variable_type: Type,
-        start: Box<CheckedExpression>,
-        end: Option<Box<CheckedExpression>>,
-        inclusive: bool,
-        reverse: bool,
-        body: Vec<CheckedStatement>,
-    },
+    For(Box<CheckedFor>),
     ArithmeticReturn {
         location: Location,
         id: usize,

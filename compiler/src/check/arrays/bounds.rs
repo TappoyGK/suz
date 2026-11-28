@@ -432,6 +432,59 @@ fn base_affine(expr: &CheckedExpression, scope: &Scope) -> Option<Affine> {
     }
 }
 
+/// 配列参照 `target` が `[array.bounds-proof]` の項 `a` に該当するか判定する。
+fn is_bounds_proof_array_term(target: &CheckedExpression, scope: &Scope) -> bool {
+    let _ = scope;
+    match &target.value {
+        Value::Local(_) | Value::Array { .. } => true,
+        Value::Cast(inner) | Value::SoaColumn { target: inner, .. } => {
+            is_bounds_proof_array_term(inner, scope)
+        }
+        Value::Field { .. } => {
+            array_value_path(target).is_some()
+                || field_value(target).is_some_and(|f| matches!(f.value, Value::Array { .. }))
+        }
+        _ => matches!(
+            super::super::constants::evaluate(target),
+            Ok(Some(CheckedExpression {
+                value: Value::Array { .. },
+                ..
+            }))
+        ),
+    }
+}
+
+/// 2 変数形式の通常配列反復 `for i, x in a` で、`a` が `[array.bounds-proof]` の項のとき `0 <= i < len a` を覚える。
+pub(in crate::check) fn loop_array_index_bound(
+    index_id: usize,
+    array_expr: &CheckedExpression,
+    location: Location,
+    scope: &mut Scope,
+) {
+    if !is_bounds_proof_array_term(array_expr, scope) {
+        return;
+    }
+    let Some(len_affine) = target_dim_affine(array_expr, 0, scope) else {
+        return;
+    };
+    let i_term = Affine::term(Term::Local(index_id));
+    let mut facts = scope.array_bounds.facts.borrow_mut();
+    facts.add_comparison(
+        &Affine::constant(0),
+        ComparisonOperator::LessEqual,
+        &i_term,
+        false,
+        location,
+    );
+    facts.add_comparison(
+        &i_term,
+        ComparisonOperator::Less,
+        &len_affine,
+        false,
+        location,
+    );
+}
+
 pub(in crate::check) fn loop_bound(
     id: usize,
     start: &CheckedExpression,

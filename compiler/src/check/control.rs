@@ -225,14 +225,16 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
                     validate_statements(&arm.body, in_value)?;
                 }
             }
-            Statement::For {
-                start, end, body, ..
-            } => {
-                visit(start, false, in_value)?;
-                if let Some(end) = end {
-                    visit(end, false, in_value)?;
+            Statement::For(for_stmt) => {
+                match &for_stmt.target {
+                    crate::ast::ForTarget::Range { start, end, .. } => {
+                        visit(start, false, in_value)?;
+                        visit(end, false, in_value)?;
+                    }
+                    crate::ast::ForTarget::Expression(expr) => visit(expr, false, in_value)?,
+                    crate::ast::ForTarget::Type { .. } => {}
                 }
-                validate_statements(body, in_value)?;
+                validate_statements(&for_stmt.body, in_value)?;
             }
             Statement::Binding { initializer, .. } => visit(initializer, true, in_value)?,
             Statement::Assign {
@@ -532,7 +534,7 @@ fn contains_break(statements: &[Statement]) -> bool {
             match statement {
                 Statement::Break(_) => self.0 = true,
                 // 入れ子のループ内のbreakは、その内側のループに属する。
-                Statement::For { .. } | Statement::Loop { .. } => return Ok(()),
+                Statement::For(_) | Statement::Loop { .. } => return Ok(()),
                 _ => {}
             }
             visit::walk_statement(self, statement)

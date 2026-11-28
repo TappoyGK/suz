@@ -943,23 +943,41 @@ impl Analysis {
                 CheckedStatement::Loop { condition, body } => {
                     self.loop_body(body, condition.as_ref(), region, arena);
                 }
-                CheckedStatement::For {
-                    id,
-                    variable_type,
-                    start,
-                    end,
-                    body,
-                    ..
-                } => {
-                    let source = self.expr(start, region, arena);
-                    if let Some(end) = end {
-                        self.expr(end, region, arena);
-                    }
+                CheckedStatement::For(for_stmt) => {
+                    let crate::check::ir::CheckedFor {
+                        index,
+                        id,
+                        variable_type,
+                        target,
+                        body,
+                        ..
+                    } = for_stmt.as_ref();
+                    let source = match target {
+                        crate::check::ir::CheckedForTarget::Range { start, end, .. } => {
+                            self.expr(start, region, arena);
+                            self.expr(end, region, arena);
+                            None
+                        }
+                        crate::check::ir::CheckedForTarget::Array(start) => {
+                            Some((start.ty, self.expr(start, region, arena)))
+                        }
+                        crate::check::ir::CheckedForTarget::Text(start) => {
+                            self.expr(start, region, arena);
+                            None
+                        }
+                        crate::check::ir::CheckedForTarget::TypeRange { .. } => None,
+                    };
                     let locals = self.locals.clone();
                     let location = self.regions[region].end;
+                    if let Some((index_id, index_type)) = index {
+                        let index_cell = self.cell(region, location, *index_type);
+                        self.locals.insert(*index_id, index_cell);
+                    }
                     let cell = self.cell(region, location, *variable_type);
                     self.locals.insert(*id, cell);
-                    if let Some(array) = start.ty.array_id() {
+                    if let Some((start_ty, source)) = source
+                        && let Some(array) = start_ty.array_id()
+                    {
                         let rank = self.structs.arrays.borrow().get(array).rank;
                         let value = if rank == 1 {
                             self.read(*variable_type, Place::Indirect(source[&vec![]], vec![]))
