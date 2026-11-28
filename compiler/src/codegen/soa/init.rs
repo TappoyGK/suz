@@ -53,16 +53,21 @@ pub(in crate::codegen) fn allocate(
         .unwrap();
     }
     for (i, length) in lengths.iter().enumerate() {
-        write!(
-            c,
-            "{} suz_length_{i} = {}; ",
-            length.ty.c_name(),
-            expression(length, context)
-        )
-        .unwrap();
+        if array.dims[i].is_none() {
+            write!(
+                c,
+                "{} suz_length_{i} = {}; ",
+                length.ty.c_name(),
+                expression(length, context)
+            )
+            .unwrap();
+        }
     }
     write!(c, "{} suz_array_value; ", ty.c_name()).unwrap();
     for (i, length) in lengths.iter().enumerate() {
+        let Some(ridx) = array.runtime_dim_index(i) else {
+            continue;
+        };
         let invalid = panic_call(
             location,
             &format!("array dimension {} is outside len_t [rt.array-size]", i + 1),
@@ -75,7 +80,7 @@ pub(in crate::codegen) fn allocate(
         };
         write!(
             c,
-            "if ({negative}(uint64_t)suz_length_{i} > INT32_MAX) {invalid}; suz_array_value.lengths[{i}] = (int32_t)suz_length_{i}; "
+            "if ({negative}(uint64_t)suz_length_{i} > INT32_MAX) {invalid}; suz_array_value.lengths[{ridx}] = (int32_t)suz_length_{i}; "
         )
         .unwrap();
     }
@@ -86,9 +91,13 @@ pub(in crate::codegen) fn allocate(
         context,
     );
     for i in (0..lengths.len()).rev() {
+        let dim_expr = match array.dims[i] {
+            Some(enum_ty) => enum_ty.count.to_string(),
+            None => format!("suz_length_{i}"),
+        };
         write!(
             c,
-            "if (suz_length_{i} != 0 && suz_count > SIZE_MAX / (size_t)suz_length_{i}) {overflow}; suz_count *= (size_t)suz_length_{i}; "
+            "if ({dim_expr} != 0 && suz_count > SIZE_MAX / (size_t){dim_expr}) {overflow}; suz_count *= (size_t){dim_expr}; "
         )
         .unwrap();
     }
@@ -185,14 +194,20 @@ pub(in crate::codegen) fn constant(
         unreachable!("soa array element must be a struct");
     };
     let all_leaves = leaves(struct_id, context);
-    let lengths_str = lengths
+    let all_lengths: Vec<String> = lengths
         .iter()
         .map(|v| match v.value {
             Value::Integer { value, .. } => value.to_string(),
             _ => unreachable!("constant array dimension"),
         })
-        .collect::<Vec<_>>()
-        .join(", ");
+        .collect();
+    let lengths_str = all_lengths.join(", ");
+    let rt_lengths: Vec<String> = all_lengths
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| array.dims[*i].is_none())
+        .map(|(_, s)| s.clone())
+        .collect();
     let count = *metadata.constant_counts.last().unwrap();
     let mut col_initials: Vec<Vec<(String, bool)>> = Vec::with_capacity(all_leaves.len());
     for leaf in &all_leaves {
@@ -287,7 +302,8 @@ pub(in crate::codegen) fn constant(
         .collect::<Vec<_>>()
         .join(", ");
     format!(
-        "({}){{ .cols = {{ {cols} }}, .lengths = {{ {lengths_str} }} }}",
-        value.ty.c_name()
+        "({}){{ .cols = {{ {cols} }}{} }}",
+        value.ty.c_name(),
+        crate::codegen::arrays::lengths_field_init(&rt_lengths)
     )
 }

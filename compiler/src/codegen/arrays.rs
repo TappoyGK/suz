@@ -13,11 +13,41 @@ pub(super) use bulk::emit_bulk_write;
 pub(super) use constant::{constant, constant_element};
 use std::fmt::Write;
 
+pub(super) fn dim_length_expr(
+    array: &crate::ast::arrays::ArrayType,
+    source: &str,
+    cached: Option<usize>,
+    axis: usize,
+) -> String {
+    if let Some(enum_ty) = array.dims[axis] {
+        return enum_ty.count.to_string();
+    }
+    let ridx = array.runtime_dim_index(axis).unwrap();
+    cached.map_or_else(
+        || format!("{source}.lengths[{ridx}]"),
+        |id| format!("suz_array_length_{id}_{axis}"),
+    )
+}
+
+pub(super) fn lengths_field_init(lengths: &[String]) -> String {
+    if lengths.is_empty() {
+        String::new()
+    } else {
+        format!(", .lengths = {{ {} }}", lengths.join(", "))
+    }
+}
+
 pub(super) fn declarations(c: &mut String, context: &ExpressionContext) {
     if !context.arrays.entries.is_empty() {
         c.push_str("#include <string.h>\n");
     }
     for (id, array) in context.arrays.entries.iter().enumerate() {
+        let rt_dims = array.runtime_dim_count();
+        let lengths_field = if rt_dims == 0 {
+            String::new()
+        } else {
+            format!(" int32_t lengths[{rt_dims}];")
+        };
         if array.soa {
             let Type::Struct(struct_id) = array.element else {
                 continue;
@@ -25,8 +55,7 @@ pub(super) fn declarations(c: &mut String, context: &ExpressionContext) {
             let leaf_count = super::soa::leaves(struct_id, context).len();
             writeln!(
                 c,
-                "typedef struct {{ void *cols[{leaf_count}]; int32_t lengths[{}]; }} suz_array_{id};",
-                array.rank()
+                "typedef struct {{ void *cols[{leaf_count}];{lengths_field} }} suz_array_{id};"
             )
             .unwrap();
             writeln!(c, "typedef suz_array_{id} suz_readonly_array_{id};").unwrap();
@@ -34,14 +63,12 @@ pub(super) fn declarations(c: &mut String, context: &ExpressionContext) {
         }
         writeln!(
             c,
-            "typedef struct {{ const void *data; int32_t lengths[{}]; }} suz_readonly_array_{id};",
-            array.rank()
+            "typedef struct {{ const void *data;{lengths_field} }} suz_readonly_array_{id};"
         )
         .unwrap();
         writeln!(
             c,
-            "typedef struct {{ void *data; int32_t lengths[{}]; }} suz_array_{id};",
-            array.rank()
+            "typedef struct {{ void *data;{lengths_field} }} suz_array_{id};"
         )
         .unwrap();
     }
@@ -66,7 +93,9 @@ pub(super) fn cache(
         .unwrap();
     }
     for dimension in 0..array.rank() {
-        writeln!(c, "{indent}const int32_t suz_array_length_{id}_{dimension} = ({source}).lengths[{dimension}];\n{indent}(void)suz_array_length_{id}_{dimension};").unwrap();
+        if let Some(ridx) = array.runtime_dim_index(dimension) {
+            writeln!(c, "{indent}const int32_t suz_array_length_{id}_{dimension} = ({source}).lengths[{ridx}];\n{indent}(void)suz_array_length_{id}_{dimension};").unwrap();
+        }
     }
 }
 
@@ -92,7 +121,7 @@ pub(super) fn readonly(value: &CheckedExpression, context: &mut ExpressionContex
     if array.soa {
         return expression(value, context);
     }
-    let rank = array.rank();
+    let rt_dims = array.runtime_dim_count();
     let (setup, source) = if direct_reference(value) {
         (String::new(), format!("({})", expression(value, context)))
     } else {
@@ -100,12 +129,12 @@ pub(super) fn readonly(value: &CheckedExpression, context: &mut ExpressionContex
         let value = expression(value, context);
         (format!("{source} = {value}, "), source)
     };
-    let lengths = (0..rank)
-        .map(|axis| format!("{source}.lengths[{axis}]"))
-        .collect::<Vec<_>>()
-        .join(", ");
+    let lengths: Vec<String> = (0..rt_dims)
+        .map(|ridx| format!("{source}.lengths[{ridx}]"))
+        .collect();
     format!(
-        "({setup}(suz_readonly_array_{id}){{ .data = {source}.data, .lengths = {{ {lengths} }} }})"
+        "({setup}(suz_readonly_array_{id}){{ .data = {source}.data{} }})",
+        lengths_field_init(&lengths)
     )
 }
 
@@ -193,7 +222,8 @@ pub(super) fn allocate(
         unreachable!()
     };
     context.uses_arena = true;
-    let element = context.arrays.get(ty.array_id().unwrap()).element.c_name();
+    let array = context.arrays.get(ty.array_id().unwrap());
+    let element = array.element.c_name();
     let mut c = String::from("({ ");
     for count in &metadata.constant_counts {
         write!(c, r#"_Static_assert(UINT64_C({count}) <= SIZE_MAX / sizeof({element}), "array byte size overflows size_t [array.layout]"); "#).unwrap();
@@ -206,19 +236,24 @@ pub(super) fn allocate(
         )
         .unwrap();
     }
-    // 寸法の検証より先に、各寸法の式を一度ずつ左から評価する。
+    // 寸法の検証より先に、長さの次元の式を一度ずつ左から評価する。列挙型次元は実行時に評価しない。
     for (i, length) in lengths.iter().enumerate() {
-        write!(
-            c,
-            "{} suz_length_{i} = {}; ",
-            length.ty.c_name(),
-            expression(length, context)
-        )
-        .unwrap();
+        if array.dims[i].is_none() {
+            write!(
+                c,
+                "{} suz_length_{i} = {}; ",
+                length.ty.c_name(),
+                expression(length, context)
+            )
+            .unwrap();
+        }
     }
     write!(c, "{} suz_array_value; ", ty.c_name()).unwrap();
 
     for (i, length) in lengths.iter().enumerate() {
+        let Some(ridx) = array.runtime_dim_index(i) else {
+            continue;
+        };
         let invalid = panic(
             location,
             &format!("array dimension {} is outside len_t [rt.array-size]", i + 1),
@@ -229,7 +264,7 @@ pub(super) fn allocate(
         } else {
             String::new()
         };
-        write!(c, "if ({negative}(uint64_t)suz_length_{i} > INT32_MAX) {invalid}; suz_array_value.lengths[{i}] = (int32_t)suz_length_{i}; ").unwrap();
+        write!(c, "if ({negative}(uint64_t)suz_length_{i} > INT32_MAX) {invalid}; suz_array_value.lengths[{ridx}] = (int32_t)suz_length_{i}; ").unwrap();
     }
     c.push_str("size_t suz_count = 1; ");
     let overflow = panic(
@@ -239,7 +274,11 @@ pub(super) fn allocate(
     );
     // 外側がゼロでも、内側の部分配列の配置が表現可能であることを保証する。
     for i in (0..lengths.len()).rev() {
-        write!(c, "if (suz_length_{i} != 0 && suz_count > SIZE_MAX / (size_t)suz_length_{i}) {overflow}; suz_count *= (size_t)suz_length_{i}; if (suz_count > SIZE_MAX / sizeof({element})) {overflow}; ").unwrap();
+        let dim_expr = match array.dims[i] {
+            Some(enum_ty) => enum_ty.count.to_string(),
+            None => format!("suz_length_{i}"),
+        };
+        write!(c, "if ({dim_expr} != 0 && suz_count > SIZE_MAX / (size_t){dim_expr}) {overflow}; suz_count *= (size_t){dim_expr}; if (suz_count > SIZE_MAX / sizeof({element})) {overflow}; ").unwrap();
     }
     write!(c, "size_t suz_bytes = suz_count * sizeof({element}); void *suz_data = suz_arena_alloc(suz_bytes ? suz_bytes : 1, alignof({element}), {}, {}, {}); ", c_string(&context.source_name), location.line, location.column).unwrap();
     if *repeated && zero_bits(&values[0]) {
@@ -289,6 +328,7 @@ pub(super) fn element_offset_parts(
     } else {
         format!("{source} = {}", expression(target, context))
     };
+    let array = context.arrays.get(target.ty.array_id().unwrap());
     let mut offset = String::new();
     for (dimension, (index, location, proven)) in indices.iter().enumerate() {
         let direct = proven.then(|| proven_index(index, context)).flatten();
@@ -302,10 +342,7 @@ pub(super) fn element_offset_parts(
             let evaluate = format!("{local} = {}, ", expression(index, context));
             (local, evaluate)
         };
-        let length = cached.map_or_else(
-            || format!("{source}.lengths[{dimension}]"),
-            |id| format!("suz_array_length_{id}_{dimension}"),
-        );
+        let length = dim_length_expr(&array, &source, cached, dimension);
         let check = if *proven {
             format!("({evaluate}true)")
         } else {
@@ -460,15 +497,16 @@ fn access_parts(
             local
         })
     };
+    let first_len = dim_length_expr(&array, &source, None, 0);
     let first = bound(start, "0".into());
-    let last = bound(end, format!("{source}.lengths[0]"));
+    let last = bound(end, first_len.clone());
     let test = if *proven {
         "true".into()
     } else if *index {
-        format!("(uint64_t){first} < (uint64_t){source}.lengths[0]")
+        format!("(uint64_t){first} < (uint64_t){first_len}")
     } else {
         format!(
-            "((uint64_t){first} <= (uint64_t){last} && (uint64_t){last} <= (uint64_t){source}.lengths[0])"
+            "((uint64_t){first} <= (uint64_t){last} && (uint64_t){last} <= (uint64_t){first_len})"
         )
     };
     // 同じ角括弧の境界は両方評価してから検査する。前の角括弧が失敗したら評価しない。
@@ -480,10 +518,10 @@ fn access_parts(
             } else { "false".into() }
         };
         let fail = if *index {
-            format!("suz_array_bounds({}, {}, {}, 1, (uint64_t){first}, {}, {source}.lengths[0])",
+            format!("suz_array_bounds({}, {}, {}, 1, (uint64_t){first}, {}, {first_len})",
                 c_string(&context.source_name), location.line, location.column, negative(start, &first))
         } else {
-            format!("suz_array_slice_bounds({}, {}, {}, (uint64_t){first}, {}, (uint64_t){last}, {}, {source}.lengths[0])",
+            format!("suz_array_slice_bounds({}, {}, {}, (uint64_t){first}, {}, (uint64_t){last}, {}, {first_len})",
                 c_string(&context.source_name), location.line, location.column, negative(start, &first), negative(end, &last))
         };
         format!("({test} || ({fail}, false))")
@@ -492,24 +530,31 @@ fn access_parts(
     });
     let condition = sequence(&previous, &format!("({})", evaluations.join(", ")), write);
     let stride = (1..array.rank())
-        .map(|i| format!("(size_t){source}.lengths[{i}]"))
+        .map(|i| format!("(size_t){}", dim_length_expr(&array, &source, None, i)))
         .collect::<Vec<_>>();
     let stride = if stride.is_empty() {
         "1".into()
     } else {
         stride.join(" * ")
     };
-    let lengths = if *index {
+    let rt_lengths: Vec<String> = if *index {
         (1..array.rank())
-            .map(|i| format!("{source}.lengths[{i}]"))
-            .collect::<Vec<_>>()
-            .join(", ")
+            .filter_map(|i| {
+                array
+                    .runtime_dim_index(i)
+                    .map(|r| format!("{source}.lengths[{r}]"))
+            })
+            .collect()
     } else {
         std::iter::once(format!("(int32_t)((uint64_t){last} - (uint64_t){first})"))
-            .chain((1..array.rank()).map(|i| format!("{source}.lengths[{i}]")))
-            .collect::<Vec<_>>()
-            .join(", ")
+            .chain((1..array.rank()).filter_map(|i| {
+                array
+                    .runtime_dim_index(i)
+                    .map(|r| format!("{source}.lengths[{r}]"))
+            }))
+            .collect()
     };
+    let lengths_init = lengths_field_init(&rt_lengths);
     let value = if array.soa {
         let Type::Struct(struct_id) = array.element else {
             unreachable!("soa array element must be a struct");
@@ -527,12 +572,12 @@ fn access_parts(
             .collect::<Vec<_>>()
             .join(", ");
         format!(
-            "({}){{ .cols = {{ {cols} }}, .lengths = {{ {lengths} }} }}",
+            "({}){{ .cols = {{ {cols} }}{lengths_init} }}",
             expr.ty.c_name()
         )
     } else {
         format!(
-            "({}){{ .data = ({} *){source}.data + (size_t){first} * ({stride}), .lengths = {{ {lengths} }} }}",
+            "({}){{ .data = ({} *){source}.data + (size_t){first} * ({stride}){lengths_init} }}",
             expr.ty.c_name(),
             element_type(array.element, target.ty)
         )
@@ -584,18 +629,27 @@ pub(super) fn emit_loop(
         .unwrap();
     }
     for dimension in 0..array.rank() {
-        writeln!(c, "{indent}    const int32_t suz_iter_length_{id}_{dimension} = suz_iter_{id}.lengths[{dimension}];").unwrap();
+        if let Some(ridx) = array.runtime_dim_index(dimension) {
+            writeln!(c, "{indent}    const int32_t suz_iter_length_{id}_{dimension} = suz_iter_{id}.lengths[{ridx}];").unwrap();
+        }
     }
+    let iter_len = |dimension: usize| -> String {
+        if let Some(enum_ty) = array.dims[dimension] {
+            enum_ty.count.to_string()
+        } else {
+            format!("suz_iter_length_{id}_{dimension}")
+        }
+    };
     let (initial, condition, position) = if reverse {
         (
-            format!("suz_iter_length_{id}_0"),
+            iter_len(0),
             format!("suz_cursor_{id} > 0"),
             format!("--suz_cursor_{id}"),
         )
     } else {
         (
             "0".into(),
-            format!("suz_cursor_{id} < suz_iter_length_{id}_0"),
+            format!("suz_cursor_{id} < {}", iter_len(0)),
             format!("suz_cursor_{id}++"),
         )
     };
@@ -623,14 +677,14 @@ pub(super) fn emit_loop(
             )
             .0
         } else {
-            let lengths = (1..array.rank())
-                .map(|i| format!("suz_iter_length_{id}_{i}"))
-                .collect::<Vec<_>>();
-            let stride = lengths
-                .iter()
-                .map(|s| format!("(size_t){s}"))
+            let stride = (1..array.rank())
+                .map(|i| format!("(size_t){}", iter_len(i)))
                 .collect::<Vec<_>>()
                 .join(" * ");
+            let rt_lengths: Vec<String> = (1..array.rank())
+                .filter(|&i| array.dims[i].is_none())
+                .map(iter_len)
+                .collect();
             let all_leaves = super::soa::leaves(struct_id, context);
             let cols = all_leaves
                 .iter()
@@ -644,26 +698,26 @@ pub(super) fn emit_loop(
                 .collect::<Vec<_>>()
                 .join(", ");
             format!(
-                "({}){{ .cols = {{ {cols} }}, .lengths = {{ {} }} }}",
+                "({}){{ .cols = {{ {cols} }}{} }}",
                 item.c_name(),
-                lengths.join(", ")
+                lengths_field_init(&rt_lengths)
             )
         }
     } else if array.rank() == 1 {
         format!("suz_iter_data_{id}[suz_pos_{id}]")
     } else {
-        let lengths = (1..array.rank())
-            .map(|i| format!("suz_iter_length_{id}_{i}"))
-            .collect::<Vec<_>>();
-        let stride = lengths
-            .iter()
-            .map(|s| format!("(size_t){s}"))
+        let stride = (1..array.rank())
+            .map(|i| format!("(size_t){}", iter_len(i)))
             .collect::<Vec<_>>()
             .join(" * ");
+        let rt_lengths: Vec<String> = (1..array.rank())
+            .filter(|&i| array.dims[i].is_none())
+            .map(iter_len)
+            .collect();
         format!(
-            "({}){{ .data = suz_iter_data_{id} + suz_pos_{id} * ({stride}), .lengths = {{ {} }} }}",
+            "({}){{ .data = suz_iter_data_{id} + suz_pos_{id} * ({stride}){} }}",
             item.c_name(),
-            lengths.join(", ")
+            lengths_field_init(&rt_lengths)
         )
     };
     writeln!(

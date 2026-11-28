@@ -30,14 +30,20 @@ pub(in crate::codegen) fn constant(
         .map(|v| constant_element(v, context))
         .collect::<Vec<_>>();
     let static_initial = initial.iter().all(|(_, literal)| *literal);
-    let lengths = lengths
+    let all_lengths: Vec<String> = lengths
         .iter()
         .map(|v| match v.value {
             Value::Integer { value, .. } => value.to_string(),
             _ => unreachable!("constant array dimension"),
         })
-        .collect::<Vec<_>>()
-        .join(", ");
+        .collect();
+    let lengths = all_lengths.join(", ");
+    let rt_lengths: Vec<String> = all_lengths
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| array.dims[*i].is_none())
+        .map(|(_, s)| s.clone())
+        .collect();
     let count = *metadata.constant_counts.last().unwrap();
     let key = format!(
         "{:?}:{lengths}:{repeated}:{}",
@@ -117,8 +123,9 @@ pub(in crate::codegen) fn constant(
         id
     };
     format!(
-        "({}){{ .data = suz_constant_array_{id}, .lengths = {{ {lengths} }} }}",
-        value.ty.c_name()
+        "({}){{ .data = suz_constant_array_{id}{} }}",
+        value.ty.c_name(),
+        super::lengths_field_init(&rt_lengths)
     )
 }
 

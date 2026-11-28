@@ -127,22 +127,22 @@ pub(super) fn column(
         let value = expression(target, context);
         (format!("{source} = {value}, "), source)
     };
-    let lengths = (0..target_array.rank())
-        .map(|axis| format!("{source}.lengths[{axis}]"))
-        .collect::<Vec<_>>()
-        .join(", ");
+    let lengths: Vec<String> = (0..target_array.runtime_dim_count())
+        .map(|ridx| format!("{source}.lengths[{ridx}]"))
+        .collect();
+    let lengths_init = super::arrays::lengths_field_init(&lengths);
     if result_array.soa {
         let cols = (leaf_offset..leaf_offset + leaf_count)
             .map(|c| format!("{source}.cols[{c}]"))
             .collect::<Vec<_>>()
             .join(", ");
         format!(
-            "({setup}({}){{ .cols = {{ {cols} }}, .lengths = {{ {lengths} }} }})",
+            "({setup}({}){{ .cols = {{ {cols} }}{lengths_init} }})",
             result_ty.c_name()
         )
     } else {
         format!(
-            "({setup}({}){{ .data = {source}.cols[{leaf_offset}], .lengths = {{ {lengths} }} }})",
+            "({setup}({}){{ .data = {source}.cols[{leaf_offset}]{lengths_init} }})",
             result_ty.c_name()
         )
     }

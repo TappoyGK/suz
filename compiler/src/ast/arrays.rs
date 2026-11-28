@@ -22,6 +22,16 @@ impl ArrayType {
         self.dims[1..].to_vec()
     }
 
+    pub fn runtime_dim_count(&self) -> usize {
+        self.dims.iter().filter(|d| d.is_none()).count()
+    }
+
+    pub fn runtime_dim_index(&self, axis: usize) -> Option<usize> {
+        self.dims[axis]
+            .is_none()
+            .then(|| self.dims[..axis].iter().filter(|d| d.is_none()).count())
+    }
+
     pub fn format_dims(&self, enums: &[EnumDeclaration]) -> Option<String> {
         if self.dims.len() == 1 && self.dims[0].is_none() {
             return None;

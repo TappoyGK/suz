@@ -70,7 +70,10 @@ pub(in crate::codegen) fn emit_bulk_write(
             .then(|| format!("suz_bulk_e_{bid} < 0"));
         (format!("suz_bulk_e_{bid}"), neg)
     } else {
-        (format!("suz_bulk_out_{bid}.lengths[0]"), None)
+        (
+            super::dim_length_expr(&out_array, &format!("suz_bulk_out_{bid}"), None, 0),
+            None,
+        )
     };
 
     // 右辺の配列参照とブロードキャストスカラーを左から右へ1回ずつ評価する。
@@ -199,9 +202,10 @@ pub(in crate::codegen) fn emit_bulk_write(
         )
         .unwrap();
     } else {
+        let len_expr = super::dim_length_expr(&out_array, &format!("suz_bulk_out_{bid}"), None, 0);
         writeln!(
             c,
-            "{inner}const size_t suz_bulk_n_{bid} = (size_t)suz_bulk_out_{bid}.lengths[0];"
+            "{inner}const size_t suz_bulk_n_{bid} = (size_t){len_expr};"
         )
         .unwrap();
     }
