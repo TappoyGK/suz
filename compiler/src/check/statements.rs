@@ -414,11 +414,11 @@ fn check_for(statement: &Statement, context: &mut StatementContext<'_>) -> Resul
             end,
             inclusive,
         } => {
-            if let Some(index) = index {
-                return Err(index.1.error(
+            if index.is_some() {
+                return Err(start.location.error(
                     ErrorKind::InvalidSource,
                     crate::diagnostic!(
-                        "char.for-type",
+                        "for.pair-target",
                         "two-variable iteration cannot be used with a range"
                     ),
                 ));
@@ -439,11 +439,11 @@ fn check_for(statement: &Statement, context: &mut StatementContext<'_>) -> Resul
             name: type_name,
             location: type_location,
         } => {
-            if let Some(index) = index {
-                return Err(index.1.error(
+            if index.is_some() {
+                return Err(type_location.error(
                     ErrorKind::InvalidSource,
                     crate::diagnostic!(
-                        "char.for-type",
+                        "for.pair-target",
                         "two-variable iteration cannot be used with a type name"
                     ),
                 ));
@@ -473,8 +473,8 @@ fn check_for(statement: &Statement, context: &mut StatementContext<'_>) -> Resul
                 return Err(type_location.error(
                     ErrorKind::InvalidSource,
                     crate::diagnostic!(
-                        "char.for-type",
-                        "type iteration requires an enum or range type"
+                        "for.type-name",
+                        "type iteration requires a declared enum or range type"
                     ),
                 ));
             }
@@ -512,15 +512,21 @@ fn check_for(statement: &Statement, context: &mut StatementContext<'_>) -> Resul
                     None,
                     Type::Char,
                 )
-            } else {
-                let message = if index.is_some() {
-                    "two-variable iteration requires a non-nil array"
-                } else {
-                    "iteration without a range requires text, a non-nil array, or an enum/range type"
-                };
+            } else if index.is_some() {
                 return Err(start.location.error(
                     ErrorKind::InvalidSource,
-                    crate::diagnostic!("char.for-type", "{message}"),
+                    crate::diagnostic!(
+                        "for.pair-target",
+                        "two-variable iteration requires a non-nil array"
+                    ),
+                ));
+            } else {
+                return Err(start.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "char.for-type",
+                        "iteration without a range requires text or a non-nil array"
+                    ),
                 ));
             }
         }

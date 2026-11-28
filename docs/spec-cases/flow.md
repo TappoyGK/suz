@@ -1872,90 +1872,7 @@ iを参照できるのはループ本体の中だけ。
 |---|---|---:|---:|
 | 通常 | `[decl.local-scope]` | 4 | 12 |
 
-### flow-153 列挙型名と値域制限型名をfor・revで反復する
-
-主根拠：`[char.for-type]`。
-
-補助根拠：`[for.variable]`、`[array.enum-index]`。
-
-**ソース：**
-
-```suz
-enum Wave: u8 { Sine, Saw, Square }
-range Step: u8 = 0..<4
-range Byte: u8 = 0..=255
-
-fn main() -> u8 {
-    fix a: #[i32; Wave] = new #[0; Wave]
-    for w in Wave {
-        a#[w] = (w as i32) + 1 or return 1
-    }
-    if a.[Wave.Sine] != 1 || a.[Wave.Saw] != 2 || a.[Wave.Square] != 3 { return 2 }
-
-    var rev_wave: i32 = 0
-    rev w in Wave {
-        fix v = a.[w]
-        rev_wave = rev_wave * 10 + v or return 3
-    }
-    if rev_wave != 321 { return 4 }
-
-    var step_fwd: i32 = 0
-    for s in Step {
-        step_fwd = step_fwd * 10 + (s as i32) or return 5
-    }
-    var step_rev: i32 = 0
-    rev s in Step {
-        step_rev = step_rev * 10 + (s as i32) or return 6
-    }
-    if step_fwd != 123 || step_rev != 3210 { return 7 }
-
-    var count_fwd: i32 = 0
-    for b in Byte {
-        count_fwd = count_fwd + 1 or return 8
-        if b == 255 { continue }
-    }
-    var count_rev: i32 = 0
-    rev b in Byte {
-        count_rev = count_rev + 1 or return 9
-        if b == 0 { continue }
-    }
-    if count_fwd != 256 || count_rev != 256 { return 10 }
-    return 0
-}
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | 正常終了 | 0 | 0 |
-
-### flow-154 範囲式に対する2変数反復は拒否する
-
-主根拠：`[char.for-type]`。
-
-**ソース：**
-
-```suz
-fn main() -> u8 {
-    for i, x in 0..<3 {}
-    return 0
-}
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | コンパイルエラー | — | 0 |
-
-**コンパイル診断：**
-
-| 設定 | 規則 | 行 | 列 |
-|---|---|---:|---:|
-| 通常 | `[char.for-type]` | 2 | 9 |
-
-### flow-155 2変数反復で同じ変数名を重複させると拒否する
+### flow-153 2変数反復で同じ変数名を重複させると拒否する
 
 主根拠：`[for.variable]`。
 
@@ -1982,6 +1899,35 @@ fn main() -> u8 {
 | 設定 | 規則 | 行 | 列 |
 |---|---|---:|---:|
 | 通常 | `[decl.duplicate]` | 3 | 12 |
+
+### flow-154 2変数反復で外側の名前をシャドーイングすると拒否する
+
+主根拠：`[for.variable]`。
+
+補助根拠：`[decl.shadowing]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    fix a = new .[1, 2]
+    fix i = 0
+    for i, x in a {}
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[decl.shadowing]` | 4 | 9 |
 
 ### flow-066 textをスカラー値単位で前後に反復する
 
@@ -2031,6 +1977,217 @@ info flow-066.suz:15: 😀
 info flow-066.suz:15: あ
 info flow-066.suz:19: changed
 ```
+
+### flow-155 範囲式に対する2変数反復は拒否する
+
+主根拠：`[for.pair-target]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    for i, x in 0..<3 {}
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[for.pair-target]` | 2 | 17 |
+
+### flow-156 文字列に対する2変数反復は拒否する
+
+主根拠：`[for.pair-target]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    for i, c in "abc" {}
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[for.pair-target]` | 2 | 17 |
+
+### flow-157 型名に対する2変数反復は拒否する
+
+主根拠：`[for.pair-target]`。
+
+**ソース：**
+
+```suz
+enum Wave: u8 { Sine }
+fn main() -> u8 {
+    for w, x in Wave {}
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[for.pair-target]` | 3 | 17 |
+
+### flow-158 列挙型名と値域制限型名をfor・revで反復する
+
+主根拠：`[for.type-name]`。
+
+補助根拠：`[for.variable]`、`[array.enum-index]`。
+
+**ソース：**
+
+```suz
+enum Wave: u8 { Sine, Saw, Square }
+range Step: u8 = 0..<4
+range One: i32 = 3..=3
+range SignedByte: i8 = -128..=127
+range FullU64: u64 = 0..=18446744073709551615
+range HighU64: u64 = 18446744073709551614..=18446744073709551615
+
+fn main() -> u8 {
+    fix a: #[i32; Wave] = new #[0; Wave]
+    for w in Wave {
+        a#[w] = (w as i32) + 1 or return 1
+    }
+    if a.[Wave.Sine] != 1 || a.[Wave.Saw] != 2 || a.[Wave.Square] != 3 { return 2 }
+
+    var rev_wave: i32 = 0
+    rev w in Wave {
+        fix v = a.[w]
+        rev_wave = rev_wave * 10 + v or return 3
+    }
+    if rev_wave != 321 { return 4 }
+
+    var step_fwd: i32 = 0
+    for s in Step {
+        step_fwd = step_fwd * 10 + (s as i32) or return 5
+    }
+    var step_rev: i32 = 0
+    rev s in Step {
+        step_rev = step_rev * 10 + (s as i32) or return 6
+    }
+    if step_fwd != 123 || step_rev != 3210 { return 7 }
+
+    var one_sum: i32 = 0
+    for o in One { one_sum = one_sum + (o as i32) or return 8 }
+    rev o in One { one_sum = one_sum + (o as i32) or return 9 }
+    if one_sum != 6 { return 10 }
+
+    var sb: i32 = 0
+    for b in SignedByte {
+        sb = sb + 1 or return 11
+        if b == 127 { continue }
+    }
+    rev b in SignedByte {
+        sb = sb + 1 or return 12
+        if b == -128 { continue }
+    }
+    if sb != 512 { return 13 }
+
+    var full_ok: i32 = 0
+    for u in FullU64 {
+        if u == 0 {
+            full_ok = full_ok + 1 or return 14
+            break
+        }
+    }
+    rev u in FullU64 {
+        if u == 18446744073709551615 {
+            full_ok = full_ok + 1 or return 15
+            break
+        }
+    }
+    for u in HighU64 {
+        full_ok = full_ok + 1 or return 16
+        if u == 18446744073709551615 { continue }
+    }
+    if full_ok != 4 { return 17 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### flow-159 構造体の型名の反復は拒否する
+
+主根拠：`[for.type-name]`。
+
+**ソース：**
+
+```suz
+struct Vec2 { x: f32 }
+fn main() -> u8 {
+    for p in Vec2 {}
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[for.type-name]` | 3 | 14 |
+
+### flow-160 宣言していない型名の反復は拒否する
+
+主根拠：`[for.type-name]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 {
+    for w in UnknownEnum {}
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[for.type-name]` | 2 | 14 |
 
 ### flow-056 forのcontinueは次の値へ進む
 

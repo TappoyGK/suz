@@ -1718,7 +1718,7 @@ fix narrow: u8 = a + b or 0 // 格納に失敗し、代替値0を使う
 
 1次元では各反復の開始時に要素の値をコピーし、2次元以上ではその部分配列への非nil参照を束縛する。束縛は不変で、部分配列の要素の更新は認める。要素値に含まれる参照は同じ実体を指す。先の反復で書き換えた要素を後の反復が読む場合、書き換え後の値を読む。通常の添字ループも記述された順序で読み書きし、配列同士が重ならないとは仮定しない。
 
-2変数形式`for 添字変数, 要素変数 in a`・`rev 添字変数, 要素変数 in a`も書ける。通常の配列（1次元・多次元・SoA配列を含む）では、添字変数の型を`len_t`（[len.type]）とし、反復対象の参照の先頭を0とする位置（`rev`では末尾の位置から0まで逆順。切り出し元の配列へのオフセットは付けない）を束縛する。要素変数の型と取得時点は1変数形式と同じとする。対象式が [array.bounds-proof] の項`a`のときだけ、本体で`0 <= 添字変数 < len a`を覚える。列挙型添字配列の2変数形式は [array.enum-iteration] に従い、2つのループ変数には [for.variable] を適用する。
+2変数形式`for 添字変数, 要素変数 in a`・`rev 添字変数, 要素変数 in a`も書ける。通常の配列（1次元・多次元・SoA配列を含む）では、添字変数の型を`len_t`（[len.type]）とし、反復対象の参照の先頭を0とする位置（`rev`では末尾の位置から0まで逆順。切り出し元の配列へのオフセットは付けない）を束縛する。要素変数の型と取得時点は1変数形式と同じとする。通常配列の2変数反復における範囲保証は [array.bounds-proof] に従う。列挙型添字配列の2変数形式は [array.enum-iteration] に従い、2つのループ変数には [for.variable] を適用する。
 
 **[array.enum-init]** 列挙型`E`を添字にする配列は、作業領域に確保する`new #[...]`・`new .[...]`および定数配列`.[...]`（[array.constant]）で次の2つの形により生成する。
 
@@ -1731,7 +1731,7 @@ fix narrow: u8 = a + b or 0 // 格納に失敗し、代替値0を使う
 
 **[array.enum-index]** 列挙型`E`を添字にする配列`a`に対する`a.[e]`・`a#[e] = 値`・`a.[e]#field = 値`は、`e`の型が`E`のときだけ書ける。範囲外にならないため`or`は不要であり、実行時の範囲検査も生成しない。`or`を書いた場合は [array.access-handler] に従い、連続するアクセスの全段の成功が保証される場合に [array.redundant-handler] の警告を出す。要素型が配列参照の`rows.[wave].[i] or 0.0`のように後段に保証がない場合は`or`を必須とし、警告しない。切り出し`a.[start:end]`（[array.slice]）はコンパイルエラーとする。
 
-**[array.enum-iteration]** 列挙型`E`を添字にする非nil配列参照`a`に対し、`for x in a`・`rev x in a`および2変数形式の`for e, x in a`・`rev e, x in a`は [array.iteration] に従って要素を反復する。順序は列挙子の宣言順（`rev`はその逆）とし、2変数形式では第1変数の型を`E`、第2変数の型を要素型とする。
+**[array.enum-iteration]** 列挙型`E`を添字にする非nil配列参照`a`に対し、`for x in a`・`rev x in a`および2変数形式の`for e, x in a`・`rev e, x in a`は [array.iteration] に従って要素を反復する。順序は列挙子の宣言順（`rev`はその逆）とし、2変数形式では第1変数の型を`E`としてその要素に対応する列挙子を、第2変数に要素の値を束縛する。
 
 **[array.enum-dispatch]** 要素が関数値（`static fn`）の列挙型添字配列では、`a.[e](実引数)`で呼べる。配列と添字から関数値を決めてから、実引数を左から1回ずつ評価する（[fn.value-evaluation] と同じ）。
 
@@ -1916,7 +1916,7 @@ for i in 0..<limit {
 }
 ```
 
-**[for.variable]** 範囲反復のループ変数の型は両端の型とする。すべての`for`・`rev`のループ変数（2変数形式の両方を含む）は値を変更できず、名前はループ本体の中だけで参照でき、[name.value]・[decl.duplicate]・[decl.shadowing] に従う。2変数形式で同じ名前を重複させることはコンパイルエラーとする。
+**[for.variable]** 範囲反復のループ変数の型は両端の型とする。すべての`for`・`rev`のループ変数（2変数形式の両方を含む）は値を変更できず、名前はループ本体の中だけで参照でき、[name.value]・[decl.duplicate]（2変数形式での同じ名前の重複を含む）・[decl.shadowing] に従う。
 
 ```suz
 for i in 0..<10 {
@@ -1928,7 +1928,7 @@ for i in 0..=10 {
 }
 ```
 
-**[char.for-type]** 範囲演算子を付けずに反復を書く場合、1変数形式（`for 名前 in 対象 { ... }`・`rev 名前 in 対象 { ... }`）の対象は `symbol`・`text`・非nilの配列参照の式、または列挙型・値域制限型の型名（[name.type] のつづり）でなければならない。2変数形式（`for 添字変数, 要素変数 in 対象 { ... }`・`rev 添字変数, 要素変数 in 対象 { ... }`）の対象は非nilの配列参照の式に限られ、範囲式・`symbol`・`text`・型名に対する2変数形式はコンパイルエラーとする。配列の反復は [array.iteration]・[array.enum-iteration] に従う。文字列の場合、`for` は先頭から、`rev` は末尾から、Unicodeスカラー値を1つずつ反復し、ループ変数の型は `char` とする。列挙型名 `E` を対象とする場合は宣言順（`rev` は逆順）に、値域制限型名 `R` を対象とする場合は `LO` から `HI` まで1ずつ（`rev` は逆順）反復し、ループ変数の型はその型とする。型名による反復の位置更新は1回O(1)で動的確保をせず、終了規則は [for.bounds]・[rev.bounds]・[loop.continue] に従い、最後の値の後に範囲外の値を作らず終了する（1値の型や基底型の最小値・最大値、`u64`全域を含む）。列挙型・値域制限型以外の型名はコンパイルエラーとする。ループ変数の変更禁止と参照範囲には [for.variable] を適用する。
+**[char.for-type]** 範囲演算子を付けずに `for 名前 in 式 { ... }` または `rev 名前 in 式 { ... }` と書く場合、式の型は `symbol`・`text`または非nilの配列参照でなければならない。配列の反復は [array.iteration] に従う。文字列の場合、`for` は先頭から、`rev` は末尾から、Unicodeスカラー値を1つずつ反復する。ループ変数の型は `char` で、値の変更と参照範囲には [for.variable] を適用する。
 
 **[char.for]** 反復対象の式は開始時に1回だけ評価し、その値を最後まで読む。空の `symbol` または `text` では反復しない。反復対象の式にも [for.bound-reference] を適用する。`var` の値を使う場合は、事前に `fix` へコピーする。元の変数への後続の代入は反復対象を変えない。
 
@@ -1942,6 +1942,19 @@ for i in 0..=10 {
 | 利用者の制御 | 文字を順に読む場合は添字を毎回先頭から探索する代わりにfor・revを使える |
 
 `break` は反復を終了し、`continue` はそれぞれの進行方向の次のスカラー値へ進む。構造体リテラルの括弧には [expr.struct-in-cond]、関数末尾への到達判定には [fn.flow-analysis] を適用する。反復とUTF-8の復号では、一時文字列や反復対象全体のコピーを作らず、動的メモリを確保せず、シンボルプールに値を登録しない。反復対象の式に含まれる関数呼び出しなどによる確保は、その式の処理である。
+
+**[for.pair-target]** 2変数形式の `for 添字変数, 要素変数 in 対象 { ... }`・`rev 添字変数, 要素変数 in 対象 { ... }` の対象は、非nilの配列参照の式でなければならない。範囲式・`symbol`・`text`・型名に対する2変数形式はコンパイルエラーとし、診断位置は対象の先頭を示す。配列の2変数反復は [array.iteration]・[array.enum-iteration] に従う。
+
+**[for.type-name]** 1変数形式の `for 名前 in 型名 { ... }`・`rev 名前 in 型名 { ... }` で、`in` の直後に [name.type] のつづりの型名を書いた場合、宣言済みの列挙型または値域制限型でなければコンパイルエラーとし、診断位置は型名を示す。列挙型では宣言順（`rev` は逆順）に全列挙子を、値域制限型では型に含まれる最小値から最大値まで1ずつ（`rev` は逆順）反復し、ループ変数の型はその型とする。終了規則は [for.bounds]・[rev.bounds]・[loop.continue] に従い、最後の値の後に範囲外の値を作らず終了する（1値の型や基底型の最小値・最大値、`u64`全域を含む）。ループ変数の変更禁止と参照範囲には [for.variable] を適用する。
+
+**処理量の上限を定める。**
+
+| 項目 | 規定 |
+|---|---|
+| 対象・条件 | 型名による反復1回の終了判定と位置更新。ループ本体の評価は含めない。revにも適用する |
+| 内部の計算量 | O(1)。固定幅の整数を比較・更新し、動的確保をしない |
+| 外部処理 | なし |
+| 利用者の制御 | 列挙型の列挙子数や値域制限型の範囲で反復回数を指定できる |
 
 ### 8.6 break と continue
 
@@ -3407,7 +3420,7 @@ AllowItem        ::= ALLOW_ITEM
 
 `ALLOW_ITEM` は [allow.item] に従って読む1つのトークンである。`AllowClause` には [allow.clause] と [allow.contains-block]、`AllowStatement` には [allow.block]、`AllowItem` には [allow.item]・[allow.reason]・[allow.rule-check] を適用する。`LogLevel` の `"debug"`・`"info"`・`"warn"` はそのつづりの `IDENT`、`"error"` は予約語トークンに一致する。
 
-`RangeOperator` は [for.range-spacing] に従い、左右の式の境界に隣接する。`Assignment` と `TextAppend` の右辺には [assign.rhs-write] の代入先の制約を適用する。`TextAppend` は [text.append]・[text.append-arena] に従う。`ForStatement` と `RevStatement` の `LoopTarget` で `in` の直後に [name.type] のつづりの `IDENT` があり、その直後が `{` のときは型名として読む。それ以外のすべての `Condition` には [for.bound-reference] の参照の制約も適用する。範囲演算子のない形と2変数形式は [char.for-type]・[char.for]・[array.iteration]・[array.enum-iteration] に従う。`Condition` の扱いは A.6 に定める。
+`RangeOperator` は [for.range-spacing] に従い、左右の式の境界に隣接する。`Assignment` と `TextAppend` の右辺には [assign.rhs-write] の代入先の制約を適用する。`TextAppend` は [text.append]・[text.append-arena] に従う。`ForStatement` と `RevStatement` の `LoopTarget` で `in` の直後に [name.type] のつづりの `IDENT` があり、その直後が `{` のときは型名として読む。それ以外のすべての `Condition` には [for.bound-reference] の参照の制約も適用する。範囲演算子のない形と2変数形式は [char.for-type]・[char.for]・[for.pair-target]・[for.type-name]・[array.iteration]・[array.enum-iteration] に従う。`Condition` の扱いは A.6 に定める。
 
 ### A.5 式
 

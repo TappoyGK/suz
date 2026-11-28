@@ -231,7 +231,7 @@ pub(super) fn emit_block(
                             writeln!(c, "{indent}    _Bool suz_more_{id} = 1;").unwrap();
                             writeln!(
                                 c,
-                                "{indent}    for (; suz_more_{id} && suz_cursor_{id} <= suz_end_{id}; suz_more_{id} = suz_cursor_{id} < suz_end_{id}, suz_cursor_{id} += suz_more_{id}) {{"
+                                "{indent}    for (; suz_more_{id}; suz_more_{id} = suz_cursor_{id} < suz_end_{id}, suz_cursor_{id} += suz_more_{id}) {{"
                             )
                             .unwrap();
                         }

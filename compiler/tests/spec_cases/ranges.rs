@@ -440,27 +440,27 @@ fn main() -> u8 {
     for (source, rule) in [
         (
             "fn main() -> u8 { for i, x in 0..<3 {}\nreturn 0 }",
-            "char.for-type",
+            "for.pair-target",
         ),
         (
             "fn main() -> u8 { for i, c in \"abc\" {}\nreturn 0 }",
-            "char.for-type",
+            "for.pair-target",
         ),
         (
             "enum Wave: u8 { A }\nfn main() -> u8 { for w, x in Wave {}\nreturn 0 }",
-            "char.for-type",
+            "for.pair-target",
         ),
         (
             "range Step: u8 = 0..<4\nfn main() -> u8 { for s, x in Step {}\nreturn 0 }",
-            "char.for-type",
+            "for.pair-target",
         ),
         (
             "fn main() -> u8 { for w in UnknownEnum {}\nreturn 0 }",
-            "char.for-type",
+            "for.type-name",
         ),
         (
             "struct Vec2 { x: f32 }\nfn main() -> u8 { for p in Vec2 {}\nreturn 0 }",
-            "char.for-type",
+            "for.type-name",
         ),
         (
             "enum Wave: u8 { A }\nfn main() -> u8 { fix g = new #[1; Wave]\nfor w, _ in g {}\nreturn 0 }",
@@ -489,7 +489,7 @@ fn main() -> u8 {
         ),
         // 切り出しでは範囲保証を覚えないため、元配列へのアクセスに or が必要
         (
-            "fn f(a: .[i32]) -> i32 { for i, x in a.[1:] { fix y = a.[i]\nreturn y }\nreturn 0 }\nfn main() -> u8 { return 0 }",
+            "fn f(a: .[i32]) -> i32 { if 1 <= len a { for i, x in a.[1:] { fix y = a.[i]\nreturn y } }\nreturn 0 }\nfn main() -> u8 { return 0 }",
             "array.access-handler",
         ),
     ] {
