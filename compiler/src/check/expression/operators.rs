@@ -438,8 +438,55 @@ pub(super) fn check(
                         while let ExpressionKind::Group(grouped) = &inner.kind {
                             inner = grouped;
                         }
+                        let empty_array = match &inner.kind {
+                            ExpressionKind::ArrayInit {
+                                values,
+                                repeated: false,
+                                readonly,
+                                soa,
+                                ..
+                            } if values.is_empty() => Some((*readonly, *soa)),
+                            ExpressionKind::New(boxed) => match &boxed.kind {
+                                ExpressionKind::ArrayInit {
+                                    values,
+                                    repeated: false,
+                                    readonly,
+                                    soa,
+                                    ..
+                                } if values.is_empty() => Some((*readonly, *soa)),
+                                _ => None,
+                            },
+                            _ => None,
+                        };
                         if matches!(inner.kind, ExpressionKind::Nil) && ty.is_nilable() {
                             expression(operand, Some(ty), bindings)
+                        } else if let (Some((readonly, soa)), Some(id)) =
+                            (empty_array, ty.array_id())
+                        {
+                            let arr = bindings.structs.arrays.borrow().get(id);
+                            let expected_id =
+                                if arr.rank == 1 && arr.index_enum.is_none() && arr.soa == soa {
+                                    id
+                                } else {
+                                    let Type::Array(new_id) = bindings
+                                        .structs
+                                        .arrays
+                                        .borrow_mut()
+                                        .intern_full(arr.element, 1, None, soa)
+                                    else {
+                                        unreachable!()
+                                    };
+                                    new_id
+                                };
+                            expression(
+                                operand,
+                                Some(Type::ArrayRef {
+                                    id: expected_id,
+                                    mutable: !readonly,
+                                    nilable: false,
+                                }),
+                                bindings,
+                            )
                         } else if operand_type(operand, bindings).is_none()
                             && has_float_source(operand, bindings)
                         {
