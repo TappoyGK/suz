@@ -1,4 +1,4 @@
-# symbolとtext（テンプレート・追記・textbuf）
+# symbolとtext（テンプレート・追記・textbuf・寿命）
 
 [目次と書式](../spec-cases.md)
 

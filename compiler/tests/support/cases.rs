@@ -48,22 +48,46 @@ fn source(lines: &[&str]) -> Result<Source> {
     let mut bytes = None;
     let mut runs = Vec::new();
     let mut rule = None;
+    let mut secondary = None;
     let mut stdout = None;
     let mut stderr = None;
     let mut stderr_prefix = None;
     let mut diagram = None;
-    let mut seen_body = false;
+    let mut in_meta = true;
     let mut i = 0;
     while i < lines.len() {
         let line = lines[i];
         i += 1;
+        if in_meta {
+            if line.trim().is_empty() {
+                in_meta = false;
+                continue;
+            }
+            if let Some(value) = line.strip_prefix("- 主根拠：") {
+                let value = parse_rule_token(value).map_err(|_| "invalid primary rule")?;
+                unique(&mut rule, value, "primary rule")?;
+            } else if let Some(value) = line.strip_prefix("- 補助根拠：") {
+                if value.is_empty()
+                    || value
+                        .split(['・', '、'])
+                        .any(|token| parse_rule_token(token).is_err())
+                {
+                    return Err("invalid secondary rule".into());
+                }
+                unique(&mut secondary, (), "secondary rule")?;
+            } else if line.starts_with("- 結果") {
+                runs.push(parse_result_line(line)?);
+            } else {
+                return Err("invalid metadata line".into());
+            }
+            continue;
+        }
         match line {
             "**期待結果：**" | "**コンパイル診断：**" | "**パニック診断：**" | "**警告：**" =>
             {
                 return Err("legacy table format is no longer supported".into());
             }
             "**ソース：**" => {
-                seen_body = true;
                 let code = block(lines, &mut i, "suz")?;
                 if code.is_empty() {
                     return Err("empty source".into());
@@ -71,7 +95,6 @@ fn source(lines: &[&str]) -> Result<Source> {
                 unique(&mut bytes, code.into_bytes(), "source")?;
             }
             "**保存用のバイト列（16進数）：**" => {
-                seen_body = true;
                 let body = block(lines, &mut i, "text")?;
                 let digits: String = body.chars().filter(|c| !c.is_ascii_whitespace()).collect();
                 if digits.is_empty()
@@ -87,7 +110,6 @@ fn source(lines: &[&str]) -> Result<Source> {
                 unique(&mut bytes, decoded, "source")?;
             }
             "**標準出力：**" => {
-                seen_body = true;
                 let content = block(lines, &mut i, "text")?;
                 if content.is_empty() {
                     return Err("empty output block".into());
@@ -95,7 +117,6 @@ fn source(lines: &[&str]) -> Result<Source> {
                 unique(&mut stdout, content, "stdout")?;
             }
             "**標準エラー：**" => {
-                seen_body = true;
                 let content = block(lines, &mut i, "text")?;
                 if content.is_empty() {
                     return Err("empty output block".into());
@@ -103,7 +124,6 @@ fn source(lines: &[&str]) -> Result<Source> {
                 unique(&mut stderr, content, "stderr")?;
             }
             "**パニック前の標準エラー：**" => {
-                seen_body = true;
                 let content = block(lines, &mut i, "text")?;
                 if content.is_empty() {
                     return Err("empty output block".into());
@@ -111,7 +131,6 @@ fn source(lines: &[&str]) -> Result<Source> {
                 unique(&mut stderr_prefix, content, "panic stderr")?;
             }
             "**入力図：**" => {
-                seen_body = true;
                 unique(
                     &mut diagram,
                     decode_diagram(&block(lines, &mut i, "text")?)?,
@@ -120,39 +139,14 @@ fn source(lines: &[&str]) -> Result<Source> {
             }
             _ => {
                 let trimmed = line.trim();
-                if let Some(value) = line.strip_prefix("- 主根拠：") {
-                    if seen_body {
-                        return Err("metadata line must appear before source".into());
-                    }
-                    let value = value.trim().trim_end_matches('。').trim();
-                    let value = parse_rule_token(value).map_err(|_| "invalid primary rule")?;
-                    unique(&mut rule, value, "primary rule")?;
-                } else if let Some(value) = line.strip_prefix("- 補助根拠：") {
-                    if seen_body {
-                        return Err("metadata line must appear before source".into());
-                    }
-                    if value.trim().is_empty() {
-                        return Err("empty secondary rule".into());
-                    }
-                } else if line.starts_with("- 結果") {
-                    if seen_body {
-                        return Err("result line must appear before source".into());
-                    }
-                    runs.push(parse_result_line(line)?);
-                } else if trimmed.starts_with("- ") || trimmed == "-" {
-                    return Err("unknown metadata line".into());
-                } else if trimmed.starts_with("結果：")
-                    || trimmed.starts_with("結果（")
-                    || trimmed.starts_with("結果:")
-                    || trimmed.starts_with("結果(")
+                if trimmed.starts_with("- 主根拠：")
+                    || trimmed.starts_with("- 補助根拠：")
+                    || trimmed.starts_with("- 結果")
                 {
-                    return Err("invalid result line".into());
-                } else if trimmed.starts_with('|') {
-                    return Err("legacy table format is no longer supported".into());
+                    return Err("metadata line must appear in header block".into());
                 } else if trimmed.starts_with("**") && trimmed.ends_with("：**") {
                     return Err("unsupported or unlabelled fence".into());
                 } else if line == "```suz" {
-                    seen_body = true;
                     i -= 1;
                     let code = block(lines, &mut i, "suz")?;
                     if code.is_empty() {

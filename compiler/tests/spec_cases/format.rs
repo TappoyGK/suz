@@ -71,7 +71,7 @@ fn malformed_markdown_is_rejected() {
         ),
         (format!("{SMALL}\n```suz\nother\n```\n"), "duplicate source"),
         (
-            SMALL.replace("- 主根拠：`[src.encoding]`", ""),
+            SMALL.replace("- 主根拠：`[src.encoding]`\n", ""),
             "missing primary rule",
         ),
         (
@@ -102,12 +102,6 @@ fn legacy_table_format_is_rejected() {
             "expected legacy error for {label}"
         );
     }
-    let bare_table = format!("{SMALL}\n| 通常 | 正常終了 | 0 | 0 |\n");
-    assert!(
-        extract(&bare_table)
-            .unwrap_err()
-            .contains("legacy table format is no longer supported")
-    );
 }
 
 #[test]
@@ -145,7 +139,11 @@ fn labelled_output_is_exact_and_prose_is_not_parsed() {
         run.stderr.as_deref(),
         Some("### not-a-case\n- 結果：正常終了\n")
     );
-    let s = extract(&SMALL.replace("自由な説明。", "実行時パニック。終了コード 101。")).unwrap();
+    let s = extract(&SMALL.replace(
+        "自由な説明。",
+        "実行時パニック。終了コード 101。\n\n- 箇条書きの説明。\n結果：は説明文の中で書ける。\n\n| 列A | 列B |\n|---|---|\n| 1 | 2 |",
+    ))
+    .unwrap();
     assert_eq!(s["lex-001"].runs[0].result, Outcome::Exit);
     assert_eq!(s["lex-001"].runs[0].code, Some(0));
 }
@@ -327,7 +325,7 @@ fn main() -> u8 { return 7 }
 ## Cases
 
 ### lex-001 example ###
-- 主根拠：  `[src.encoding]`
+- 主根拠：`[src.encoding]`
 - 結果：正常終了
 
 #### Explanation within the case
@@ -372,7 +370,7 @@ This is not a case.
             "### lex-001",
             "invalid case heading",
         ),
-        ("- 主根拠：  `[src.encoding]`", "", "missing primary rule"),
+        ("- 主根拠：`[src.encoding]`\n", "", "missing primary rule"),
         ("```suz", "## Appendix\n\n```suz", "missing source"),
     ] {
         let error = extract(&document.replace(from, to)).unwrap_err();
@@ -609,33 +607,79 @@ fn main() -> u8 { return 0 }
                 "- 結果：正常終了",
                 "- 結果：正常終了\n-  結果（警告）：正常終了",
             ),
-            "unknown metadata line",
+            "invalid metadata line",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：正常終了\n-\t結果（警告）：正常終了",
+            ),
+            "invalid metadata line",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：正常終了\n-　結果（警告）：正常終了",
+            ),
+            "invalid metadata line",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：正常終了\n-結果（警告）：正常終了",
+            ),
+            "invalid metadata line",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：正常終了\n* 結果（警告）：正常終了",
+            ),
+            "invalid metadata line",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：正常終了\n+ 結果（警告）：正常終了",
+            ),
+            "invalid metadata line",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：正常終了\n－ 結果（警告）：正常終了",
+            ),
+            "invalid metadata line",
         ),
         (
             base.replace(
                 "- 結果：正常終了",
                 "- 結果：正常終了\n- 副根拠：`[src.encoding]`",
             ),
-            "unknown metadata line",
+            "invalid metadata line",
         ),
         (
             base.replace("- 主根拠：", "- 主根據："),
-            "unknown metadata line",
+            "invalid metadata line",
         ),
         (
             base.replace("- 結果：正常終了", "  - 結果：正常終了"),
-            "unknown metadata line",
+            "invalid metadata line",
         ),
         (
             base.replace(
                 "- 結果：正常終了",
                 "- 結果：正常終了\n結果（強制）：正常終了",
             ),
-            "invalid result line",
+            "invalid metadata line",
+        ),
+        (
+            base.replace("- 結果：正常終了", "\n- 結果：正常終了"),
+            "metadata line must appear in header block",
         ),
         (
             format!("{base}\n- 結果（警告）：正常終了\n"),
-            "result line must appear before source",
+            "metadata line must appear in header block",
         ),
         (
             base.replace("`[src.encoding]`", "`[src.encoding]`、`[lex.x]`"),
@@ -644,6 +688,32 @@ fn main() -> u8 { return 0 }
         (
             base.replace("`[src.encoding]`", "`[src encoding!]`"),
             "invalid primary rule",
+        ),
+        (
+            base.replace("`[src.encoding]`", " `[src.encoding]`"),
+            "invalid primary rule",
+        ),
+        (
+            base.replace("`[src.encoding]`", "`[src.encoding]` "),
+            "invalid primary rule",
+        ),
+        (
+            base.replace("`[src.encoding]`", "`[src.encoding]`。"),
+            "invalid primary rule",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 補助根拠：なにか\n- 結果：正常終了",
+            ),
+            "invalid secondary rule",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 補助根拠：`[src.encoding]`\n- 補助根拠：`[lex.x]`\n- 結果：正常終了",
+            ),
+            "duplicate secondary rule",
         ),
     ] {
         let error = extract(&bad).unwrap_err();

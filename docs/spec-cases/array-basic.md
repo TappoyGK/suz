@@ -877,14 +877,3 @@ fn main() -> u8 {
     return 0
 }
 ```
-
-### array-051 newで確保する配列はトップレベル定数にできない
-- 主根拠：`[const.expression]`
-- 結果：コンパイルエラー `[const.expression]` 1:18
-
-```suz
-fix W: #[i32]? = new #[1]
-fn main() -> u8 {
-    return 0
-}
-```

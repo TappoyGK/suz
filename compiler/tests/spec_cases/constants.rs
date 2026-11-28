@@ -215,4 +215,11 @@ fn constant_allocations_report_the_operation_instead_of_methods_or_arena_context
             "{source}"
         );
     }
+
+    // 仕様例集（旧 `array-051`）から移管した派生拒否ケース。
+    let array_051 = "fix W: #[i32]? = new #[1]\nfn main() -> u8 {\n    return 0\n}\n";
+    let error = suz::compile(array_051.as_bytes()).unwrap_err();
+    assert_eq!(error.kind, suz::ErrorKind::InvalidSource);
+    assert_eq!(error.rule(), "const.expression");
+    assert_eq!((error.line, error.column), (1, 18));
 }
