@@ -1,22 +1,14 @@
 use crate::support::{Mode, Outcome, extract, validate_inventory};
 
 pub(super) const SMALL: &str = r#"### lex-001 example
-
-主根拠：`[src.encoding]`。
+- 主根拠：`[src.encoding]`
+- 結果：正常終了
 
 自由な説明。
-
-**ソース：**
 
 ```suz
 fn main() -> u8 { return 0 }
 ```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | 正常終了 | 0 | 0 |
 
 "#;
 
@@ -70,26 +62,20 @@ fn split_catalog_checks_cross_file_duplicates_and_missing_cases() {
 fn malformed_markdown_is_rejected() {
     for (input, message) in [
         (format!("{SMALL}{SMALL}"), "duplicate ID"),
-        (SMALL.replace("```suz", "```rust"), "expected suz fence"),
+        (SMALL.replace("```suz", "```rust"), "unlabelled fence"),
         (SMALL.replace("lex-001", "../bad"), "invalid case heading"),
         (SMALL.replacen("\n```\n", "\n", 1), "unclosed fence"),
         (
-            SMALL.replace(
-                "**ソース：**\n\n```suz\nfn main() -> u8 { return 0 }\n```",
-                "",
-            ),
+            SMALL.replace("```suz\nfn main() -> u8 { return 0 }\n```", ""),
             "missing source",
         ),
+        (format!("{SMALL}\n```suz\nother\n```\n"), "duplicate source"),
         (
-            format!("{SMALL}\n**ソース：**\n\n```suz\nother\n```\n"),
-            "duplicate source",
-        ),
-        (
-            SMALL.replace("主根拠：`[src.encoding]`。", ""),
+            SMALL.replace("- 主根拠：`[src.encoding]`", ""),
             "missing primary rule",
         ),
         (
-            SMALL.replace("**ソース：**", "**ソースの誤記：**"),
+            SMALL.replace("```suz", "**ソースの誤記：**\n\n```suz"),
             "unlabelled fence",
         ),
     ] {
@@ -99,10 +85,35 @@ fn malformed_markdown_is_rejected() {
 }
 
 #[test]
+fn legacy_table_format_is_rejected() {
+    let legacy = r#"### lex-001 example
+
+主根拠：`[src.encoding]`。
+
+**ソース：**
+
+```suz
+fn main() -> u8 { return 0 }
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+"#;
+    assert!(
+        extract(legacy)
+            .unwrap_err()
+            .contains("legacy table format is no longer supported")
+    );
+}
+
+#[test]
 fn malformed_hex_is_rejected() {
     for digits in ["f", "ff gg", "é0", ""] {
         let input = SMALL.replace(
-            "**ソース：**\n\n```suz\nfn main() -> u8 { return 0 }\n```",
+            "```suz\nfn main() -> u8 { return 0 }\n```",
             &format!("**保存用のバイト列（16進数）：**\n\n```text\n{digits}\n```"),
         );
         assert!(extract(&input).unwrap_err().contains("invalid hex"));
@@ -113,7 +124,7 @@ fn malformed_hex_is_rejected() {
 fn headings_and_labels_inside_source_are_not_metadata() {
     let input = SMALL.replace(
         "fn main() -> u8 { return 0 }",
-        "### not-a-case\n主根拠：`[not.metadata]`。\n**期待結果：**",
+        "### not-a-case\n- 主根拠：`[not.metadata]`\n- 結果：パニック `[rt.div-zero]` 1:1",
     );
     let s = extract(&input).unwrap();
     assert_eq!(s.len(), 1);
@@ -122,83 +133,18 @@ fn headings_and_labels_inside_source_are_not_metadata() {
 }
 
 #[test]
-fn malformed_expectation_tables_are_rejected() {
-    let row = "| 通常 | 正常終了 | 0 | 0 |";
-    for (input, message) in [
-        (
-            SMALL.replace("**期待結果：**", "自由な文章"),
-            "missing expectation table",
-        ),
-        (
-            SMALL.replace("| 設定 |", "| モード |"),
-            "invalid table header",
-        ),
-        (
-            SMALL.replace("|---|---|---:|---:|", "|---|---|oops|---|"),
-            "invalid table separator",
-        ),
-        (SMALL.replace(row, ""), "empty expectation table"),
-        (
-            SMALL.replace(row, &format!("{row}\n{row}")),
-            "duplicate mode",
-        ),
-        (
-            SMALL.replace(row, "| 不明 | 正常終了 | 0 | 0 |"),
-            "unknown mode",
-        ),
-        (
-            SMALL.replace(row, "| 通常 | 不明 | 0 | 0 |"),
-            "unknown outcome",
-        ),
-        (
-            SMALL.replace(row, "| 通常 | 正常終了 | 256 | 0 |"),
-            "integer out of range",
-        ),
-        (
-            SMALL.replace(row, "| 通常 | 正常終了 | — | 0 |"),
-            "invalid exit code",
-        ),
-        (
-            SMALL.replace(row, "| 通常 | コンパイルエラー | 0 | 0 |"),
-            "invalid exit code",
-        ),
-        (
-            SMALL.replace(row, "| 通常 | 正常終了 | 0 | -1 |"),
-            "invalid unsigned integer",
-        ),
-        (
-            SMALL.replace(row, "| 通常 | 正常終了 | 0 | 0 | extra |"),
-            "4 table columns",
-        ),
-        (
-            format!(
-                "{SMALL}\n**期待結果：**\n\n| 設定 | 結果 | 終了コード | 警告数 |\n|---|---|---|---|\n{row}\n"
-            ),
-            "duplicate expectation table",
-        ),
-    ] {
-        let error = extract(&input).unwrap_err();
-        assert!(error.contains(message), "expected {message}, got {error}");
-    }
-}
-
-#[test]
 fn labelled_output_is_exact_and_prose_is_not_parsed() {
     let input = format!(
-        "{SMALL}\n**標準出力：**\n\n```text\nhello\n\n```\n\n**標準エラー：**\n\n```text\n### not-a-case\n**期待結果：**\n```\n"
+        "{SMALL}\n**標準出力：**\n\n```text\nhello\n\n```\n\n**標準エラー：**\n\n```text\n### not-a-case\n- 結果：正常終了\n```\n"
     );
     let s = extract(&input).unwrap();
     let run = &s["lex-001"].runs[0];
     assert_eq!(run.stdout.as_deref(), Some("hello\n\n"));
     assert_eq!(
         run.stderr.as_deref(),
-        Some("### not-a-case\n**期待結果：**\n")
+        Some("### not-a-case\n- 結果：正常終了\n")
     );
-    let s = extract(&SMALL.replace(
-        "自由な説明。",
-        "**期待：** 実行時パニック。終了コード 101。",
-    ))
-    .unwrap();
+    let s = extract(&SMALL.replace("自由な説明。", "実行時パニック。終了コード 101。")).unwrap();
     assert_eq!(s["lex-001"].runs[0].result, Outcome::Exit);
     assert_eq!(s["lex-001"].runs[0].code, Some(0));
 }
@@ -233,11 +179,9 @@ fn malformed_output_blocks_are_rejected() {
 
 #[test]
 fn cases_and_modes_come_from_the_document() {
-    // 新しい分類と異なる例数を加えても、解析処理の変更は不要。
-    let row = "| 通常 | 正常終了 | 0 | 0 |";
     let second = SMALL.replace("lex-001", "example-042").replace(
-        row,
-        "| 警告 | 正常終了 | 7 | 2 |\n| 強制 | コンパイルエラー | — | 0 |",
+        "- 結果：正常終了",
+        "- 結果（警告）：正常終了 7 / 警告：`[diagnostic.arithmetic]` 1:1, `[diagnostic.arithmetic]` 1:2\n- 結果（強制）：コンパイルエラー `[diagnostic.arithmetic]` 1:1",
     );
     let s = extract(&format!("{SMALL}\n{second}")).unwrap();
     assert_eq!(s.len(), 2);
@@ -250,7 +194,6 @@ fn cases_and_modes_come_from_the_document() {
     assert_eq!(runs[1].result, Outcome::CompileError);
     assert_eq!(runs[1].code, None);
     assert!(runs[1].stdout.is_none());
-    // グループ名によって実行モードを選ばない。
     assert_eq!(
         extract(&SMALL.replace("lex-001", "diag-001")).unwrap()["diag-001"]
             .runs
@@ -289,15 +232,14 @@ fn inventory_is_checked_against_the_parsed_cases() {
         SMALL.replace("lex-001", "lex-002")
     );
     validate_inventory(&extended, &extract(&extended).unwrap()).unwrap();
-    // 二つの設定が両方とも正常終了しても、比較例としては一例に数える。
     let compared = format!(
         "{}{}",
         ONE_CASE_INVENTORY
             .replace("| 受理 | 1 |", "| 受理 | 0 |")
             .replace("| 診断設定の比較 | 0 |", "| 診断設定の比較 | 1 |"),
         SMALL.replace(
-            "| 通常 | 正常終了 | 0 | 0 |",
-            "| 通常 | 正常終了 | 0 | 0 |\n| 警告 | 正常終了 | 0 | 0 |"
+            "- 結果：正常終了",
+            "- 結果（通常）：正常終了\n- 結果（警告）：正常終了"
         )
     );
     validate_inventory(&compared, &extract(&compared).unwrap()).unwrap();
@@ -311,7 +253,12 @@ fn input_diagrams_are_compared_with_bytes_for_any_id() {
         ("<CR><EOF>", "0d", b"\r".as_slice()),
         ("あ<LF>\nb<EOF>", "e3 81 82 0a 62", "あ\nb".as_bytes()),
     ] {
-        let input = SMALL.replace("**ソース：**\n\n```suz\nfn main() -> u8 { return 0 }\n```", &format!("**入力図：**\n\n```text\n{diagram}\n```\n\n**保存用のバイト列（16進数）：**\n\n```text\n{hex}\n```"));
+        let input = SMALL.replace(
+            "```suz\nfn main() -> u8 { return 0 }\n```",
+            &format!(
+                "**入力図：**\n\n```text\n{diagram}\n```\n\n**保存用のバイト列（16進数）：**\n\n```text\n{hex}\n```"
+            ),
+        );
         assert_eq!(extract(&input).unwrap()["lex-001"].bytes, expected);
         let bad = input.replace(&format!("\n{hex}\n"), "\n00\n");
         assert!(extract(&bad).unwrap_err().contains("disagree"));
@@ -329,11 +276,8 @@ fn input_diagrams_are_compared_with_bytes_for_any_id() {
 }
 
 #[test]
-fn panic_expectation_is_read_from_the_table() {
-    let input = SMALL.replace(
-        "| 通常 | 正常終了 | 0 | 0 |",
-        "| 通常 | パニック | 101 | 0 |",
-    );
+fn panic_expectation_is_read_from_result_line() {
+    let input = SMALL.replace("- 結果：正常終了", "- 結果：パニック `[rt.div-zero]` 2:10");
     let input =
         format!("{input}\n**パニック前の標準エラー：**\n\n```text\nlogged before panic\n```\n");
     let cases = extract(&input).unwrap();
@@ -342,7 +286,7 @@ fn panic_expectation_is_read_from_the_table() {
     assert_eq!(run.code, Some(101));
     assert_eq!(run.stderr_prefix.as_deref(), Some("logged before panic\n"));
     assert!(run.stderr.is_none());
-    assert!(run.panic_diagnostic.is_none());
+    assert_eq!(run.panic_diagnostic.as_ref().unwrap().rule, "rt.div-zero");
 }
 
 #[test]
@@ -355,7 +299,9 @@ This fenced example is documentation, not a test case.
 
 ````markdown
 ### fake-001 example
-主根拠：`[fake.rule]`。
+- 主根拠：`[fake.rule]`
+- 結果：正常終了
+
 ```suz
 fn main() -> u8 { return 7 }
 ```
@@ -363,26 +309,18 @@ fn main() -> u8 { return 7 }
 
 ~~~text
 ### fake-002 example
-主根拠：`[fake.rule]`。
+- 主根拠：`[fake.rule]`
 ~~~
 
 ## Cases
 
 ### lex-001 example ###
-
-主根拠：  `[src.encoding]`
+- 主根拠：  `[src.encoding]`
+- 結果：正常終了
 
 #### Explanation within the case
 
 The following program returns zero.
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | 正常終了 | 0 | 0 |
-
-**ソース：**
 
 ```suz
 fn main() -> u8 { return 0 }
@@ -398,16 +336,15 @@ This must not be read as case data.
 
 ## Appendix
 
-**期待結果：**
+- 結果：正常終了
 
-This is not an expectation table.
+This is not a case.
 "#;
     let cases = extract(document).unwrap();
     assert_eq!(cases.len(), 1);
     assert_eq!(cases["lex-001"].rule, "src.encoding");
     assert_eq!(cases["lex-001"].bytes, b"fn main() -> u8 { return 0 }\n");
 
-    // 例と同じ階層かそれより上の見出しは、現在の例を終了させる。
     for heading in ["# Appendix", "## Appendix", "### Further reading"] {
         let input = document.replace("### Further reading", heading);
         assert_eq!(extract(&input).unwrap().len(), 1);
@@ -423,12 +360,8 @@ This is not an expectation table.
             "### lex-001",
             "invalid case heading",
         ),
-        ("主根拠：  `[src.encoding]`", "", "missing primary rule"),
-        (
-            "**ソース：**",
-            "## Appendix\n\n**ソース：**",
-            "missing source",
-        ),
+        ("- 主根拠：  `[src.encoding]`", "", "missing primary rule"),
+        ("```suz", "## Appendix\n\n```suz", "missing source"),
     ] {
         let error = extract(&document.replace(from, to)).unwrap_err();
         assert!(error.contains(reason), "{error}");

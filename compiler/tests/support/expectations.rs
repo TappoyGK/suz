@@ -1,7 +1,4 @@
-use super::{
-    ExpectedDiagnostic, Mode, Outcome, Result, Run, Source,
-    markdown::{cells, number, separator, skip_blank},
-};
+use super::{ExpectedDiagnostic, Mode, Outcome, Result, Run, Source, markdown::number};
 use std::{collections::BTreeSet, path::Path};
 
 impl ExpectedDiagnostic {
@@ -184,99 +181,6 @@ pub(super) fn parse_result_line(line: &str) -> Result<Run> {
         panic_diagnostic,
         warnings,
     })
-}
-
-pub(super) fn diagnostic_table(
-    lines: &[&str],
-    i: &mut usize,
-) -> Result<Vec<(Mode, ExpectedDiagnostic)>> {
-    skip_blank(lines, i);
-    if cells(lines.get(*i).ok_or("missing diagnostic table")?)? != ["設定", "規則", "行", "列"]
-    {
-        return Err("invalid diagnostic table header".into());
-    }
-    *i += 1;
-    separator(lines, i)?;
-    let mut entries = Vec::new();
-    while *i < lines.len() && lines[*i].starts_with('|') {
-        let values = cells(lines[*i])?;
-        *i += 1;
-        let mode = match values[0] {
-            "通常" => Mode::Default,
-            "警告" => Mode::Warn,
-            "強制" => Mode::Deny,
-            _ => return Err("unknown diagnostic mode".into()),
-        };
-        let rule = values[1]
-            .strip_prefix("`[")
-            .and_then(|s| s.strip_suffix("]`"))
-            .filter(|s| {
-                !s.is_empty()
-                    && s.bytes()
-                        .all(|b| b.is_ascii_lowercase() || b".-".contains(&b))
-            })
-            .ok_or("invalid diagnostic rule")?
-            .to_owned();
-        let line = number::<usize>(values[2])?;
-        let column = number::<usize>(values[3])?;
-        if line == 0 || column == 0 {
-            return Err("diagnostic positions must be positive".into());
-        }
-        entries.push((mode, ExpectedDiagnostic { rule, line, column }));
-    }
-    if entries.is_empty() {
-        return Err("empty diagnostic table".into());
-    }
-    Ok(entries)
-}
-
-pub(super) fn table(lines: &[&str], i: &mut usize) -> Result<Vec<Run>> {
-    skip_blank(lines, i);
-    let header = cells(lines.get(*i).ok_or("missing expectation table")?)?;
-    if header != ["設定", "結果", "終了コード", "警告数"] {
-        return Err("invalid table header".into());
-    }
-    *i += 1;
-    separator(lines, i)?;
-    let mut runs = Vec::new();
-    while *i < lines.len() && lines[*i].starts_with('|') {
-        let values = cells(lines[*i])?;
-        *i += 1;
-        let mode = match values[0] {
-            "通常" => Mode::Default,
-            "警告" => Mode::Warn,
-            "強制" => Mode::Deny,
-            _ => return Err("unknown mode".into()),
-        };
-        let result = match values[1] {
-            "正常終了" => Outcome::Exit,
-            "コンパイルエラー" => Outcome::CompileError,
-            "パニック" => Outcome::Panic,
-            _ => return Err("unknown outcome".into()),
-        };
-        let code = if values[2] == "—" {
-            None
-        } else {
-            Some(number::<u8>(values[2])?)
-        };
-        let warning_count = number(values[3])?;
-        runs.push(Run {
-            mode,
-            result,
-            code,
-            stdout: None,
-            stderr: None,
-            stderr_prefix: None,
-            warning_count,
-            diagnostic: None,
-            panic_diagnostic: None,
-            warnings: Vec::new(),
-        });
-    }
-    if runs.is_empty() {
-        return Err("empty expectation table".into());
-    }
-    Ok(runs)
 }
 
 pub(super) fn validate(source: &Source) -> Result<()> {
