@@ -86,15 +86,15 @@ error Failed { Read }
 struct Number { n: i32 }
 fn Number.read() -> i32 or Failed { return self.n }
 fn Number#increment() -> void { self#n = self.n + 1 }
-fn Number.copy() -> ptr Number { return new self }
+fn Number.copy() -> mut Number { return new self }
 needs Mutable[T] {
     T: .read() -> i32 or Failed
     T: #increment() -> void
-    T: .copy() -> ptr T
+    T: .copy() -> mut T
 }
 @needs Mutable[T]
-fn duplicate[T](value: T) -> ptr T {
-    fix ptr copy = value.copy()
+fn duplicate[T](value: T) -> mut T {
+    fix copy = value.copy()
     copy#increment()
     return copy
 }
@@ -107,7 +107,7 @@ fn read[T](value: T) -> i32 or Failed {
 }
 fn main() -> u8 {
     arena {
-        fix ptr copy = duplicate(Number { n: 7 })
+        fix copy = duplicate(Number { n: 7 })
         fix f: static fn Read[Number] = fn read[Number]
         if (f(.copy) or 0) != 8 { return 1 }
     }

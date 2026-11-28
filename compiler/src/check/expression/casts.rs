@@ -19,18 +19,40 @@ pub(in crate::check) fn check(
 ) -> Result<CheckedExpression, Diagnostic> {
     Ok(match &expr.kind {
         ExpressionKind::Cast {
-            wrap,
+            kind,
             operand,
             target: annotation,
             fallback,
         } => {
+            use crate::ast::CastKind;
             let target = bindings.resolve_type_at(*annotation, expr.location)?;
-            if *wrap {
-                let allowed = |ty| ty != Type::Integer(crate::ast::IntegerType::Len);
+            if matches!(*kind, CastKind::Wrap | CastKind::Saturating) {
+                let allowed = |ty| match *kind {
+                    CastKind::Wrap => !matches!(
+                        ty,
+                        Type::Integer(crate::ast::IntegerType::Len) | Type::Range(_)
+                    ),
+                    CastKind::Saturating => ty != Type::Integer(crate::ast::IntegerType::Len),
+                    CastKind::Checked => true,
+                };
                 let error = || {
                     expr.location.error(
                         ErrorKind::InvalidSource,
-                        crate::diagnostic!("expr.as-trunc", "len_t cannot be the target of as%"),
+                        if *kind == CastKind::Wrap {
+                            if matches!(target, Type::Range(_)) {
+                                crate::diagnostic!(
+                                    "range.cast",
+                                    "range types cannot be the target of as%"
+                                )
+                            } else {
+                                crate::diagnostic!(
+                                    "expr.as-trunc",
+                                    "len_t cannot be the target of as%"
+                                )
+                            }
+                        } else {
+                            crate::diagnostic!("expr.as-sat", "len_t cannot be the target of as|")
+                        },
                     )
                 };
                 match domain::judge_one(target, allowed) {
@@ -63,7 +85,7 @@ pub(in crate::check) fn check(
                 return crate::check::ffi::cast(
                     operand,
                     target,
-                    *wrap,
+                    *kind,
                     fallback,
                     expr.location,
                     bindings,
@@ -73,13 +95,13 @@ pub(in crate::check) fn check(
                 return super::super::exact::cast(
                     operand,
                     target,
-                    *wrap,
+                    *kind,
                     fallback,
                     expr.location,
                     bindings,
                 );
             }
-            if !*wrap && operand.ty == Type::Text && target == Type::Symbol {
+            if *kind == CastKind::Checked && operand.ty == Type::Text && target == Type::Symbol {
                 if fallback.is_some() {
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
@@ -115,12 +137,13 @@ pub(in crate::check) fn check(
                         ),
                     ));
                 }
-                let valid = if *wrap {
+                let valid = if matches!(*kind, CastKind::Wrap | CastKind::Saturating) {
                     target.is_integer()
                 } else {
                     matches!(
                         target,
                         Type::Integer(_)
+                            | Type::Range(_)
                             | Type::Float(_)
                             | Type::GenericInt
                             | Type::GenericFloat
@@ -133,22 +156,26 @@ pub(in crate::check) fn check(
                 if !valid
                     || bindings.contains_function(target)
                     || crate::check::ffi::contains_c_type(target, bindings)
-                    || crate::check::arena::contains(target, bindings)
+                    || crate::check::ffi::contains_pointer(target, bindings)
                 {
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
-                        if *wrap {
-                            crate::diagnostic!(
+                        match *kind {
+                            CastKind::Wrap => crate::diagnostic!(
                                 "symbol.cast-wrap",
                                 "{} as% requires an integer target",
                                 operand.ty.name()
-                            )
-                        } else {
-                            crate::diagnostic!(
+                            ),
+                            CastKind::Saturating => crate::diagnostic!(
+                                "symbol.cast-sat",
+                                "{} as| requires an integer target",
+                                operand.ty.name()
+                            ),
+                            CastKind::Checked => crate::diagnostic!(
                                 "symbol.cast",
                                 "unsupported {} conversion target",
                                 operand.ty.name()
-                            )
+                            ),
                         },
                     ));
                 }
@@ -162,7 +189,7 @@ pub(in crate::check) fn check(
                         ),
                     ));
                 }
-            } else if *wrap {
+            } else if *kind == CastKind::Wrap {
                 if fallback.is_some() {
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
@@ -185,6 +212,59 @@ pub(in crate::check) fn check(
                     ty: target,
                     value: Value::Truncate(Box::new(operand)),
                 });
+            } else if *kind == CastKind::Saturating {
+                if !(target.is_integer() && (operand.ty.is_integer() || operand.ty.is_float())) {
+                    return Err(expr.location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "expr.as-sat",
+                            "as| requires integer or floating-point source and integer target"
+                        ),
+                    ));
+                }
+                if operand.ty.is_integer() {
+                    if fallback.is_some() {
+                        return Err(expr.location.error(
+                            ErrorKind::InvalidSource,
+                            crate::diagnostic!(
+                                "expr.cast-sat-handler-syntax",
+                                "integer as| does not accept or"
+                            ),
+                        ));
+                    }
+                    return Ok(CheckedExpression {
+                        ty: target,
+                        value: Value::SaturatingCast(Box::new(operand)),
+                    });
+                }
+                if fallback.is_none() {
+                    if let Type::Range(r) = target {
+                        let (lo, hi) = r.bounds();
+                        if lo > 0 || hi < 0 {
+                            return Err(expr.location.error(
+                                ErrorKind::InvalidSource,
+                                crate::diagnostic!(
+                                    "range.cast-float-sat",
+                                    "floating-point as| to a range type that excludes 0 requires or"
+                                ),
+                            ));
+                        }
+                    }
+                    let known_non_nan = !target.symbolic()
+                        && !super::super::constants::depends_on_generic(&operand)
+                        && constant_float(&operand)?.is_some_and(|v| !v.is_nan());
+                    if !known_non_nan {
+                        bindings
+                            .outputs
+                            .float_sat_nans
+                            .borrow_mut()
+                            .insert((expr.location.line, expr.location.column));
+                    }
+                    return Ok(CheckedExpression {
+                        ty: target,
+                        value: Value::SaturatingCast(Box::new(operand)),
+                    });
+                }
             }
             let validity = domain::judge(operand.ty, target, |from, to| {
                 conversion_safety(from, to).is_some()
@@ -211,7 +291,24 @@ pub(in crate::check) fn check(
                 });
             }
             if fallback.is_none() && !operand.ty.is_text() {
-                let safe = conversion_safety(operand.ty, target).unwrap_or(false);
+                let mut safe = conversion_safety(operand.ty, target).unwrap_or(false);
+                if !safe
+                    && operand.ty.is_integer()
+                    && target.is_integer()
+                    && !operand.ty.symbolic()
+                    && !target.symbolic()
+                    && let (Some((src_lo, src_hi)), Some((lo, hi))) =
+                        (operand.ty.integer_bounds(), target.integer_bounds())
+                    && {
+                        let proven = super::super::contracts::narrow_leaf_range(
+                            &operand, src_lo, src_hi, bindings,
+                        );
+                        proven.min >= crate::numeric::Int::from_i128(lo)
+                            && proven.max <= crate::numeric::Int::from_i128(hi)
+                    }
+                {
+                    safe = true;
+                }
                 require_handler(&operand, target, safe, expr.location, bindings)?;
             }
             if let Some(FailureHandler::Return {
@@ -225,7 +322,7 @@ pub(in crate::check) fn check(
                     value: Value::CastReturn {
                         return_location: *return_location,
                         location: expr.location,
-                        wrap: *wrap,
+                        kind: *kind,
                         operand: Box::new(operand),
                         return_value: Box::new(return_value),
                     },
@@ -243,7 +340,12 @@ pub(in crate::check) fn check(
                     return Err(crate::check::errors::invalid_handler(*location));
                 }
                 Some(FailureHandler::Value(value)) => {
-                    Some(super::coerced(value, Some(target), bindings)?)
+                    let exits = matches!(value.kind, crate::ast::ExpressionKind::Panic(_));
+                    Some(super::super::arrays::bounds::with_fallback(
+                        bindings,
+                        exits,
+                        || super::coerced(value, Some(target), bindings),
+                    )?)
                 }
                 None => None,
                 _ => unreachable!(),
@@ -276,7 +378,7 @@ pub(in crate::check) fn check(
                     value: Value::CheckedCast {
                         location: expr.location,
                         constant_struct,
-                        wrap: *wrap,
+                        kind: *kind,
                         operand: Box::new(operand),
                         fallback: Box::new(fallback.unwrap()),
                     },
@@ -286,7 +388,7 @@ pub(in crate::check) fn check(
                 Value::CheckedCast {
                     location: expr.location,
                     constant_struct: None,
-                    wrap: false,
+                    kind: *kind,
                     operand: Box::new(operand),
                     fallback: Box::new(fallback),
                 }
@@ -308,18 +410,23 @@ fn conversion_safety(from: Type, to: Type) -> Option<bool> {
     }
     Some(match (from, to) {
         (Type::Symbol | Type::Text, _) => false,
-        (Type::Char, Type::Integer(_)) | (Type::Integer(_), Type::Char) => {
+        (Type::Char, Type::Integer(_) | Type::Range(_))
+        | (Type::Integer(_) | Type::Range(_), Type::Char) => {
             let (lo, hi) = from.integer_bounds().unwrap();
             crate::numeric::Range::bounds(lo, hi).fits_type(to)
         }
-        (Type::Integer(a), Type::Integer(b)) => {
-            let (lo, hi) = a.bounds();
-            let (min, max) = b.bounds();
+        (Type::Integer(_) | Type::Range(_), Type::Integer(_) | Type::Range(_)) => {
+            let (lo, hi) = from.integer_bounds().unwrap();
+            let (min, max) = to.integer_bounds().unwrap();
             lo >= min && hi <= max
         }
-        (Type::Enum(a), Type::Integer(b)) => a.count as i128 - 1 <= b.bounds().1,
-        (Type::Integer(_), Type::Enum(_)) | (Type::Float(_), Type::Integer(_)) => false,
-        (Type::Integer(_), Type::Float(_)) => true,
+        (Type::Enum(a), Type::Integer(_) | Type::Range(_)) => {
+            let (min, max) = to.integer_bounds().unwrap();
+            0 >= min && a.count as i128 - 1 <= max
+        }
+        (Type::Integer(_) | Type::Range(_), Type::Enum(_))
+        | (Type::Float(_), Type::Integer(_) | Type::Range(_)) => false,
+        (Type::Integer(_) | Type::Range(_), Type::Float(_)) => true,
         (Type::Float(a), Type::Float(b)) => a == b || a == FloatType::F32,
         _ => return None,
     })

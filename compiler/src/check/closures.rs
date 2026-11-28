@@ -77,6 +77,7 @@ pub(super) fn check(
                 ));
             }
             references.insert(capture.name.clone(), binding.clone());
+            outer.ref_captured.borrow_mut().insert(binding.id);
         }
         captures.push(CheckedCapture {
             value: binding.constant.clone().unwrap_or(CheckedExpression {
@@ -97,6 +98,7 @@ pub(super) fn check(
     scope.locals.clear();
     scope.array_bounds =
         super::arrays::bounds::captures(&captures, closure.function.parameters.len(), outer);
+    scope.ref_captured = Default::default();
     scope.value_captures = closure
         .captures
         .iter()

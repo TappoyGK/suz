@@ -17,13 +17,17 @@ mod functions;
 mod helpers;
 mod logs;
 mod slices;
+mod soa;
 mod statements;
 mod structs;
 mod text;
 mod text_structure;
 
 use crate::check::CheckedProgram;
-use std::{collections::BTreeSet, fmt::Write};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt::Write,
+};
 
 struct RecoveryTarget {
     result: Option<String>,
@@ -37,6 +41,9 @@ struct ExpressionContext {
     report_function: String,
     report_sites: std::collections::BTreeMap<(usize, usize), (usize, String)>,
     arrays: crate::ast::arrays::Types,
+    constant_arrays: std::collections::BTreeMap<String, usize>,
+    constant_array_data: String,
+    constant_array_init: String,
     uses_c_byte_len: bool,
     uses_c_integer: bool,
     uses_c_pointer: bool,
@@ -48,6 +55,7 @@ struct ExpressionContext {
     text_literals: std::collections::BTreeMap<String, usize>,
     uses_text: bool,
     structs: Vec<crate::ast::StructDeclaration>,
+    external_ids: std::ops::Range<usize>,
     function_types: Vec<crate::ast::FunctionType>,
     call_only_types: BTreeSet<usize>,
     function_adapters: BTreeSet<usize>,
@@ -63,19 +71,26 @@ struct ExpressionContext {
     closure_environments: Vec<String>,
     references: BTreeSet<usize>,
     immutable_locals: BTreeSet<usize>,
+    bulk_bindings: BTreeMap<usize, String>,
     helpers: BTreeSet<bool>,
     source_name: String,
     narrow_float: bool,
     narrow_float_check: bool,
     bit_helpers: BTreeSet<crate::ast::IntegerType>,
+    saturating_helpers: BTreeSet<(&'static str, crate::ast::IntegerType)>,
+    float_sat_casts: BTreeSet<(crate::ast::FloatType, crate::ast::IntegerType)>,
     float_helpers: BTreeSet<crate::ast::FloatType>,
     float_types: BTreeSet<crate::ast::FloatType>,
+    uses_float_rem: bool,
+    float_euclid: BTreeSet<crate::ast::FloatType>,
     temporaries: Vec<crate::ast::Type>,
 }
 
 impl ExpressionContext {
     fn local(&self, id: usize) -> String {
-        if self.references.contains(&id) {
+        if let Some(expr) = self.bulk_bindings.get(&id) {
+            expr.clone()
+        } else if self.references.contains(&id) {
             format!("(*suz_ref_{id})")
         } else {
             format!("suz_local_{id}")
@@ -86,7 +101,7 @@ impl ExpressionContext {
 pub(crate) fn generate(
     program: &CheckedProgram,
     source_name: &str,
-    text_pool_limit: crate::TextPoolLimit,
+    symbol_pool_limit: crate::SymbolPoolLimit,
     arena: crate::ArenaOptions,
     log_level: crate::LogLevel,
     log_ignore: bool,
@@ -120,6 +135,7 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
         source_name: source_name.into(),
         enums: program.enums.clone(),
         structs: program.structs.clone(),
+        external_ids: program.external_base..program.external_base + program.externs.len(),
         function_types: program.function_types.clone(),
         // 未使用のfnshapeもCへ宣言するため、その仮引数が参照する組の型も用意する。
         call_only_types: program
@@ -163,7 +179,7 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
                 writeln!(c, "#define SUZ_ARENA_REPORT_FORMAT {format}\n#define SUZ_ARENA_REPORT_CAPACITY {}", report.capacity).unwrap();
             }
         }
-        c.push_str("#include \"suz_arena.h\"\n");
+        c.push_str("#include \"suz_arena.h\"\n#include \"suz_textbuf.h\"\n");
     }
     for (&(line, column), (id, function)) in &context.report_sites {
         writeln!(c, "static suz_arena_report_site suz_arena_report_site_{id} = {{ .id = {id}, .source = {}, .line = {line}, .column = {column}, .function = {}, .cached_parent = SIZE_MAX }};",
@@ -178,8 +194,9 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
     functions::call_only_declarations(&mut c, &context);
     text_structure::emit(&mut c, &context);
     for function in &program.functions {
-        writeln!(c, "{};", functions::declaration(function)).unwrap();
+        writeln!(c, "{};", functions::declaration(function, &context)).unwrap();
     }
+    c.push_str(&context.constant_array_data);
     c.push_str(&context.functions);
     for body in bodies {
         c.push_str(&body);
@@ -193,8 +210,8 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
         .collect();
     let mut text_init = if context.uses_text {
         format!(
-            "    suz_text_pool_init(UINT64_C({}));\n",
-            text_pool_limit.runtime_value()
+            "    suz_symbol_pool_init(UINT64_C({}));\n",
+            symbol_pool_limit.runtime_value()
         )
     } else {
         String::new()
@@ -213,6 +230,7 @@ _Static_assert(UINT8_MAX == 255, "Suz requires uint8_t");
     for (value, id) in &context.text_literals {
         writeln!(text_init, "    suz_text_constant_{id} = suz_text_intern(suz_text_literal_{id}, UINT64_C({}), true, {});", value.len(), text::position(program.main_location, &context)).unwrap();
     }
+    text_init.push_str(&context.constant_array_init);
     let report = if arena_report.is_some() {
         "    suz_arena_report();\n"
     } else {

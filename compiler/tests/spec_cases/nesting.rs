@@ -48,7 +48,7 @@ fn nesting_limit_rejects_deep_inputs_without_aborting() {
             format!("1{}", " + 1".repeat(count)),
             format!("P{}", " with { x: 1 }".repeat(count)),
             wrap("expr { ", " }", count, "1"),
-            wrap("`${", "}`", count, "1"),
+            wrap("\"${", "}\"", count, "1"),
         ]
         .into_iter()
         .enumerate()
@@ -137,18 +137,18 @@ fn nesting_boundaries_cover_expression_and_statement_children() {
     let cases = [
         (253, "1", "fix value = - $"),
         (253, "1", "fix value: u8 = ~ $"),
-        (253, "`a`", "fix value = len $"),
+        (253, "\"a\"", "fix value = len $"),
         (253, "1", "fix value: u8 = 1 + 1 @or $"),
         (253, "1", "fix value = Point { x: $, y: 0 }"),
         (253, "1", "fix value = matchexpr $ { _ => 0 }"),
         (252, "1", "fix value = matchexpr 0 { _ => $ }"),
         (252, "1", "fix value = matchexpr 0 { _ => { $ } }"),
         (253, "P", "fix value = $@.x"),
-        (253, "`a`", "fix value = $@[:]"),
-        (252, "`a`", "fix value = $[0] @or 'a'"),
-        (252, "0", "fix value = `a`[$] @or 'a'"),
-        (252, "0", "fix value = `a`[$:] @or ``"),
-        (252, "1", "fix value = `a`[:$] @or ``"),
+        (253, "\"a\"", "fix value = $@.[:]"),
+        (252, "\"a\"", "fix value = $.[0] @or \\a"),
+        (252, "0", "fix value = \"a\".[$] @or \\a"),
+        (252, "0", "fix value = \"a\".[$:] @or \"\""),
+        (252, "1", "fix value = \"a\".[:$] @or \"\""),
         (253, "1", "fix value = 0 @< $ < 2"),
         (253, "1", "while false { fix value = $ }"),
         (253, "1", "loop { fix value = $\nbreak }"),
@@ -261,7 +261,7 @@ fn deeply_nested_unclosed_inputs_exit_with_a_diagnostic() {
     for (opening, rule) in [
         ("(", "src.nesting-limit"),
         ("id(", "src.nesting-limit"),
-        ("`${", "symbol.template-line"),
+        ("\"${", "symbol.template-line"),
     ] {
         // 閉じ記号に到達しない入力でも、再帰でプロセスが異常終了しないことを確認する。
         // 未完のテンプレートは構文解析より先に字句解析が拒否する。
@@ -303,7 +303,7 @@ fn nesting_boundary_compiles_and_runs_through_all_commands() {
             "(Point { x: 1, y: 0 })",
         ),
         (mixed, "1"),
-        (wrap("`${", "}`", 254, "1"), "`1`"),
+        (wrap("\"${", "}\"", 254, "1"), "\"1\""),
         (format!("1 + {e}"), "2"),
         (format!("P with {{ x: {e} }}"), "(Point { x: 1, y: 0 })"),
     ];

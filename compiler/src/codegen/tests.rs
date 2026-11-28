@@ -119,6 +119,7 @@ fn generated_bool_values_preserve_negation_and_copies() {
         let program = CheckedProgram {
             arrays: Default::default(),
             arena_warnings: Vec::new(),
+            array_handler_warnings: Vec::new(),
             externs: Vec::new(),
             external_base: 0,
             function_types: Vec::new(),
@@ -129,6 +130,7 @@ fn generated_bool_values_preserve_negation_and_copies() {
             unhandled_arithmetic: Vec::new(),
             comparison_warnings: Vec::new(),
             division_warnings: Vec::new(),
+            float_sat_nan_warnings: Vec::new(),
             main_id: 0,
             functions: vec![crate::check::ir::CheckedFunction {
                 name: String::new(),
@@ -175,7 +177,7 @@ fn generated_bool_values_preserve_negation_and_copies() {
             generate(
                 &program,
                 "test.suz",
-                crate::TextPoolLimit::default(),
+                crate::SymbolPoolLimit::default(),
                 crate::ArenaOptions::default(),
                 crate::LogLevel::default(),
                 false,
@@ -317,6 +319,7 @@ fn comparison_codegen_sequences_and_reuses_operands() {
         let program = CheckedProgram {
             arrays: Default::default(),
             arena_warnings: Vec::new(),
+            array_handler_warnings: Vec::new(),
             externs: Vec::new(),
             external_base: 0,
             function_types: Vec::new(),
@@ -327,6 +330,7 @@ fn comparison_codegen_sequences_and_reuses_operands() {
             unhandled_arithmetic: Vec::new(),
             comparison_warnings: Vec::new(),
             division_warnings: Vec::new(),
+            float_sat_nan_warnings: Vec::new(),
             main_id: 0,
             functions: vec![crate::check::ir::CheckedFunction {
                 name: String::new(),
@@ -363,7 +367,7 @@ return result != {expected} || trace != {trace};
             generate(
                 &program,
                 "test.suz",
-                crate::TextPoolLimit::default(),
+                crate::SymbolPoolLimit::default(),
                 crate::ArenaOptions::default(),
                 crate::LogLevel::default(),
                 false,
@@ -391,5 +395,185 @@ return result != {expected} || trace != {trace};
     }
 }
 
+#[test]
+fn exact_expressions_avoid_suz_exact_require_and_use_native_path() {
+    let generate_c = |source: &str| {
+        let (program, _) =
+            crate::analyze(source.as_bytes(), &crate::CompilationOptions::default()).unwrap();
+        generate(
+            &program,
+            "exact.suz",
+            crate::SymbolPoolLimit::default(),
+            crate::ArenaOptions::default(),
+            crate::LogLevel::default(),
+            false,
+            None,
+        )
+    };
+
+    // 64ビットネイティブ演算に収まる式はsuz_exactもsuz_exact_requireも経由しない。
+    let native_c = generate_c(
+        r#"
+fn sat(x: i16) -> i16 { return ((x as i32) * 3) as| i16 }
+fn wrap(x: i16) -> i16 { return ((x as i32) * 3) as% i16 }
+fn checked(x: i16) -> i16 { return ((x as i32) * 3) as i16 or 0 }
+fn cmp(x: i16) -> bool { return (x as i32) * 3 > 1000 }
+fn widen(x: i16) -> f64 { return ((x as i32) * 3) as f64 }
+fn main() -> u8 {
+    if cmp(sat(10) +| wrap(20) +| checked(30)) && widen(1) > 0.0 { return 0 }
+    return 1
+}
+"#,
+    );
+    assert!(
+        !native_c.contains("suz_exact"),
+        "expected native 64-bit path without suz_exact:\n{native_c}"
+    );
+
+    // 64ビットを超えるがゼロ除算がない式はsuz_exact_requireを省く。
+    let wide_c = generate_c(
+        r#"
+fn wide(x: i64, y: i64) -> i64 { return (x * y) as| i64 }
+fn main() -> u8 { return ifexpr wide(2, 3) == 6 { 0 } else { 1 } }
+"#,
+    );
+    assert!(
+        !wide_c.contains("suz_exact_require"),
+        "expected infallible wide exact expression to omit suz_exact_require:\n{wide_c}"
+    );
+
+    // ゼロ除算の可能性がある式はsuz_exact_requireを残す。
+    let div_c = generate_c(
+        r#"
+fn div_cmp(x: i32, d: i32) -> bool { return x / d > 0 }
+fn main() -> u8 { return ifexpr div_cmp(6, 2) { 0 } else { 1 } }
+"#,
+    );
+    assert!(
+        div_c.contains("suz_exact_require"),
+        "expected fallible division exact expression to keep suz_exact_require:\n{div_c}"
+    );
+}
+
+#[test]
+fn enum_indexed_arrays_omit_bounds_checks_in_generated_c() {
+    let source = r#"
+enum Wave: u8 { Saw, Square, Triangle }
+fnshape Shape(f32) -> f32
+fn saw(p: f32) -> f32 { return p * 2.0 - 1.0 }
+fn square(p: f32) -> f32 { if p < 0.5 { return 1.0 } else { return -1.0 } }
+fn triangle(p: f32) -> f32 { if p < 0.5 { return p * 4.0 - 1.0 } else { return 3.0 - p * 4.0 } }
+fix SHAPES: .[static fn Shape; Wave] = .[
+    Wave.Triangle: fn triangle,
+    Wave.Saw: fn saw,
+    Wave.Square: fn square,
+]
+fn render(shapes: .[static fn Shape; Wave], levels: #[f32; Wave], wave: Wave, phase: f32) -> f32 {
+    levels#[wave] = levels.[wave] + 0.25
+    return shapes.[wave](phase) * levels.[wave]
+}
+fn main() -> u8 {
+    fix levels: #[f32; Wave] = new #[0.5; Wave]
+    fix w = 2 as Wave or return 1
+    fix v = render(SHAPES, levels, w, 0.25)
+    return ifexpr v == 0.0 { 0 } else { 1 }
+}
+"#;
+    let (program, _) =
+        crate::analyze(source.as_bytes(), &crate::CompilationOptions::default()).unwrap();
+    let c = generate(
+        &program,
+        "enum-array.suz",
+        crate::SymbolPoolLimit::default(),
+        crate::ArenaOptions::default(),
+        crate::LogLevel::default(),
+        false,
+        None,
+    );
+    assert!(
+        !c.contains("suz_array_bounds"),
+        "expected no runtime bounds check for enum-indexed array:\n{c}"
+    );
+    assert!(
+        c.contains("static suz_fntype_"),
+        "expected static constant function table:\n{c}"
+    );
+}
+
+#[test]
+fn nonzero_range_divisor_omits_division_by_zero_check_in_generated_c() {
+    let source = r#"
+range Divisor: u16 = 1..=1000
+
+fn divide(x: u16, d: Divisor) -> u16 {
+    return x / d
+}
+
+fn main() -> u8 {
+    fix d: Divisor = 5
+    return divide(100, d) as u8 or 0
+}
+"#;
+    let (program, _) =
+        crate::analyze(source.as_bytes(), &crate::CompilationOptions::default()).unwrap();
+    let c = generate(
+        &program,
+        "nonzero-divisor.suz",
+        crate::SymbolPoolLimit::default(),
+        crate::ArenaOptions::default(),
+        crate::LogLevel::default(),
+        false,
+        None,
+    );
+    assert!(
+        !c.contains("suz_exact_div") && !c.contains("rt.div-zero"),
+        "expected no runtime division-by-zero check for nonzero range divisor:\n{c}"
+    );
+}
+
+#[test]
+fn subrange_index_omits_bounds_check_for_known_length_array() {
+    let source = r#"
+range Channel: u8 = 0..<16
+
+struct Voice {
+    ch: Channel,
+}
+
+fix TABLE: .[u8] = .[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+
+fn lookup_param(c: Channel) -> u8 {
+    return TABLE.[c]
+}
+
+fn lookup_field(v: Voice) -> u8 {
+    return TABLE.[v.ch]
+}
+
+fn main() -> u8 {
+    fix c: Channel = 15
+    fix v = Voice { ch: 0 }
+    return lookup_param(c) - lookup_field(v)
+}
+"#;
+    let (program, _) =
+        crate::analyze(source.as_bytes(), &crate::CompilationOptions::default()).unwrap();
+    let c = generate(
+        &program,
+        "range-index.suz",
+        crate::SymbolPoolLimit::default(),
+        crate::ArenaOptions::default(),
+        crate::LogLevel::default(),
+        false,
+        None,
+    );
+    assert!(
+        !c.contains("suz_array_bounds") && !c.contains("rt.array-bounds"),
+        "expected no runtime bounds check for subrange index on known-length array:\n{c}"
+    );
+}
+
 #[path = "tests/array_bounds.rs"]
 mod array_bounds;
+#[path = "tests/struct_params.rs"]
+mod struct_params;

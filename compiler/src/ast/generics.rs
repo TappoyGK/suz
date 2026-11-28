@@ -73,6 +73,7 @@ impl ApplicationTable {
 pub(crate) type Applications = std::rc::Rc<std::cell::RefCell<ApplicationTable>>;
 
 /// 名前付き要求一覧。展開後の直接要求だけを意味検査へ渡す。
+#[derive(Clone)]
 pub(crate) struct NeedGroup {
     pub name: String,
     pub location: Location,

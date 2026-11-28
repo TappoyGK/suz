@@ -45,7 +45,10 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
     super::generic::work();
     match &expr.kind {
         ExpressionKind::ArrayInit {
-            values, lengths, ..
+            values,
+            lengths,
+            soa,
+            ..
         } => {
             let element = values
                 .first()
@@ -55,7 +58,8 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
                     .structs
                     .arrays
                     .borrow_mut()
-                    .intern(element, lengths.len()),
+                    .intern_full(element, lengths.len(), None, *soa)
+                    .array_reference(true),
             )
         }
         ExpressionKind::MethodCall {
@@ -99,10 +103,12 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
             Some(bindings.function_types.borrow()[id].result)
         }
         ExpressionKind::Slice { target, index, .. } => {
-            if let Some(id) = operand_type(target, bindings).and_then(Type::array_id) {
+            let target_type = operand_type(target, bindings);
+            if let Some(id) = target_type.and_then(Type::array_id) {
+                let readonly = target_type.is_some_and(Type::is_readonly_array);
                 let a = bindings.structs.arrays.borrow().get(id);
                 return Some(if !index {
-                    Type::Array(id).pointer()
+                    Type::Array(id).array_reference(readonly)
                 } else if a.rank == 1 {
                     a.element
                 } else {
@@ -110,15 +116,21 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
                         .structs
                         .arrays
                         .borrow_mut()
-                        .intern(a.element, a.rank - 1)
-                        .pointer()
+                        .intern_full(a.element, a.rank - 1, None, a.soa)
+                        .array_reference(readonly)
                 });
             }
             Some(if *index { Type::Char } else { Type::Text })
         }
-        ExpressionKind::New(value) => operand_type(value, bindings).map(Type::pointer),
+        ExpressionKind::New(value) => operand_type(value, bindings).map(|ty| {
+            if let ExpressionKind::ArrayInit { readonly, .. } = &value.kind {
+                Type::Array(ty.array_id().unwrap()).array_reference(*readonly)
+            } else {
+                ty.pointer()
+            }
+        }),
         ExpressionKind::Deref(value) => operand_type(value, bindings).and_then(Type::pointee),
-        ExpressionKind::Null => None,
+        ExpressionKind::Nil => None,
         ExpressionKind::CBytes(_) => Some(Type::CPointer),
         ExpressionKind::CByteLen(_) => Some(Type::CInteger(crate::ast::CIntegerType::Size)),
         ExpressionKind::Len(inner) => {
@@ -130,11 +142,38 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
                 Some(Type::Integer(IntegerType::Len))
             }
         }
-        ExpressionKind::Template(_) => Some(Type::Symbol),
+        ExpressionKind::TextAppend { .. }
+        | ExpressionKind::Template(_)
+        | ExpressionKind::TextBuffer { .. } => Some(Type::Text),
         ExpressionKind::Struct { ty, .. } => bindings.resolve_type_at(*ty, expr.location).ok(),
         ExpressionKind::With { target, .. } => operand_type(target, bindings),
         ExpressionKind::Field { target, name } => {
             let known = operand_type(target, bindings)?;
+            if let Some(array_id) = known.array_id()
+                && !known.is_nilable()
+            {
+                let array = bindings.structs.arrays.borrow().get(array_id);
+                if array.soa
+                    && let Type::Struct(id) = array.element
+                {
+                    let field_ty = bindings
+                        .structs
+                        .get(id)
+                        .fields
+                        .iter()
+                        .find(|field| &field.name == name)
+                        .map(|field| field.ty)?;
+                    let col_soa = matches!(field_ty, Type::Struct(_));
+                    return Some(
+                        bindings
+                            .structs
+                            .arrays
+                            .borrow_mut()
+                            .intern_full(field_ty, array.rank, array.index_enum, col_soa)
+                            .array_reference(known.is_readonly_array()),
+                    );
+                }
+            }
             let Type::Struct(id) = known.pointee().unwrap_or(known) else {
                 return None;
             };
@@ -195,6 +234,8 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
         ExpressionKind::Integer { .. } | ExpressionKind::Float(_) => None,
         ExpressionKind::Name(name) => bindings.get(name).map(|binding| binding.ty),
         ExpressionKind::Negate(inner)
+        | ExpressionKind::WrapNegate(inner)
+        | ExpressionKind::SaturatingNegate(inner)
         | ExpressionKind::BitNot(inner)
         | ExpressionKind::Not(inner)
             if bindings.has_operator_methods
@@ -209,6 +250,8 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
         ExpressionKind::ArithmeticHandler { operand: inner, .. }
         | ExpressionKind::Group(inner)
         | ExpressionKind::BitNot(inner)
+        | ExpressionKind::WrapNegate(inner)
+        | ExpressionKind::SaturatingNegate(inner)
         | ExpressionKind::Negate(inner) => operand_type(inner, bindings),
         ExpressionKind::Binary {
             operator,
@@ -220,7 +263,7 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
                 && super::operator_methods::supported(*operator)
                 && matches!(a, Some(Type::Struct(_) | Type::Enum(_)))
             {
-                return super::operator_methods::hint(operator.c_symbol(), left, right, bindings);
+                return super::operator_methods::hint(operator.symbol(), left, right, bindings);
             }
             let b = operand_type(right, bindings);
             if operator.is_shift() {
@@ -303,6 +346,8 @@ fn has_float_source_inner<const OPERATOR_METHODS: bool>(
         }
         ExpressionKind::Float(_) => true,
         ExpressionKind::Negate(inner)
+        | ExpressionKind::WrapNegate(inner)
+        | ExpressionKind::SaturatingNegate(inner)
         | ExpressionKind::BitNot(inner)
         | ExpressionKind::Not(inner)
             if OPERATOR_METHODS && super::operator_methods::owner(inner, bindings).is_some() =>
@@ -317,6 +362,8 @@ fn has_float_source_inner<const OPERATOR_METHODS: bool>(
         ExpressionKind::ArithmeticHandler { operand: inner, .. }
         | ExpressionKind::Group(inner)
         | ExpressionKind::BitNot(inner)
+        | ExpressionKind::WrapNegate(inner)
+        | ExpressionKind::SaturatingNegate(inner)
         | ExpressionKind::Negate(inner) => float_source::<OPERATOR_METHODS>(inner, bindings),
         ExpressionKind::Binary {
             operator,
@@ -327,7 +374,7 @@ fn has_float_source_inner<const OPERATOR_METHODS: bool>(
                 && super::operator_methods::supported(*operator)
                 && super::operator_methods::owner(left, bindings).is_some()
             {
-                return super::operator_methods::hint(operator.c_symbol(), left, right, bindings)
+                return super::operator_methods::hint(operator.symbol(), left, right, bindings)
                     .is_some_and(Type::is_float);
             }
             float_source::<OPERATOR_METHODS>(left, bindings)
@@ -545,7 +592,7 @@ fn expression_checked(
     {
         super::operator_methods::call(
             expr,
-            operator.c_symbol(),
+            operator.symbol(),
             left,
             right,
             inference_hint,
@@ -561,7 +608,7 @@ fn expression_checked(
     } else {
         match &expr.kind {
             ExpressionKind::ArrayInit { .. } => {
-                super::arrays::initializer(expr, required, bindings)?
+                super::arrays::constant_initializer(expr, required, bindings)?
             }
             ExpressionKind::MethodCall { .. } => {
                 super::methods::call(expr, inference_hint, bindings, None)?
@@ -592,9 +639,9 @@ fn expression_checked(
                 super::function_values::invoke(expr, target, arguments, bindings, None)?
             }
             ExpressionKind::Slice { .. } => super::arrays::read_or_text(expr, bindings)?,
-            ExpressionKind::Template(parts) => {
-                super::text::template(parts, expr.location, bindings)?
-            }
+            ExpressionKind::TextAppend { .. }
+            | ExpressionKind::TextBuffer { .. }
+            | ExpressionKind::Template(_) => super::text::expression(expr, required, bindings)?,
             ExpressionKind::Struct { .. }
             | ExpressionKind::With { .. }
             | ExpressionKind::Field { .. } => structs::check(expr, bindings)?,
@@ -637,7 +684,7 @@ fn expression_checked(
             ExpressionKind::Block { statements, value } => {
                 blocks::check(statements, value, inference_hint, bindings)?
             }
-            ExpressionKind::New(_) | ExpressionKind::Deref(_) | ExpressionKind::Null => {
+            ExpressionKind::New(_) | ExpressionKind::Deref(_) | ExpressionKind::Nil => {
                 super::arena::expression(expr, required, bindings)?
             }
             ExpressionKind::CBytes(inner) | ExpressionKind::CByteLen(inner) => {
@@ -646,7 +693,7 @@ fn expression_checked(
             ExpressionKind::Len(inner) => {
                 let operand = expression(inner, None, bindings)?;
                 if !operand.ty.is_text()
-                    && !(operand.ty.is_nonnull() && operand.ty.array_id().is_some())
+                    && !(!operand.ty.is_nilable() && operand.ty.array_id().is_some())
                 {
                     return Err(expr.location.error(
                         ErrorKind::InvalidSource,
@@ -667,6 +714,8 @@ fn expression_checked(
             }
             ExpressionKind::ArithmeticHandler { .. }
             | ExpressionKind::BitNot(_)
+            | ExpressionKind::WrapNegate(_)
+            | ExpressionKind::SaturatingNegate(_)
             | ExpressionKind::Negate(_)
             | ExpressionKind::Binary { .. }
             | ExpressionKind::Not(_)
@@ -877,22 +926,22 @@ fn allocation_type(value: &Expression, bindings: &Scope) -> Option<Type> {
     }
 }
 
-fn has_null_branch(value: &Expression) -> bool {
+fn has_nil_branch(value: &Expression) -> bool {
     match &value.kind {
-        ExpressionKind::Null => true,
+        ExpressionKind::Nil => true,
         ExpressionKind::Group(inner) | ExpressionKind::Block { value: inner, .. } => {
-            has_null_branch(inner)
+            has_nil_branch(inner)
         }
         ExpressionKind::If {
             branches,
             otherwise,
-        } => branches.iter().any(|(_, v)| has_null_branch(v)) || has_null_branch(otherwise),
-        ExpressionKind::Match { arms, .. } => arms.iter().any(|a| has_null_branch(&a.body)),
+        } => branches.iter().any(|(_, v)| has_nil_branch(v)) || has_nil_branch(otherwise),
+        ExpressionKind::Match { arms, .. } => arms.iter().any(|a| has_nil_branch(&a.body)),
         _ => false,
     }
 }
 
-// nullの分岐には、他の分岐から決めた参照先の型を要求する。
+// nilの分岐には、他の分岐から決めた参照先の型を要求する。
 fn branch_type<'a>(
     values: impl Iterator<Item = &'a Expression> + Clone,
     bindings: &Scope,
@@ -907,11 +956,11 @@ fn branch_type<'a>(
         }
         result
     })?;
-    if ty.pointee().is_some() && values.clone().any(has_null_branch) {
+    if ty.is_reference() && values.clone().any(has_nil_branch) {
         if matches!(ty, Type::Pointer { shape, .. } if shape.depth() > 256) {
             return None;
         }
-        Some(ty.with_nullable(true))
+        Some(ty.with_nilable(true))
     } else {
         Some(ty)
     }
@@ -924,6 +973,36 @@ pub(super) fn joined_type(types: impl Iterator<Item = Option<Type>>) -> Option<T
 // 代替の型選択も型の代入ごとに適用する。共通型がなくても、
 // 先頭オペランドの型への通常の変換判定まで進む。
 fn joined_or_first(a: Type, b: Type) -> Type {
+    if a.is_text() && b.is_text() && a != b {
+        return Type::Text;
+    }
+    if let (Type::Pointer { .. }, Type::Pointer { .. }) = (a, b)
+        && a.pointee() == b.pointee()
+    {
+        return a
+            .with_readonly(a.is_readonly_pointer() || b.is_readonly_pointer())
+            .with_nilable(a.is_nilable() || b.is_nilable());
+    }
+    if let (
+        Type::ArrayRef {
+            id: a_id,
+            mutable: a_mut,
+            nilable: a_nil,
+        },
+        Type::ArrayRef {
+            id: b_id,
+            mutable: b_mut,
+            nilable: b_nil,
+        },
+    ) = (a, b)
+        && a_id == b_id
+    {
+        return Type::ArrayRef {
+            id: a_id,
+            mutable: a_mut && b_mut,
+            nilable: a_nil || b_nil,
+        };
+    }
     if a.lifts_to(b) {
         return b;
     }
@@ -953,6 +1032,48 @@ pub(in crate::check) fn integer_literal(
     let value = integer_literal_value(value, negative, ty, location)?;
     Ok(CheckedExpression {
         ty: Type::Integer(ty),
+        value: Value::Integer {
+            value,
+            minus: negative.then_some(location),
+        },
+    })
+}
+fn range_literal(
+    text: &str,
+    negative: bool,
+    ty: crate::ast::RangeType,
+    location: Location,
+) -> Result<CheckedExpression, Diagnostic> {
+    let digits = text.replace('_', "");
+    let value = digits
+        .parse::<i128>()
+        .ok()
+        .and_then(|n| if negative { n.checked_neg() } else { Some(n) });
+    let fail = || {
+        location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "lit.range",
+                "integer literal is out of range for range type"
+            ),
+        )
+    };
+    let value = value.ok_or_else(fail)?;
+    let (min, max) = ty.bounds();
+    if value < min || value > max {
+        return Err(fail());
+    }
+    if negative && ty.base.bounds().0 == 0 {
+        return Err(location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "expr.operator-types",
+                "integer negation requires a signed type"
+            ),
+        ));
+    }
+    Ok(CheckedExpression {
+        ty: Type::Range(ty),
         value: Value::Integer {
             value,
             minus: negative.then_some(location),
@@ -1106,6 +1227,7 @@ pub(in crate::check) fn scalar_literal(
 ) -> Result<CheckedExpression, Diagnostic> {
     match ty {
         Type::Integer(ty) if !floating => integer_literal(text, negative, ty, location),
+        Type::Range(ty) if !floating => range_literal(text, negative, ty, location),
         Type::Float(ty) => {
             let spelling = if negative {
                 format!("-{text}")

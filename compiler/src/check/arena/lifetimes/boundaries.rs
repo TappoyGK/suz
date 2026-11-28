@@ -34,7 +34,7 @@ impl Analysis {
         while index < objects.len() {
             let (ty, object) = objects[index];
             for path in self.paths(ty) {
-                let pointee = self.field_type(ty, &path).pointee().unwrap();
+                let pointee = reference_target(self.field_type(ty, &path)).unwrap();
                 let target = if let Some((_, cell)) = objects.iter().find(|(ty, _)| *ty == pointee)
                 {
                     *cell
@@ -72,7 +72,7 @@ impl Analysis {
             .insert(root, summaries::Object::Parameter(index, ty));
         roots.insert(ty, root);
         for path in self.paths(ty) {
-            let target = self.field_type(ty, &path).pointee().unwrap();
+            let target = reference_target(self.field_type(ty, &path)).unwrap();
             let object = self.parameter_object(target, region, location, objects);
             let field = self.project(root, &path);
             self.targets[field].insert(Reference::object(object));
@@ -104,7 +104,7 @@ impl Analysis {
                 self.objects.insert(local, summaries::Object::Slot(id));
             }
             for path in self.paths(ty) {
-                let pointee = self.field_type(ty, &path).pointee().unwrap();
+                let pointee = reference_target(self.field_type(ty, &path)).unwrap();
                 let object =
                     self.parameter_root(id, pointee, region, location, &mut roots, objects);
                 let field = self.project(local, &path);

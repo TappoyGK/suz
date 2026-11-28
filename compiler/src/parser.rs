@@ -16,9 +16,10 @@ mod function_types;
 mod functions;
 mod generics;
 mod logs;
-mod names;
+pub(crate) mod names;
 mod need_groups;
 pub(crate) mod nesting;
+mod ranges;
 mod statements;
 pub(crate) mod structs;
 
@@ -37,11 +38,14 @@ struct Parser<'a, 's> {
     applications: crate::ast::generics::Applications,
     type_parameters: Vec<crate::ast::generics::TypeParameter>,
     pending_needs: Vec<(usize, usize)>,
+    pending_contracts: Vec<(usize, usize)>,
+    in_ensures: bool,
     need_groups: std::rc::Rc<need_groups::Groups>,
     generic_functions: std::rc::Rc<std::collections::BTreeSet<String>>,
     allows: Vec<crate::warnings::AllowScope>,
     tokens: &'a [Token<'s>],
     enums: &'a [crate::ast::EnumDeclaration],
+    ranges: &'a [crate::ast::RangeDeclaration],
     structs: &'a [crate::ast::StructDeclaration],
     fnshapes: &'a [crate::ast::FnShapeDeclaration],
     fnshape_names: std::rc::Rc<std::collections::BTreeMap<String, usize>>,
@@ -153,6 +157,7 @@ impl<'a, 's> Parser<'a, 's> {
 pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
     let need_groups = need_groups::collect(tokens)?;
     let enums = enums::collect(tokens)?;
+    let ranges = ranges::collect(tokens, &enums)?;
     let mut fnshapes = function_types::headers(tokens)?;
     let applications = crate::ast::generics::Applications::default();
     for (id, declaration) in fnshapes.iter_mut().enumerate() {
@@ -168,6 +173,7 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
     let mut structs = structs::collect(
         tokens,
         &enums,
+        &ranges,
         &fnshapes,
         applications.clone(),
         need_groups.clone(),
@@ -175,6 +181,7 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
     let function_types = function_types::resolve(
         tokens,
         &enums,
+        &ranges,
         &mut structs,
         &mut fnshapes,
         applications.clone(),
@@ -185,9 +192,12 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
         applications: applications.clone(),
         type_parameters: Vec::new(),
         pending_needs: Vec::new(),
+        pending_contracts: Vec::new(),
+        in_ensures: false,
         generic_functions: std::rc::Rc::new(generics::function_names(tokens)),
         allows: Vec::new(),
         enums: &enums,
+        ranges: &ranges,
         structs: &structs,
         fnshapes: &fnshapes,
         fnshape_names: function_types::name_index(&fnshapes),
@@ -217,6 +227,17 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
                 crate::diagnostic!(
                     "generic.needs",
                     "requirements must precede a generic declaration"
+                ),
+            ));
+        }
+        if !p.pending_contracts.is_empty()
+            && !matches!(p.token().kind, Kind::Symbol("@") | Kind::Keyword("fn"))
+        {
+            return Err(p.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "contract.decl",
+                    "@expects and @ensures must precede a function or method declaration"
                 ),
             ));
         }
@@ -251,6 +272,13 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
                     .unwrap()
                     .end;
             }
+            Kind::Keyword("range") => {
+                p.cursor = ranges
+                    .iter()
+                    .find(|decl| decl.start == p.cursor)
+                    .unwrap()
+                    .end;
+            }
             Kind::Keyword("arena") => {
                 return Err(p.location().error(
                     ErrorKind::InvalidSource,
@@ -276,7 +304,7 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
                     ErrorKind::InvalidSource,
                     crate::diagnostic!(
                         "decl.top-level",
-                        "expected a fix, fn, fnshape, needs, struct, enum, error or extern declaration"
+                        "expected a fix, fn, fnshape, needs, struct, enum, range, error or extern declaration"
                     ),
                 ));
             }
@@ -308,6 +336,7 @@ pub(crate) fn parse(tokens: &[Token<'_>]) -> Result<Program, Diagnostic> {
         function_types,
         structs,
         enums,
+        ranges,
         bindings,
         functions,
     })

@@ -123,6 +123,18 @@ fn statement_height(statement: &Statement) -> usize {
             .max(block_height(body))
             .max(block_height(otherwise)),
         Statement::Store { target, value, .. } => target.height.max(value.height),
+        Statement::ArrayBulkWrite(bulk) => {
+            let mut h = bulk.target.height.max(bulk.value.height);
+            if let crate::ast::BulkSelector::Slice { start, end } = &bulk.selector {
+                if let Some(start) = start {
+                    h = h.max(start.height);
+                }
+                if let Some(end) = end {
+                    h = h.max(end.height);
+                }
+            }
+            h
+        }
         Statement::Binding { initializer, .. } => initializer.height,
         Statement::Assign {
             value, compound, ..
@@ -149,12 +161,12 @@ fn statement_height(statement: &Statement) -> usize {
             .as_ref()
             .map_or(0, |v| v.height)
             .max(block_height(body)),
-        Statement::For {
-            start, end, body, ..
-        } => start
-            .height
-            .max(end.as_ref().map_or(0, |v| v.height))
-            .max(block_height(body)),
+        Statement::For(for_stmt) => match &for_stmt.target {
+            crate::ast::ForTarget::Range { start, end, .. } => start.height.max(end.height),
+            crate::ast::ForTarget::Expression(expr) => expr.height,
+            crate::ast::ForTarget::Type { .. } => 0,
+        }
+        .max(block_height(&for_stmt.body)),
         Statement::If {
             branches,
             otherwise,
@@ -182,11 +194,18 @@ fn statement_height(statement: &Statement) -> usize {
 fn kind_height(kind: &ExpressionKind) -> usize {
     use ExpressionKind::*;
     1 + match kind {
+        TextBuffer { capacity, value } => {
+            value.height.max(capacity.as_ref().map_or(0, |v| v.height))
+        }
         ArrayInit {
-            values, lengths, ..
+            values,
+            lengths,
+            keys,
+            ..
         } => values
             .iter()
             .chain(lengths)
+            .chain(keys.iter().flatten())
             .map(|v| v.height)
             .max()
             .unwrap_or(0),
@@ -239,8 +258,8 @@ fn kind_height(kind: &ExpressionKind) -> usize {
         Cast {
             operand, fallback, ..
         } => (operand.height + usize::from(fallback.is_some())).max(handler_height(fallback)),
-        New(v) | Deref(v) | CBytes(v) | CByteLen(v) | Len(v) | Negate(v) | BitNot(v) | Not(v)
-        | Group(v) => v.height,
+        New(v) | Deref(v) | CBytes(v) | CByteLen(v) | Len(v) | Negate(v) | BitNot(v)
+        | WrapNegate(v) | SaturatingNegate(v) | Not(v) | Group(v) => v.height,
         If {
             branches,
             otherwise,
@@ -251,11 +270,13 @@ fn kind_height(kind: &ExpressionKind) -> usize {
                 .max()
                 .unwrap_or(0),
         ),
-        Binary { left, right, .. } | Logical { left, right, .. } => left.height.max(right.height),
+        TextAppend { left, right } | Binary { left, right, .. } | Logical { left, right, .. } => {
+            left.height.max(right.height)
+        }
         Comparison { operands, .. } => operands.iter().map(|v| v.height).max().unwrap_or(0),
         Integer { negative: true, .. } => 1,
         Float(value) if value.starts_with('-') => 1,
-        Integer { .. } | Float(_) | Bool(_) | Char(_) | Name(_) | Variant { .. } | Null | Void => 0,
+        Integer { .. } | Float(_) | Bool(_) | Char(_) | Name(_) | Variant { .. } | Nil | Void => 0,
     }
 }
 
@@ -269,13 +290,13 @@ mod tests {
             ("(1 + 2) * 3", 5),
             ("0 < a < 10", 3),
             ("a + 1 + 1", 4),
-            ("`n=${a + 1}`", 4),
+            (r#""n=${a + 1}""#, 4),
             ("ifexpr a == 0 { a } else { 0 }", 4),
             ("expr { 1 }", 4),
             ("run(fn []() -> i32 { return 1 })", 5),
             ("matchexpr a { _ => 1 }", 4),
             ("x as u8 or 0", 4),
-            ("s[0] or 'a'", 4),
+            ("s.[0] or \\a", 4),
             ("-1", 3),
         ] {
             let source = format!("fn main() -> u8 {{ fix value = {expression}\nreturn 0 }}");

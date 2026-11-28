@@ -8,6 +8,18 @@ use super::{
 use crate::{ast::Type, check::CheckedStatement};
 use std::fmt::Write;
 
+fn c_int_bound(value: i128, ty: &str) -> String {
+    if value == i64::MIN as i128 {
+        format!("({ty})INT64_MIN")
+    } else if value > i64::MAX as i128 {
+        format!("({ty})UINT64_C({value})")
+    } else if value > i32::MAX as i128 || value < -(i32::MAX as i128) {
+        format!("({ty})INT64_C({value})")
+    } else {
+        format!("({ty}){value}")
+    }
+}
+
 pub(super) fn emit_block(
     c: &mut String,
     statements: &[CheckedStatement],
@@ -47,6 +59,18 @@ pub(super) fn emit_block(
                 body,
                 ..
             } => {
+                if super::soa::try_emit_store(
+                    c,
+                    target,
+                    *id,
+                    value,
+                    body,
+                    depth,
+                    next_assignment,
+                    context,
+                ) {
+                    continue;
+                }
                 writeln!(
                     c,
                     "{indent}{{\n{indent}    {} const suz_local_{id} = &({});",
@@ -61,6 +85,9 @@ pub(super) fn emit_block(
                     expression(value, context)
                 )
                 .unwrap();
+            }
+            CheckedStatement::ArrayBulkWrite(bulk) => {
+                super::arrays::emit_bulk_write(c, bulk, depth, next_assignment, context);
             }
 
             CheckedStatement::Recover(value) => {
@@ -144,19 +171,20 @@ pub(super) fn emit_block(
                 }
                 writeln!(c, "{indent}}}").unwrap();
             }
-            CheckedStatement::For {
-                id,
-                variable_type,
-                start,
-                end,
-                inclusive,
-                reverse,
-                body,
-            } => {
-                let Some(end) = end else {
-                    if start.ty.array_id().is_some() {
+            CheckedStatement::For(for_stmt) => {
+                let crate::check::ir::CheckedFor {
+                    index,
+                    id,
+                    variable_type,
+                    target,
+                    reverse,
+                    body,
+                } = for_stmt.as_ref();
+                match target {
+                    crate::check::ir::CheckedForTarget::Array(start) => {
                         super::arrays::emit_loop(
                             c,
+                            *index,
                             *id,
                             *variable_type,
                             start,
@@ -168,66 +196,114 @@ pub(super) fn emit_block(
                         );
                         continue;
                     }
-                    super::characters::emit_text_loop(
-                        c,
-                        *id,
-                        start,
-                        *reverse,
-                        body,
-                        depth,
-                        next_assignment,
-                        context,
-                    );
-                    continue;
-                };
-                let character = start.ty == crate::ast::Type::Char;
-                let ty = start.ty.c_name();
-                let start = expression(start, context);
-                let end = expression(end, context);
-                let comparison = if *inclusive { "<=" } else { "<" };
-                writeln!(c, "{indent}{{").unwrap();
-                writeln!(c, "{indent}    const {ty} suz_start_{id} = {start};").unwrap();
-                writeln!(c, "{indent}    const {ty} suz_end_{id} = {end};").unwrap();
-                if *reverse {
-                    writeln!(c, "{indent}    _Bool suz_more_{id} = suz_start_{id} {comparison} suz_end_{id};").unwrap();
-                    writeln!(c, "{indent}    {ty} suz_cursor_{id} = suz_end_{id};").unwrap();
-                    if !inclusive && character {
-                        writeln!(c, "{indent}    if (suz_more_{id}) suz_cursor_{id} = suz_cursor_{id} == 0xe000 ? 0xd7ff : suz_cursor_{id} - 1;").unwrap();
-                    } else if !inclusive {
-                        // 空の範囲では、型の最小値から減算してはならない。
-                        writeln!(c, "{indent}    if (suz_more_{id}) --suz_cursor_{id};").unwrap();
+                    crate::check::ir::CheckedForTarget::Text(start) => {
+                        super::characters::emit_text_loop(
+                            c,
+                            *id,
+                            start,
+                            *reverse,
+                            body,
+                            depth,
+                            next_assignment,
+                            context,
+                        );
+                        continue;
                     }
-                    // forの更新節で進めることで、最小値でのcontinueも扱う。
-                    let step = if character {
-                        format!(
-                            "suz_cursor_{id} -= suz_more_{id} ? (suz_cursor_{id} == 0xe000 ? 0x801 : 1) : 0"
+                    crate::check::ir::CheckedForTarget::TypeRange { ty, lo, hi } => {
+                        let c_ty = ty.c_name();
+                        let start = c_int_bound(*lo, &c_ty);
+                        let end = c_int_bound(*hi, &c_ty);
+                        writeln!(c, "{indent}{{").unwrap();
+                        writeln!(c, "{indent}    const {c_ty} suz_start_{id} = {start};").unwrap();
+                        writeln!(c, "{indent}    const {c_ty} suz_end_{id} = {end};").unwrap();
+                        if *reverse {
+                            writeln!(c, "{indent}    _Bool suz_more_{id} = 1;").unwrap();
+                            writeln!(c, "{indent}    {c_ty} suz_cursor_{id} = suz_end_{id};")
+                                .unwrap();
+                            writeln!(
+                                c,
+                                "{indent}    for (; suz_more_{id}; suz_more_{id} = suz_cursor_{id} > suz_start_{id}, suz_cursor_{id} -= suz_more_{id}) {{"
+                            )
+                            .unwrap();
+                        } else {
+                            writeln!(c, "{indent}    {c_ty} suz_cursor_{id} = suz_start_{id};")
+                                .unwrap();
+                            writeln!(c, "{indent}    _Bool suz_more_{id} = 1;").unwrap();
+                            writeln!(
+                                c,
+                                "{indent}    for (; suz_more_{id}; suz_more_{id} = suz_cursor_{id} < suz_end_{id}, suz_cursor_{id} += suz_more_{id}) {{"
+                            )
+                            .unwrap();
+                        }
+                        writeln!(
+                            c,
+                            "{indent}        const {c_ty} suz_local_{id} = suz_cursor_{id};"
                         )
-                    } else {
-                        format!("suz_cursor_{id} -= suz_more_{id}")
-                    };
-                    writeln!(c, "{indent}    for (; suz_more_{id}; suz_more_{id} = suz_cursor_{id} > suz_start_{id}, {step}) {{").unwrap();
-                } else {
-                    writeln!(c, "{indent}    {ty} suz_cursor_{id} = suz_start_{id};").unwrap();
-                    writeln!(c, "{indent}    _Bool suz_more_{id} = 1;").unwrap();
-                    // 最大値でのcontinue後も含め、加算する前に終了条件を検査する。
-                    let step = if character {
-                        format!(
-                            "suz_cursor_{id} += suz_more_{id} ? (suz_cursor_{id} == 0xd7ff ? 0x801 : 1) : 0"
+                        .unwrap();
+                        writeln!(c, "{indent}        (void)suz_local_{id};").unwrap();
+                        context.immutable_locals.insert(*id);
+                        emit_block(c, body, depth + 2, next_assignment, context);
+                        writeln!(c, "{indent}    }}\n{indent}}}").unwrap();
+                        continue;
+                    }
+                    crate::check::ir::CheckedForTarget::Range {
+                        start,
+                        end,
+                        inclusive,
+                    } => {
+                        let character = start.ty == crate::ast::Type::Char;
+                        let ty = start.ty.c_name();
+                        let start = expression(start, context);
+                        let end = expression(end, context);
+                        let comparison = if *inclusive { "<=" } else { "<" };
+                        writeln!(c, "{indent}{{").unwrap();
+                        writeln!(c, "{indent}    const {ty} suz_start_{id} = {start};").unwrap();
+                        writeln!(c, "{indent}    const {ty} suz_end_{id} = {end};").unwrap();
+                        if *reverse {
+                            writeln!(c, "{indent}    _Bool suz_more_{id} = suz_start_{id} {comparison} suz_end_{id};").unwrap();
+                            writeln!(c, "{indent}    {ty} suz_cursor_{id} = suz_end_{id};")
+                                .unwrap();
+                            if !inclusive && character {
+                                writeln!(c, "{indent}    if (suz_more_{id}) suz_cursor_{id} = suz_cursor_{id} == 0xe000 ? 0xd7ff : suz_cursor_{id} - 1;").unwrap();
+                            } else if !inclusive {
+                                // 空の範囲では、型の最小値から減算してはならない。
+                                writeln!(c, "{indent}    if (suz_more_{id}) --suz_cursor_{id};")
+                                    .unwrap();
+                            }
+                            // forの更新節で進めることで、最小値でのcontinueも扱う。
+                            let step = if character {
+                                format!(
+                                    "suz_cursor_{id} -= suz_more_{id} ? (suz_cursor_{id} == 0xe000 ? 0x801 : 1) : 0"
+                                )
+                            } else {
+                                format!("suz_cursor_{id} -= suz_more_{id}")
+                            };
+                            writeln!(c, "{indent}    for (; suz_more_{id}; suz_more_{id} = suz_cursor_{id} > suz_start_{id}, {step}) {{").unwrap();
+                        } else {
+                            writeln!(c, "{indent}    {ty} suz_cursor_{id} = suz_start_{id};")
+                                .unwrap();
+                            writeln!(c, "{indent}    _Bool suz_more_{id} = 1;").unwrap();
+                            // 最大値でのcontinue後も含め、加算する前に終了条件を検査する。
+                            let step = if character {
+                                format!(
+                                    "suz_cursor_{id} += suz_more_{id} ? (suz_cursor_{id} == 0xd7ff ? 0x801 : 1) : 0"
+                                )
+                            } else {
+                                format!("suz_cursor_{id} += suz_more_{id}")
+                            };
+                            writeln!(c, "{indent}    for (; suz_more_{id} && suz_cursor_{id} {comparison} suz_end_{id}; suz_more_{id} = suz_cursor_{id} < suz_end_{id}, {step}) {{").unwrap();
+                        }
+                        writeln!(
+                            c,
+                            "{indent}        const {ty} suz_local_{id} = suz_cursor_{id};"
                         )
-                    } else {
-                        format!("suz_cursor_{id} += suz_more_{id}")
-                    };
-                    writeln!(c, "{indent}    for (; suz_more_{id} && suz_cursor_{id} {comparison} suz_end_{id}; suz_more_{id} = suz_cursor_{id} < suz_end_{id}, {step}) {{").unwrap();
+                        .unwrap();
+                        writeln!(c, "{indent}        (void)suz_local_{id};").unwrap();
+                        context.immutable_locals.insert(*id);
+                        emit_block(c, body, depth + 2, next_assignment, context);
+                        writeln!(c, "{indent}    }}\n{indent}}}").unwrap();
+                    }
                 }
-                writeln!(
-                    c,
-                    "{indent}        const {ty} suz_local_{id} = suz_cursor_{id};"
-                )
-                .unwrap();
-                writeln!(c, "{indent}        (void)suz_local_{id};").unwrap();
-                context.immutable_locals.insert(*id);
-                emit_block(c, body, depth + 2, next_assignment, context);
-                writeln!(c, "{indent}    }}\n{indent}}}").unwrap();
             }
             CheckedStatement::SliceReturn {
                 id, return_value, ..
@@ -248,10 +324,10 @@ pub(super) fn emit_block(
                     CheckedStatement::CastReturn {
                         ty,
                         operand,
-                        wrap,
+                        kind,
                         location,
                         ..
-                    } => (*ty, cast_parts(operand, *ty, *wrap, *location, context)),
+                    } => (*ty, cast_parts(operand, *ty, *kind, *location, context)),
                     _ => unreachable!(),
                 };
                 writeln!(c, "{indent}{setup};").unwrap();

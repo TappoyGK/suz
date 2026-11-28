@@ -60,6 +60,7 @@ fn main() {
         "suz_runtime.h",
         "suz_parse.h",
         "suz_char.h",
+        "suz_unicode_cat.h",
         "suz_parse_struct.h",
         "suz_config.h",
         "third_party/ryu/ryu",

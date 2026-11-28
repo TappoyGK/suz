@@ -174,6 +174,12 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
                 }
                 visit(otherwise, false, true)?;
             }
+            ExpressionKind::TextBuffer { capacity, value } => {
+                if let Some(capacity) = capacity {
+                    visit(capacity, false, in_value)?;
+                }
+                visit(value, false, in_value)?;
+            }
             ExpressionKind::Negate(inner)
             | ExpressionKind::New(inner)
             | ExpressionKind::Deref(inner)
@@ -181,8 +187,11 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
             | ExpressionKind::CByteLen(inner)
             | ExpressionKind::Len(inner)
             | ExpressionKind::BitNot(inner)
+            | ExpressionKind::WrapNegate(inner)
+            | ExpressionKind::SaturatingNegate(inner)
             | ExpressionKind::Not(inner) => visit(inner, false, in_value)?,
-            ExpressionKind::Binary { left, right, .. }
+            ExpressionKind::TextAppend { left, right }
+            | ExpressionKind::Binary { left, right, .. }
             | ExpressionKind::Logical { left, right, .. } => {
                 visit(left, false, in_value)?;
                 visit(right, false, in_value)?;
@@ -216,21 +225,25 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
                     validate_statements(&arm.body, in_value)?;
                 }
             }
-            Statement::For {
-                start, end, body, ..
-            } => {
-                visit(start, false, in_value)?;
-                if let Some(end) = end {
-                    visit(end, false, in_value)?;
+            Statement::For(for_stmt) => {
+                match &for_stmt.target {
+                    crate::ast::ForTarget::Range { start, end, .. } => {
+                        visit(start, false, in_value)?;
+                        visit(end, false, in_value)?;
+                    }
+                    crate::ast::ForTarget::Expression(expr) => visit(expr, false, in_value)?,
+                    crate::ast::ForTarget::Type { .. } => {}
                 }
-                validate_statements(body, in_value)?;
+                validate_statements(&for_stmt.body, in_value)?;
             }
             Statement::Binding { initializer, .. } => visit(initializer, true, in_value)?,
             Statement::Assign {
                 value, compound, ..
             } => {
                 if *compound {
-                    let ExpressionKind::Binary { left, right, .. } = &value.kind else {
+                    let (ExpressionKind::TextAppend { left, right }
+                    | ExpressionKind::Binary { left, right, .. }) = &value.kind
+                    else {
                         unreachable!()
                     };
                     visit(left, false, in_value)?;
@@ -273,6 +286,18 @@ fn validate_statements(statements: &[Statement], in_value: bool) -> Result<(), D
             Statement::Store { target, value, .. } => {
                 visit(target, false, in_value)?;
                 visit(value, true, in_value)?;
+            }
+            Statement::ArrayBulkWrite(bulk) => {
+                visit(&bulk.target, false, in_value)?;
+                if let crate::ast::BulkSelector::Slice { start, end } = &bulk.selector {
+                    if let Some(start) = start {
+                        visit(start, false, in_value)?;
+                    }
+                    if let Some(end) = end {
+                        visit(end, false, in_value)?;
+                    }
+                }
+                visit(&bulk.value, true, in_value)?;
             }
             Statement::Arena { body, .. }
             | Statement::Block(body)
@@ -436,7 +461,8 @@ pub(super) fn lower_return_handler(
         return lower_return_handler(rhs, statements, next_id, location);
     }
     let operands = match &mut expr.value {
-        Value::Binary { left, right, .. }
+        Value::TextAppend { left, right, .. }
+        | Value::Binary { left, right, .. }
         | Value::IntegerArithmetic {
             operation: IntegerOperation::Binary { left, right, .. },
             ..
@@ -481,7 +507,7 @@ pub(super) fn lower_return_handler(
     let Value::CastReturn {
         return_location,
         location,
-        wrap,
+        kind,
         operand,
         return_value,
     } = std::mem::replace(&mut expr.value, Value::Local(id))
@@ -491,7 +517,7 @@ pub(super) fn lower_return_handler(
     statements.push(CheckedStatement::CastReturn {
         return_location,
         location,
-        wrap,
+        kind,
         id,
         ty: expr.ty,
         operand,
@@ -508,7 +534,7 @@ fn contains_break(statements: &[Statement]) -> bool {
             match statement {
                 Statement::Break(_) => self.0 = true,
                 // 入れ子のループ内のbreakは、その内側のループに属する。
-                Statement::For { .. } | Statement::Loop { .. } => return Ok(()),
+                Statement::For(_) | Statement::Loop { .. } => return Ok(()),
                 _ => {}
             }
             visit::walk_statement(self, statement)

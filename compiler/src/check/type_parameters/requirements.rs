@@ -126,7 +126,7 @@ pub(in crate::check) fn hint(expr: &Expression, scope: &Scope) -> Option<Type> {
             .and_then(|n| scope.resolve_type_at(n.result, expr.location).ok());
     }
     match &expr.kind {
-        ExpressionKind::Binary { operator, left, right } => find(target(left, scope)?, operator.c_symbol(), std::slice::from_ref(right), scope).and_then(|n| scope.resolve_type_at(n.result, expr.location).ok()),
+        ExpressionKind::Binary { operator, left, right } => find(target(left, scope)?, operator.symbol(), std::slice::from_ref(right), scope).and_then(|n| scope.resolve_type_at(n.result, expr.location).ok()),
         ExpressionKind::MethodCall { target: receiver, name, mutable, arguments } => method_target(receiver, scope).and_then(|parameter| scope.named.needs.candidates(parameter, true, name).find(|n| {
             n.parameters.len() == arguments.len()
                 && matches!(&n.operation, RequiredOperation::Method { mutable: write, .. } if mutable == write)
@@ -222,20 +222,15 @@ pub(in crate::check) fn operation(
                 return Err(missing(expr.location));
             }
             let args = std::slice::from_ref(right.as_ref());
-            let need = find(
-                target(left, scope).unwrap(),
-                operator.c_symbol(),
-                args,
-                scope,
-            )
-            .ok_or_else(|| {
-                missing_operator(
-                    expr.location,
-                    target(left, scope).unwrap(),
-                    operator.c_symbol(),
-                    scope,
-                )
-            })?;
+            let need = find(target(left, scope).unwrap(), operator.symbol(), args, scope)
+                .ok_or_else(|| {
+                    missing_operator(
+                        expr.location,
+                        target(left, scope).unwrap(),
+                        operator.symbol(),
+                        scope,
+                    )
+                })?;
             invoke(need, left, args, expr, scope, None).map(Some)
         }
         ExpressionKind::MethodCall {
@@ -296,7 +291,10 @@ fn symbolic_arithmetic(expr: &Expression, scope: &Scope) -> bool {
                 || symbolic_arithmetic(left, scope)
                 || symbolic_arithmetic(right, scope)
         }
-        ExpressionKind::Negate(inner) | ExpressionKind::BitNot(inner) => {
+        ExpressionKind::Negate(inner)
+        | ExpressionKind::WrapNegate(inner)
+        | ExpressionKind::SaturatingNegate(inner)
+        | ExpressionKind::BitNot(inner) => {
             target(inner, scope).is_some() || symbolic_arithmetic(inner, scope)
         }
         ExpressionKind::Group(inner) => symbolic_arithmetic(inner, scope),
@@ -454,6 +452,15 @@ pub(super) fn satisfy(
             {
                 return Err(error());
             }
+            if !signature.contracts.is_empty() {
+                return Err(location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "contract.needs",
+                        "methods with contracts cannot satisfy @needs requirements"
+                    ),
+                ));
+            }
             return Ok(());
         }
         RequiredOperation::Operator(op) => operator(op, receiver.clone(), args.clone(), location)?,
@@ -503,6 +510,15 @@ pub(super) fn satisfy(
         {
             return Err(error());
         }
+        if !signature.contracts.is_empty() {
+            return Err(location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "contract.needs",
+                    "operator methods with contracts cannot satisfy @needs requirements"
+                ),
+            ));
+        }
         return Ok(());
     }
     let checked = expression::coerced(&expr, Some(result), &context).map_err(|cause| {
@@ -527,6 +543,8 @@ fn operator(
         let inner = Box::new(receiver);
         return Ok(match op {
             "-" => ExpressionKind::Negate(inner),
+            "-%" => ExpressionKind::WrapNegate(inner),
+            "-|" => ExpressionKind::SaturatingNegate(inner),
             "~" => ExpressionKind::BitNot(inner),
             "not" => ExpressionKind::Not(inner),
             "len" => ExpressionKind::Len(inner),

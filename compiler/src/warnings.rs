@@ -5,12 +5,14 @@
 
 use crate::{ArithmeticMode, Diagnostic, ErrorKind, Warning, ast::Location};
 
+#[derive(Clone)]
 pub(crate) struct AllowItem {
     pub rule: String,
     pub reason: String,
     pub location: Location,
 }
 
+#[derive(Clone)]
 pub(crate) struct AllowScope {
     pub start: Location,
     pub end: Location,
@@ -66,11 +68,27 @@ pub(crate) fn collect(
             true,
         )
     }));
+    candidates.extend(checked.float_sat_nan_warnings.iter().map(|&location| {
+        (
+            location,
+            "diagnostic.float-sat-nan",
+            "floating-point saturating cast turns NaN into 0".to_string(),
+            true,
+        )
+    }));
     candidates.extend(
         checked.arena_warnings.iter().map(|(location, message, _)| {
             (*location, "arena.loop-allocation", message.clone(), true)
         }),
     );
+    candidates.extend(checked.array_handler_warnings.iter().map(|(location, _)| {
+        (
+            *location,
+            "array.redundant-handler",
+            "statically proven array access does not need or".to_string(),
+            true,
+        )
+    }));
     candidates.sort_by_key(|(location, ..)| position(*location));
     for scope in scopes {
         for item in &scope.items {
@@ -130,6 +148,12 @@ pub(crate) fn collect(
                         .arena_warnings
                         .binary_search_by_key(&location, |warning| warning.0)
                         .map(|index| checked.arena_warnings[index].2.clone())
+                        .unwrap_or_default()
+                } else if rule == "array.redundant-handler" {
+                    checked
+                        .array_handler_warnings
+                        .binary_search_by_key(&location, |warning| warning.0)
+                        .map(|index| checked.array_handler_warnings[index].1.clone())
                         .unwrap_or_default()
                 } else {
                     Vec::new()

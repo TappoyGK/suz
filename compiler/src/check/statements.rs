@@ -115,6 +115,7 @@ fn check_statement(
         Statement::Arena { .. } | Statement::Let { .. } | Statement::Store { .. } => {
             super::arena::statement(statement, context)?
         }
+        Statement::ArrayBulkWrite(bulk) => super::arrays::bulk::check(bulk, context)?,
         Statement::Recover(value) => {
             let Some(ty) = context.bindings.recovery.filter(|ty| *ty != Type::Void) else {
                 return Err(value.location.error(
@@ -198,18 +199,32 @@ fn check_statement(
             let patterns = super::matches::patterns(target.ty, arms, *location, context.bindings)?;
             let id = *context.next_id;
             *context.next_id += 1;
+            let base_facts = context.bindings.array_bounds.facts.borrow().clone();
+            let mut exits = Vec::new();
             let mut checked = Vec::new();
             for (arm, pattern) in arms.iter().zip(patterns.values) {
-                checked.push((
-                    pattern,
-                    block(
-                        &arm.body,
+                *context.bindings.array_bounds.facts.borrow_mut() = base_facts.clone();
+                if let Some(pat) = &pattern {
+                    super::arrays::bounds::record_match_arm(
+                        &target,
+                        pat,
+                        arm.location,
                         context.bindings,
-                        context.next_id,
-                        context.loop_depth,
-                    )?,
-                ));
+                    );
+                }
+                let body = block(
+                    &arm.body,
+                    context.bindings,
+                    context.next_id,
+                    context.loop_depth,
+                )?;
+                if !super::arrays::bounds::block_exits(&body) {
+                    exits.push(context.bindings.array_bounds.facts.borrow().clone());
+                }
+                checked.push((pattern, body));
             }
+            *context.bindings.array_bounds.facts.borrow_mut() =
+                super::arrays::facts::Facts::join_all(&exits);
             context.output.push(CheckedStatement::Match {
                 id,
                 target,
@@ -217,27 +232,55 @@ fn check_statement(
                 pattern_warnings: patterns.warnings,
             });
         }
-        Statement::For { .. } => {
+        Statement::For(_) => {
             context.bindings.program_loops_used.set(true);
             check_for(statement, context)?;
         }
 
         Statement::Loop { condition, body } => {
             context.bindings.program_loops_used.set(true);
-            let condition = condition
-                .as_ref()
-                .map(|expr| {
-                    condition_value(expr, context.bindings, || {
-                        crate::diagnostic!("while.loop", "while condition must be bool")
-                    })
-                })
-                .transpose()?;
+            super::arrays::bounds::forget_loop_writes(body, condition.as_ref(), context.bindings);
+            context
+                .bindings
+                .array_bounds
+                .loop_breaks
+                .borrow_mut()
+                .push(Some(Vec::new()));
+            let (condition, false_facts) = if let Some(expr) = condition {
+                let (value, true_facts, false_facts) =
+                    super::arrays::bounds::eval_condition(expr, context.bindings)?;
+                if value.ty != Type::Bool {
+                    context.bindings.array_bounds.loop_breaks.borrow_mut().pop();
+                    return Err(expr.location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!("while.loop", "while condition must be bool"),
+                    ));
+                }
+                *context.bindings.array_bounds.facts.borrow_mut() = true_facts;
+                (Some(value), Some(false_facts))
+            } else {
+                (None, None)
+            };
             let body = block(
                 body,
                 context.bindings,
                 context.next_id,
                 context.loop_depth + 1,
-            )?;
+            );
+            let mut breaks = context
+                .bindings
+                .array_bounds
+                .loop_breaks
+                .borrow_mut()
+                .pop()
+                .flatten()
+                .unwrap_or_default();
+            let body = body?;
+            if let Some(f) = false_facts {
+                breaks.push(f);
+            }
+            *context.bindings.array_bounds.facts.borrow_mut() =
+                super::arrays::facts::Facts::join_all(&breaks);
             context
                 .output
                 .push(CheckedStatement::Loop { condition, body });
@@ -252,6 +295,16 @@ fn check_statement(
                     ),
                 ));
             }
+            if matches!(statement, Statement::Break(_))
+                && let Some(Some(top)) = context
+                    .bindings
+                    .array_bounds
+                    .loop_breaks
+                    .borrow_mut()
+                    .last_mut()
+            {
+                top.push(context.bindings.array_bounds.facts.borrow().clone());
+            }
             context
                 .output
                 .push(if matches!(statement, Statement::Break(_)) {
@@ -265,17 +318,39 @@ fn check_statement(
             otherwise,
         } => {
             let mut checked = Vec::new();
+            let mut fallthrough = context.bindings.array_bounds.facts.borrow().clone();
+            let mut exits = Vec::new();
             for (condition, body) in branches {
-                let value = condition_value(condition, context.bindings, || {
-                    crate::diagnostic!("if.condition", "if and elif conditions must be bool")
-                })?;
+                *context.bindings.array_bounds.facts.borrow_mut() = fallthrough;
+                let (value, true_facts, false_facts) =
+                    super::arrays::bounds::eval_condition(condition, context.bindings)?;
+                if value.ty != Type::Bool {
+                    return Err(condition.location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!("if.condition", "if and elif conditions must be bool"),
+                    ));
+                }
+                *context.bindings.array_bounds.facts.borrow_mut() = true_facts;
                 let body = block(body, context.bindings, context.next_id, context.loop_depth)?;
+                if !super::arrays::bounds::block_exits(&body) {
+                    exits.push(context.bindings.array_bounds.facts.borrow().clone());
+                }
                 checked.push((value, body));
+                fallthrough = false_facts;
             }
-            let otherwise = otherwise
-                .as_ref()
-                .map(|body| block(body, context.bindings, context.next_id, context.loop_depth))
-                .transpose()?;
+            let otherwise = if let Some(body) = otherwise {
+                *context.bindings.array_bounds.facts.borrow_mut() = fallthrough;
+                let body = block(body, context.bindings, context.next_id, context.loop_depth)?;
+                if !super::arrays::bounds::block_exits(&body) {
+                    exits.push(context.bindings.array_bounds.facts.borrow().clone());
+                }
+                Some(body)
+            } else {
+                exits.push(fallthrough);
+                None
+            };
+            *context.bindings.array_bounds.facts.borrow_mut() =
+                super::arrays::facts::Facts::join_all(&exits);
             context.output.push(CheckedStatement::If {
                 branches: checked,
                 otherwise,
@@ -321,52 +396,159 @@ fn check_statement(
 }
 
 fn check_for(statement: &Statement, context: &mut StatementContext<'_>) -> Result<(), Diagnostic> {
-    let Statement::For {
-        name,
-        location,
-        start,
-        end,
-        inclusive,
-        reverse,
-        body,
-    } = statement
-    else {
+    let Statement::For(for_stmt) = statement else {
         unreachable!("matching statement handler")
     };
+    let crate::ast::ForStatement {
+        index,
+        name,
+        location,
+        target,
+        reverse,
+        body,
+    } = for_stmt.as_ref();
 
-    let (start, end, variable_type) = if let Some(end) = end {
-        let (start, end) = super::ranges::bounds(start, end, context.bindings)?;
-        let ty = start.ty;
-        (start, Some(end), ty)
-    } else {
-        super::ranges::check_references(start, context.bindings)?;
-        let value = expression(start, None, context.bindings)?;
-        let ty = if let Some(id) = value.ty.array_id().filter(|_| value.ty.is_nonnull()) {
-            let array = context.bindings.structs.arrays.borrow().get(id);
-            if array.rank == 1 {
-                array.element
-            } else {
-                context
-                    .bindings
-                    .structs
-                    .arrays
-                    .borrow_mut()
-                    .intern(array.element, array.rank - 1)
-                    .pointer()
+    let (checked_target, index_type, variable_type) = match target {
+        crate::ast::ForTarget::Range {
+            start,
+            end,
+            inclusive,
+        } => {
+            if index.is_some() {
+                return Err(start.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "for.pair-target",
+                        "two-variable iteration cannot be used with a range"
+                    ),
+                ));
             }
-        } else if value.ty.is_text() {
-            Type::Char
-        } else {
-            return Err(start.location.error(
-                ErrorKind::InvalidSource,
-                crate::diagnostic!(
-                    "char.for-type",
-                    "iteration without a range requires text or a nonnull array"
-                ),
-            ));
-        };
-        (value, None, ty)
+            let (start, end) = super::ranges::bounds(start, end, context.bindings)?;
+            let ty = start.ty;
+            (
+                super::ir::CheckedForTarget::Range {
+                    start: Box::new(start),
+                    end: Box::new(end),
+                    inclusive: *inclusive,
+                },
+                None,
+                ty,
+            )
+        }
+        crate::ast::ForTarget::Type {
+            name: type_name,
+            location: type_location,
+        } => {
+            if index.is_some() {
+                return Err(type_location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "for.pair-target",
+                        "two-variable iteration cannot be used with a type name"
+                    ),
+                ));
+            }
+            if let Some(decl) = context.bindings.enums.iter().find(|e| e.name == *type_name) {
+                let ty = Type::Enum(decl.ty);
+                let hi = (decl.variants.len() - 1) as i128;
+                (
+                    super::ir::CheckedForTarget::TypeRange { ty, lo: 0, hi },
+                    None,
+                    ty,
+                )
+            } else if let Some(decl) = context
+                .bindings
+                .ranges
+                .iter()
+                .find(|r| r.name == *type_name)
+            {
+                let ty = Type::Range(decl.ty);
+                let (lo, hi) = decl.ty.bounds();
+                (
+                    super::ir::CheckedForTarget::TypeRange { ty, lo, hi },
+                    None,
+                    ty,
+                )
+            } else {
+                return Err(type_location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "for.type-name",
+                        "type iteration requires a declared enum or range type"
+                    ),
+                ));
+            }
+        }
+        crate::ast::ForTarget::Expression(start) => {
+            super::ranges::check_references(start, context.bindings)?;
+            let value = expression(start, None, context.bindings)?;
+            if let Some(id) = value.ty.array_id().filter(|_| !value.ty.is_nilable()) {
+                let array = context.bindings.structs.arrays.borrow().get(id);
+                let elem_ty = if array.rank == 1 {
+                    array.element
+                } else {
+                    context
+                        .bindings
+                        .structs
+                        .arrays
+                        .borrow_mut()
+                        .intern_full(array.element, array.rank - 1, None, array.soa)
+                        .array_reference(value.ty.is_readonly_array())
+                };
+                let idx_ty = index.as_ref().map(|_| {
+                    array
+                        .index_enum
+                        .map(Type::Enum)
+                        .unwrap_or(Type::Integer(crate::ast::IntegerType::Len))
+                });
+                (
+                    super::ir::CheckedForTarget::Array(Box::new(value)),
+                    idx_ty,
+                    elem_ty,
+                )
+            } else if index.is_none() && value.ty.is_text() {
+                (
+                    super::ir::CheckedForTarget::Text(Box::new(value)),
+                    None,
+                    Type::Char,
+                )
+            } else if index.is_some() {
+                return Err(start.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "for.pair-target",
+                        "two-variable iteration requires a non-nil array"
+                    ),
+                ));
+            } else {
+                return Err(start.location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "char.for-type",
+                        "iteration without a range requires text or a non-nil array"
+                    ),
+                ));
+            }
+        }
     };
+
+    if let Some((index_name, index_location)) = index {
+        if context.bindings.functions.contains_key(index_name)
+            || context.bindings.is_type_name(index_name)
+            || context.bindings.contains_key(index_name)
+        {
+            return Err(index_location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("decl.shadowing", "loop variable shadows an existing name"),
+            ));
+        }
+        if index_name == name {
+            return Err(location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("decl.duplicate", "duplicate loop variable '{name}'"),
+            ));
+        }
+    }
     if context.bindings.functions.contains_key(name)
         || context.bindings.is_type_name(name)
         || context.bindings.contains_key(name)
@@ -376,42 +558,128 @@ fn check_for(statement: &Statement, context: &mut StatementContext<'_>) -> Resul
             crate::diagnostic!("decl.shadowing", "loop variable shadows an existing name"),
         ));
     }
+
+    let mut declared = Vec::with_capacity(if index.is_some() { 2 } else { 1 });
+    let checked_index =
+        if let (Some((index_name, index_location)), Some(idx_ty)) = (index, index_type) {
+            let index_id = *context.next_id;
+            *context.next_id += 1;
+            context.bindings.locals.insert(
+                index_name.clone(),
+                Binding::local(index_id, idx_ty, false, true, *index_location),
+            );
+            declared.push(index_name.clone());
+            Some((index_id, idx_ty))
+        } else {
+            None
+        };
     let id = *context.next_id;
     *context.next_id += 1;
     context.bindings.locals.insert(
         name.clone(),
         Binding::local(id, variable_type, false, true, *location),
     );
-    if let Some(end) = &end {
-        super::arrays::bounds::loop_bound(id, &start, end, *inclusive, context.bindings);
-    } else if let Some(array) = start.ty.array_id() {
-        let rank = context.bindings.structs.arrays.borrow().get(array).rank;
-        if rank > 1 {
-            let dimensions = super::arrays::bounds::shape(&start, context.bindings)
-                .into_iter()
-                .skip(1)
-                .collect();
-            super::arrays::bounds::register(id, variable_type, false, dimensions, context.bindings);
-        } else {
-            super::arrays::bounds::register(id, variable_type, false, Vec::new(), context.bindings);
+    declared.push(name.clone());
+
+    super::arrays::bounds::forget_loop_writes(body, None, context.bindings);
+    let pre_loop = if context.bindings.array_bounds.facts.borrow().is_empty() {
+        None
+    } else {
+        Some(context.bindings.array_bounds.facts.borrow().clone())
+    };
+    match &checked_target {
+        super::ir::CheckedForTarget::Range {
+            start,
+            end,
+            inclusive,
+        } => {
+            super::arrays::bounds::register_nonneg(id, variable_type, context.bindings);
+            super::arrays::bounds::loop_bound(
+                id,
+                start,
+                end,
+                *inclusive,
+                *location,
+                context.bindings,
+            );
         }
+        super::ir::CheckedForTarget::TypeRange { .. } => {
+            super::arrays::bounds::register_nonneg(id, variable_type, context.bindings);
+        }
+        super::ir::CheckedForTarget::Array(start) => {
+            if let Some((index_id, idx_ty)) = checked_index {
+                super::arrays::bounds::register_nonneg(index_id, idx_ty, context.bindings);
+                if idx_ty == Type::Integer(crate::ast::IntegerType::Len) {
+                    super::arrays::bounds::loop_array_index_bound(
+                        index_id,
+                        start,
+                        index.as_ref().unwrap().1,
+                        context.bindings,
+                    );
+                }
+            }
+            if let Some(array) = start.ty.array_id() {
+                let rank = context.bindings.structs.arrays.borrow().get(array).rank;
+                if rank > 1 {
+                    let dimensions = super::arrays::bounds::shape(start, context.bindings)
+                        .into_iter()
+                        .skip(1)
+                        .collect();
+                    super::arrays::bounds::register(
+                        id,
+                        variable_type,
+                        false,
+                        dimensions,
+                        context.bindings,
+                    );
+                } else {
+                    super::arrays::bounds::register(
+                        id,
+                        variable_type,
+                        false,
+                        Vec::new(),
+                        context.bindings,
+                    );
+                }
+            }
+        }
+        super::ir::CheckedForTarget::Text(_) => {}
     }
-    let body = block_with_bindings(
+    context
+        .bindings
+        .array_bounds
+        .loop_breaks
+        .borrow_mut()
+        .push(None);
+    let body = check_statements(
         body,
         context.bindings,
         context.next_id,
         context.loop_depth + 1,
-        vec![name.clone()],
-    )?;
-    context.output.push(CheckedStatement::For {
-        id,
-        variable_type,
-        start: Box::new(start),
-        end: end.map(Box::new),
-        inclusive: *inclusive,
-        reverse: *reverse,
-        body,
-    });
+        &mut declared,
+    );
+    context.bindings.array_bounds.loop_breaks.borrow_mut().pop();
+    match pre_loop {
+        None => context
+            .bindings
+            .array_bounds
+            .facts
+            .borrow_mut()
+            .clear_edges(),
+        Some(saved) => *context.bindings.array_bounds.facts.borrow_mut() = saved,
+    }
+    let body = body?;
+    finish_scope(context.bindings, declared)?;
+    context
+        .output
+        .push(CheckedStatement::For(Box::new(super::ir::CheckedFor {
+            index: checked_index,
+            id,
+            variable_type,
+            target: checked_target,
+            reverse: *reverse,
+            body,
+        })));
 
     Ok(())
 }
@@ -421,7 +689,6 @@ fn check_binding(
     context: &mut StatementContext<'_>,
 ) -> Result<(), Diagnostic> {
     let Statement::Binding {
-        pointer,
         mutable,
         name,
         location,
@@ -465,15 +732,6 @@ fn check_binding(
             .transpose()?,
         context.bindings,
     )?;
-    if initializer.ty.pointee().is_some() != *pointer {
-        return Err(location.error(
-            ErrorKind::InvalidSource,
-            crate::diagnostic!(
-                "arena.ptr-decl",
-                "pointer bindings require fix ptr or var ptr"
-            ),
-        ));
-    }
     if matches!(initializer.ty, Type::Function(_)) {
         return Err(location.error(
             ErrorKind::InvalidSource,
@@ -490,6 +748,7 @@ fn check_binding(
         ));
     }
     let dimensions_known = super::arrays::bounds::shape(&initializer, context.bindings);
+    let ensures_call = super::contracts::extract_ensures_call(&initializer, context.bindings);
     lower_return_handler(
         &mut initializer,
         &mut context.output,
@@ -505,6 +764,8 @@ fn check_binding(
         Binding::local(id, ty, *mutable, false, *location),
     );
     super::arrays::bounds::register(id, ty, *mutable, dimensions_known, context.bindings);
+    super::arrays::bounds::record_binding_remainder(id, &initializer, *location, context.bindings);
+    super::contracts::record_ensures_for_call(id, ty, ensures_call, *location, context.bindings);
     context.output.push(CheckedStatement::Binding {
         location: *location,
         mutable: *mutable,
@@ -589,6 +850,12 @@ fn check_assign(
     };
     lower_return_handler(&mut value, &mut context.output, context.next_id, *location);
     context.bindings[name].assigned.set(true);
+    context
+        .bindings
+        .array_bounds
+        .facts
+        .borrow_mut()
+        .forget_path(id, &indices);
     context.output.push(CheckedStatement::Assign {
         root_type: binding.ty,
         location: *location,
@@ -601,27 +868,22 @@ fn check_assign(
     Ok(())
 }
 
-// 通常の関数と汎用関数で、条件には同じboolの規則を適用する。
-fn condition_value(
-    expr: &crate::ast::Expression,
-    scope: &Scope,
-    message: impl FnOnce() -> crate::DiagnosticMessage,
-) -> Result<CheckedExpression, Diagnostic> {
-    expression(expr, None, scope).and_then(|value| {
-        if value.ty == Type::Bool {
-            Ok(value)
-        } else {
-            Err(expr.location.error(ErrorKind::InvalidSource, message()))
-        }
-    })
-}
-
 pub(super) fn finish_scope(bindings: &mut Scope, declared: Vec<String>) -> Result<(), Diagnostic> {
     for name in declared {
         let binding = bindings.locals.remove(&name).unwrap();
         bindings.array_bounds.arrays.remove(&binding.id);
         bindings.array_bounds.names.remove(&binding.id);
         bindings.array_bounds.loops.remove(&binding.id);
+        bindings
+            .array_bounds
+            .facts
+            .borrow_mut()
+            .forget_local(binding.id);
+        bindings
+            .array_bounds
+            .facts
+            .borrow_mut()
+            .unmark_nonneg(binding.id);
         if binding.mutable && !binding.assigned.get() {
             let error = binding.location.error(
                 ErrorKind::InvalidSource,

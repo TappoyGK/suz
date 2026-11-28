@@ -1,4 +1,6 @@
 //! 配列参照は実体の先頭と各次元の長さを持つ。確保前の評価と添字の短絡順序をここで保つ。
+mod bulk;
+mod constant;
 use super::{
     ExpressionContext,
     expressions::{c_string, expression},
@@ -7,6 +9,8 @@ use crate::{
     ast::{Location, Type},
     check::{CheckedExpression, Value},
 };
+pub(super) use bulk::emit_bulk_write;
+pub(super) use constant::{constant, constant_element};
 use std::fmt::Write;
 
 pub(super) fn declarations(c: &mut String, context: &ExpressionContext) {
@@ -14,6 +18,26 @@ pub(super) fn declarations(c: &mut String, context: &ExpressionContext) {
         c.push_str("#include <string.h>\n");
     }
     for (id, array) in context.arrays.entries.iter().enumerate() {
+        if array.soa {
+            let Type::Struct(struct_id) = array.element else {
+                continue;
+            };
+            let leaf_count = super::soa::leaves(struct_id, context).len();
+            writeln!(
+                c,
+                "typedef struct {{ void *cols[{leaf_count}]; int32_t lengths[{}]; }} suz_array_{id};",
+                array.rank
+            )
+            .unwrap();
+            writeln!(c, "typedef suz_array_{id} suz_readonly_array_{id};").unwrap();
+            continue;
+        }
+        writeln!(
+            c,
+            "typedef struct {{ const void *data; int32_t lengths[{}]; }} suz_readonly_array_{id};",
+            array.rank
+        )
+        .unwrap();
         writeln!(
             c,
             "typedef struct {{ void *data; int32_t lengths[{}]; }} suz_array_{id};",
@@ -33,21 +57,56 @@ pub(super) fn cache(
 ) {
     let array = context.arrays.get(ty.array_id().unwrap());
     let source = context.local(id);
-    writeln!(
-        c,
-        "{indent}{} *const suz_array_data_{id} = ({source}).data;\n{indent}(void)suz_array_data_{id};",
-        array.element.c_name()
-    )
-    .unwrap();
+    if !array.soa {
+        writeln!(
+            c,
+            "{indent}{} *const suz_array_data_{id} = ({source}).data;\n{indent}(void)suz_array_data_{id};",
+            element_type(array.element, ty)
+        )
+        .unwrap();
+    }
     for dimension in 0..array.rank {
         writeln!(c, "{indent}const int32_t suz_array_length_{id}_{dimension} = ({source}).lengths[{dimension}];\n{indent}(void)suz_array_length_{id}_{dimension};").unwrap();
     }
 }
 
-fn temporary(ty: Type, context: &mut ExpressionContext) -> String {
+pub(super) fn temporary(ty: Type, context: &mut ExpressionContext) -> String {
     let id = context.temporaries.len();
     context.temporaries.push(ty);
     format!("suz_cmp_{id}")
+}
+
+/// 呼び出しや添字の検査を含まない参照は、先頭位置と寸法を直接読み出せる。
+pub(super) fn direct_reference(value: &CheckedExpression) -> bool {
+    match &value.value {
+        Value::Local(_) => true,
+        Value::Field { target, .. } | Value::Deref(target) => direct_reference(target),
+        _ => false,
+    }
+}
+
+/// 先頭位置と寸法だけを移す。副作用を持ち得る変換元は一時変数で評価を1回に保つ。
+pub(super) fn readonly(value: &CheckedExpression, context: &mut ExpressionContext) -> String {
+    let id = value.ty.array_id().unwrap();
+    let array = context.arrays.get(id);
+    if array.soa {
+        return expression(value, context);
+    }
+    let rank = array.rank;
+    let (setup, source) = if direct_reference(value) {
+        (String::new(), format!("({})", expression(value, context)))
+    } else {
+        let source = temporary(value.ty, context);
+        let value = expression(value, context);
+        (format!("{source} = {value}, "), source)
+    };
+    let lengths = (0..rank)
+        .map(|axis| format!("{source}.lengths[{axis}]"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "({setup}(suz_readonly_array_{id}){{ .data = {source}.data, .lengths = {{ {lengths} }} }})"
+    )
 }
 
 /// 保証済みの不変の添字は、評価順を保存する一時変数を必要としない。
@@ -100,6 +159,10 @@ pub(super) fn proven_index(
     }
 }
 
+pub(super) fn panic_call(location: Location, reason: &str, context: &ExpressionContext) -> String {
+    panic(location, reason, context)
+}
+
 fn panic(location: Location, reason: &str, context: &ExpressionContext) -> String {
     format!(
         "suz_panic({}, {}, {}, {})",
@@ -117,11 +180,14 @@ pub(super) fn allocate(
     location: Location,
     context: &mut ExpressionContext,
 ) -> String {
+    if context.arrays.get(ty.array_id().unwrap()).soa {
+        return super::soa::allocate(value, ty, location, context);
+    }
     let Value::Array {
         values,
         lengths,
         repeated,
-        constant_counts,
+        metadata,
     } = &value.value
     else {
         unreachable!()
@@ -129,7 +195,7 @@ pub(super) fn allocate(
     context.uses_arena = true;
     let element = context.arrays.get(ty.array_id().unwrap()).element.c_name();
     let mut c = String::from("({ ");
-    for count in constant_counts {
+    for count in &metadata.constant_counts {
         write!(c, r#"_Static_assert(UINT64_C({count}) <= SIZE_MAX / sizeof({element}), "array byte size overflows size_t [array.layout]"); "#).unwrap();
     }
     for (i, value) in values.iter().enumerate() {
@@ -175,35 +241,30 @@ pub(super) fn allocate(
     for i in (0..lengths.len()).rev() {
         write!(c, "if (suz_length_{i} != 0 && suz_count > SIZE_MAX / (size_t)suz_length_{i}) {overflow}; suz_count *= (size_t)suz_length_{i}; if (suz_count > SIZE_MAX / sizeof({element})) {overflow}; ").unwrap();
     }
-    write!(c, "size_t suz_bytes = suz_count * sizeof({element}); suz_array_value.data = suz_arena_alloc(suz_bytes ? suz_bytes : 1, alignof({element}), {}, {}, {}); ", c_string(&context.source_name), location.line, location.column).unwrap();
+    write!(c, "size_t suz_bytes = suz_count * sizeof({element}); void *suz_data = suz_arena_alloc(suz_bytes ? suz_bytes : 1, alignof({element}), {}, {}, {}); ", c_string(&context.source_name), location.line, location.column).unwrap();
     if *repeated && zero_bits(&values[0]) {
-        c.push_str("(void)suz_initial_0; memset(suz_array_value.data, 0, suz_bytes); ");
+        c.push_str("(void)suz_initial_0; memset(suz_data, 0, suz_bytes); ");
     } else if *repeated {
-        write!(c, "for (size_t suz_i = 0; suz_i < suz_count; ++suz_i) (({element} *)suz_array_value.data)[suz_i] = suz_initial_0; ").unwrap();
+        write!(c, "for (size_t suz_i = 0; suz_i < suz_count; ++suz_i) (({element} *)suz_data)[suz_i] = suz_initial_0; ").unwrap();
     } else {
         for i in 0..values.len() {
-            write!(
-                c,
-                "(({element} *)suz_array_value.data)[{i}] = suz_initial_{i}; "
-            )
-            .unwrap();
+            let slot = metadata.slots.get(i).copied().unwrap_or(i);
+            write!(c, "(({element} *)suz_data)[{slot}] = suz_initial_{i}; ").unwrap();
         }
     }
-    c.push_str("suz_array_value; })");
+    c.push_str("suz_array_value.data = suz_data; suz_array_value; })");
     c
 }
 
-/// 失敗した添字より後の式を実行せず、全検査に成功したときだけ要素のアドレスを作る。
-fn parts(
+/// 失敗した添字より後の式を実行せず、全検査に成功したときだけ要素のオフセットと対象参照を作る。
+pub(super) fn element_offset_parts(
     expr: &CheckedExpression,
     write: bool,
     context: &mut ExpressionContext,
-) -> (String, String, String) {
+) -> (String, String, String, String) {
     let Value::ArrayElement { target, indices } = &expr.value else {
         unreachable!()
     };
-    // 不変の参照は添字評価で変わらないので直接読む。可変の参照・関数呼び出し・
-    // 要素から取り出す参照は、添字を評価する前の値を保存する。
     let cached = match target.value {
         Value::Local(id) if context.immutable_locals.contains(&id) => Some(id),
         _ => None,
@@ -230,7 +291,6 @@ fn parts(
     };
     let mut offset = String::new();
     for (dimension, (index, location, proven)) in indices.iter().enumerate() {
-        // 不変の添字もそのまま読む。可変の添字は後続の添字で変わり得るため保存する。
         let direct = proven.then(|| proven_index(index, context)).flatten();
         let (local, evaluate) = if let Some(direct) = direct {
             (direct, String::new())
@@ -275,27 +335,46 @@ fn parts(
             format!("({offset} * (size_t){length} + (size_t){local})")
         };
     }
+    let condition = if write {
+        format!(
+            "({}, true)",
+            tests
+                .iter()
+                .map(|t| format!("(void)({t})"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    } else {
+        tests.join(" && ")
+    };
+    (setup, condition, source, offset)
+}
+
+/// 失敗した添字より後の式を実行せず、全検査に成功したときだけ要素のアドレスを作る。
+fn parts(
+    expr: &CheckedExpression,
+    write: bool,
+    context: &mut ExpressionContext,
+) -> (String, String, String) {
+    let Value::ArrayElement { target, .. } = &expr.value else {
+        unreachable!()
+    };
+    let cached = match target.value {
+        Value::Local(id) if context.immutable_locals.contains(&id) => Some(id),
+        _ => None,
+    };
+    let (setup, condition, source, offset) = element_offset_parts(expr, write, context);
     let data = cached.map_or_else(
-        || format!("({} *){source}.data", expr.ty.pointee().unwrap().c_name()),
+        || {
+            format!(
+                "({} *){source}.data",
+                element_type(expr.ty.pointee().unwrap(), target.ty)
+            )
+        },
         |id| format!("suz_array_data_{id}"),
     );
     let pointer = format!("({data} + {offset})");
-    (
-        setup,
-        if write {
-            format!(
-                "({}, true)",
-                tests
-                    .iter()
-                    .map(|t| format!("(void)({t})"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        } else {
-            tests.join(" && ")
-        },
-        pointer,
-    )
+    (setup, condition, pointer)
 }
 
 pub(super) fn address(expr: &CheckedExpression, context: &mut ExpressionContext) -> String {
@@ -332,6 +411,18 @@ fn access_parts(
     context: &mut ExpressionContext,
 ) -> (String, String, String) {
     if let Value::ArrayRead { address, .. } = &expr.value {
+        if let Value::ArrayElement { target, .. } = &address.value
+            && let Some(aid) = target.ty.array_id()
+            && context.arrays.get(aid).soa
+        {
+            let Type::Struct(struct_id) = context.arrays.get(aid).element else {
+                unreachable!("soa array element must be a struct");
+            };
+            let (setup, condition, source, offset) = element_offset_parts(address, write, context);
+            let (gathered, _) =
+                super::soa::gather_expr(struct_id, &format!("{source}.cols"), &offset, 0, context);
+            return (setup, condition, gathered);
+        }
         let (setup, condition, pointer) = parts(address, write, context);
         return (setup, condition, format!("(*{pointer})"));
     }
@@ -419,16 +510,38 @@ fn access_parts(
             .collect::<Vec<_>>()
             .join(", ")
     };
-    let value = format!(
-        "({}){{ .data = ({} *){source}.data + (size_t){first} * ({stride}), .lengths = {{ {lengths} }} }}",
-        expr.ty.c_name(),
-        array.element.c_name()
-    );
+    let value = if array.soa {
+        let Type::Struct(struct_id) = array.element else {
+            unreachable!("soa array element must be a struct");
+        };
+        let all_leaves = super::soa::leaves(struct_id, context);
+        let cols = all_leaves
+            .iter()
+            .enumerate()
+            .map(|(c, leaf)| {
+                format!(
+                    "({} *){source}.cols[{c}] + (size_t){first} * ({stride})",
+                    leaf.ty.c_name()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(
+            "({}){{ .cols = {{ {cols} }}, .lengths = {{ {lengths} }} }}",
+            expr.ty.c_name()
+        )
+    } else {
+        format!(
+            "({}){{ .data = ({} *){source}.data + (size_t){first} * ({stride}), .lengths = {{ {lengths} }} }}",
+            expr.ty.c_name(),
+            element_type(array.element, target.ty)
+        )
+    };
     (setup, condition, value)
 }
 
 /// 表現が全ビット0と分かるスカラーだけを一括初期化する。
-/// nullポインタ・構造体のパディング・負の浮動小数点ゼロには適用しない。
+/// NULLポインタ・構造体のパディング・負の浮動小数点ゼロには適用しない。
 fn zero_bits(value: &CheckedExpression) -> bool {
     match &value.value {
         Value::Integer { value: 0, .. } | Value::Bool(false) | Value::Float(0) => true,
@@ -441,6 +554,7 @@ fn zero_bits(value: &CheckedExpression) -> bool {
 #[allow(clippy::too_many_arguments)]
 pub(super) fn emit_loop(
     c: &mut String,
+    index: Option<(usize, Type)>,
     id: usize,
     item: Type,
     source: &CheckedExpression,
@@ -452,6 +566,7 @@ pub(super) fn emit_loop(
 ) {
     let indent = "    ".repeat(depth);
     let array = context.arrays.get(source.ty.array_id().unwrap());
+    let element = element_type(array.element, source.ty);
     let ty = source.ty.c_name();
     let source = expression(source, context);
     writeln!(
@@ -460,12 +575,14 @@ pub(super) fn emit_loop(
     )
     .unwrap();
     // データと各寸法は反復中に変わらない。構造体からの読み取りを入口で済ませる。
-    writeln!(
-        c,
-        "{indent}    {} *const suz_iter_data_{id} = suz_iter_{id}.data;",
-        array.element.c_name()
-    )
-    .unwrap();
+    if !array.soa {
+        writeln!(
+            c,
+            "{indent}    {} *const suz_iter_data_{id} = suz_iter_{id}.data;",
+            element
+        )
+        .unwrap();
+    }
     for dimension in 0..array.rank {
         writeln!(c, "{indent}    const int32_t suz_iter_length_{id}_{dimension} = suz_iter_{id}.lengths[{dimension}];").unwrap();
     }
@@ -483,7 +600,56 @@ pub(super) fn emit_loop(
         )
     };
     writeln!(c, "{indent}    int32_t suz_cursor_{id} = {initial};\n{indent}    while ({condition}) {{\n{indent}        const size_t suz_pos_{id} = {position};").unwrap();
-    let value = if array.rank == 1 {
+    if let Some((index_id, index_ty)) = index {
+        let index_c_ty = index_ty.c_name();
+        writeln!(
+            c,
+            "{indent}        const {index_c_ty} suz_local_{index_id} = ({index_c_ty})suz_pos_{id};\n{indent}        (void)suz_local_{index_id};"
+        )
+        .unwrap();
+        context.immutable_locals.insert(index_id);
+    }
+    let value = if array.soa {
+        let Type::Struct(struct_id) = array.element else {
+            unreachable!("soa array element must be a struct");
+        };
+        if array.rank == 1 {
+            super::soa::gather_expr(
+                struct_id,
+                &format!("suz_iter_{id}.cols"),
+                &format!("suz_pos_{id}"),
+                0,
+                context,
+            )
+            .0
+        } else {
+            let lengths = (1..array.rank)
+                .map(|i| format!("suz_iter_length_{id}_{i}"))
+                .collect::<Vec<_>>();
+            let stride = lengths
+                .iter()
+                .map(|s| format!("(size_t){s}"))
+                .collect::<Vec<_>>()
+                .join(" * ");
+            let all_leaves = super::soa::leaves(struct_id, context);
+            let cols = all_leaves
+                .iter()
+                .enumerate()
+                .map(|(c, leaf)| {
+                    format!(
+                        "({} *)suz_iter_{id}.cols[{c}] + suz_pos_{id} * ({stride})",
+                        leaf.ty.c_name()
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "({}){{ .cols = {{ {cols} }}, .lengths = {{ {} }} }}",
+                item.c_name(),
+                lengths.join(", ")
+            )
+        }
+    } else if array.rank == 1 {
         format!("suz_iter_data_{id}[suz_pos_{id}]")
     } else {
         let lengths = (1..array.rank)
@@ -512,4 +678,12 @@ pub(super) fn emit_loop(
     }
     super::statements::emit_block(c, body, depth + 2, next_assignment, context);
     writeln!(c, "{indent}    }}\n{indent}}}").unwrap();
+}
+
+fn element_type(element: Type, reference: Type) -> String {
+    if reference.is_readonly_array() {
+        format!("{} const", element.c_name())
+    } else {
+        element.c_name()
+    }
 }

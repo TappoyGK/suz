@@ -35,6 +35,8 @@ pub(super) fn signatures(
                 type_parameters: 0,
                 type_parameter_names: None,
                 needs: Vec::new(),
+                parameter_names: None,
+                contracts: Vec::new(),
                 method: None,
                 external: true,
                 id: program.functions.len() + index,
@@ -124,15 +126,23 @@ pub(super) fn literal(
 pub(super) fn cast(
     operand: CheckedExpression,
     target: Type,
-    wrap: bool,
+    kind: crate::ast::CastKind,
     fallback: &Option<FailureHandler>,
     location: Location,
     scope: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
+    use crate::ast::CastKind;
     let integral = |t| matches!(t, Type::CInteger(_) | Type::Integer(_) | Type::Exact);
     let valid = |t| integral(t) || matches!(t, Type::Float(_));
-    let allowed =
-        |from, to| valid(from) && valid(to) && (!wrap || (integral(from) && integral(to)));
+    let allowed = |from, to| {
+        valid(from)
+            && valid(to)
+            && match kind {
+                CastKind::Checked => true,
+                CastKind::Wrap => integral(from) && integral(to),
+                CastKind::Saturating => integral(to),
+            }
+    };
     let error = || {
         location.error(
             ErrorKind::InvalidSource,
@@ -147,7 +157,7 @@ pub(super) fn cast(
         }),
         domain::Judgment::Valid => {}
     }
-    if wrap {
+    if kind == CastKind::Wrap {
         if fallback.is_some() {
             return Err(location.error(
                 ErrorKind::InvalidSource,
@@ -162,6 +172,39 @@ pub(super) fn cast(
             value: Value::Truncate(Box::new(operand)),
         });
     }
+    if kind == CastKind::Saturating {
+        if !operand.ty.is_float() {
+            if fallback.is_some() {
+                return Err(location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "expr.cast-sat-handler-syntax",
+                        "integer as| does not accept or"
+                    ),
+                ));
+            }
+            return Ok(CheckedExpression {
+                ty: target,
+                value: Value::SaturatingCast(Box::new(operand)),
+            });
+        }
+        if fallback.is_none() {
+            let known_non_nan = !target.symbolic()
+                && !super::constants::depends_on_generic(&operand)
+                && super::constants::constant_float(&operand)?.is_some_and(|v| !v.is_nan());
+            if !known_non_nan {
+                scope
+                    .outputs
+                    .float_sat_nans
+                    .borrow_mut()
+                    .insert((location.line, location.column));
+            }
+            return Ok(CheckedExpression {
+                ty: target,
+                value: Value::SaturatingCast(Box::new(operand)),
+            });
+        }
+    }
     if let Some(FailureHandler::Return {
         value,
         location: return_location,
@@ -173,7 +216,7 @@ pub(super) fn cast(
             value: Value::CastReturn {
                 return_location: *return_location,
                 location,
-                wrap: false,
+                kind,
                 operand: Box::new(operand),
                 return_value: Box::new(return_value),
             },
@@ -183,7 +226,7 @@ pub(super) fn cast(
         Some(FailureHandler::Value(value)) => Value::CheckedCast {
             location,
             constant_struct: None,
-            wrap: false,
+            kind,
             operand: Box::new(operand),
             fallback: Box::new(super::expression::coerced(value, Some(target), scope)?),
         },
@@ -210,7 +253,7 @@ pub(super) fn cast(
 /// ポインタを含む値にも比較を認めず、アドレス同一性を言語の値の等値性にしない。
 pub(super) fn contains_pointer(ty: Type, scope: &Scope) -> bool {
     match ty {
-        Type::Pointer { .. } | Type::CPointer => true,
+        Type::ArrayRef { .. } | Type::Pointer { .. } | Type::CPointer => true,
         Type::Struct(id) => scope
             .structs
             .get(id)

@@ -14,6 +14,31 @@ use crate::{
 };
 
 impl Parser<'_, '_> {
+    // 再帰するunaryのフレームに配列の構築用一時値を置かない。
+    fn constant_array(&mut self, soa: bool) -> Result<Expression, Diagnostic> {
+        let value = self.array_initializer(true, soa)?;
+        self.postfix(value)
+    }
+
+    fn text_buffer(&mut self) -> Result<Expression, Diagnostic> {
+        let location = self.location();
+        self.cursor += 1;
+        let capacity = if self.token().kind == Kind::Symbol("[") {
+            self.cursor += 1;
+            let value = self.expression()?;
+            self.expect(FixedToken::Symbol("]"))?;
+            Some(Box::new(value))
+        } else {
+            None
+        };
+        let kind = ExpressionKind::TextBuffer {
+            capacity,
+            value: Box::new(self.unary()?),
+        };
+        let result = self.primary_node(kind, location)?;
+        self.postfix(result)
+    }
+
     pub(super) fn expression(&mut self) -> Result<Expression, Diagnostic> {
         let result = self.expression_before_assignment()?;
         self.check_value_context()?;
@@ -32,6 +57,15 @@ impl Parser<'_, '_> {
                 ),
             ));
         }
+        if self.token().kind == Kind::Symbol("<-") {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "text.append",
+                    "text append is a statement, not an expression"
+                ),
+            ));
+        }
         if matches!(
             self.token().kind,
             Kind::Symbol(
@@ -40,14 +74,23 @@ impl Parser<'_, '_> {
                     | "*="
                     | "/="
                     | "%="
+                    | "%%="
                     | "+%="
                     | "-%="
                     | "*%="
+                    | "+|="
+                    | "-|="
+                    | "*|="
                     | "&="
                     | "|="
                     | "^="
                     | "<<="
                     | ">>="
+                    | ">>>="
+                    | "<<%="
+                    | ">>%="
+                    | ">>>%="
+                    | "<<|="
             )
         ) {
             return Err(self.error(
@@ -250,8 +293,15 @@ impl Parser<'_, '_> {
 
     fn cast(&mut self) -> Result<Expression, Diagnostic> {
         let mut operand = self.unary()?;
-        while matches!(self.token().kind, Kind::Symbol("as%") | Kind::Keyword("as")) {
-            let truncate = self.token().kind == Kind::Symbol("as%");
+        while matches!(
+            self.token().kind,
+            Kind::Symbol("as%" | "as|") | Kind::Keyword("as")
+        ) {
+            let kind = match self.token().kind {
+                Kind::Symbol("as%") => crate::ast::CastKind::Wrap,
+                Kind::Symbol("as|") => crate::ast::CastKind::Saturating,
+                _ => crate::ast::CastKind::Checked,
+            };
             let location = self.location();
             self.cursor += 1;
             self.check_height(operand.height + 1, location)?;
@@ -265,7 +315,7 @@ impl Parser<'_, '_> {
                 None
             };
             let kind = ExpressionKind::Cast {
-                wrap: truncate,
+                kind,
                 operand: Box::new(operand),
                 target,
                 fallback,
@@ -413,9 +463,9 @@ impl Parser<'_, '_> {
                 self.cursor += 1;
                 self.value_block()?.0.kind
             }
-            Kind::Keyword("null") => {
+            Kind::Keyword("nil") => {
                 self.cursor += 1;
-                ExpressionKind::Null
+                ExpressionKind::Nil
             }
             Kind::Keyword("true" | "false") => {
                 let value = self.token().kind == Kind::Keyword("true");
@@ -431,6 +481,20 @@ impl Parser<'_, '_> {
                     ),
                 ));
             }
+            Kind::Symbol("#")
+                if self
+                    .tokens
+                    .get(self.cursor + 1)
+                    .is_some_and(|t| t.kind == Kind::Symbol("[")) =>
+            {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "array.new",
+                        "mutable array initializer requires new #[...]"
+                    ),
+                ));
+            }
             Kind::Symbol("#") => {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
@@ -440,6 +504,16 @@ impl Parser<'_, '_> {
                     ),
                 ));
             }
+            Kind::Symbol(".")
+                if self
+                    .tokens
+                    .get(self.cursor + 1)
+                    .is_some_and(|t| t.kind == Kind::Symbol("[")) =>
+            {
+                self.cursor += 1;
+                return self.constant_array(false);
+            }
+            Kind::Keyword("soa") => return self.soa_expression(location),
             Kind::Symbol(".") => {
                 self.cursor += 1;
                 let operand = self.unary()?;
@@ -466,19 +540,14 @@ impl Parser<'_, '_> {
                 }
                 ExpressionKind::Deref(Box::new(operand))
             }
-            Kind::Keyword("new")
-                if self
-                    .tokens
-                    .get(self.cursor + 1)
-                    .is_some_and(|t| t.kind == Kind::Symbol("[")) =>
-            {
-                self.cursor += 1;
-                ExpressionKind::New(Box::new(self.array_initializer()?))
-            }
-            Kind::Symbol("~") | Kind::Keyword("len" | "not" | "c_bytes" | "c_byte_len" | "new") => {
+            Kind::Keyword("textbuf") => return self.text_buffer(),
+            Kind::Keyword("new") => return self.new_expression(location),
+            Kind::Symbol("~" | "-%" | "-|")
+            | Kind::Keyword("len" | "not" | "c_bytes" | "c_byte_len") => {
                 let constructor: fn(Box<Expression>) -> ExpressionKind = match self.token().kind {
-                    Kind::Keyword("new") => ExpressionKind::New,
                     Kind::Symbol("~") => ExpressionKind::BitNot,
+                    Kind::Symbol("-%") => ExpressionKind::WrapNegate,
+                    Kind::Symbol("-|") => ExpressionKind::SaturatingNegate,
                     Kind::Keyword("len") => ExpressionKind::Len,
                     Kind::Keyword("not") => ExpressionKind::Not,
                     Kind::Keyword("c_bytes") => ExpressionKind::CBytes,
@@ -487,6 +556,10 @@ impl Parser<'_, '_> {
                 };
                 self.cursor += 1;
                 constructor(Box::new(self.unary()?))
+            }
+            Kind::Keyword("return") if self.in_ensures => {
+                self.cursor += 1;
+                ExpressionKind::Name("return".into())
             }
             Kind::Ident(name) | Kind::Keyword(name @ "self") => {
                 self.cursor += 1;
@@ -613,7 +686,7 @@ impl Parser<'_, '_> {
     fn postfix(&mut self, mut result: Expression) -> Result<Expression, Diagnostic> {
         while matches!(
             self.token().kind,
-            Kind::Symbol("." | "[" | "(") | Kind::Keyword("with")
+            Kind::Symbol("." | "(") | Kind::Keyword("with")
         ) || (self.token().kind == Kind::Symbol("#")
             && self
                 .tokens
@@ -650,11 +723,16 @@ impl Parser<'_, '_> {
                 result = self.with_expression(result)?;
                 continue;
             }
-            if self.token().kind == Kind::Symbol("[") {
+            if self.token().kind == Kind::Symbol(".")
+                && self
+                    .tokens
+                    .get(self.cursor + 1)
+                    .is_some_and(|t| t.kind == Kind::Symbol("["))
+            {
                 let location = self.location();
                 self.check_height(result.height, location)?;
                 let previous_limit = self.limit_location.replace(location);
-                self.cursor += 1;
+                self.cursor += 2;
                 let start = if self.token().kind == Kind::Symbol(":") {
                     None
                 } else {
@@ -672,17 +750,18 @@ impl Parser<'_, '_> {
                     None
                 };
                 self.expect(FixedToken::Symbol("]"))?;
-                let fallback = if self.token().kind == Kind::Keyword("or") {
+                let (fallback, fallback_location) = if self.token().kind == Kind::Keyword("or") {
+                    let or_location = self.location();
                     let height = result
                         .height
                         .max(start.as_ref().map_or(0, |v| v.height))
                         .max(end.as_ref().map_or(0, |v| v.height));
-                    self.check_height(height + 1, self.location())?;
-                    self.limit_location = Some(self.location());
+                    self.check_height(height + 1, or_location)?;
+                    self.limit_location = Some(or_location);
                     self.cursor += 1;
-                    Some(self.failure_handler()?)
+                    (Some(self.failure_handler()?), Some(or_location))
                 } else {
-                    None
+                    (None, None)
                 };
                 self.limit_location = previous_limit;
                 result = self.primary_node(
@@ -692,6 +771,7 @@ impl Parser<'_, '_> {
                         end,
                         index,
                         fallback,
+                        fallback_location,
                     },
                     location,
                 )?;
@@ -768,5 +848,82 @@ impl Parser<'_, '_> {
             }
         }
         Ok(result)
+    }
+
+    #[inline(never)]
+    fn soa_expression(&mut self, location: crate::ast::Location) -> Result<Expression, Diagnostic> {
+        if self
+            .tokens
+            .get(self.cursor + 1)
+            .is_some_and(|t| t.kind == Kind::Symbol("."))
+            && self
+                .tokens
+                .get(self.cursor + 2)
+                .is_some_and(|t| t.kind == Kind::Symbol("["))
+        {
+            self.cursor += 2;
+            return self.constant_array(true);
+        }
+        if self
+            .tokens
+            .get(self.cursor + 1)
+            .is_some_and(|t| t.kind == Kind::Symbol("#"))
+            && self
+                .tokens
+                .get(self.cursor + 2)
+                .is_some_and(|t| t.kind == Kind::Symbol("["))
+        {
+            return Err(location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "array.new",
+                    "mutable soa array initializer requires new soa #[...]"
+                ),
+            ));
+        }
+        Err(location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!(
+                "array.soa-type",
+                "expected soa .[...], new soa #[...], or new soa .[...]"
+            ),
+        ))
+    }
+
+    #[inline(never)]
+    fn new_expression(&mut self, location: crate::ast::Location) -> Result<Expression, Diagnostic> {
+        let kind = if self
+            .tokens
+            .get(self.cursor + 1)
+            .is_some_and(|t| t.kind == Kind::Keyword("soa"))
+            && self
+                .tokens
+                .get(self.cursor + 2)
+                .is_some_and(|t| matches!(t.kind, Kind::Symbol("#" | ".")))
+            && self
+                .tokens
+                .get(self.cursor + 3)
+                .is_some_and(|t| t.kind == Kind::Symbol("["))
+        {
+            let readonly = self.tokens[self.cursor + 2].kind == Kind::Symbol(".");
+            self.cursor += 3;
+            ExpressionKind::New(Box::new(self.array_initializer(readonly, true)?))
+        } else if self
+            .tokens
+            .get(self.cursor + 1)
+            .is_some_and(|t| matches!(t.kind, Kind::Symbol("#" | ".")))
+            && self
+                .tokens
+                .get(self.cursor + 2)
+                .is_some_and(|t| t.kind == Kind::Symbol("["))
+        {
+            let readonly = self.tokens[self.cursor + 1].kind == Kind::Symbol(".");
+            self.cursor += 2;
+            ExpressionKind::New(Box::new(self.array_initializer(readonly, false)?))
+        } else {
+            self.cursor += 1;
+            ExpressionKind::New(Box::new(self.unary()?))
+        };
+        self.primary_node(kind, location)
     }
 }

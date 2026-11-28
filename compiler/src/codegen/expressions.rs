@@ -80,7 +80,7 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
         return super::exact::stored(expr, context);
     }
     match expr.value {
-        Value::Array { .. } => unreachable!("array initializer is emitted by new"),
+        Value::Array { .. } => super::arrays::constant(expr, context),
         Value::ArrayElement { .. } => super::arrays::address(expr, context),
         Value::ArrayView { ref handler, .. } | Value::ArrayRead { ref handler, .. } => {
             let (setup, condition, value) = super::arrays::read_parts(expr, context);
@@ -95,18 +95,39 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                 expression(fallback, context)
             )
         }
+        Value::SoaColumn {
+            ref target,
+            leaf_offset,
+            leaf_count,
+            ..
+        } => super::soa::column(target, leaf_offset, leaf_count, expr.ty, context),
         Value::Receiver { ref target, .. } => expression(target, context),
+        Value::TextAppend {
+            ref left,
+            ref right,
+            location,
+        } => super::text::append(left, right, location, context),
+        Value::TextBuffer {
+            ref capacity,
+            ref value,
+            location,
+        } => super::text::buffer(capacity.as_deref(), value, location, context),
         Value::New {
             ref value,
             location,
         } => super::arena::allocate(value, expr.ty, location, context),
         Value::Deref(ref value) => format!("(*({}))", expression(value, context)),
-        Value::NonNull(ref value) if value.ty.array_id().is_some() => {
-            format!("(({}).data != NULL)", expression(value, context))
+        Value::NonNil(ref value) if value.ty.array_id().is_some() => {
+            let array = context.arrays.get(value.ty.array_id().unwrap());
+            if array.soa {
+                format!("(({}).cols[0] != NULL)", expression(value, context))
+            } else {
+                format!("(({}).data != NULL)", expression(value, context))
+            }
         }
-        Value::Null if expr.ty.array_id().is_some() => format!("({}){{0}}", expr.ty.c_name()),
-        Value::NonNull(ref value) => format!("({} != NULL)", expression(value, context)),
-        Value::Null => "NULL".into(),
+        Value::Nil if expr.ty.array_id().is_some() => format!("({}){{0}}", expr.ty.c_name()),
+        Value::NonNil(ref value) => format!("({} != NULL)", expression(value, context)),
+        Value::Nil => "NULL".into(),
         Value::CBytes(ref operand) => super::ffi::bytes(operand, context),
         Value::CByteLen {
             ref operand,
@@ -134,11 +155,17 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
         Value::GenericNumericLiteral { .. } => {
             unreachable!("generic values are substituted before code generation")
         }
-        Value::Exact(ref e) => format!(
-            "suz_exact_require({}, {})",
-            super::exact::tree(e, context),
-            c_string(&context.source_name)
-        ),
+        Value::Exact(ref e) => {
+            let tree = super::exact::tree(e, context);
+            if super::exact::can_fail(e) {
+                format!(
+                    "suz_exact_require({tree}, {})",
+                    c_string(&context.source_name)
+                )
+            } else {
+                tree
+            }
+        }
         Value::TextView(ref inner) => format!("suz_text_as_view({})", expression(inner, context)),
         Value::Intern {
             ref operand,
@@ -180,7 +207,7 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             if expr.ty == crate::ast::Type::Text {
                 context.uses_text = true;
                 format!(
-                    "(suz_text_view){{{}, UINT64_C({}), UINT64_C({})}}",
+                    "(suz_text_view){{{}, UINT64_C({}), UINT64_C({}), NULL}}",
                     c_string(text),
                     text.len(),
                     text.chars().count()
@@ -194,6 +221,7 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             location,
             ref constant,
         } => match constant {
+            Some(text) if expr.ty == crate::ast::Type::Text => super::text::static_view(text),
             Some(text) => super::text::constant(text, context),
             None => super::text::template(parts, location, context),
         },
@@ -208,13 +236,16 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             super::structs::literal(id, fields, context)
         }
         Value::Field { ref target, index } => {
+            if let Some(direct) = super::soa::try_direct_field_read(expr, context) {
+                return direct;
+            }
             let name = super::structs::field_name(target.ty, index, context);
             format!("({}).{name}", expression(target, context))
         }
         Value::Void => String::new(),
         Value::Call {
             id, ref arguments, ..
-        } => super::functions::call(id, arguments, context, None),
+        } => super::functions::call(id, arguments, expr.ty, context, None),
         Value::Block {
             ref statements,
             ref value,
@@ -246,6 +277,8 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                             BinaryOperator::Remainder => "remainder",
                             BinaryOperator::ShiftLeft => "left shift",
                             BinaryOperator::ShiftRight => "right shift",
+                            BinaryOperator::LogicalShiftRight => "logical right shift",
+                            BinaryOperator::SaturatingShiftLeft => "saturating left shift",
                             _ => unreachable!(),
                         },
                         IntegerOperation::Exact(_) => unreachable!(),
@@ -267,23 +300,27 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                     } else if let IntegerOperation::Binary { operator, .. } = operation
                         && operator.is_shift()
                     {
-                        let crate::ast::Type::Integer(ty) = expr.ty else {
-                            unreachable!()
-                        };
-                        let IntegerOperation::Binary { right, .. } = operation else {
-                            unreachable!()
-                        };
-                        let invalid = if right.ty == crate::ast::Type::Exact {
+                        if matches!(operator, BinaryOperator::ShiftLeft) {
+                            let crate::ast::Type::Integer(ty) = expr.ty else {
+                                unreachable!()
+                            };
+                            let IntegerOperation::Binary { right, .. } = operation else {
+                                unreachable!()
+                            };
+                            let invalid = if right.ty == crate::ast::Type::Exact {
+                                format!(
+                                    "suz_cmp_{right_index}.negative || suz_cmp_{right_index}.magnitude >= {}",
+                                    ty.bits()
+                                )
+                            } else {
+                                format!("(uint64_t)suz_cmp_{right_index} >= {}", ty.bits())
+                            };
                             format!(
-                                "suz_cmp_{right_index}.negative || suz_cmp_{right_index}.magnitude >= {}",
-                                ty.bits()
+                                "({invalid}) ? \"shift count out of range [rt.shift-count]\" : \"integer {name} overflow [rt.shift-overflow]\""
                             )
                         } else {
-                            format!("(uint64_t)suz_cmp_{right_index} >= {}", ty.bits())
-                        };
-                        format!(
-                            "({invalid}) ? \"shift count out of range [rt.shift-count]\" : \"integer {name} overflow [rt.shift-overflow]\""
-                        )
+                            "\"shift count out of range [rt.shift-count]\"".into()
+                        }
                     } else {
                         c_string(&format!("integer {name} overflow [rt.int-overflow]"))
                     };
@@ -302,7 +339,7 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
         Value::CheckedCast {
             ref constant_struct,
             location,
-            wrap,
+            kind,
             ref operand,
             ref fallback,
             ..
@@ -310,14 +347,51 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             if let Some(value) = constant_struct {
                 return expression(value, context);
             }
+            if kind == crate::ast::CastKind::Saturating
+                && let (crate::ast::Type::Float(from), crate::ast::Type::Integer(to)) =
+                    (operand.ty, expr.ty)
+                && unordered_read(fallback, context)
+            {
+                context.float_types.insert(from);
+                context.float_sat_casts.insert((from, to));
+                if unordered_read(operand, context) {
+                    return format!(
+                        "suz_sat_f2i_{}_{}({}, ({})({}))",
+                        from.name(),
+                        to.name(),
+                        expression(operand, context),
+                        to.c_name(),
+                        expression(fallback, context)
+                    );
+                }
+                let index = context.temporaries.len();
+                context.temporaries.push(operand.ty);
+                let op_code = expression(operand, context);
+                let fb_code = expression(fallback, context);
+                return format!(
+                    "(suz_cmp_{index} = {op_code}, suz_sat_f2i_{}_{}(suz_cmp_{index}, ({})({fb_code})))",
+                    from.name(),
+                    to.name(),
+                    to.c_name(),
+                );
+            }
             let (setup, condition, converted) =
-                cast_parts(operand, expr.ty, wrap, location, context);
+                cast_parts(operand, expr.ty, kind, location, context);
             let fallback = expression(fallback, context);
             format!("({setup}, {condition} ? {converted} : ({fallback}))")
         }
         Value::Cast(ref inner) => {
+            if expr.ty.is_readonly_array() && !inner.ty.is_readonly_array() {
+                return super::arrays::readonly(inner, context);
+            }
             if expr.ty.array_id().is_some() {
                 return expression(inner, context);
+            }
+            if let Some((_, value)) = super::exact::native_value(inner, context) {
+                if let crate::ast::Type::Float(ty) = expr.ty {
+                    context.float_types.insert(ty);
+                }
+                return format!("({})({value})", expr.ty.c_name());
             }
             if inner.ty == crate::ast::Type::Exact {
                 let value = expression(inner, context);
@@ -435,12 +509,147 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             format!(
                 "suz_bits_{}((uint64_t)({}))",
                 ty.name(),
-                if inner.ty == crate::ast::Type::Exact {
+                if let Some((_, value)) = super::exact::native_value(inner, context) {
+                    value
+                } else if inner.ty == crate::ast::Type::Exact {
                     format!("suz_exact_bits({})", expression(inner, context))
                 } else {
                     expression(inner, context)
                 }
             )
+        }
+        Value::SaturatingCast(ref inner) => {
+            use crate::ast::Type;
+            if matches!(expr.ty, Type::CInteger(_)) || matches!(inner.ty, Type::CInteger(_)) {
+                return super::ffi::saturating_cast(inner, expr.ty, context);
+            }
+            let (to, to_min, to_max) = match expr.ty {
+                Type::Integer(to) => {
+                    let (lo, hi) = to.bounds();
+                    (to, lo, hi)
+                }
+                Type::Range(r) => {
+                    let (lo, hi) = r.bounds();
+                    (r.base, lo, hi)
+                }
+                _ => unreachable!(),
+            };
+            let c_to = to.c_name();
+            let to_signed = to.bounds().0 < 0;
+            let c_bound = |v: i128| {
+                if !to_signed {
+                    format!("({c_to})UINT64_C({})", v as u64)
+                } else if v == i64::MIN as i128 {
+                    format!("({c_to})INT64_MIN")
+                } else {
+                    format!("({c_to})INT64_C({v})")
+                }
+            };
+            let min_expr = c_bound(to_min);
+            let max_expr = c_bound(to_max);
+            let native_ty = super::exact::native_type(inner);
+            if inner.ty == Type::Exact && native_ty.is_none() {
+                let id = context.temporaries.len();
+                context.temporaries.push(Type::Exact);
+                let val = expression(inner, context);
+                let neg_branch = if to_min >= 0 {
+                    min_expr.clone()
+                } else {
+                    let abs_min = to_min.unsigned_abs();
+                    if to_max < 0 {
+                        let abs_max = to_max.unsigned_abs();
+                        format!(
+                            "(suz_cmp_{id}.magnitude >= {abs_min}ULL ? {min_expr} : (suz_cmp_{id}.magnitude <= {abs_max}ULL ? {max_expr} : ({c_to})-(int64_t)suz_cmp_{id}.magnitude))"
+                        )
+                    } else {
+                        format!(
+                            "(suz_cmp_{id}.magnitude >= {abs_min}ULL ? {min_expr} : ({c_to})-(int64_t)suz_cmp_{id}.magnitude)"
+                        )
+                    }
+                };
+                let pos_branch = if to_max < 0 {
+                    max_expr.clone()
+                } else if to_min > 0 {
+                    format!(
+                        "(suz_cmp_{id}.magnitude <= {}ULL ? {min_expr} : (suz_cmp_{id}.magnitude >= {}ULL ? {max_expr} : ({c_to})suz_cmp_{id}.magnitude))",
+                        to_min as u64, to_max as u64
+                    )
+                } else {
+                    format!(
+                        "(suz_cmp_{id}.magnitude >= {}ULL ? {max_expr} : ({c_to})suz_cmp_{id}.magnitude)",
+                        to_max as u64
+                    )
+                };
+                return format!(
+                    "(suz_cmp_{id} = {val}, suz_cmp_{id}.negative ? {neg_branch} : {pos_branch})"
+                );
+            }
+            let inner_ty = native_ty.unwrap_or(inner.ty);
+            if let Type::Float(from) = inner_ty {
+                context.float_types.insert(from);
+                context.float_sat_casts.insert((from, to));
+                let base_sat = format!(
+                    "suz_sat_f2i_{}_{}({}, ({c_to})0)",
+                    from.name(),
+                    to.name(),
+                    expression(inner, context)
+                );
+                if matches!(expr.ty, Type::Range(_)) {
+                    let (base_min, base_max) = to.bounds();
+                    if to_min > base_min || to_max < base_max {
+                        let id = context.temporaries.len();
+                        context.temporaries.push(Type::Integer(to));
+                        let local = format!("suz_cmp_{id}");
+                        let mut body = local.clone();
+                        if to_max < base_max {
+                            body = format!("({local} > {max_expr} ? {max_expr} : {body})");
+                        }
+                        if to_min > base_min {
+                            body = format!("({local} < {min_expr} ? {min_expr} : {body})");
+                        }
+                        return format!("({local} = {base_sat}, {body})");
+                    }
+                }
+                return base_sat;
+            }
+            let (from_min, from_max) = inner_ty.integer_bounds().unwrap();
+            let from_signed = inner_ty.integer_storage().unwrap().c_signed();
+            if from_min >= to_min && from_max <= to_max {
+                let val = if let Some(ty) = native_ty {
+                    super::exact::emit_native(inner, ty, context)
+                } else {
+                    expression(inner, context)
+                };
+                return format!("({c_to})({val})");
+            }
+            let id = context.temporaries.len();
+            context.temporaries.push(inner_ty);
+            let val = if let Some(ty) = native_ty {
+                super::exact::emit_native(inner, ty, context)
+            } else {
+                expression(inner, context)
+            };
+            let local = format!("suz_cmp_{id}");
+            let mut body = format!("({c_to}){local}");
+            if from_max > to_max {
+                let prefix = if from_signed { "INT64_C" } else { "UINT64_C" };
+                let hi_cmp = if to_max == i64::MIN as i128 {
+                    "INT64_MIN".into()
+                } else {
+                    format!("{prefix}({to_max})")
+                };
+                body = format!("({local} > {hi_cmp} ? {max_expr} : {body})");
+            }
+            if from_min < to_min {
+                let prefix = if from_signed { "INT64_C" } else { "UINT64_C" };
+                let lo_cmp = if to_min == i64::MIN as i128 {
+                    "INT64_MIN".into()
+                } else {
+                    format!("{prefix}({to_min})")
+                };
+                body = format!("({local} < {lo_cmp} ? {min_expr} : {body})");
+            }
+            format!("({local} = {val}, {body})")
         }
         Value::BitNot(ref inner) => {
             let crate::ast::Type::Integer(ty) = expr.ty else {
@@ -453,6 +662,24 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                 expression(inner, context)
             )
         }
+        Value::WrapNegate(ref inner) => {
+            let crate::ast::Type::Integer(ty) = expr.ty else {
+                unreachable!()
+            };
+            context.bit_helpers.insert(ty);
+            format!(
+                "suz_bits_{}(UINT64_C(0) - (uint64_t)({}))",
+                ty.name(),
+                expression(inner, context)
+            )
+        }
+        Value::SaturatingNegate(ref inner) => {
+            let crate::ast::Type::Integer(ty) = expr.ty else {
+                unreachable!()
+            };
+            context.saturating_helpers.insert(("neg", ty));
+            format!("suz_sat_neg_{}({})", ty.name(), expression(inner, context))
+        }
         Value::Binary {
             operator,
             ref left,
@@ -460,34 +687,159 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
         } => {
             if expr.ty.is_float() && unordered_read(left, context) && unordered_read(right, context)
             {
-                return format!(
-                    "({})(({}) {} ({}))",
-                    expr.ty.c_name(),
-                    expression(left, context),
-                    operator.c_symbol(),
-                    expression(right, context)
-                );
+                let crate::ast::Type::Float(ty) = expr.ty else {
+                    unreachable!()
+                };
+                return match operator {
+                    crate::ast::BinaryOperator::Remainder => {
+                        context.uses_float_rem = true;
+                        let fmod_fn = match ty {
+                            crate::ast::FloatType::F32 => "fmodf",
+                            crate::ast::FloatType::F64 => "fmod",
+                        };
+                        format!(
+                            "{fmod_fn}(({}), ({}))",
+                            expression(left, context),
+                            expression(right, context)
+                        )
+                    }
+                    crate::ast::BinaryOperator::EuclideanRemainder => {
+                        context.float_euclid.insert(ty);
+                        format!(
+                            "suz_euclid_{}(({}), ({}))",
+                            ty.name(),
+                            expression(left, context),
+                            expression(right, context)
+                        )
+                    }
+                    _ => format!(
+                        "({})(({}) {} ({}))",
+                        expr.ty.c_name(),
+                        expression(left, context),
+                        operator.c_symbol(),
+                        expression(right, context)
+                    ),
+                };
             }
+            let right_native = super::exact::native_type(right);
+            let right_ty = right_native.unwrap_or(right.ty);
             let index = context.temporaries.len();
-            context.temporaries.extend([left.ty, right.ty]);
+            context.temporaries.extend([left.ty, right_ty]);
+            let right_is_exact = right_ty == crate::ast::Type::Exact;
             let left = expression(left, context);
-            let right = expression(right, context);
+            let right = if let Some(ty) = right_native {
+                super::exact::emit_native(right, ty, context)
+            } else {
+                expression(right, context)
+            };
             let result = match expr.ty {
                 crate::ast::Type::Integer(ty) => {
-                    context.bit_helpers.insert(ty);
-                    format!(
-                        "suz_bits_{}((uint64_t)suz_cmp_{index} {} (uint64_t)suz_cmp_{})",
-                        ty.name(),
+                    use crate::ast::BinaryOperator;
+                    let bits = ty.bits();
+                    let shift_mask = bits - 1;
+                    let shift_count = if right_is_exact {
+                        format!("(suz_exact_bits(suz_cmp_{}) & {shift_mask})", index + 1)
+                    } else {
+                        format!("((uint64_t)suz_cmp_{} & {shift_mask})", index + 1)
+                    };
+                    match operator {
+                        BinaryOperator::WrapShiftLeft => {
+                            context.bit_helpers.insert(ty);
+                            format!(
+                                "suz_bits_{}((uint64_t)suz_cmp_{index} << {shift_count})",
+                                ty.name()
+                            )
+                        }
+                        BinaryOperator::WrapShiftRight => {
+                            if ty.bounds().0 < 0 {
+                                format!(
+                                    "(suz_cmp_{index} < 0 ? ({})(-INT64_C(1) - (int64_t)((uint64_t)(-(int64_t)(suz_cmp_{index} + 1)) >> {shift_count})) : ({})((uint64_t)(int64_t)suz_cmp_{index} >> {shift_count}))",
+                                    ty.c_name(),
+                                    ty.c_name(),
+                                )
+                            } else {
+                                context.bit_helpers.insert(ty);
+                                format!(
+                                    "suz_bits_{}((uint64_t)suz_cmp_{index} >> {shift_count})",
+                                    ty.name()
+                                )
+                            }
+                        }
+                        BinaryOperator::WrapLogicalShiftRight => {
+                            context.bit_helpers.insert(ty);
+                            let value_mask = u64::MAX >> (64 - bits);
+                            format!(
+                                "suz_bits_{}(((uint64_t)suz_cmp_{index} & UINT64_C({value_mask})) >> {shift_count})",
+                                ty.name()
+                            )
+                        }
+                        BinaryOperator::SaturatingAdd => {
+                            context.saturating_helpers.insert(("add", ty));
+                            format!(
+                                "suz_sat_add_{}(suz_cmp_{index}, suz_cmp_{})",
+                                ty.name(),
+                                index + 1
+                            )
+                        }
+                        BinaryOperator::SaturatingSubtract => {
+                            context.saturating_helpers.insert(("sub", ty));
+                            format!(
+                                "suz_sat_sub_{}(suz_cmp_{index}, suz_cmp_{})",
+                                ty.name(),
+                                index + 1
+                            )
+                        }
+                        BinaryOperator::SaturatingMultiply => {
+                            context.saturating_helpers.insert(("mul", ty));
+                            format!(
+                                "suz_sat_mul_{}(suz_cmp_{index}, suz_cmp_{})",
+                                ty.name(),
+                                index + 1
+                            )
+                        }
+                        BinaryOperator::SaturatingShiftLeft => {
+                            context.saturating_helpers.insert(("shl", ty));
+                            format!(
+                                "suz_sat_shl_{}(suz_cmp_{index}, (uint64_t)suz_cmp_{})",
+                                ty.name(),
+                                index + 1
+                            )
+                        }
+                        _ => {
+                            context.bit_helpers.insert(ty);
+                            format!(
+                                "suz_bits_{}((uint64_t)suz_cmp_{index} {} (uint64_t)suz_cmp_{})",
+                                ty.name(),
+                                operator.c_symbol(),
+                                index + 1
+                            )
+                        }
+                    }
+                }
+                crate::ast::Type::Float(ty) => match operator {
+                    crate::ast::BinaryOperator::Remainder => {
+                        context.uses_float_rem = true;
+                        let fmod_fn = match ty {
+                            crate::ast::FloatType::F32 => "fmodf",
+                            crate::ast::FloatType::F64 => "fmod",
+                        };
+                        format!("{fmod_fn}(suz_cmp_{index}, suz_cmp_{})", index + 1)
+                    }
+                    crate::ast::BinaryOperator::EuclideanRemainder => {
+                        context.float_euclid.insert(ty);
+                        format!(
+                            "suz_euclid_{}(suz_cmp_{index}, suz_cmp_{})",
+                            ty.name(),
+                            index + 1
+                        )
+                    }
+                    _ => format!(
+                        "({})(suz_cmp_{index} {} suz_cmp_{})",
+                        ty.c_name(),
                         operator.c_symbol(),
                         index + 1
-                    )
-                }
-                crate::ast::Type::Float(ty) => format!(
-                    "({})(suz_cmp_{index} {} suz_cmp_{})",
-                    ty.c_name(),
-                    operator.c_symbol(),
-                    index + 1
-                ),
+                    ),
+                },
                 _ => unreachable!(),
             };
             format!(
@@ -539,30 +891,80 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                 })
                 .collect();
             // 宣言には評価の副作用がない。代入は式の中に残し、論理演算の短絡評価とループの再評価を保つ。
+            // 演算子メソッドへポインタ渡しする不変の構造体は一時変数へコピーせず、直接アドレスを渡す。
+            let pointer_struct: Vec<bool> = operands
+                .iter()
+                .map(|operand| super::functions::pass_struct_by_pointer(operand.ty, context))
+                .collect();
+            let direct_struct: Vec<bool> = operands
+                .iter()
+                .enumerate()
+                .map(|(index, operand)| {
+                    if !pointer_struct[index]
+                        || !super::functions::immutable_struct_place(operand, context)
+                    {
+                        return false;
+                    }
+                    let left_method =
+                        index == 0 || methods.get(index - 1).is_some_and(Option::is_some);
+                    let right_method =
+                        index >= operators.len() || methods.get(index).is_some_and(Option::is_some);
+                    left_method && right_method
+                })
+                .collect();
+            let native_types: Vec<_> = operands.iter().map(super::exact::native_type).collect();
+            let operand_types: Vec<_> = operands
+                .iter()
+                .enumerate()
+                .map(|(i, operand)| native_types[i].unwrap_or(operand.ty))
+                .collect();
             let names: Vec<_> = operands
                 .iter()
-                .map(|operand| {
-                    let index = context.temporaries.len();
-                    context.temporaries.push(operand.ty);
-                    format!("suz_cmp_{index}")
+                .enumerate()
+                .map(|(i, _)| {
+                    if direct_struct[i] {
+                        String::new()
+                    } else {
+                        let index = context.temporaries.len();
+                        context.temporaries.push(operand_types[i]);
+                        format!("suz_cmp_{index}")
+                    }
                 })
                 .collect();
             let values: Vec<_> = operands
                 .iter()
-                .map(|operand| expression(operand, context))
+                .enumerate()
+                .map(|(i, operand)| {
+                    if let Some(ty) = native_types[i] {
+                        super::exact::emit_native(operand, ty, context)
+                    } else {
+                        expression(operand, context)
+                    }
+                })
                 .collect();
+            let method_argument = |i: usize| -> String {
+                if direct_struct[i] {
+                    format!("&({})", values[i])
+                } else if pointer_struct[i] {
+                    format!("&{}", names[i])
+                } else {
+                    names[i].clone()
+                }
+            };
             let mut compare = |index: usize| {
                 if let Some(Some(id)) = methods.get(index) {
-                    return format!("suz_fn_{id}({}, {})", names[index], names[index + 1]);
+                    return format!(
+                        "suz_fn_{id}({}, {})",
+                        method_argument(index),
+                        method_argument(index + 1)
+                    );
                 }
-                let unsigned = operands[index]
-                    .ty
-                    .integer_storage()
-                    .is_some_and(|ty| ty.bounds().0 == 0);
-                let text = operands[index].ty.is_text();
-                let view = operands[index].ty == Type::Text;
-                let floating = matches!(operands[index].ty, Type::Float(_));
-                let structure = if let Type::Struct(id) = operands[index].ty {
+                let ty = operand_types[index];
+                let unsigned = ty.integer_storage().is_some_and(|ty| ty.bounds().0 == 0);
+                let text = ty.is_text();
+                let view = ty == Type::Text;
+                let floating = matches!(ty, Type::Float(_));
+                let structure = if let Type::Struct(id) = ty {
                     context.struct_equals.insert(id);
                     Some(id)
                 } else {
@@ -572,8 +974,8 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                     && !text
                     && structure.is_none()
                     && !matches!(
-                        operands[index].ty,
-                        Type::Integer(_) | Type::Exact | Type::CInteger(_)
+                        ty,
+                        Type::Integer(_) | Type::Range(_) | Type::Exact | Type::CInteger(_)
                     )
                 {
                     context.helpers.insert(unsigned);
@@ -593,11 +995,8 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                 }
                 if text {
                     if operators[index].is_equality() {
-                        let equal = super::expressions::equality(
-                            operands[index].ty,
-                            &names[index],
-                            &names[index + 1],
-                        );
+                        let equal =
+                            super::expressions::equality(ty, &names[index], &names[index + 1]);
                         return if matches!(
                             operators[index],
                             crate::ast::ComparisonOperator::NotEqual
@@ -620,18 +1019,18 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                     );
                 }
                 if matches!(
-                    operands[index].ty,
-                    Type::Exact | Type::Integer(_) | Type::Float(_)
+                    ty,
+                    Type::Exact | Type::Integer(_) | Type::Range(_) | Type::Float(_)
                 ) {
                     return super::exact::compare(
-                        operands[index].ty,
+                        ty,
                         &names[index],
-                        operands[index + 1].ty,
+                        operand_types[index + 1],
                         &names[index + 1],
                         operators[index],
                     );
                 }
-                if matches!(operands[index].ty, Type::CInteger(_)) {
+                if matches!(ty, Type::CInteger(_)) {
                     // 同じC型同士なので、その型の符号と幅のまま比較する。
                     // int64_tの比較ヘルパーへ渡すとsize_tなどの上半分を負数にしてしまう。
                     return format!(
@@ -649,23 +1048,28 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                     operators[index].symbol()
                 )
             };
-            let mut result = format!(
-                "({} = {}, {} = {}, {}",
-                names[0],
-                values[0],
-                names[1],
-                values[1],
-                compare(0)
-            );
+            let mut first = Vec::new();
+            if !direct_struct[0] {
+                first.push(format!("{} = {}", names[0], values[0]));
+            }
+            if !direct_struct[1] {
+                first.push(format!("{} = {}", names[1], values[1]));
+            }
+            first.push(compare(0));
+            let mut result = format!("({}", first.join(", "));
             for index in 1..operators.len() {
-                write!(
-                    result,
-                    " && ({} = {}, {})",
-                    names[index + 1],
-                    values[index + 1],
-                    compare(index)
-                )
-                .unwrap();
+                if direct_struct[index + 1] {
+                    write!(result, " && ({})", compare(index)).unwrap();
+                } else {
+                    write!(
+                        result,
+                        " && ({} = {}, {})",
+                        names[index + 1],
+                        values[index + 1],
+                        compare(index)
+                    )
+                    .unwrap();
+                }
             }
             result.push(')');
             result

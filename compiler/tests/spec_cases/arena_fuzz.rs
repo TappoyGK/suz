@@ -33,17 +33,11 @@ fn pick_opt_ptr(rng: &mut Rng, has_inner: bool) -> &'static str {
         let inner = ["inner_a", "inner_opt", "inner_holder.p"];
         return inner[rng.pick(inner.len())];
     }
-    let outer = [
-        "null",
-        "outer_a",
-        "outer_opt",
-        "outer_mut",
-        "outer_holder.p",
-    ];
+    let outer = ["nil", "outer_a", "outer_opt", "outer_mut", "outer_holder.p"];
     outer[rng.pick(outer.len())]
 }
 
-fn pick_nonnull_ptr(rng: &mut Rng, has_inner: bool) -> &'static str {
+fn pick_nonnil_ptr(rng: &mut Rng, has_inner: bool) -> &'static str {
     if has_inner && rng.chance(1, 5) {
         let inner = ["inner_a", "inner_holder.q"];
         return inner[rng.pick(inner.len())];
@@ -68,7 +62,7 @@ fn emit_inner_ops(out: &mut String, rng: &mut Rng, phase: usize, in_loop: bool, 
                 let _ = writeln!(out, "{indent}outer_opt = {src}");
             }
             1 => {
-                let src = pick_nonnull_ptr(rng, true);
+                let src = pick_nonnil_ptr(rng, true);
                 let _ = writeln!(out, "{indent}outer_mut = {src}");
             }
             2 => {
@@ -94,7 +88,7 @@ fn emit_inner_ops(out: &mut String, rng: &mut Rng, phase: usize, in_loop: bool, 
             }
             4 => {
                 let p = pick_opt_ptr(rng, true);
-                let q = pick_nonnull_ptr(rng, true);
+                let q = pick_nonnil_ptr(rng, true);
                 if rng.chance(1, 2) {
                     let _ = writeln!(out, "{indent}#outer_mut = $Node {{ value: 42, next: {p} }}");
                 } else {
@@ -128,7 +122,7 @@ fn emit_inner_ops(out: &mut String, rng: &mut Rng, phase: usize, in_loop: bool, 
                 let let_var = format!("narrowed_{phase}_{op_idx}");
                 let _ = writeln!(
                     out,
-                    "{indent}let {let_var} = {src} {{\n{indent}    outer_opt = {let_var}\n{indent}    {let_var}#value += 1\n{indent}}} else {{\n{indent}    outer_opt = null\n{indent}}}"
+                    "{indent}let {let_var} = {src} {{\n{indent}    outer_opt = {let_var}\n{indent}    {let_var}#value += 1\n{indent}}} else {{\n{indent}    outer_opt = nil\n{indent}}}"
                 );
             }
             8 => {
@@ -156,17 +150,17 @@ fn emit_inner_ops(out: &mut String, rng: &mut Rng, phase: usize, in_loop: bool, 
                 if rng.chance(1, 2) {
                     let _ = writeln!(
                         out,
-                        "{indent}sink = apply_action(fn [inner_a](x: ptr? $Node) -> i32 {{ return borrow_read(x) + inner_a.value }}, {arg})"
+                        "{indent}sink = apply_action(fn [inner_a](x: mut? $Node) -> i32 {{ return borrow_read(x) + inner_a.value }}, {arg})"
                     );
                 } else {
                     let _ = writeln!(
                         out,
-                        "{indent}sink = apply_action(fn [var outer_opt](x: ptr? $Node) -> i32 {{\n{indent}    outer_opt = x\n{indent}    return borrow_read(outer_opt)\n{indent}}}, {arg})"
+                        "{indent}sink = apply_action(fn [var outer_opt](x: mut? $Node) -> i32 {{\n{indent}    outer_opt = x\n{indent}    return borrow_read(outer_opt)\n{indent}}}, {arg})"
                     );
                 }
             }
             10 => {
-                let target = pick_nonnull_ptr(rng, true);
+                let target = pick_nonnil_ptr(rng, true);
                 let opt = pick_opt_ptr(rng, true);
                 let _ = writeln!(out, "{indent}borrow_mutate({target})");
                 let _ = writeln!(out, "{indent}sink = borrow_read({opt})");
@@ -181,11 +175,11 @@ fn emit_inner_ops(out: &mut String, rng: &mut Rng, phase: usize, in_loop: bool, 
                 }
             }
             12 => {
-                let q = pick_nonnull_ptr(rng, true);
+                let q = pick_nonnil_ptr(rng, true);
                 let h_var = format!("h_arg_{phase}_{op_idx}");
                 let _ = writeln!(
                     out,
-                    "{indent}fix ptr {h_var} = new $Holder {{ p: null, q: {q} }}"
+                    "{indent}fix {h_var} = new $Holder {{ p: nil, q: {q} }}"
                 );
                 let _ = writeln!(out, "{indent}attach({h_var})");
             }
@@ -195,7 +189,7 @@ fn emit_inner_ops(out: &mut String, rng: &mut Rng, phase: usize, in_loop: bool, 
                 let _ = writeln!(out, "{indent}sink = outer_holder.read_p()");
             }
             _ => {
-                let q = pick_nonnull_ptr(rng, true);
+                let q = pick_nonnil_ptr(rng, true);
                 let _ = writeln!(out, "{indent}#pp_outer = {q}");
             }
         }
@@ -246,12 +240,12 @@ fn generate_program(seed: u64, index: usize) -> String {
     // 共通の操作生成で、通常構造体と汎用構造体の両方を検査する。
     // 型引数を経由しても、別名・フィールド更新・回収後のアクセスの判定を変えない。
     let mut out = String::from(if generic {
-        r#"struct Node[T] { value: T, next: ptr? Node[T] }
-struct Holder[T] { p: ptr? Node[T], q: ptr Node[T] }
-struct Pair[T] { a: Holder[T], b: ptr? Node[T] }
+        r#"struct Node[T] { value: T, next: mut? Node[T] }
+struct Holder[T] { p: mut? Node[T], q: mut Node[T] }
+struct Pair[T] { a: Holder[T], b: mut? Node[T] }
 error ArenaErr { Abort }
-fnshape NodeAction[T](ptr? Node[T]) -> i32
-fn apply_generic[T](f: fn NodeAction[T], arg: ptr? Node[T]) -> i32 { return f(arg) }
+fnshape NodeAction[T](mut? Node[T]) -> i32
+fn apply_generic[T](f: fn NodeAction[T], arg: mut? Node[T]) -> i32 { return f(arg) }
 
 fn Holder[T].read_p() -> T {
     let n = self.p { return n.value } else { return self.q.value }
@@ -269,17 +263,17 @@ fn Node[T]#bump(delta: T) -> void {
     return
 }
 
-fn make_node[T](v: T, tail: ptr? Node[T]) -> ptr Node[T] {
+fn make_node[T](v: T, tail: mut? Node[T]) -> mut Node[T] {
     return new Node[T] { value: v, next: tail }
 }
 
 "#
     } else {
-        r#"struct $Node { value: i32, next: ptr? $Node }
-struct $Holder { p: ptr? $Node, q: ptr $Node }
-struct $Pair { a: $Holder, b: ptr? $Node }
+        r#"struct $Node { value: i32, next: mut? $Node }
+struct $Holder { p: mut? $Node, q: mut $Node }
+struct $Pair { a: $Holder, b: mut? $Node }
 error ArenaErr { Abort }
-fnshape NodeAction(ptr? $Node) -> i32
+fnshape NodeAction(mut? $Node) -> i32
 
 fn $Holder.read_p() -> i32 {
     let n = self.p { return n.value } else { return self.q.value }
@@ -298,11 +292,11 @@ fn $Node#bump(delta: i32) -> void {
 "#
     });
     out.push_str(
-        r#"fn borrow_read(p: ptr? $Node) -> i32 {
+        r#"fn borrow_read(p: mut? $Node) -> i32 {
     let n = p { return n.value } else { return 0 }
 }
 
-fn borrow_mutate(p: ptr $Node) -> void {
+fn borrow_mutate(p: mut $Node) -> void {
     p#value += 1
     return
 }
@@ -311,33 +305,33 @@ fn borrow_holder(h: $Holder) -> i32 {
     let n = h.p { return n.value } else { return h.q.value }
 }
 
-fn apply_action(f: fn NodeAction, arg: ptr? $Node) -> i32 {
+fn apply_action(f: fn NodeAction, arg: mut? $Node) -> i32 {
     return f(arg)
 }
 
-fn attach(h: ptr $Holder) -> void {
-    h.q#next = new $Node { value: 7, next: null }
+fn attach(h: mut $Holder) -> void {
+    h.q#next = new $Node { value: 7, next: nil }
     return
 }
 
-fn build_chain(v: i32, tail: ptr? $Node, depth: i32) -> ptr $Node {
+fn build_chain(v: i32, tail: mut? $Node, depth: i32) -> mut $Node {
     if depth <= 0 {
         return new $Node { value: v, next: tail }
     }
-    fix ptr next = build_chain(v + 1, tail, depth - 1)
+    fix next = build_chain(v + 1, tail, depth - 1)
     return new $Node { value: v, next: next }
 }
 
-fn maybe_alloc(flag: bool, fallback: ptr? $Node) -> ptr? $Node {
+fn maybe_alloc(flag: bool, fallback: mut? $Node) -> mut? $Node {
     if flag {
         return new $Node { value: 7, next: fallback }
     }
     return fallback
 }
 
-fn helper_return_inside_arena(outer_p: ptr $Node, flag: bool) -> i32 {
+fn helper_return_inside_arena(outer_p: mut $Node, flag: bool) -> i32 {
     arena {
-        fix ptr local_n = new $Node { value: 99, next: outer_p }
+        fix local_n = new $Node { value: 99, next: outer_p }
         if flag {
             return borrow_read(local_n)
         }
@@ -345,9 +339,9 @@ fn helper_return_inside_arena(outer_p: ptr $Node, flag: bool) -> i32 {
     return borrow_read(outer_p)
 }
 
-fn may_fail_inside_arena(outer_p: ptr $Node, do_fail: bool) -> i32 or ArenaErr {
+fn may_fail_inside_arena(outer_p: mut $Node, do_fail: bool) -> i32 or ArenaErr {
     arena {
-        fix ptr local_n = new $Node { value: 88, next: outer_p }
+        fix local_n = new $Node { value: 88, next: outer_p }
         if do_fail {
             fail ArenaErr.Abort
         }
@@ -357,12 +351,12 @@ fn may_fail_inside_arena(outer_p: ptr $Node, do_fail: bool) -> i32 or ArenaErr {
 
 fn main() -> u8 {
     arena {
-        fix ptr outer_a = new $Node { value: 10, next: null }
-        fix ptr pp_outer: ptr ptr $Node = new outer_a
-        var ptr outer_opt: ptr? $Node = null
-        var ptr outer_mut: ptr $Node = outer_a
-        var outer_holder = $Holder { p: null, q: outer_a }
-        var outer_pair = $Pair { a: outer_holder, b: null }
+        fix outer_a = new $Node { value: 10, next: nil }
+        fix pp_outer: mut mut $Node = new outer_a
+        var outer_opt: mut? $Node = nil
+        var outer_mut: mut $Node = outer_a
+        var outer_holder = $Holder { p: nil, q: outer_a }
+        var outer_pair = $Pair { a: outer_holder, b: nil }
         var sink: i32 = 0
 "#,
     );
@@ -377,11 +371,11 @@ fn main() -> u8 {
             let _ = writeln!(out, "            arena {{");
             let _ = writeln!(
                 out,
-                "                fix ptr inner_a = new $Node {{ value: 20, next: null }}"
+                "                fix inner_a = new $Node {{ value: 20, next: nil }}"
             );
             let _ = writeln!(
                 out,
-                "                var ptr inner_opt: ptr? $Node = new $Node {{ value: 30, next: null }}"
+                "                var inner_opt: mut? $Node = new $Node {{ value: 30, next: nil }}"
             );
             let _ = writeln!(
                 out,
@@ -396,11 +390,11 @@ fn main() -> u8 {
             let _ = writeln!(out, "        arena {{");
             let _ = writeln!(
                 out,
-                "            fix ptr inner_a = new $Node {{ value: 20, next: null }}"
+                "            fix inner_a = new $Node {{ value: 20, next: nil }}"
             );
             let _ = writeln!(
                 out,
-                "            var ptr inner_opt: ptr? $Node = new $Node {{ value: 30, next: null }}"
+                "            var inner_opt: mut? $Node = new $Node {{ value: 30, next: nil }}"
             );
             let _ = writeln!(
                 out,
@@ -429,7 +423,7 @@ fn main() -> u8 {
             let _ = writeln!(out, "        arena {{");
             let _ = writeln!(
                 out,
-                "            fix ptr reused = new $Node {{ value: 55, next: outer_a }}"
+                "            fix reused = new $Node {{ value: 55, next: outer_a }}"
             );
             let _ = writeln!(out, "            sink = borrow_read(reused)");
             let _ = writeln!(out, "        }}");
@@ -486,26 +480,26 @@ fn callable_program(kind: usize, escaping: bool) -> String {
     let operation = match kind {
         0 => format!("invoke(fn write, holder, {value})"),
         1 => format!(
-            "invoke(fn [holder](a: ptr Node, b: ptr Node) -> void {{ holder#next = b }}, holder, {value})"
+            "invoke(fn [holder](a: mut Node, b: mut Node) -> void {{ holder#next = b }}, holder, {value})"
         ),
         2 => format!(
             "var action: static fn Link = fn read\naction(holder, {value})\naction = fn write\naction(holder, {value})"
         ),
-        3 => format!("fix ptr alias = identity(holder)\nalias#next = {value}"),
+        3 => format!("fix alias = identity(holder)\nalias#next = {value}"),
         _ => unreachable!(),
     };
     format!(
-        r#"struct Node {{ value: i32, next: ptr? Node }}
-fnshape Link(ptr Node, ptr Node) -> void
-fn read(a: ptr Node, b: ptr Node) -> void {{ fix x = a.value + b.value }}
-fn write(a: ptr Node, b: ptr Node) -> void {{ a#next = b }}
-fn invoke(f: fn Link, a: ptr Node, b: ptr Node) -> void {{ f(a, b) }}
-fn identity(p: ptr Node) -> ptr Node {{ return p }}
+        r#"struct Node {{ value: i32, next: mut? Node }}
+fnshape Link(mut Node, mut Node) -> void
+fn read(a: mut Node, b: mut Node) -> void {{ fix x = a.value + b.value }}
+fn write(a: mut Node, b: mut Node) -> void {{ a#next = b }}
+fn invoke(f: fn Link, a: mut Node, b: mut Node) -> void {{ f(a, b) }}
+fn identity(p: mut Node) -> mut Node {{ return p }}
 fn main() -> u8 {{
-    fix ptr holder = new Node {{ value: 1, next: null }}
-    fix ptr outer = new Node {{ value: 2, next: null }}
+    fix holder = new Node {{ value: 1, next: nil }}
+    fix outer = new Node {{ value: 2, next: nil }}
     arena {{
-        fix ptr inner = new Node {{ value: 3, next: null }}
+        fix inner = new Node {{ value: 3, next: nil }}
         {operation}
     }}
     let saved = holder.next {{ if saved.value == 0 {{ return 1 }} }}

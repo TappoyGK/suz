@@ -10,7 +10,19 @@ fn key(ty: Type) -> String {
     match ty {
         Type::Struct(id) => format!("struct_{id}"),
         Type::Enum(ty) => format!("enum_{}", ty.id),
+        Type::Range(ty) => format!("range_{}", ty.id),
         _ => ty.name().into(),
+    }
+}
+
+pub(super) fn has_text(ty: Type, context: &ExpressionContext) -> bool {
+    match ty {
+        Type::Text => true,
+        Type::Struct(id) => context.structs[id]
+            .fields
+            .iter()
+            .any(|f| has_text(f.ty, context)),
+        _ => false,
     }
 }
 
@@ -23,6 +35,9 @@ pub(super) fn prepare(context: &mut ExpressionContext) {
         match ty {
             Type::Integer(ty) => {
                 bits.insert(ty);
+            }
+            Type::Range(ty) => {
+                bits.insert(ty.base);
             }
             Type::Struct(id) => {
                 for field in &structs[id].fields {
@@ -52,7 +67,7 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
         if let Some(slots) = emitted.get(&key) {
             return *slots;
         }
-        let (kind, bits, signed, name, fields, count, slots) = match ty {
+        let (kind, bits, signed, name, fields, count, slots, range_min, range_max) = match ty {
             Type::Integer(ty) => (
                 "SUZ_PARSE_INTEGER",
                 ty.bits(),
@@ -61,7 +76,29 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
                 "NULL".into(),
                 0,
                 1,
+                0u64,
+                0u64,
             ),
+            Type::Range(ty) => {
+                let (lo, hi) = ty.bounds();
+                let signed = ty.base.bounds().0 < 0;
+                let (min_bits, max_bits) = if signed {
+                    ((lo as i64) as u64, (hi as i64) as u64)
+                } else {
+                    (lo as u64, hi as u64)
+                };
+                (
+                    "SUZ_PARSE_RANGE",
+                    64,
+                    signed,
+                    "NULL".into(),
+                    "NULL".into(),
+                    0,
+                    1,
+                    min_bits,
+                    max_bits,
+                )
+            }
             Type::Float(ty) => (
                 "SUZ_PARSE_FLOAT",
                 if ty == FloatType::F32 { 32 } else { 64 },
@@ -70,6 +107,8 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
                 "NULL".into(),
                 0,
                 1,
+                0,
+                0,
             ),
             Type::Char => (
                 "SUZ_PARSE_CHAR",
@@ -79,6 +118,8 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
                 "NULL".into(),
                 0,
                 1,
+                0,
+                0,
             ),
             Type::Bool => (
                 "SUZ_PARSE_BOOL",
@@ -88,6 +129,8 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
                 "NULL".into(),
                 0,
                 1,
+                0,
+                0,
             ),
             Type::Symbol | Type::Text => (
                 "SUZ_PARSE_TEXT",
@@ -97,6 +140,8 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
                 "NULL".into(),
                 0,
                 1,
+                0,
+                0,
             ),
             Type::Enum(ty) => {
                 let decl = &context.enums[ty.id];
@@ -117,6 +162,8 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
                     format!("suz_schema_{key}_fields"),
                     decl.variants.len(),
                     1,
+                    0,
+                    0,
                 )
             }
             Type::Struct(id) => {
@@ -147,9 +194,12 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
                     format!("suz_schema_{key}_fields"),
                     decl.fields.len(),
                     slots,
+                    0,
+                    0,
                 )
             }
-            Type::Array(_)
+            Type::ArrayRef { .. }
+            | Type::Array(_)
             | Type::Pointer { .. }
             | Type::CPointer
             | Type::CInteger(_)
@@ -167,7 +217,7 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
                 unreachable!("text conversions only receive resolved, storable types")
             }
         };
-        writeln!(c, "static const suz_parse_type suz_schema_{key} = {{{kind}, {bits}, {}, {name}, {fields}, {count}, {slots}}};", u8::from(signed)).unwrap();
+        writeln!(c, "static const suz_parse_type suz_schema_{key} = {{{kind}, {bits}, {}, {name}, {fields}, {count}, {slots}, UINT64_C({range_min}), UINT64_C({range_max})}};", u8::from(signed)).unwrap();
         emitted.insert(key, slots);
         slots
     }
@@ -188,19 +238,18 @@ pub(super) fn emit(c: &mut String, context: &ExpressionContext) {
         *slot += 1;
         let value = match ty {
             Type::Integer(ty) => format!("suz_bits_{}(values[{index}].bits)", ty.name()),
+            Type::Range(ty) => format!("suz_bits_{}(values[{index}].bits)", ty.base.name()),
             Type::Enum(_) | Type::Bool | Type::Char => {
                 format!("({})(values[{index}].bits)", ty.c_name())
             }
             Type::Float(ty) => format!("suz_parsed_{}(values[{index}].bits)", ty.name()),
-            Type::Symbol | Type::Text => format!(
+            Type::Text => format!(
+                "suz_textbuf_from_parsed(bytes + values[{index}].start, values[{index}].length, values[{index}].decoded_length, values[{index}].scalars, location)"
+            ),
+            Type::Symbol => format!(
                 "suz_text_from_parsed(bytes + values[{index}].start, values[{index}].length, location)"
             ),
             _ => unreachable!(),
-        };
-        let value = if ty == Type::Text {
-            format!("suz_text_as_view({value})")
-        } else {
-            value
         };
         writeln!(c, "    {path} = {value};").unwrap();
     }

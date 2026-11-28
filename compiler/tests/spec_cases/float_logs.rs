@@ -13,7 +13,7 @@ use std::{
 #[ignore = "release check: run scripts/test-release.sh"]
 fn float_interpolations_preserve_precision_and_evaluate_before_output() {
     let source = r#"fn mark(value: f32) -> f32 {
-    log info `mark ${value}`
+    log info "mark ${value}"
     return value
 }
 fn main() -> u8 {
@@ -24,7 +24,7 @@ fn main() -> u8 {
     fix negative_inf = -inf
     fix not_number = nan
     fix infinity = inf
-    log info `${marked} ${precise} ${negative_zero} ${not_number} ${infinity} ${negative_inf}`
+    log info "${marked} ${precise} ${negative_zero} ${not_number} ${infinity} ${negative_inf}"
     return 0
 }
 "#;

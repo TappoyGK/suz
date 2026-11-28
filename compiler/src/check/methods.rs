@@ -96,6 +96,17 @@ pub(super) fn call(
     scope.type_hints.borrow_mut().clear();
     scope.float_hints.borrow_mut().clear();
     let result = call_inner(expr, expected, scope, handler);
+    if result.is_ok() {
+        if let ExpressionKind::MethodCall {
+            target,
+            mutable: true,
+            ..
+        } = &expr.kind
+        {
+            super::arrays::bounds::forget_mutable_receiver(target, scope);
+        }
+        super::arrays::bounds::forget_call(scope);
+    }
     scope.type_hints.borrow_mut().clear();
     scope.float_hints.borrow_mut().clear();
     result
@@ -195,25 +206,37 @@ pub(super) fn receiver(
         value = super::arena::deref(value, target.location)?;
     }
     if mutable {
-        fn indirect(value: &Value) -> bool {
+        fn indirect_pointer(value: &Value) -> Option<Type> {
             match value {
-                Value::Deref(_) => true,
-                Value::Field { target, .. } => indirect(&target.value),
-                _ => false,
+                Value::Deref(pointer) => Some(pointer.ty),
+                Value::Field { target, .. } => indirect_pointer(&target.value),
+                _ => None,
             }
         }
-        if !indirect(&value.value) {
-            let binding = path(target).and_then(|(name, _)| scope.locals.get(name));
-            if !binding.is_some_and(|binding| binding.mutable) {
+        match indirect_pointer(&value.value) {
+            Some(ty) if ty.is_readonly_pointer() => {
                 return Err(target.location.error(
                     ErrorKind::InvalidSource,
                     crate::diagnostic!(
                         "method.write-target",
-                        "a # method requires a writable variable, field or pointee"
+                        "cannot call a # method through a readonly pointer"
                     ),
                 ));
             }
-            binding.unwrap().assigned.set(true);
+            Some(_) => {}
+            None => {
+                let binding = path(target).and_then(|(name, _)| scope.locals.get(name));
+                if !binding.is_some_and(|binding| binding.mutable) {
+                    return Err(target.location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "method.write-target",
+                            "a # method requires a writable variable, field or pointee"
+                        ),
+                    ));
+                }
+                binding.unwrap().assigned.set(true);
+            }
         }
     }
     Ok(CheckedExpression {

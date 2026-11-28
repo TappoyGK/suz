@@ -30,25 +30,25 @@ fn source(state: &mut u64) -> String {
         initial
     };
     let update = if h > 0 && w > 0 {
-        format!("fix ptr row = a[0]\nfix ptr view = row[0:{w}]\nview#[0] += 1")
+        format!("fix row = a.[0]\nfix view = row.[0:{w}]\nview#[0] += 1")
     } else {
         String::new()
     };
     let total = h * w * initial + i64::from(h > 0 && w > 0);
     format!(
         r#"
-fn access(a: ptr [i64; _, _], start: i64, end: i64, y: i64, x: i64) -> i64 {{
-    fix ptr view = a[start:end] or return -99
-    fix ptr row = view[y] or return -88
-    return row[x] or -77
+fn access(a: #[i64; _, _], start: i64, end: i64, y: i64, x: i64) -> i64 {{
+    fix view = a.[start:end] or return -99
+    fix row = view.[y] or return -88
+    return row.[x] or -77
 }}
-fn sum(a: ptr [i64; h, w]) -> i64 {{
+fn sum(a: #[i64; h, w]) -> i64 {{
     var total: i64 = 0
-    for y in 0..<h {{ rev x in 0..<w {{ total += a[y][x] }} }}
+    for y in 0..<h {{ rev x in 0..<w {{ total += a.[y].[x] }} }}
     return total
 }}
 fn main() -> u8 {{
-    fix ptr a = new [{initial}; {h}, {w}]
+    fix a = new #[{initial}; {h}, {w}]
     if access(a, {start}, {end}, {y}, {x}) != {expected} {{ return 1 }}
     {update}
     if sum(a) != {total} {{ return 2 }}
@@ -62,12 +62,12 @@ fn lifetime(index: usize, invalid: bool) -> String {
     let pointer = if invalid { "inner" } else { "outer" };
     let update = match index % 4 {
         0 => format!("a[0]#[0] = {pointer}"),
-        1 => format!("fix ptr row = a[0]\nrow#[0] = {pointer}"),
-        2 => format!("fix ptr slice = a[0:1]\nslice[0]#[0] = {pointer}"),
+        1 => format!("fix row = a.[0]\nrow#[0] = {pointer}"),
+        2 => format!("fix slice = a.[0:1]\nslice.[0]#[0] = {pointer}"),
         _ => format!("for row in a {{ row#[0] = {pointer} }}"),
     };
     format!(
-        "struct Node {{ value: i64 }}\nfn main() -> u8 {{ fix ptr outer = new Node {{ value: 7 }}\nfix ptr a: ptr [ptr? Node; _, _] = new [null; 1, 1]\narena {{ fix ptr inner = new Node {{ value: 9 }}\n{update} }}\nlet p = a[0][0] {{ if p.value != 7 {{ return 1 }} }} else {{ return 2 }}\nreturn 0 }}"
+        "struct Node {{ value: i64 }}\nfn main() -> u8 {{ fix outer = new Node {{ value: 7 }}\nfix a: #[mut? Node; _, _] = new #[nil; 1, 1]\narena {{ fix inner = new Node {{ value: 9 }}\n{update} }}\nlet p = a.[0].[0] {{ if p.value != 7 {{ return 1 }} }} else {{ return 2 }}\nreturn 0 }}"
     )
 }
 

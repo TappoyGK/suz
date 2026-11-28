@@ -32,7 +32,7 @@ impl Parser<'_, '_> {
             } else if numeric_type(target)
                 || matches!(target, Type::Struct(id) if self.structs[id].external.is_some())
             {
-                target.pointer()
+                target.pointer().with_readonly(read_only)
             } else {
                 return Err(location.error(
                     ErrorKind::InvalidSource,
@@ -49,7 +49,7 @@ impl Parser<'_, '_> {
                     ErrorKind::InvalidSource,
                     crate::diagnostic!(
                         "ffi.pointer-type",
-                        "use *const T or *T for an extern pointer parameter, not ptr T"
+                        "use *const T or *T for an extern pointer parameter, not mut T or ref T"
                     ),
                 ));
             }
@@ -61,13 +61,10 @@ impl Parser<'_, '_> {
             }
             ty
         };
-        if keep && ty.pointee().is_none() {
+        if keep && ty.pointee().is_none() && ty != Type::CPointer {
             return Err(modifier_location.error(
                 ErrorKind::InvalidSource,
-                crate::diagnostic!(
-                    "ffi.keep",
-                    "keep requires a typed C pointer parameter (*const T or *T)"
-                ),
+                crate::diagnostic!("ffi.keep", "keep requires a C pointer parameter"),
             ));
         }
         // keepはABIを変えず、蓄積警告でCへの保持を判定するために残す。

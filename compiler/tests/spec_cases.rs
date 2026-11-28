@@ -94,8 +94,8 @@ mod names;
 mod native_cli;
 #[path = "spec_cases/nesting.rs"]
 mod nesting;
-#[path = "spec_cases/nullable_pointers.rs"]
-mod nullable_pointers;
+#[path = "spec_cases/nilable_pointers.rs"]
+mod nilable_pointers;
 #[path = "spec_cases/numeric.rs"]
 mod numeric;
 #[path = "spec_cases/panic.rs"]
@@ -108,6 +108,8 @@ mod ranges;
 mod readme;
 #[path = "spec_cases/runtime.rs"]
 mod runtime;
+#[path = "spec_cases/saturating.rs"]
+mod saturating;
 #[path = "spec_cases/shifts.rs"]
 mod shifts;
 #[path = "spec_cases/structs.rs"]
@@ -131,6 +133,8 @@ mod symbol_struct_runtime;
 mod syntax_diagnostics;
 #[path = "support/test_util.rs"]
 mod test_util;
+#[path = "spec_cases/text_buffer.rs"]
+mod text_buffer;
 #[path = "spec_cases/text_views.rs"]
 mod text_views;
 #[path = "spec_cases/value_blocks.rs"]
@@ -156,16 +160,33 @@ fn spec_rules() -> std::collections::BTreeSet<&'static str> {
         .collect()
 }
 
+fn runtime_rules() -> std::collections::BTreeSet<&'static str> {
+    include_str!("../../docs/runtime.md")
+        .lines()
+        .filter_map(|line| {
+            line.strip_prefix("**[")
+                .and_then(|s| s.split_once("]**").map(|(id, _)| id))
+        })
+        .collect()
+}
+
 #[test]
 fn catalog_is_complete_and_sources_round_trip() {
     let sources = catalog();
     let rules = spec_rules();
+    let runtime = runtime_rules();
     for (id, case) in &sources {
         assert!(
             rules.contains(case.rule.as_str()),
             "{id}: unknown primary rule {}",
             case.rule
         );
+        for secondary in &case.secondary_rules {
+            assert!(
+                rules.contains(secondary.as_str()) || runtime.contains(secondary.as_str()),
+                "{id}: unknown secondary rule {secondary}"
+            );
+        }
     }
     for (id, case) in &sources {
         for run in &case.runs {

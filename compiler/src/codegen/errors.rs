@@ -12,7 +12,7 @@ fn call(call: &CheckedExpression, context: &mut ExpressionContext) -> (String, S
     context.temporaries.push(Type::Integer(IntegerType::U64));
     let code = match &call.value {
         Value::Call { id, arguments, .. } => {
-            super::functions::call(*id, arguments, context, Some(&error))
+            super::functions::call(*id, arguments, call.ty, context, Some(&error))
         }
         Value::Invoke {
             target, arguments, ..

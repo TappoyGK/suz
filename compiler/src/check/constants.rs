@@ -11,10 +11,21 @@ use crate::{Diagnostic, ErrorKind};
 
 // Rustの飽和するfloatからi128への変換は値域の確認だけに使う。
 // Suzのすべての整数型の値域はi128の範囲の内側に収まる。
-pub(super) fn float_to_integer(value: f64, ty: IntegerType) -> Option<i128> {
+pub(super) fn float_to_integer_bounds(value: f64, min: i128, max: i128) -> Option<i128> {
     let integer = value.trunc() as i128;
-    let (min, max) = ty.bounds();
     (value.is_finite() && (min..=max).contains(&integer)).then_some(integer)
+}
+
+pub(super) fn float_to_integer(value: f64, ty: IntegerType) -> Option<i128> {
+    let (min, max) = ty.bounds();
+    float_to_integer_bounds(value, min, max)
+}
+
+pub(super) fn float_to_integer_sat_bounds(value: f64, min: i128, max: i128) -> i128 {
+    if value.is_nan() {
+        return 0;
+    }
+    (value.trunc() as i128).clamp(min, max)
 }
 
 fn integer_result(operator: BinaryOperator, a: i128, b: i128, ty: IntegerType) -> Option<i128> {
@@ -23,8 +34,36 @@ fn integer_result(operator: BinaryOperator, a: i128, b: i128, ty: IntegerType) -
     {
         return None;
     }
-    if operator.is_shift() && !(0..i128::from(ty.bits())).contains(&b) {
+    if matches!(operator, BinaryOperator::EuclideanRemainder) && b == 0 {
         return None;
+    }
+    if operator.is_shift() {
+        if matches!(operator, BinaryOperator::SaturatingShiftLeft) {
+            if b < 0 {
+                return None;
+            }
+            let (min, max) = ty.bounds();
+            if a == 0 || b == 0 {
+                return Some(a);
+            }
+            if b >= i128::from(ty.bits()) {
+                return Some(if a > 0 { max } else { min });
+            }
+            let shifted = a.checked_mul(1_i128 << b);
+            return Some(match shifted {
+                Some(v) => v.clamp(min, max),
+                None => {
+                    if a > 0 {
+                        max
+                    } else {
+                        min
+                    }
+                }
+            });
+        }
+        if !(0..i128::from(ty.bits())).contains(&b) {
+            return None;
+        }
     }
     let value = match operator {
         BinaryOperator::Add => a.checked_add(b),
@@ -32,8 +71,23 @@ fn integer_result(operator: BinaryOperator, a: i128, b: i128, ty: IntegerType) -
         BinaryOperator::Multiply => a.checked_mul(b),
         BinaryOperator::Divide => a.checked_div(b),
         BinaryOperator::Remainder => a.checked_rem(b),
+        BinaryOperator::EuclideanRemainder => Int::from_i128(a)
+            .rem_euclid(Int::from_i128(b))
+            .and_then(Int::to_i128),
         BinaryOperator::ShiftLeft => a.checked_mul(1_i128 << b),
         BinaryOperator::ShiftRight => Some(a >> b),
+        BinaryOperator::LogicalShiftRight => {
+            let bits = ty.bits();
+            let mask = (1_u128 << bits) - 1;
+            let shifted = ((a as u128) & mask) >> (b as u32);
+            let (min, max) = ty.bounds();
+            let value = if min < 0 && shifted > (max as u128) {
+                (shifted as i128) - (1_i128 << bits)
+            } else {
+                shifted as i128
+            };
+            Some(value)
+        }
         _ => unreachable!(),
     }?;
     let (min, max) = ty.bounds();
@@ -86,31 +140,49 @@ fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
     match &expr.value {
         Value::IntegerArithmetic {
             operation, handler, ..
-        } => operation_result(operation, ty).or_else(|| match handler {
-            Some(CheckedHandler::Value(fallback)) => constant_integer_raw(fallback),
-            _ => None,
-        }),
+        } => operation_result(operation, ty)
+            .filter(|&v| {
+                expr.ty
+                    .integer_bounds()
+                    .is_none_or(|(lo, hi)| v >= lo && v <= hi)
+            })
+            .or_else(|| match handler {
+                Some(CheckedHandler::Value(fallback)) => constant_integer_raw(fallback),
+                _ => None,
+            }),
         Value::Integer { value, .. } => Some(*value),
         Value::Cast(inner) => match inner.ty {
             Type::Exact => super::exact::constant(inner)?.to_i128(),
-            Type::Float(_) => float_to_integer(constant_float_raw(inner)?, ty),
+            Type::Float(_) => {
+                let (min, max) = expr.ty.integer_bounds()?;
+                float_to_integer_bounds(constant_float_raw(inner)?, min, max)
+            }
             _ => constant_integer_raw(inner),
         },
         Value::CheckedCast {
             operand,
             fallback,
-            wrap,
+            kind,
             ..
         } => {
             if operand.ty.is_text() {
-                return text_cast(operand, expr.ty, *wrap)
+                return text_cast(operand, expr.ty, *kind)
                     .and_then(|value| constant_integer_raw(&value))
                     .or_else(|| constant_integer_raw(fallback));
             }
             // 両辺とも定数式の文法に従っていなければならない。
             if matches!(operand.ty, Type::Float(_)) {
                 let value = constant_float_raw(operand)?;
-                return float_to_integer(value, ty).or_else(|| constant_integer_raw(fallback));
+                let (min, max) = expr.ty.integer_bounds()?;
+                if *kind == crate::ast::CastKind::Saturating {
+                    return if value.is_nan() {
+                        constant_integer_raw(fallback)
+                    } else {
+                        Some(float_to_integer_sat_bounds(value, min, max))
+                    };
+                }
+                return float_to_integer_bounds(value, min, max)
+                    .or_else(|| constant_integer_raw(fallback));
             }
             if operand.ty == Type::Exact {
                 let value = super::exact::constant(operand)?;
@@ -125,6 +197,27 @@ fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
                 Some(value)
             } else {
                 constant_integer_raw(fallback)
+            }
+        }
+        Value::SaturatingCast(inner) => {
+            let (min, max) = expr.ty.integer_bounds()?;
+            if inner.ty == Type::Exact {
+                let n = super::exact::constant(inner)?;
+                if n < Int::from_i128(min) {
+                    Some(min)
+                } else if n > Int::from_i128(max) {
+                    Some(max)
+                } else {
+                    n.to_i128()
+                }
+            } else if matches!(inner.ty, Type::Float(_)) {
+                Some(float_to_integer_sat_bounds(
+                    constant_float_raw(inner)?,
+                    min,
+                    max,
+                ))
+            } else {
+                Some(constant_integer_raw(inner)?.clamp(min, max))
             }
         }
         Value::Truncate(inner) => {
@@ -147,13 +240,17 @@ fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
                 Some(wrap(constant_integer_raw(inner)?))
             }
         }
-        Value::Len(inner) => {
-            let Value::Text { text } = evaluate_raw(inner)?.value else {
-                return None;
-            };
-            Some(text.chars().count() as i128)
-        }
+        Value::Len(inner) => match evaluate_raw(inner)?.value {
+            Value::Text { text } => Some(text.chars().count() as i128),
+            Value::Array { lengths, .. } => constant_integer_raw(&lengths[0]),
+            _ => None,
+        },
         Value::BitNot(inner) => Some(wrap(!constant_integer_raw(inner)?)),
+        Value::WrapNegate(inner) => Some(wrap(-constant_integer_raw(inner)?)),
+        Value::SaturatingNegate(inner) => {
+            let (min, max) = ty.bounds();
+            Some((-constant_integer_raw(inner)?).clamp(min, max))
+        }
         Value::Binary {
             operator,
             left,
@@ -161,11 +258,49 @@ fn constant_integer_raw(expr: &CheckedExpression) -> Option<i128> {
         } => {
             let left = constant_integer_raw(left)?;
             let right = constant_integer_raw(right)?;
+            let (min, max) = ty.bounds();
+            match operator {
+                BinaryOperator::SaturatingAdd => return Some((left + right).clamp(min, max)),
+                BinaryOperator::SaturatingSubtract => return Some((left - right).clamp(min, max)),
+                BinaryOperator::SaturatingMultiply => {
+                    return Some(match left.checked_mul(right) {
+                        Some(v) => v.clamp(min, max),
+                        None => {
+                            if (left < 0) != (right < 0) {
+                                min
+                            } else {
+                                max
+                            }
+                        }
+                    });
+                }
+                BinaryOperator::SaturatingShiftLeft => {
+                    return integer_result(BinaryOperator::SaturatingShiftLeft, left, right, ty);
+                }
+                _ => {}
+            }
             Some(wrap(match operator {
                 BinaryOperator::WrapAdd => left + right,
                 BinaryOperator::WrapSubtract => left - right,
                 // 整数のラップ変換の結果に影響するのは下位64ビットだけ。
                 BinaryOperator::WrapMultiply => (left as u64).wrapping_mul(right as u64) as i128,
+                BinaryOperator::WrapShiftLeft => {
+                    let shift = (right as u64) as u32 & (ty.bits() - 1);
+                    ((left as u64) << shift) as i128
+                }
+                BinaryOperator::WrapShiftRight => {
+                    let shift = (right as u64) as u32 & (ty.bits() - 1);
+                    if ty.bounds().0 < 0 {
+                        left >> shift
+                    } else {
+                        ((left as u64) >> shift) as i128
+                    }
+                }
+                BinaryOperator::WrapLogicalShiftRight => {
+                    let shift = (right as u64) as u32 & (ty.bits() - 1);
+                    let mask = (1_u128 << ty.bits()) - 1;
+                    (((left as u128) & mask) >> shift) as i128
+                }
                 BinaryOperator::And => left & right,
                 BinaryOperator::Or => left | right,
                 BinaryOperator::Xor => left ^ right,
@@ -222,12 +357,12 @@ fn constant_float_raw(expr: &CheckedExpression) -> Option<f64> {
         Value::CheckedCast {
             operand,
             fallback,
-            wrap,
+            kind,
             ..
         } => {
-            debug_assert!(!wrap);
+            debug_assert_eq!(*kind, crate::ast::CastKind::Checked);
             if operand.ty.is_text() {
-                return text_cast(operand, expr.ty, false)
+                return text_cast(operand, expr.ty, *kind)
                     .and_then(|value| constant_float_raw(&value))
                     .or_else(|| constant_float_raw(fallback));
             }
@@ -261,6 +396,23 @@ fn constant_float_raw(expr: &CheckedExpression) -> Option<f64> {
                         BinaryOperator::Subtract => left - right,
                         BinaryOperator::Multiply => left * right,
                         BinaryOperator::Divide => left / right,
+                        BinaryOperator::Remainder => left % right,
+                        BinaryOperator::EuclideanRemainder => {
+                            if !right.is_finite() {
+                                f32::NAN
+                            } else {
+                                let r = left % right;
+                                let abs_b = right.abs();
+                                if r < 0.0 {
+                                    let adjusted = r + abs_b;
+                                    if adjusted >= abs_b { 0.0 } else { adjusted }
+                                } else if r == 0.0 {
+                                    0.0
+                                } else {
+                                    r
+                                }
+                            }
+                        }
                         _ => return None,
                     } as f64);
                 }
@@ -269,6 +421,23 @@ fn constant_float_raw(expr: &CheckedExpression) -> Option<f64> {
                     BinaryOperator::Subtract => left - right,
                     BinaryOperator::Multiply => left * right,
                     BinaryOperator::Divide => left / right,
+                    BinaryOperator::Remainder => left % right,
+                    BinaryOperator::EuclideanRemainder => {
+                        if !right.is_finite() {
+                            f64::NAN
+                        } else {
+                            let r = left % right;
+                            let abs_b = right.abs();
+                            if r < 0.0 {
+                                let adjusted = r + abs_b;
+                                if adjusted >= abs_b { 0.0 } else { adjusted }
+                            } else if r == 0.0 {
+                                0.0
+                            } else {
+                                r
+                            }
+                        }
+                    }
                     _ => return None,
                 },
             }
@@ -292,9 +461,9 @@ fn constant_bool_raw(expr: &CheckedExpression) -> Option<bool> {
         Value::CheckedCast {
             operand,
             fallback,
-            wrap,
+            kind,
             ..
-        } if operand.ty.is_text() => text_cast(operand, Type::Bool, *wrap)
+        } if operand.ty.is_text() => text_cast(operand, Type::Bool, *kind)
             .and_then(|value| constant_bool_raw(&value))
             .or_else(|| constant_bool_raw(fallback)),
         Value::Not(inner) => Some(!constant_bool_raw(inner)?),
@@ -340,7 +509,8 @@ fn constant_bool_raw(expr: &CheckedExpression) -> Option<bool> {
                 } else {
                     match left.ty {
                         Type::StaticFunction(_) | Type::Function(_) => return None,
-                        Type::Array(_)
+                        Type::ArrayRef { .. }
+                        | Type::Array(_)
                         | Type::Pointer { .. }
                         | Type::CPointer
                         | Type::CInteger(_)
@@ -373,7 +543,7 @@ fn constant_bool_raw(expr: &CheckedExpression) -> Option<bool> {
                             continue;
                         }
                         Type::Void | Type::Exact => return None,
-                        Type::Integer(_) | Type::Enum(_) | Type::Char => {
+                        Type::Integer(_) | Type::Range(_) | Type::Enum(_) | Type::Char => {
                             Some(constant_integer_raw(&left)?.cmp(&constant_integer_raw(&right)?))
                         }
                         Type::Float(_) => {
@@ -437,7 +607,185 @@ fn equal_structs(left: &CheckedExpression, right: &CheckedExpression) -> Option<
     Some(true)
 }
 
+// 連続する添字・切り出しの1段の結果。orのない途中の段の範囲外は、外側の段のorへ伝える。
+enum ArrayStep {
+    Value(CheckedExpression),
+    OutOfRange,
+}
+
+fn array_access(expr: &CheckedExpression) -> Option<CheckedExpression> {
+    match array_step(expr)? {
+        ArrayStep::Value(value) => Some(value),
+        ArrayStep::OutOfRange => None,
+    }
+}
+
+fn chain_target(target: &CheckedExpression) -> Option<ArrayStep> {
+    if matches!(
+        target.value,
+        Value::ArrayRead { handler: None, .. } | Value::ArrayView { handler: None, .. }
+    ) {
+        array_step(target)
+    } else {
+        evaluate_raw(target).map(ArrayStep::Value)
+    }
+}
+
+fn chain_fallback(handler: &Option<CheckedHandler>) -> Option<ArrayStep> {
+    match handler {
+        Some(CheckedHandler::Value(v)) => evaluate_raw(v).map(ArrayStep::Value),
+        None => Some(ArrayStep::OutOfRange),
+        _ => None,
+    }
+}
+
+// 定数配列の部分参照を求める。反復初期化は展開せず、一つの初期値と寸法を保つ。
+fn array_step(expr: &CheckedExpression) -> Option<ArrayStep> {
+    if let Value::ArrayView {
+        target,
+        start,
+        end,
+        index,
+        handler,
+        location,
+        ..
+    } = &expr.value
+    {
+        // 対象がすでに配列の値なら、全要素を評価し直さず、取り出す範囲だけを評価する。
+        let owned;
+        let array = if matches!(target.value, Value::Array { .. }) {
+            target.as_ref()
+        } else {
+            owned = match chain_target(target)? {
+                ArrayStep::Value(value) => value,
+                ArrayStep::OutOfRange => return chain_fallback(handler),
+            };
+            &owned
+        };
+        let Value::Array {
+            metadata,
+            values,
+            lengths,
+            repeated,
+        } = &array.value
+        else {
+            return None;
+        };
+        let repeated = *repeated;
+        let mut lengths = lengths
+            .iter()
+            .map(evaluate_raw)
+            .collect::<Option<Vec<_>>>()?;
+        let mut origins = metadata.origins.clone();
+        let length = constant_integer_raw(&lengths[0])?;
+        let first = start
+            .as_ref()
+            .map_or(Some(0), |v| constant_integer_raw(v))?;
+        let last = if *index {
+            first.checked_add(1)?
+        } else {
+            end.as_ref()
+                .map_or(Some(length), |v| constant_integer_raw(v))?
+        };
+        if first < 0 || last < first || last > length {
+            return chain_fallback(handler);
+        }
+        let stride = lengths[1..].iter().try_fold(1usize, |n, v| {
+            n.checked_mul(constant_integer_raw(v)? as usize)
+        })?;
+        let values = if repeated {
+            values.as_slice()
+        } else {
+            values.get(first as usize * stride..last as usize * stride)?
+        };
+        let values = values
+            .iter()
+            .map(evaluate_raw)
+            .collect::<Option<Vec<_>>>()?;
+        if *index {
+            origins.remove(0);
+            lengths.remove(0);
+        } else {
+            if start.is_some() || end.is_some() {
+                origins[0] = (*location, 0);
+            }
+            lengths[0] = CheckedExpression {
+                ty: Type::Integer(IntegerType::Len),
+                value: Value::Integer {
+                    value: last - first,
+                    minus: None,
+                },
+            };
+        }
+        let mut count = 1u64;
+        let mut constant_counts = Vec::new();
+        for length in lengths.iter().rev() {
+            count = count.checked_mul(constant_integer_raw(length)? as u64)?;
+            constant_counts.push(count);
+        }
+        return Some(ArrayStep::Value(CheckedExpression {
+            ty: expr.ty,
+            value: Value::Array {
+                metadata: Box::new(super::ir::ArrayMetadata {
+                    origins,
+                    constant_counts,
+                    slots: Vec::new(),
+                }),
+                values,
+                lengths,
+                repeated,
+            },
+        }));
+    }
+    if let Value::ArrayRead { address, handler } = &expr.value {
+        let Value::ArrayElement { target, indices } = &address.value else {
+            return None;
+        };
+        let owned;
+        let array = if matches!(target.value, Value::Array { .. }) {
+            target.as_ref()
+        } else {
+            owned = match chain_target(target)? {
+                ArrayStep::Value(value) => value,
+                ArrayStep::OutOfRange => return chain_fallback(handler),
+            };
+            &owned
+        };
+        let Value::Array {
+            values,
+            lengths,
+            repeated,
+            ..
+        } = &array.value
+        else {
+            return None;
+        };
+        let mut offset = 0usize;
+        for ((index, _, _), length) in indices.iter().zip(lengths) {
+            let index = constant_integer_raw(index)?;
+            let length = constant_integer_raw(&evaluate_raw(length)?)?;
+            if !(0..length).contains(&index) {
+                return chain_fallback(handler);
+            }
+            offset = offset
+                .checked_mul(length as usize)?
+                .checked_add(index as usize)?;
+        }
+        return values
+            .get(if *repeated { 0 } else { offset })
+            .and_then(evaluate_raw)
+            .map(ArrayStep::Value);
+    }
+    None
+}
+
 fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
+    if matches!(
+        expr.value,
+        Value::ArrayRead { .. } | Value::ArrayView { .. }
+    ) {
+        return array_access(expr);
+    }
     if let Value::With { target, fields } = &expr.value {
         let mut result = evaluate_raw(target)?;
         let Value::Struct { fields: saved } = &mut result.value else {
@@ -453,6 +801,40 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
     if let Value::Field { target, index } = &expr.value {
         return constant_field(target, *index);
     }
+    if let Value::SoaColumn {
+        target,
+        field_index,
+        ..
+    } = &expr.value
+    {
+        let evaluated = evaluate_raw(target)?;
+        let Value::Array {
+            values,
+            lengths,
+            repeated,
+            metadata,
+        } = evaluated.value
+        else {
+            return None;
+        };
+        let mut col_values = Vec::with_capacity(values.len());
+        for item in values {
+            let Value::Struct { fields } = item.value else {
+                return None;
+            };
+            let (_, val) = fields.into_iter().find(|(i, _)| *i == *field_index)?;
+            col_values.push(val);
+        }
+        return Some(CheckedExpression {
+            ty: expr.ty,
+            value: Value::Array {
+                values: col_values,
+                lengths,
+                repeated,
+                metadata,
+            },
+        });
+    }
     if let Value::TextView(inner) | Value::Intern { operand: inner, .. } = &expr.value {
         let mut value = evaluate_raw(inner)?;
         value.ty = expr.ty;
@@ -466,7 +848,63 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
             Value::Function { .. } => expr.value.clone(),
             _ => return None,
         },
-        Type::Array(_)
+        Type::ArrayRef { mutable: false, .. } => match &expr.value {
+            Value::Nil => Value::Nil,
+            Value::Cast(inner) => {
+                let mut value = evaluate_raw(inner)?;
+                value.ty = expr.ty;
+                return Some(value);
+            }
+            Value::Array {
+                metadata,
+                values,
+                lengths,
+                repeated,
+            } => {
+                let mut evaluated: Vec<_> =
+                    values.iter().map(evaluate_raw).collect::<Option<_>>()?;
+                let mut metadata = metadata.clone();
+                if !metadata.slots.is_empty() {
+                    let mut ordered = vec![None; evaluated.len()];
+                    for (value, &slot) in evaluated.into_iter().zip(&metadata.slots) {
+                        ordered[slot] = Some(value);
+                    }
+                    evaluated = ordered.into_iter().map(Option::unwrap).collect();
+                    metadata.slots.clear();
+                }
+                Value::Array {
+                    metadata,
+                    values: evaluated,
+                    lengths: lengths.iter().map(evaluate_raw).collect::<Option<_>>()?,
+                    repeated: *repeated,
+                }
+            }
+            _ => return None,
+        },
+        Type::ArrayRef {
+            mutable: true,
+            nilable: true,
+            ..
+        } => match &expr.value {
+            Value::Nil => Value::Nil,
+            Value::Cast(inner) => {
+                let mut value = evaluate_raw(inner)?;
+                value.ty = expr.ty;
+                return Some(value);
+            }
+            _ => return None,
+        },
+        Type::Pointer { .. } if expr.ty.is_nilable() => match &expr.value {
+            Value::Nil => Value::Nil,
+            Value::Cast(inner) => {
+                let mut value = evaluate_raw(inner)?;
+                value.ty = expr.ty;
+                return Some(value);
+            }
+            _ => return None,
+        },
+        Type::ArrayRef { .. }
+        | Type::Array(_)
         | Type::Pointer { .. }
         | Type::CPointer
         | Type::CInteger(_)
@@ -523,7 +961,7 @@ fn evaluate_raw(expr: &CheckedExpression) -> Option<CheckedExpression> {
             }))
         }
         Type::Void => return None,
-        Type::Integer(_) | Type::Enum(_) | Type::Char => Value::Integer {
+        Type::Integer(_) | Type::Range(_) | Type::Enum(_) | Type::Char => Value::Integer {
             value: constant_integer_raw(expr)?,
             minus: None,
         },
@@ -586,7 +1024,7 @@ pub(super) fn depends_on_generic(expr: &CheckedExpression) -> bool {
         || constant_kind(expr) == ConstantKind::Generic
 }
 
-fn cast_succeeds(operand: &CheckedExpression, target: Type, wrap: bool) -> bool {
+fn cast_succeeds(operand: &CheckedExpression, target: Type, kind: crate::ast::CastKind) -> bool {
     if operand.ty == Type::Exact {
         return super::exact::constant(operand).is_some_and(|n| {
             if matches!(target, Type::Float(_)) {
@@ -597,15 +1035,21 @@ fn cast_succeeds(operand: &CheckedExpression, target: Type, wrap: bool) -> bool 
     }
 
     if operand.ty.is_text() {
-        return text_cast(operand, target, wrap).is_some();
+        return text_cast(operand, target, kind).is_some();
     }
     if operand.ty.integer_bounds().is_some() && target.integer_bounds().is_some() {
         let value = constant_integer_raw(operand).unwrap();
         return crate::numeric::Range::point(Int::from_i128(value)).fits_type(target);
     }
     match (operand.ty, target) {
-        (Type::Float(_), Type::Integer(to)) => {
-            float_to_integer(constant_float_raw(operand).unwrap(), to).is_some()
+        (Type::Float(_), Type::Integer(_) | Type::Range(_)) => {
+            let value = constant_float_raw(operand).unwrap();
+            if kind == crate::ast::CastKind::Saturating {
+                !value.is_nan()
+            } else {
+                let (min, max) = target.integer_bounds().unwrap();
+                float_to_integer_bounds(value, min, max).is_some()
+            }
         }
         (Type::Float(_), Type::Float(FloatType::F32)) => {
             let value = constant_float_raw(operand).unwrap();
@@ -732,12 +1176,15 @@ fn validate_evaluation(expr: &CheckedExpression) -> Result<(), Diagnostic> {
         Value::Cast(inner)
         | Value::Negate(inner)
         | Value::Truncate(inner)
+        | Value::SaturatingCast(inner)
         | Value::BitNot(inner)
+        | Value::WrapNegate(inner)
+        | Value::SaturatingNegate(inner)
         | Value::Not(inner) => validate_evaluation(inner)?,
         Value::CheckedCast {
             operand,
             fallback,
-            wrap,
+            kind,
             ..
         } => {
             validate_evaluation(operand)?;
@@ -750,7 +1197,7 @@ fn validate_evaluation(expr: &CheckedExpression) -> Result<(), Diagnostic> {
                 };
                 constant_struct.is_some()
             } else {
-                cast_succeeds(operand, expr.ty, *wrap)
+                cast_succeeds(operand, expr.ty, *kind)
             };
             if !succeeds {
                 validate_evaluation(fallback)?;
@@ -814,11 +1261,15 @@ pub(super) fn constant_float(expr: &CheckedExpression) -> Result<Option<f64>, Di
     Ok(evaluate(expr)?.and_then(|value| constant_float_raw(&value)))
 }
 
-fn text_cast(operand: &CheckedExpression, target: Type, wrap: bool) -> Option<CheckedExpression> {
+fn text_cast(
+    operand: &CheckedExpression,
+    target: Type,
+    kind: crate::ast::CastKind,
+) -> Option<CheckedExpression> {
     let Value::Text { text, .. } = evaluate_raw(operand)?.value else {
         return None;
     };
-    super::text_parse::parse(&text, target, wrap)
+    super::text_parse::parse(&text, target, kind)
 }
 
 fn slice_result(expr: &CheckedExpression) -> Option<CheckedExpression> {

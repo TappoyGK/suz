@@ -61,35 +61,58 @@ impl Parser<'_, '_> {
         mut write_target: bool,
     ) -> Result<Statement, Diagnostic> {
         // 関数の返したポインタや括弧付きの対象にも、最後の#fieldだけを認める。
+        let mut bulk_selector = None;
         if !write_target && self.token().kind == Kind::Symbol("#") {
             let location = self.location();
             self.cursor += 1;
             if self.token().kind == Kind::Symbol("[") {
                 let location = self.location();
                 self.cursor += 1;
-                let index = if self.token().kind == Kind::Symbol(":") {
-                    None
+                if self.token().kind == Kind::Symbol("]") {
+                    self.cursor += 1;
+                    bulk_selector = Some(crate::ast::BulkSelector::All);
+                    write_target = true;
+                } else if self.token().kind == Kind::Symbol(":") {
+                    self.cursor += 1;
+                    let end = if self.token().kind == Kind::Symbol("]") {
+                        None
+                    } else {
+                        Some(Box::new(self.expression()?))
+                    };
+                    self.expect(FixedToken::Symbol("]"))?;
+                    bulk_selector = Some(crate::ast::BulkSelector::Slice { start: None, end });
+                    write_target = true;
                 } else {
-                    Some(self.expression()?)
-                };
-                if index.is_none() || self.token().kind == Kind::Symbol(":") {
-                    return Err(self.error(ErrorKind::InvalidSource, crate::diagnostic!(
-                        "array.write", "use a#[i] = value to write an element; assigning to a slice is not allowed"
-                    )));
+                    let first = self.expression()?;
+                    if self.token().kind == Kind::Symbol(":") {
+                        self.cursor += 1;
+                        let end = if self.token().kind == Kind::Symbol("]") {
+                            None
+                        } else {
+                            Some(Box::new(self.expression()?))
+                        };
+                        self.expect(FixedToken::Symbol("]"))?;
+                        bulk_selector = Some(crate::ast::BulkSelector::Slice {
+                            start: Some(Box::new(first)),
+                            end,
+                        });
+                        write_target = true;
+                    } else {
+                        self.expect(FixedToken::Symbol("]"))?;
+                        target = self.node(
+                            ExpressionKind::Slice {
+                                target: Box::new(target),
+                                start: Some(Box::new(first)),
+                                end: None,
+                                index: true,
+                                fallback: None,
+                                fallback_location: None,
+                            },
+                            location,
+                        )?;
+                        write_target = true;
+                    }
                 }
-                let index = index.unwrap();
-                self.expect(FixedToken::Symbol("]"))?;
-                target = self.node(
-                    ExpressionKind::Slice {
-                        target: Box::new(target),
-                        start: Some(Box::new(index)),
-                        end: None,
-                        index: true,
-                        fallback: None,
-                    },
-                    location,
-                )?;
-                write_target = true;
             } else {
                 let Kind::Ident(name) = self.token().kind else {
                     return Err(self.error(
@@ -111,9 +134,11 @@ impl Parser<'_, '_> {
         let location = self.location();
         let operator = match self.token().kind {
             Kind::Symbol("=") => Some(None),
+            Kind::Symbol("<-") => Some(Some(crate::ast::AssignmentOperator::Append)),
             Kind::Symbol(symbol) => symbol
                 .strip_suffix('=')
                 .and_then(BinaryOperator::from_symbol)
+                .map(crate::ast::AssignmentOperator::Binary)
                 .map(Some),
             _ => None,
         };
@@ -150,6 +175,17 @@ impl Parser<'_, '_> {
         }
         self.cursor += 1;
         let value = self.expression()?;
+        if let Some(selector) = bulk_selector {
+            return Ok(Statement::ArrayBulkWrite(Box::new(
+                crate::ast::ArrayBulkWrite {
+                    target,
+                    selector,
+                    value,
+                    operator,
+                    location,
+                },
+            )));
+        }
         Ok(Statement::Store {
             target: Box::new(target),
             value: Box::new(value),

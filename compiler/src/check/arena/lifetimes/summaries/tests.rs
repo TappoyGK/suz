@@ -269,7 +269,7 @@ fn missing_callee_is_an_error_not_an_empty_effect() {
 }
 
 #[test]
-fn callee_objection_is_lexical_and_call_store_keeps_the_nonnull_proof() {
+fn callee_objection_is_lexical_and_call_store_keeps_the_nonnil_proof() {
     let mut f = body(1);
     let a = parameter(&mut f, 0, Type::Bool.pointer());
     let b = parameter(&mut f, 1, Type::Bool.pointer());
@@ -280,7 +280,7 @@ fn callee_objection_is_lexical_and_call_store_keeps_the_nonnull_proof() {
         Constraint::Copy(destination, b),
     ]);
     f.objections.insert(f.constraints.len());
-    f.nonnull_values.insert(source);
+    f.nonnil_values.insert(source);
     f.constraints.push(Constraint::Store(
         Place::Indirect(destination, vec![]),
         source,
@@ -448,7 +448,7 @@ fn mutable_receivers_with_the_same_value_keep_distinct_storage() {
 
 fn recursive_ring(count: usize, writes_input: bool) -> BTreeMap<usize, Rc<Analysis>> {
     let tokens =
-        crate::lexer::lex("struct Node { v: i32, next: ptr? Node }\nfn main() -> u8 { return 0 }")
+        crate::lexer::lex("struct Node { v: i32, next: mut? Node }\nfn main() -> u8 { return 0 }")
             .unwrap();
     let program = crate::parser::parse(&tokens).unwrap();
     let structs = Rc::new(crate::check::type_parameters::structs::Structs::new(
@@ -680,6 +680,201 @@ fn repeated_allocating_calls_share_effects_but_keep_each_warning_site() {
             assert_eq!(
                 checked.loop_warnings().len(),
                 if retained { 0 } else { count }
+            );
+        }
+    }
+}
+
+// 本文の実体と参照の保存先を異なる領域に置き、型付きIRで寿命制約を検証する。
+// 本文の葉はVoidで表すが、言語のptr voidを作るわけではない。
+#[test]
+fn text_slice_and_c_bytes_keep_the_callers_origin_and_return_limit() {
+    let mut callee = body(1);
+    let (region, arena) = callee.parameters(&[(Type::Text, HERE, false)], HERE);
+    let bytes = CheckedExpression {
+        ty: Type::CPointer,
+        value: Value::CBytes(Box::new(CheckedExpression {
+            ty: Type::Text,
+            value: Value::Slice {
+                target: Box::new(CheckedExpression {
+                    ty: Type::Text,
+                    value: Value::Local(0),
+                }),
+                start: None,
+                end: None,
+                index: false,
+                handler: None,
+            },
+        })),
+    };
+    let result = callee.expr(&bytes, region, arena);
+    callee.return_value(Type::CPointer, result, HERE);
+    let summaries = infer(&BTreeMap::from([(1, Rc::new(callee))])).unwrap();
+    let mut caller = body(0);
+    let inner = caller.region(0, HERE);
+    let (argument, object) = pointer(&mut caller, 0, Type::Void);
+    let result = caller.node();
+    caller
+        .direct_calls
+        .push(call(1, vec![(Type::Text, argument)], result, inner));
+    let saved = caller.cell(0, HERE, Type::CPointer);
+    caller
+        .constraints
+        .push(Constraint::Store(Place::Direct(saved), result, HERE));
+    let mut checked = caller.with_summaries(&summaries).unwrap();
+    assert_eq!(
+        checked.targets[result],
+        BTreeSet::from([Reference {
+            target: object,
+            limit: Some(inner)
+        }])
+    );
+    let constraints = checked.constraints.clone();
+    assert_eq!(
+        checked.validate(&constraints).unwrap_err().rule_id,
+        "arena.return-lifetime"
+    );
+}
+
+#[test]
+fn text_slice_fallback_cannot_hide_a_shorter_lived_source() {
+    for inner_in_fallback in [false, true] {
+        let mut analysis = body(0);
+        let inner = analysis.region(0, HERE);
+        let (source, _) = pointer(&mut analysis, inner, Type::Void);
+        let local = analysis.cell(inner, HERE, Type::Text);
+        analysis.locals.insert(0, local);
+        analysis.constraints.push(Constraint::Copy(local, source));
+        let borrowed = CheckedExpression {
+            ty: Type::Text,
+            value: Value::Local(0),
+        };
+        let static_text = CheckedExpression {
+            ty: Type::Text,
+            value: Value::Text {
+                text: "static".into(),
+            },
+        };
+        let (target, fallback) = if inner_in_fallback {
+            (static_text, borrowed)
+        } else {
+            (borrowed, static_text)
+        };
+        let sliced = CheckedExpression {
+            ty: Type::Text,
+            value: Value::Slice {
+                target: Box::new(target),
+                start: None,
+                end: None,
+                index: false,
+                handler: Some(CheckedHandler::Value(Box::new(fallback))),
+            },
+        };
+        let value = analysis.expr(&sliced, inner, Some(inner));
+        let outer = analysis.cell(0, HERE, Type::Text);
+        analysis.write(Place::Direct(outer), value, HERE);
+        assert_eq!(analysis.solve().unwrap_err().rule_id, "arena.store");
+    }
+}
+
+#[test]
+fn static_text_and_symbol_bytes_do_not_acquire_an_arena_lifetime() {
+    for ty in [Type::Text, Type::Symbol] {
+        let mut callee = body(1);
+        let bytes = CheckedExpression {
+            ty: Type::CPointer,
+            value: Value::CBytes(Box::new(CheckedExpression {
+                ty,
+                value: Value::Text {
+                    text: "static".into(),
+                },
+            })),
+        };
+        callee.return_region = Some(0);
+        let value = callee.expr(&bytes, 0, Some(0));
+        callee.return_value(Type::CPointer, value, HERE);
+        let summaries = infer(&BTreeMap::from([(1, Rc::new(callee))])).unwrap();
+        let mut caller = body(0);
+        let inner = caller.region(0, HERE);
+        let result = caller.node();
+        caller.direct_calls.push(call(1, vec![], result, inner));
+        let outer = caller.cell(0, HERE, Type::CPointer);
+        caller
+            .constraints
+            .push(Constraint::Store(Place::Direct(outer), result, HERE));
+        let mut checked = caller.with_summaries(&summaries).unwrap();
+        assert_eq!(checked.targets[result].len(), 1);
+        let reference = checked.targets[result].first().unwrap();
+        assert!(matches!(
+            checked.cells[&reference.target].origin,
+            Origin::Permanent
+        ));
+        assert_eq!(reference.limit, None);
+        let constraints = checked.constraints.clone();
+        checked.validate(&constraints).unwrap();
+    }
+}
+
+#[test]
+fn append_chains_share_current_arena_requirements_and_check_actual_objects() {
+    // 追記のたびに返却候補は増えても、仮引数へ課す所属条件は同じ1件である。
+    // 経過時間ではなく、要約と展開後の条件数で再膨張を検出する。
+    let count = 64;
+    let mut bodies = BTreeMap::new();
+    for id in 0..count {
+        let mut f = body(id);
+        let parameter = parameter(&mut f, 0, Type::Void);
+        let source = if id == 0 {
+            parameter
+        } else {
+            let source = f.node();
+            f.direct_calls
+                .push(call(id - 1, vec![(Type::Text, parameter)], source, 0));
+            source
+        };
+        f.append_requirements.push((source, 0, HERE));
+        let allocation = f.allocation(Some(0), HERE, Type::Void);
+        let result = f.node();
+        f.targets[result].insert(Reference::object(allocation));
+        f.constraints.push(Constraint::Copy(result, source));
+        f.returned.insert(vec![], result);
+        bodies.insert(id, Rc::new(f));
+    }
+    let inferred = infer_checked(bodies, true, BTreeMap::new()).unwrap();
+    for id in 0..count {
+        let summary = &inferred.summaries[&id];
+        assert_eq!(
+            summary.current_arena,
+            BTreeSet::from([Endpoint {
+                object: Object::Parameter(0, Type::Void),
+                path: vec![],
+                limited: false,
+            }])
+        );
+        assert!(inferred.checked[&id].append_requirements.len() <= 2);
+    }
+    for kind in ["current", "outer", "static", "unknown"] {
+        let mut caller = body(count);
+        let inner = caller.region(0, HERE);
+        let source = match kind {
+            "current" => pointer(&mut caller, inner, Type::Void).0,
+            "outer" => pointer(&mut caller, 0, Type::Void).0,
+            "static" => caller.permanent_text(Type::Text)[&vec![]],
+            "unknown" => caller.node(),
+            _ => unreachable!(),
+        };
+        let result = caller.node();
+        caller
+            .direct_calls
+            .push(call(count - 1, vec![(Type::Text, source)], result, inner));
+        let checked = caller.with_summaries(&inferred.summaries).unwrap();
+        if kind == "current" {
+            checked.validate_appends().unwrap();
+        } else {
+            assert_eq!(
+                checked.validate_appends().unwrap_err().rule_id,
+                "text.append-arena",
+                "{kind}"
             );
         }
     }

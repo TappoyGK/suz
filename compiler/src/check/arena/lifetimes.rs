@@ -1,7 +1,7 @@
 //! 実行順によらない候補の包含制約を解く。各保存場所は自身の寿命を持ち、
 //! 別名経由のメンバーも同じセルへ合流させる。安全でも候補を絞れない保存は拒否する。
 //!
-//! **[impl.lifetime-flow]** ポインタを含みうる値の流れは、すべて制約（Copy・Limit・Load・Store・Address）へ
+//! **[impl.lifetime-flow]** 参照を含みうる値の流れは、すべて制約（Copy・Limit・Load・Store・Address）へ
 //! 変換してから検査し、構文ごとに個別の寿命検査を書かない。式・文・失敗処理で分岐する
 //! match には `_` を使わず全種類を列挙する。
 mod accumulation;
@@ -32,7 +32,7 @@ impl Reference {
         }
     }
 }
-// 構造体の各ポインタ葉をフィールド番号列で区別する。ポインタ自身の値は空の列。
+// 構造体内の参照をフィールド番号列で区別する。ポインタ・text・Cのバイト列自身は空の列。
 type Shape = BTreeMap<Vec<usize>, Node>;
 // 型検査後の呼び出し境界では葉を追加・削除しないため、並びだけを保持する。
 type Leaves = Vec<(Vec<usize>, Node)>;
@@ -59,6 +59,7 @@ struct Cell {
 #[derive(Clone, Copy)]
 enum Origin {
     Allocation,
+    Permanent,
     Parameter,
     Call,
 }
@@ -94,6 +95,9 @@ pub(crate) struct Analysis {
     active_loop: Option<usize>,
     discarded_calls: Vec<accumulation::Discarded>,
     kept: Vec<Node>,
+    // 追記先の実体が現在のArenaに属するという前提。呼び出し先の前提もここへ合流する。
+    append_requirements: Vec<(Node, usize, Location)>,
+    permanent: BTreeMap<Type, Node>,
     returned: Shape,
     direct_calls: Vec<summaries::Call>,
     effect_calls: BTreeMap<usize, Location>,
@@ -103,8 +107,8 @@ pub(crate) struct Analysis {
     objection: bool,
     // 字句上のobjection内で作ったStoreの添字。呼出し契約由来の制約は含めない。
     objections: BTreeSet<usize>,
-    // 候補集合はnullを表さないため、非nullの証明を値と不変の保存場所に別途保持する。
-    nonnull_values: BTreeSet<Node>,
+    // 候補集合はnilを表さないため、非nilの証明を値と不変の保存場所に別途保持する。
+    nonnil_values: BTreeSet<Node>,
     return_region: Option<usize>,
     recovery: Option<Shape>,
     // 各値が指しうる保存場所。実体の領域は参照変数の宣言位置から独立している。
@@ -133,6 +137,8 @@ impl Analysis {
             active_loop: None,
             discarded_calls: Vec::new(),
             kept: Vec::new(),
+            append_requirements: Vec::new(),
+            permanent: BTreeMap::new(),
             returned: Shape::new(),
             direct_calls: Vec::new(),
             effect_calls: BTreeMap::new(),
@@ -141,7 +147,7 @@ impl Analysis {
             effect_stores: BTreeMap::new(),
             objection: false,
             objections: BTreeSet::new(),
-            nonnull_values: BTreeSet::new(),
+            nonnil_values: BTreeSet::new(),
             return_region: None,
             recovery: None,
             targets: vec![],
@@ -200,7 +206,9 @@ impl Analysis {
     fn paths(&self, ty: Type) -> Vec<Vec<usize>> {
         match ty {
             Type::Array(id) => self.paths(self.structs.arrays.borrow().get(id).element),
-            Type::Pointer { .. } => vec![vec![]],
+            Type::ArrayRef { .. } | Type::Pointer { .. } | Type::Text | Type::CPointer => {
+                vec![vec![]]
+            }
             Type::Struct(id) => self
                 .structs
                 .get(id)
@@ -222,8 +230,8 @@ impl Analysis {
             .into_iter()
             .map(|p| {
                 let n = self.node();
-                if self.field_type(ty, &p).is_nonnull() {
-                    self.nonnull_values.insert(n);
+                if self.field_type(ty, &p).is_nonnil() {
+                    self.nonnil_values.insert(n);
                 }
                 (p, n)
             })
@@ -270,7 +278,7 @@ impl Analysis {
             }
         }
     }
-    // 分岐で候補を合流する。非null性は分岐の結果型で決まる。
+    // 分岐で候補を合流する。非nil性は分岐の結果型で決まる。
     fn alternatives(&mut self, ty: Type, alternatives: Vec<Shape>) -> Shape {
         let result = self.shape(ty);
         for shape in alternatives {
@@ -299,6 +307,19 @@ impl Analysis {
             } => {
                 for length in lengths {
                     self.expr(length, region, arena);
+                }
+                if let Type::ArrayRef {
+                    id, mutable: false, ..
+                } = value.ty
+                {
+                    let cell = self.permanent_cell(Type::Array(id));
+                    for initial in values {
+                        let shape = self.expr(initial, region, arena);
+                        self.write(Place::Direct(cell), shape, self.regions[0].end);
+                    }
+                    let node = self.node();
+                    self.targets[node].insert(Reference::object(cell));
+                    return BTreeMap::from([(vec![], node)]);
                 }
                 let result = self.shape(value.ty);
                 for initial in values {
@@ -336,6 +357,10 @@ impl Analysis {
                 }
                 self.alternatives(value.ty, alternatives)
             }
+            Value::SoaColumn { target, .. } => {
+                let result = self.expr(target, region, arena);
+                self.alternatives(value.ty, vec![result])
+            }
             Value::ArrayRead { address, handler } => {
                 let p = self.expr(address, region, arena);
                 let read = self.read(value.ty, Place::Indirect(p[&vec![]], vec![]));
@@ -350,36 +375,52 @@ impl Analysis {
                 }
                 self.alternatives(value.ty, alternatives)
             }
-            Value::Null => self.shape(value.ty),
-            // 最外側の暗黙変換は実体と、保存直前の非nullの証明を変えない。
-            Value::Cast(inner) if value.ty.pointee().is_some() => self.expr(inner, region, arena),
+            Value::Nil => self.shape(value.ty),
+            // 最外側の暗黙変換は実体と、保存直前の非nilの証明を変えない。
+            Value::Cast(inner) if super::reference_target(value.ty).is_some() => {
+                self.expr(inner, region, arena)
+            }
+            Value::TextAppend {
+                left,
+                right,
+                location,
+            } => {
+                let source = self.expr(left, region, arena);
+                self.append_requirements.push((
+                    source[&vec![]],
+                    arena.expect("current arena"),
+                    *location,
+                ));
+                self.expr(right, region, arena);
+                let allocated = self.text_allocations(Type::Text, arena, *location);
+                self.alternatives(Type::Text, vec![source, allocated])
+            }
+            Value::TextBuffer {
+                capacity,
+                value,
+                location,
+            } => {
+                if let Some(capacity) = capacity {
+                    self.expr(capacity, region, arena);
+                }
+                self.expr(value, region, arena);
+                self.text_allocations(Type::Text, arena, *location)
+            }
             Value::New {
                 value: initial,
                 location,
             } => {
                 let ty = initial.ty;
                 let initial = self.expr(initial, region, arena);
-                let cell = self.cell(arena.expect("new has a lexical arena"), *location, ty);
-                self.objects
-                    .insert(cell, summaries::Object::Allocation(self.function_id, cell));
-                if self.warn_allocations {
-                    self.allocations.insert(
-                        cell,
-                        vec![accumulation::Allocation {
-                            site: *location,
-                            trace: accumulation::Trace::allocation(*location),
-                            loop_region: self.active_loop,
-                        }],
-                    );
-                }
+                let cell = self.allocation(arena, *location, ty);
                 self.write(Place::Direct(cell), initial, *location);
                 let n = self.node();
                 self.targets[n].insert(Reference::object(cell));
-                self.nonnull_values.insert(n);
+                self.nonnil_values.insert(n);
                 BTreeMap::from([(vec![], n)])
             }
             Value::Local(id) => {
-                if contains_in(value.ty, &self.structs) {
+                if contains_references(value.ty, &self.structs) {
                     let cell = self.locals[id];
                     self.read(value.ty, Place::Direct(cell))
                 } else {
@@ -537,6 +578,7 @@ impl Analysis {
                 Shape::new()
             }
             Value::CastReturn {
+                location: cast_location,
                 return_location: location,
                 operand,
                 return_value,
@@ -545,7 +587,7 @@ impl Analysis {
                 self.expr(operand, region, arena);
                 let returned = self.expr(return_value, region, arena);
                 self.return_value(return_value.ty, returned, *location);
-                Shape::new()
+                self.text_allocations(value.ty, arena, *cast_location)
             }
             Value::Closure(closure) => {
                 // 本体は呼び出し文脈ごとに別の要約へ移した。ここでは捕捉値の評価だけを行う。
@@ -555,28 +597,48 @@ impl Analysis {
                 Shape::new()
             }
             Value::Receiver { target, .. } => self.expr(target, region, arena),
+            // 範囲やC向けの表現が変わっても、本文の由来と利用期間は同じ。
+            Value::CBytes(v) | Value::TextView(v) => {
+                let source = self.expr(v, region, arena);
+                if v.ty == Type::Symbol {
+                    self.permanent_text(value.ty)
+                } else {
+                    self.alternatives(value.ty, vec![source])
+                }
+            }
             Value::Cast(v)
-            | Value::NonNull(v)
-            | Value::CBytes(v)
+            | Value::NonNil(v)
             | Value::CByteLen { operand: v, .. }
             | Value::FunctionBorrow(v)
             | Value::ArrayLength { target: v, .. }
             | Value::Len(v)
             | Value::Negate(v)
             | Value::Truncate(v)
+            | Value::SaturatingCast(v)
             | Value::BitNot(v)
+            | Value::WrapNegate(v)
+            | Value::SaturatingNegate(v)
             | Value::Not(v)
-            | Value::TextView(v)
             | Value::Intern { operand: v, .. } => {
                 self.expr(v, region, arena);
                 Shape::new()
             }
             Value::CheckedCast {
-                operand, fallback, ..
+                operand,
+                fallback,
+                constant_struct,
+                location,
+                ..
             } => {
                 self.expr(operand, region, arena);
-                self.expr(fallback, region, arena);
-                Shape::new()
+                let fallback = self.expr(fallback, region, arena);
+                // 解析成功時の文字列は生成元とは独立する。代替値は元の由来を保つ。
+                let success = if let Some(constant) = constant_struct {
+                    self.expr(constant, region, arena)
+                } else {
+                    self.text_allocations(value.ty, arena, *location)
+                };
+                self.alternatives(value.ty, vec![success, fallback])
             }
             Value::ArrayDimensionGuard { left, right, .. }
             | Value::Binary { left, right, .. }
@@ -624,21 +686,31 @@ impl Analysis {
                         self.expr(v, region, arena);
                     }
                 }
-                Shape::new()
+                self.permanent_text(value.ty)
             }
             Value::Slice {
                 target,
                 start,
                 end,
                 handler,
-                ..
+                index,
             } => {
-                self.expr(target, region, arena);
+                let source = self.expr(target, region, arena);
                 for v in [start, end].into_iter().flatten() {
                     self.expr(v, region, arena);
                 }
-                self.checked_handler(handler.as_ref(), region, arena);
-                Shape::new()
+                let mut alternatives = if *index { vec![] } else { vec![source] };
+                match handler {
+                    Some(CheckedHandler::Value(v)) => {
+                        alternatives.push(self.expr(v, region, arena))
+                    }
+                    Some(CheckedHandler::Return { value, location }) => {
+                        let returned = self.expr(value, region, arena);
+                        self.return_value(value.ty, returned, *location);
+                    }
+                    None => {}
+                }
+                self.alternatives(value.ty, alternatives)
             }
             Value::IntegerArithmetic { handler, .. } => {
                 value.value.visit_constant_children(&mut |child| {
@@ -653,13 +725,13 @@ impl Analysis {
                 });
                 Shape::new()
             }
+            Value::Text { .. } => self.permanent_text(value.ty),
             Value::CIntegerLiteral { .. }
             | Value::GenericNumericLiteral { .. }
             | Value::Integer { .. }
             | Value::Float(_)
             | Value::Function { .. }
             | Value::Bool(_)
-            | Value::Text { .. }
             | Value::Void => Shape::new(),
         }
     }
@@ -783,6 +855,72 @@ impl Analysis {
                         self.locals.remove(id);
                     }
                 }
+                CheckedStatement::ArrayBulkWrite(bulk) => {
+                    let target_vals = self.expr(&bulk.target, region, arena);
+                    if let Some(start) = &bulk.start {
+                        let _ = self.expr(start, region, arena);
+                    }
+                    if let Some(end) = &bulk.end {
+                        let _ = self.expr(end, region, arena);
+                    }
+                    let mut saved_locals = Vec::new();
+                    for input in &bulk.inputs {
+                        match input {
+                            crate::check::ir::BulkInput::Array {
+                                elem_id,
+                                expr,
+                                location,
+                                ..
+                            } => {
+                                let arr_vals = self.expr(expr, region, arena);
+                                let elem_ty = self
+                                    .structs
+                                    .arrays
+                                    .borrow()
+                                    .get(expr.ty.array_id().unwrap())
+                                    .element;
+                                let elem_cell = self.cell(region, *location, elem_ty);
+                                if let Some(&ptr) = arr_vals.get(&vec![]) {
+                                    let read = self.read(elem_ty, Place::Indirect(ptr, vec![]));
+                                    self.write(Place::Direct(elem_cell), read, *location);
+                                }
+                                saved_locals
+                                    .push((*elem_id, self.locals.insert(*elem_id, elem_cell)));
+                            }
+                            crate::check::ir::BulkInput::Scalar { local_id, expr } => {
+                                let val = self.expr(expr, region, arena);
+                                let cell = self.cell(region, bulk.location, expr.ty);
+                                self.write(Place::Direct(cell), val, bulk.location);
+                                saved_locals.push((*local_id, self.locals.insert(*local_id, cell)));
+                            }
+                        }
+                    }
+                    if let Some(out_id) = bulk.out_elem_id {
+                        let elem_ty = self
+                            .structs
+                            .arrays
+                            .borrow()
+                            .get(bulk.target.ty.array_id().unwrap())
+                            .element;
+                        let out_cell = self.cell(region, bulk.location, elem_ty);
+                        if let Some(&ptr) = target_vals.get(&vec![]) {
+                            let read = self.read(elem_ty, Place::Indirect(ptr, vec![]));
+                            self.write(Place::Direct(out_cell), read, bulk.location);
+                        }
+                        saved_locals.push((out_id, self.locals.insert(out_id, out_cell)));
+                    }
+                    let elem_val = self.expr(&bulk.element_value, region, arena);
+                    if let Some(&ptr) = target_vals.get(&vec![]) {
+                        self.write(Place::Indirect(ptr, vec![]), elem_val, bulk.location);
+                    }
+                    for (id, prev) in saved_locals.into_iter().rev() {
+                        if let Some(prev) = prev {
+                            self.locals.insert(id, prev);
+                        } else {
+                            self.locals.remove(&id);
+                        }
+                    }
+                }
                 CheckedStatement::Objection(body) => {
                     let saved = self.objection;
                     self.objection = true;
@@ -805,23 +943,41 @@ impl Analysis {
                 CheckedStatement::Loop { condition, body } => {
                     self.loop_body(body, condition.as_ref(), region, arena);
                 }
-                CheckedStatement::For {
-                    id,
-                    variable_type,
-                    start,
-                    end,
-                    body,
-                    ..
-                } => {
-                    let source = self.expr(start, region, arena);
-                    if let Some(end) = end {
-                        self.expr(end, region, arena);
-                    }
+                CheckedStatement::For(for_stmt) => {
+                    let crate::check::ir::CheckedFor {
+                        index,
+                        id,
+                        variable_type,
+                        target,
+                        body,
+                        ..
+                    } = for_stmt.as_ref();
+                    let source = match target {
+                        crate::check::ir::CheckedForTarget::Range { start, end, .. } => {
+                            self.expr(start, region, arena);
+                            self.expr(end, region, arena);
+                            None
+                        }
+                        crate::check::ir::CheckedForTarget::Array(start) => {
+                            Some((start.ty, self.expr(start, region, arena)))
+                        }
+                        crate::check::ir::CheckedForTarget::Text(start) => {
+                            self.expr(start, region, arena);
+                            None
+                        }
+                        crate::check::ir::CheckedForTarget::TypeRange { .. } => None,
+                    };
                     let locals = self.locals.clone();
                     let location = self.regions[region].end;
+                    if let Some((index_id, index_type)) = index {
+                        let index_cell = self.cell(region, location, *index_type);
+                        self.locals.insert(*index_id, index_cell);
+                    }
                     let cell = self.cell(region, location, *variable_type);
                     self.locals.insert(*id, cell);
-                    if let Some(array) = start.ty.array_id() {
+                    if let Some((start_ty, source)) = source
+                        && let Some(array) = start_ty.array_id()
+                    {
                         let rank = self.structs.arrays.borrow().get(array).rank;
                         let value = if rank == 1 {
                             self.read(*variable_type, Place::Indirect(source[&vec![]], vec![]))
@@ -836,9 +992,11 @@ impl Analysis {
                 CheckedStatement::Match {
                     id, target, arms, ..
                 } => {
-                    self.expr(target, region, arena);
-                    let cell = self.cell(region, self.regions[region].end, Type::Void);
+                    let value = self.expr(target, region, arena);
+                    let location = self.regions[region].end;
+                    let cell = self.cell(region, location, target.ty);
                     self.locals.insert(*id, cell);
+                    self.write(Place::Direct(cell), value, location);
                     for (p, b) in arms {
                         if let Some(p) = p {
                             self.expr(p, region, arena);
@@ -893,8 +1051,10 @@ impl Analysis {
                     self.write(Place::Direct(cell), value, *location);
                 }
                 CheckedStatement::CastReturn {
+                    location: cast_location,
                     return_location: location,
                     id,
+                    ty,
                     operand,
                     return_value,
                     ..
@@ -902,8 +1062,10 @@ impl Analysis {
                     self.expr(operand, region, arena);
                     let returned = self.expr(return_value, region, arena);
                     self.return_value(return_value.ty, returned, *location);
-                    let cell = self.cell(region, self.regions[region].end, Type::Void);
+                    let cell = self.cell(region, self.regions[region].end, *ty);
                     self.locals.insert(*id, cell);
+                    let parsed = self.text_allocations(*ty, arena, *cast_location);
+                    self.write(Place::Direct(cell), parsed, *cast_location);
                 }
                 CheckedStatement::Break
                 | CheckedStatement::Continue
@@ -921,6 +1083,81 @@ impl Analysis {
                 .collect::<BTreeSet<_>>()
                 .into_iter()
                 .collect(),
+        }
+    }
+    // 文字列の本文もnewと同じ確保・蓄積の情報を持つ。本文にはSuzから参照解除できる型を付けない。
+    fn allocation(&mut self, arena: Option<usize>, location: Location, ty: Type) -> usize {
+        let cell = self.cell(arena.expect("allocation has a current arena"), location, ty);
+        self.objects
+            .insert(cell, summaries::Object::Allocation(self.function_id, cell));
+        if self.warn_allocations {
+            self.allocations.insert(
+                cell,
+                vec![accumulation::Allocation {
+                    site: location,
+                    trace: accumulation::Trace::allocation(location),
+                    loop_region: self.active_loop,
+                }],
+            );
+        }
+        cell
+    }
+    // 静的な実体も型ごとの候補として残す。空集合にすると、分岐でArenaのtextと合流した際に
+    // 「必ず現在のArenaに属する」と誤判定してしまう。
+    fn permanent_cell(&mut self, ty: Type) -> Node {
+        if let Some(cell) = self.permanent.get(&ty) {
+            return *cell;
+        }
+        let cell = self.cell(0, self.regions[0].end, ty);
+        self.cells.get_mut(&cell).unwrap().origin = Origin::Permanent;
+        self.objects.insert(cell, summaries::Object::Permanent(ty));
+        self.permanent.insert(ty, cell);
+        cell
+    }
+    fn permanent_text(&mut self, ty: Type) -> Shape {
+        if reference_target(ty).is_none() {
+            return Shape::new();
+        }
+        let cell = self.permanent_cell(Type::Void);
+        let node = self.node();
+        self.targets[node].insert(Reference::object(cell));
+        BTreeMap::from([(vec![], node)])
+    }
+    fn validate_appends(&self) -> Result<(), Diagnostic> {
+        for &(source, region, location) in &self.append_requirements {
+            if self.targets[source].is_empty()
+                || self.targets[source].iter().any(|r| {
+                    let cell = &self.cells[&r.target];
+                    matches!(cell.origin, Origin::Permanent) || cell.region != region
+                })
+            {
+                return Err(location.error(ErrorKind::InvalidSource, crate::diagnostic!(
+                    "text.append-arena", "append destination must belong to the current arena; use textbuf to copy it"
+                )));
+            }
+        }
+        Ok(())
+    }
+    fn text_allocations(&mut self, ty: Type, arena: Option<usize>, location: Location) -> Shape {
+        match ty {
+            Type::Text => {
+                let cell = self.allocation(arena, location, Type::Void);
+                let n = self.node();
+                self.targets[n].insert(Reference::object(cell));
+                BTreeMap::from([(vec![], n)])
+            }
+            Type::Struct(id) => {
+                let types: Vec<_> = self.structs.get(id).fields.iter().map(|f| f.ty).collect();
+                let mut result = Shape::new();
+                for (index, ty) in types.into_iter().enumerate() {
+                    for (mut path, node) in self.text_allocations(ty, arena, location) {
+                        path.insert(0, index);
+                        result.insert(path, node);
+                    }
+                }
+                result
+            }
+            _ => Shape::new(),
         }
     }
     fn outlives(&self, source: usize, mut destination: usize) -> bool {
@@ -959,10 +1196,11 @@ impl Analysis {
         }
     }
     fn reference_outlives(&self, source: Reference, destination: usize) -> bool {
-        self.outlives(self.cells[&source.target].region, destination)
-            && source
-                .limit
-                .is_none_or(|limit| self.outlives(limit, destination))
+        matches!(self.cells[&source.target].origin, Origin::Permanent)
+            || (self.outlives(self.cells[&source.target].region, destination)
+                && source
+                    .limit
+                    .is_none_or(|limit| self.outlives(limit, destination)))
     }
     fn solve(&mut self) -> Result<(), Diagnostic> {
         // 制約は固定し、候補集合と保存場所だけを更新する。列全体の複製は不要。
@@ -1009,6 +1247,7 @@ impl Analysis {
     }
 
     fn validate(&mut self, constraints: &[Constraint]) -> Result<(), Diagnostic> {
+        self.validate_appends()?;
         if self.root_references_only() {
             return Ok(());
         }
@@ -1017,9 +1256,9 @@ impl Analysis {
                 continue;
             };
             let destinations = self.destinations(place);
-            // 実行される保存について、非nullで全候補対が違反する場合だけを証明済みとする。
+            // 実行される保存について、非nilで全候補対が違反する場合だけを証明済みとする。
             // 候補の空集合は証明に使わない。集合が変わらない状態で全保存先をまとめて判定する。
-            let proven = self.nonnull_values.contains(src)
+            let proven = self.nonnil_values.contains(src)
                 && !destinations.is_empty()
                 && !self.targets[*src].is_empty()
                 && destinations.iter().all(|dst| {
@@ -1090,6 +1329,8 @@ impl Analysis {
                                 "arena.lifetime",
                                 "{}",
                                 match source.origin {
+                                    Origin::Permanent =>
+                                        unreachable!("permanent text always outlives storage"),
                                     Origin::Allocation => "referenced object is allocated here",
                                     Origin::Call => "this call may allocate the referenced object",
                                     Origin::Parameter =>

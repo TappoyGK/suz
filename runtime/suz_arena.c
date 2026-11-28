@@ -1,6 +1,7 @@
 #include <string.h>
 #include "suz_arena.h"
 #include "suz_runtime.h"
+#include "suz_text.h"
 #include <assert.h>
 
 suz_arena_state suz_arena;
@@ -160,4 +161,12 @@ suz_arena_cursor suz_arena_expand(suz_arena_chunk *current, size_t size, const c
     chunk->next = *unused;
     *unused = chunk;
     return (suz_arena_cursor){chunk->bytes, chunk->capacity, size, chunk};
+}
+
+_Noreturn void suz_textbuf_length_failure(uint64_t scalars, suz_text_location location) {
+    suz_panic_begin(location.source, location.line, location.column);
+    suz_log_text("text length exceeded: scalars=", sizeof("text length exceeded: scalars=") - 1);
+    suz_log_u64(scalars);
+    suz_log_text(" limit=2147483647 [rt.arena-allocation]", sizeof(" limit=2147483647 [rt.arena-allocation]") - 1);
+    suz_panic_end();
 }

@@ -3,7 +3,7 @@
 //! 利用元: [`crate::check::functions`]、[`crate::check::generic::analysis`]。
 //! 主な対象規則: `[num.fn-check]`。
 
-use super::{GenericTypes, domain};
+use super::{GenericIntType, GenericTypes, domain};
 use crate::check::scope::Scope;
 use crate::{
     Diagnostic,
@@ -30,9 +30,13 @@ pub(in crate::check) struct Analysis {
 
 impl GenericTypes {
     pub(in crate::check) fn index(self) -> usize {
-        let integer = self
-            .int
-            .map_or(0, |ty| domain::INTS.iter().position(|t| *t == ty).unwrap());
+        let integer = self.int.map_or(0, |ty| match ty {
+            GenericIntType::Integer(ty) => domain::INTS.iter().position(|t| *t == ty).unwrap(),
+            GenericIntType::Range(_) => domain::INTS
+                .iter()
+                .position(|t| *t == crate::ast::IntegerType::Len)
+                .unwrap(),
+        });
         integer * 2 + usize::from(self.float == Some(crate::ast::FloatType::F64))
     }
 }
@@ -99,7 +103,8 @@ impl Scope {
             Some(GenericTypes {
                 int: match int.map(|t| domain::at(t, i)) {
                     None => None,
-                    Some(Some(Type::Integer(ty))) => Some(ty),
+                    Some(Some(Type::Integer(ty))) => Some(GenericIntType::Integer(ty)),
+                    Some(Some(Type::Range(r))) => Some(GenericIntType::Range(r)),
                     _ => return None,
                 },
                 float: match float.map(|t| domain::at(t, i)) {

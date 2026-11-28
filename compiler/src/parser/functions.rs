@@ -111,7 +111,7 @@ impl Parser<'_, '_> {
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(
                     "ffi.keep",
-                    "keep is only allowed on extern typed C pointer parameters"
+                    "keep is only allowed on extern C pointer parameters"
                 ),
             ));
         }
@@ -137,25 +137,29 @@ impl Parser<'_, '_> {
         names: bool,
         parameter: bool,
     ) -> Result<(Type, Vec<crate::ast::arrays::Dimension>), Diagnostic> {
+        if names && self.token().kind == Kind::Keyword("soa") {
+            self.cursor += 1;
+            let (ty, dimensions) = self.array_type_dimensions(true, true)?;
+            self.reject_error_spec()?;
+            return Ok((ty, dimensions));
+        }
         if names
-            && self.token().kind == Kind::Keyword("ptr")
+            && matches!(self.token().kind, Kind::Symbol("." | "#"))
             && self
                 .tokens
                 .get(self.cursor + 1)
                 .is_some_and(|t| t.kind == Kind::Symbol("["))
         {
-            self.cursor += 1;
-            let (ty, dimensions) = self.array_type_dimensions(true)?;
+            let (ty, dimensions) = self.array_type_dimensions(true, false)?;
             self.reject_error_spec()?;
-            Ok((ty.pointer(), dimensions))
-        } else {
-            let ty = if parameter {
-                self.function_parameter_type()?
-            } else {
-                self.stored_type()?
-            };
-            Ok((ty, Vec::new()))
+            return Ok((ty, dimensions));
         }
+        let ty = if parameter {
+            self.function_parameter_type()?
+        } else {
+            self.stored_type()?
+        };
+        Ok((ty, Vec::new()))
     }
 
     pub(super) fn parse_type(&mut self) -> Result<Type, Diagnostic> {
@@ -202,7 +206,8 @@ impl Parser<'_, '_> {
     // 戻り値に続くエラー指定と、変換に続くorハンドラーは呼び出し側で解析する。
     pub(super) fn type_atom(&mut self) -> Result<Type, Diagnostic> {
         let mut layers = Vec::new();
-        while self.token().kind == Kind::Keyword("ptr") {
+        while matches!(self.token().kind, Kind::Keyword("mut" | "ref")) {
+            let readonly = self.token().kind == Kind::Keyword("ref");
             if layers.len() == 256 {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
@@ -210,14 +215,22 @@ impl Parser<'_, '_> {
                 ));
             }
             self.cursor += 1;
-            let nullable = self.token().kind == Kind::Symbol("?");
-            if nullable {
+            let nilable = self.token().kind == Kind::Symbol("?");
+            if nilable {
                 self.cursor += 1;
             }
-            layers.push(nullable);
+            layers.push((readonly, nilable));
         }
-        let mut ty = if !layers.is_empty() && self.token().kind == Kind::Symbol("[") {
-            self.array_type()?
+        let mut ty = if self.token().kind == Kind::Keyword("soa") {
+            self.cursor += 1;
+            self.array_type(true)?
+        } else if matches!(self.token().kind, Kind::Symbol("." | "#"))
+            && self
+                .tokens
+                .get(self.cursor + 1)
+                .is_some_and(|t| t.kind == Kind::Symbol("["))
+        {
+            self.array_type(false)?
         } else {
             self.type_leaf()?
         };
@@ -238,8 +251,8 @@ impl Parser<'_, '_> {
                 crate::diagnostic!("arena.ptr-type", "pointer requires a stored value type"),
             ));
         }
-        for nullable in layers.into_iter().rev() {
-            ty = ty.pointer().with_nullable(nullable);
+        for (readonly, nilable) in layers.into_iter().rev() {
+            ty = ty.pointer().with_readonly(readonly).with_nilable(nilable);
         }
         Ok(ty)
     }
@@ -250,14 +263,14 @@ impl Parser<'_, '_> {
             if self.token().kind != Kind::Ident("const") {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
-                    crate::diagnostic!("ffi.pointer-type", "typed C pointers are only allowed on extern parameters; use ptr T for Suz pointers"),
+                    crate::diagnostic!("ffi.pointer-type", "typed C pointers are only allowed on extern parameters; use mut T for Suz pointers"),
                 ));
             }
             self.cursor += 1;
             if self.token().kind != Kind::TypeName("void") {
                 return Err(self.error(
                     ErrorKind::InvalidSource,
-                    crate::diagnostic!("ffi.pointer-type", "typed C pointers are only allowed on extern parameters; use ptr T for Suz pointers"),
+                    crate::diagnostic!("ffi.pointer-type", "typed C pointers are only allowed on extern parameters; use mut T for Suz pointers"),
                 ));
             }
             self.cursor += 1;
@@ -355,6 +368,12 @@ impl Parser<'_, '_> {
                 .find(|decl| decl.name == name)
                 .map(|decl| Type::Enum(decl.ty))
                 .or_else(|| {
+                    self.ranges
+                        .iter()
+                        .find(|decl| decl.name == name)
+                        .map(|decl| Type::Range(decl.ty))
+                })
+                .or_else(|| {
                     self.structs
                         .iter()
                         .position(|decl| decl.name == name)
@@ -423,8 +442,9 @@ impl Parser<'_, '_> {
             let (method_name, operator) = match self.token().kind {
                 Kind::Ident(name) => (name, None),
                 Kind::Symbol(
-                    op @ ("+" | "-" | "*" | "/" | "%" | "&" | "|" | "^" | "<<" | ">>" | "~" | "<"
-                    | "<=" | ">" | ">="),
+                    op @ ("+" | "-" | "*" | "/" | "%" | "%%" | "+%" | "-%" | "*%" | "+|" | "-|"
+                    | "*|" | "&" | "|" | "^" | "<<" | ">>" | ">>>" | "<<%" | ">>%" | ">>>%"
+                    | "<<|" | "~" | "<" | "<=" | ">" | ">="),
                 )
                 | Kind::Keyword(op @ ("not" | "len")) => {
                     let symbol = match op {
@@ -433,11 +453,23 @@ impl Parser<'_, '_> {
                         "*" => "*",
                         "/" => "/",
                         "%" => "%",
+                        "%%" => "%%",
+                        "+%" => "+%",
+                        "-%" => "-%",
+                        "*%" => "*%",
+                        "+|" => "+|",
+                        "-|" => "-|",
+                        "*|" => "*|",
                         "&" => "&",
                         "|" => "|",
                         "^" => "^",
                         "<<" => "<<",
                         ">>" => ">>",
+                        ">>>" => ">>>",
+                        "<<%" => "<<%",
+                        ">>%" => ">>%",
+                        ">>>%" => ">>>%",
+                        "<<|" => "<<|",
                         "~" => "~",
                         "not" => "not",
                         "len" => "len",
@@ -526,6 +558,7 @@ impl Parser<'_, '_> {
             }
         }
         let mut needs = self.declaration_needs()?;
+        let contracts = self.declaration_contracts()?;
         // 継承がなければ、解析済みの要求を再び確保・重複除去しない。
         if !inherited.is_empty() {
             let mut combined = crate::ast::generics::NeedList::default();
@@ -581,7 +614,7 @@ impl Parser<'_, '_> {
                 if method.mutable
                     || !match operator {
                         "~" | "not" | "len" => parameters.is_empty(),
-                        "-" => parameters.len() <= 1,
+                        "-" | "-%" | "-|" => parameters.len() <= 1,
                         _ => parameters.len() == 1,
                     }
                     || result == Type::Void
@@ -626,10 +659,17 @@ impl Parser<'_, '_> {
                 crate::diagnostic!("prog.main", "main cannot return errors"),
             ));
         }
+        if name == "main" && !contracts.is_empty() {
+            return Err(contracts[0].location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("contract.decl", "main cannot have contracts"),
+            ));
+        }
         let (statements, end) = self.block()?;
         Ok(Function {
             type_parameters: std::mem::take(&mut self.type_parameters),
             needs,
+            contracts,
             method,
             keyword_location,
             name,

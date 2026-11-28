@@ -105,28 +105,40 @@ pub(super) fn check(
                     ),
                 ));
             }
-            *handler =
-                Some(match fallback.as_ref().unwrap() {
-                    FailureHandler::Ignore(ignore) => {
-                        return Err(crate::check::errors::invalid_handler(ignore.location));
-                    }
-                    FailureHandler::Errors(handler) => {
-                        return Err(crate::check::errors::invalid_handler(handler.location));
-                    }
-                    FailureHandler::Fail { location, .. } => {
-                        return Err(super::super::errors::invalid_handler(*location));
-                    }
-                    FailureHandler::Value(value) => CheckedHandler::Value(Box::new(
-                        super::coerced(value, Some(checked.ty), bindings)?,
-                    )),
-                    FailureHandler::Return { value, location } => CheckedHandler::Return {
-                        value: Box::new(crate::check::functions::return_value(value, bindings)?),
-                        location: *location,
-                    },
-                });
+            *handler = Some(match fallback.as_ref().unwrap() {
+                FailureHandler::Ignore(ignore) => {
+                    return Err(crate::check::errors::invalid_handler(ignore.location));
+                }
+                FailureHandler::Errors(handler) => {
+                    return Err(crate::check::errors::invalid_handler(handler.location));
+                }
+                FailureHandler::Fail { location, .. } => {
+                    return Err(super::super::errors::invalid_handler(*location));
+                }
+                FailureHandler::Value(value) => {
+                    let exits = matches!(value.kind, ExpressionKind::Panic(_));
+                    CheckedHandler::Value(Box::new(super::super::arrays::bounds::with_fallback(
+                        bindings,
+                        exits,
+                        || super::coerced(value, Some(checked.ty), bindings),
+                    )?))
+                }
+                FailureHandler::Return { value, location } => CheckedHandler::Return {
+                    value: Box::new(super::super::arrays::bounds::with_fallback(
+                        bindings,
+                        true,
+                        || crate::check::functions::return_value(value, bindings),
+                    )?),
+                    location: *location,
+                },
+            });
             checked
         }
-        ExpressionKind::BitNot(_) | ExpressionKind::Negate(_) | ExpressionKind::Binary { .. } => {
+        ExpressionKind::BitNot(_)
+        | ExpressionKind::WrapNegate(_)
+        | ExpressionKind::SaturatingNegate(_)
+        | ExpressionKind::Negate(_)
+        | ExpressionKind::Binary { .. } => {
             let ty = expected
                 .or_else(|| operand_type(expr, bindings))
                 .unwrap_or_else(|| default_type(expr, bindings));
@@ -146,9 +158,10 @@ pub(super) fn check(
             let integer_only = matches!(
                 &expr.kind,
                 ExpressionKind::Binary {
-                    operator: BinaryOperator::Remainder
-                        | BinaryOperator::ShiftLeft
-                        | BinaryOperator::ShiftRight,
+                    operator: BinaryOperator::ShiftLeft
+                        | BinaryOperator::ShiftRight
+                        | BinaryOperator::LogicalShiftRight
+                        | BinaryOperator::SaturatingShiftLeft,
                     ..
                 }
             );
@@ -156,25 +169,35 @@ pub(super) fn check(
                 ExpressionKind::Binary { operator, .. }
                     if super::super::operator_methods::supported(*operator) =>
                 {
-                    Some(operator.c_symbol())
+                    Some(operator.symbol())
                 }
                 _ => None,
             };
             let type_error = |ty: Type| {
-                if ty == Type::Integer(IntegerType::Len)
+                if matches!(ty, Type::Integer(IntegerType::Len) | Type::Range(_))
                     && (!arithmetic
                         || matches!(&expr.kind, ExpressionKind::Binary { operator, .. } if operator.is_shift()))
                 {
                     return Some(expr.location.error(
                         ErrorKind::InvalidSource,
-                        crate::diagnostic!(
-                            "expr.operator-types",
-                            "len_t does not support bit-width operations"
-                        ),
+                        if matches!(ty, Type::Range(_)) {
+                            crate::diagnostic!(
+                                "range.prohibited-ops",
+                                "range types do not support bit-width, wrapping or saturating operations"
+                            )
+                        } else {
+                            crate::diagnostic!(
+                                "expr.operator-types",
+                                "len_t does not support bit-width operations"
+                            )
+                        },
                     ));
                 }
-                if matches!(&expr.kind, ExpressionKind::Negate(_))
-                    && matches!(ty, Type::Integer(integer) if integer.bounds().0 == 0)
+                if matches!(
+                    &expr.kind,
+                    ExpressionKind::Negate(_) | ExpressionKind::SaturatingNegate(_)
+                ) && (matches!(ty, Type::Integer(i) if i.bounds().0 == 0)
+                    || matches!(ty, Type::Range(r) if r.base.bounds().0 == 0))
                 {
                     return Some(expr.location.error(
                         ErrorKind::InvalidSource,
@@ -193,7 +216,10 @@ pub(super) fn check(
                             Type::Struct(_) | Type::Enum(_)
                                 if matches!(
                                     &expr.kind,
-                                    ExpressionKind::Negate(_) | ExpressionKind::BitNot(_)
+                                    ExpressionKind::Negate(_)
+                                        | ExpressionKind::WrapNegate(_)
+                                        | ExpressionKind::SaturatingNegate(_)
+                                        | ExpressionKind::BitNot(_)
                                 ) =>
                             {
                                 crate::diagnostic!(
@@ -253,6 +279,18 @@ pub(super) fn check(
                     }
                     Value::BitNot(Box::new(expression(inner, Some(ty), bindings)?))
                 }
+                ExpressionKind::WrapNegate(inner) => {
+                    if !super::super::exact::is_operator(inner) {
+                        same_width(operand_type(inner, bindings), ty, inner.location, bindings)?;
+                    }
+                    Value::WrapNegate(Box::new(expression(inner, Some(ty), bindings)?))
+                }
+                ExpressionKind::SaturatingNegate(inner) => {
+                    if !super::super::exact::is_operator(inner) {
+                        same_width(operand_type(inner, bindings), ty, inner.location, bindings)?;
+                    }
+                    Value::SaturatingNegate(Box::new(expression(inner, Some(ty), bindings)?))
+                }
                 ExpressionKind::Binary {
                     operator,
                     left,
@@ -285,7 +323,13 @@ pub(super) fn check(
                             ),
                         ));
                     }
-                    if integer_arithmetic {
+                    let saturating_shift_infallible =
+                        matches!(*operator, BinaryOperator::SaturatingShiftLeft)
+                            && right
+                                .ty
+                                .integer_storage()
+                                .is_some_and(|r| r.bounds().0 == 0);
+                    if integer_arithmetic && !saturating_shift_infallible {
                         Value::IntegerArithmetic {
                             operation: IntegerOperation::Binary {
                                 operator: *operator,
@@ -327,31 +371,12 @@ pub(super) fn check(
                 value: Value::Not(Box::new(operand)),
             }
         }
-        ExpressionKind::Logical {
-            operator,
-            left,
-            right,
-        } => {
-            let left = expression(left, None, bindings)?;
-            let right = expression(right, None, bindings)?;
-            if left.ty != Type::Bool || right.ty != Type::Bool {
-                return Err(expr.location.error(
-                    ErrorKind::InvalidSource,
-                    crate::diagnostic!(
-                        "expr.operator-types",
-                        "{} requires bool operands",
-                        operator.symbol()
-                    ),
-                ));
-            }
-            CheckedExpression {
-                ty: Type::Bool,
-                value: Value::Logical {
-                    operator: *operator,
-                    left: Box::new(left),
-                    right: Box::new(right),
-                },
-            }
+        ExpressionKind::Logical { .. } => {
+            let (checked, true_facts, false_facts) =
+                super::super::arrays::bounds::eval_condition(expr, bindings)?;
+            *bindings.array_bounds.facts.borrow_mut() =
+                super::super::arrays::facts::Facts::join_all(&[true_facts, false_facts]);
+            checked
         }
         ExpressionKind::Comparison {
             locations,
@@ -377,16 +402,47 @@ pub(super) fn check(
                 }
             });
             let numeric = ty.is_numeric();
+            let mut has_array_operand =
+                !numeric && crate::check::arrays::contains_reference(ty, bindings);
+            if !has_array_operand {
+                for operand in operands {
+                    if is_empty_array_literal(operand)
+                        || operand_type(operand, bindings).is_some_and(|op_ty| {
+                            op_ty != ty
+                                && !op_ty.is_numeric()
+                                && crate::check::arrays::contains_reference(op_ty, bindings)
+                        })
+                    {
+                        has_array_operand = true;
+                        break;
+                    }
+                }
+            }
             let float_type = super::joined_type(
                 operands
                     .iter()
                     .map(|operand| operand_type(operand, bindings).filter(|ty| ty.is_float())),
             )
             .unwrap_or(Type::Float(FloatType::F64));
+            let mut first_empty_array: Option<usize> = None;
             let operands = operands
                 .iter()
-                .map(|operand| {
-                    if numeric {
+                .enumerate()
+                .map(|(index, operand)| {
+                    if is_empty_array_literal(operand) {
+                        first_empty_array.get_or_insert(index);
+                        return Ok(CheckedExpression {
+                            ty: Type::Void,
+                            value: Value::Void,
+                        });
+                    }
+                    if has_array_operand && is_nil_literal(operand) {
+                        return Ok(CheckedExpression {
+                            ty: Type::Void,
+                            value: Value::Void,
+                        });
+                    }
+                    if numeric || has_array_operand {
                         if operand_type(operand, bindings).is_none()
                             && has_float_source(operand, bindings)
                         {
@@ -399,6 +455,46 @@ pub(super) fn check(
                     }
                 })
                 .collect::<Result<Vec<_>, _>>()?;
+            if has_array_operand {
+                let mut first_index = first_empty_array;
+                for (index, operand) in operands.iter().enumerate() {
+                    if first_index.is_some_and(|first| index >= first) {
+                        break;
+                    }
+                    if !operand.ty.is_numeric()
+                        && operand.ty != Type::Exact
+                        && operand.ty != Type::Void
+                        && crate::check::arrays::contains_reference(operand.ty, bindings)
+                    {
+                        first_index = Some(index);
+                        break;
+                    }
+                }
+                let location = locations[first_index.unwrap_or(0).saturating_sub(1)];
+                return Err(location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!(
+                        "array.value",
+                        "array references and structs containing them cannot be compared"
+                    ),
+                ));
+            }
+            if numeric {
+                for (index, operand) in operands.iter().enumerate() {
+                    if !(operand.ty.is_numeric() || operand.ty == Type::Exact)
+                        && crate::check::arrays::contains_reference(operand.ty, bindings)
+                    {
+                        let location = locations[index.saturating_sub(1)];
+                        return Err(location.error(
+                            ErrorKind::InvalidSource,
+                            crate::diagnostic!(
+                                "array.value",
+                                "array references and structs containing them cannot be compared"
+                            ),
+                        ));
+                    }
+                }
+            }
             if numeric
                 && operands
                     .iter()
@@ -412,10 +508,25 @@ pub(super) fn check(
                     ),
                 ));
             }
+            for (pair, location) in operands.windows(2).zip(locations) {
+                if let (Type::Range(a), Type::Range(b)) = (pair[0].ty, pair[1].ty)
+                    && a.id != b.id
+                {
+                    return Err(location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "range.compare",
+                            "cannot compare different range types {} and {}",
+                            bindings.type_name(pair[0].ty),
+                            bindings.type_name(pair[1].ty)
+                        ),
+                    ));
+                }
+            }
             if crate::check::ffi::contains_pointer(ty, bindings) {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
-                    if crate::check::arena::contains(ty, bindings) {
+                    if crate::check::arena::contains(ty, bindings) || ty.array_id().is_some() {
                         crate::diagnostic!(
                             "arena.ptr-operations",
                             "pointer values cannot be compared"
@@ -487,6 +598,35 @@ pub(super) fn check(
         }
         _ => unreachable!(),
     })
+}
+
+fn is_nil_literal(mut expr: &Expression) -> bool {
+    while let ExpressionKind::Group(inner) = &expr.kind {
+        expr = inner;
+    }
+    matches!(expr.kind, ExpressionKind::Nil)
+}
+
+fn is_empty_array_literal(mut expr: &Expression) -> bool {
+    while let ExpressionKind::Group(inner) = &expr.kind {
+        expr = inner;
+    }
+    match &expr.kind {
+        ExpressionKind::ArrayInit {
+            values,
+            repeated: false,
+            ..
+        } => values.is_empty(),
+        ExpressionKind::New(boxed) => matches!(
+            &boxed.kind,
+            ExpressionKind::ArrayInit {
+                values,
+                repeated: false,
+                ..
+            } if values.is_empty()
+        ),
+        _ => false,
+    }
 }
 
 fn same_width(

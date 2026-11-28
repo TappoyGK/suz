@@ -1,11 +1,11 @@
 use super::{
     Outcome, Result, Source,
-    expectations::{diagnostic_table, table, validate},
+    expectations::{parse_result_line, parse_rule_token, validate},
     markdown::{block, fence, heading, unique},
 };
 use std::collections::BTreeMap;
 
-fn valid_id(id: &str) -> bool {
+pub(super) fn valid_id(id: &str) -> bool {
     let Some((group, number)) = id.split_once('-') else {
         return false;
     };
@@ -46,36 +46,51 @@ fn decode_diagram(body: &str) -> Result<Vec<u8>> {
 
 fn source(lines: &[&str]) -> Result<Source> {
     let mut bytes = None;
-    let mut runs = None;
+    let mut runs = Vec::new();
     let mut rule = None;
+    let mut secondary = None;
     let mut stdout = None;
     let mut stderr = None;
     let mut stderr_prefix = None;
     let mut diagram = None;
-    let mut diagnostics = None;
-    let mut panic_diagnostics = None;
-    let mut warnings = None;
+    let mut in_meta = true;
     let mut i = 0;
     while i < lines.len() {
         let line = lines[i];
         i += 1;
+        if in_meta {
+            if line.trim().is_empty() {
+                in_meta = false;
+                continue;
+            }
+            if let Some(value) = line.strip_prefix("- 主根拠：") {
+                let value = parse_rule_token(value).map_err(|_| "invalid primary rule")?;
+                unique(&mut rule, value, "primary rule")?;
+            } else if let Some(value) = line.strip_prefix("- 補助根拠：") {
+                if value.is_empty() {
+                    return Err("invalid secondary rule".into());
+                }
+                let mut tokens = Vec::new();
+                for token in value.split(['・', '、']) {
+                    let parsed = parse_rule_token(token).map_err(|_| "invalid secondary rule")?;
+                    if tokens.contains(&parsed) {
+                        return Err("duplicate secondary rule id".into());
+                    }
+                    tokens.push(parsed);
+                }
+                unique(&mut secondary, tokens, "secondary rule")?;
+            } else if line.starts_with("- 結果") {
+                runs.push(parse_result_line(line)?);
+            } else {
+                return Err("invalid metadata line".into());
+            }
+            continue;
+        }
         match line {
-            "**期待結果：**" => unique(&mut runs, table(lines, &mut i)?, "expectation table")?,
-            "**コンパイル診断：**" => unique(
-                &mut diagnostics,
-                diagnostic_table(lines, &mut i)?,
-                "diagnostic table",
-            )?,
-            "**パニック診断：**" => unique(
-                &mut panic_diagnostics,
-                diagnostic_table(lines, &mut i)?,
-                "panic diagnostic table",
-            )?,
-            "**警告：**" => unique(
-                &mut warnings,
-                diagnostic_table(lines, &mut i)?,
-                "warning table",
-            )?,
+            "**期待結果：**" | "**コンパイル診断：**" | "**パニック診断：**" | "**警告：**" =>
+            {
+                return Err("legacy table format is no longer supported".into());
+            }
             "**ソース：**" => {
                 let code = block(lines, &mut i, "suz")?;
                 if code.is_empty() {
@@ -98,15 +113,27 @@ fn source(lines: &[&str]) -> Result<Source> {
                     .collect();
                 unique(&mut bytes, decoded, "source")?;
             }
-            "**標準出力：**" => unique(&mut stdout, block(lines, &mut i, "text")?, "stdout")?,
-            "**標準エラー：**" => {
-                unique(&mut stderr, block(lines, &mut i, "text")?, "stderr")?
+            "**標準出力：**" => {
+                let content = block(lines, &mut i, "text")?;
+                if content.is_empty() {
+                    return Err("empty output block".into());
+                }
+                unique(&mut stdout, content, "stdout")?;
             }
-            "**パニック前の標準エラー：**" => unique(
-                &mut stderr_prefix,
-                block(lines, &mut i, "text")?,
-                "panic stderr",
-            )?,
+            "**標準エラー：**" => {
+                let content = block(lines, &mut i, "text")?;
+                if content.is_empty() {
+                    return Err("empty output block".into());
+                }
+                unique(&mut stderr, content, "stderr")?;
+            }
+            "**パニック前の標準エラー：**" => {
+                let content = block(lines, &mut i, "text")?;
+                if content.is_empty() {
+                    return Err("empty output block".into());
+                }
+                unique(&mut stderr_prefix, content, "panic stderr")?;
+            }
             "**入力図：**" => {
                 unique(
                     &mut diagram,
@@ -115,64 +142,30 @@ fn source(lines: &[&str]) -> Result<Source> {
                 )?;
             }
             _ => {
-                if let Some(value) = line.trim().strip_prefix("主根拠：") {
-                    let value = value.trim().trim_end_matches('。').trim();
-                    let value = value
-                        .strip_prefix("`[")
-                        .and_then(|s| s.strip_suffix("]`"))
-                        .ok_or("invalid primary rule")?;
-                    unique(&mut rule, value.to_owned(), "primary rule")?;
-                } else if line.starts_with("```") {
+                let trimmed = line.trim();
+                if trimmed.starts_with("- 主根拠：")
+                    || trimmed.starts_with("- 補助根拠：")
+                    || trimmed.starts_with("- 結果：")
+                    || trimmed.starts_with("- 結果（")
+                {
+                    return Err("metadata line must appear in header block".into());
+                } else if trimmed.starts_with("**") && trimmed.ends_with("：**") {
+                    return Err("unsupported or unlabelled fence".into());
+                } else if line == "```suz" {
+                    i -= 1;
+                    let code = block(lines, &mut i, "suz")?;
+                    if code.is_empty() {
+                        return Err("empty source".into());
+                    }
+                    unique(&mut bytes, code.into_bytes(), "source")?;
+                } else if fence(line).is_some() {
                     return Err("unsupported or unlabelled fence".into());
                 }
             }
         }
     }
-    let mut runs = runs.ok_or("missing expectation table")?;
-    for (mode, diagnostic) in diagnostics.unwrap_or_default() {
-        let run = runs
-            .iter_mut()
-            .find(|r| r.mode == mode && r.result == Outcome::CompileError)
-            .ok_or("diagnostic does not apply to a compile-error run")?;
-        unique(&mut run.diagnostic, diagnostic, "diagnostic mode")?;
-    }
-    for (mode, diagnostic) in panic_diagnostics.unwrap_or_default() {
-        if !diagnostic.rule.starts_with("rt.") {
-            return Err("expected runtime panic rule".into());
-        }
-        let run = runs
-            .iter_mut()
-            .find(|r| r.mode == mode && r.result == Outcome::Panic)
-            .ok_or("panic diagnostic does not apply to a panic run")?;
-        unique(
-            &mut run.panic_diagnostic,
-            diagnostic,
-            "panic diagnostic mode",
-        )?;
-    }
-    for (mode, warning) in warnings.unwrap_or_default() {
-        let run = runs
-            .iter_mut()
-            .find(|r| r.mode == mode)
-            .ok_or("warning does not apply to any run")?;
-        if !matches!(
-            warning.rule.as_str(),
-            "diagnostic.arithmetic"
-                | "diagnostic.constant-comparison"
-                | "diagnostic.integer-division-to-float"
-                | "arena.loop-allocation"
-        ) {
-            return Err("expected a supported warning rule".into());
-        }
-        if run.warnings.contains(&warning) {
-            return Err("duplicate warning expectation".into());
-        }
-        run.warnings.push(warning);
-    }
-    for run in &runs {
-        if !run.warnings.is_empty() && run.warnings.len() != run.warning_count {
-            return Err("warning table and warning count disagree".into());
-        }
+    if runs.is_empty() {
+        return Err("missing result line".into());
     }
     let has_exit = runs.iter().any(|r| r.result == Outcome::Exit);
     let has_panic = runs.iter().any(|r| r.result == Outcome::Panic);
@@ -201,9 +194,15 @@ fn source(lines: &[&str]) -> Result<Source> {
     {
         return Err("input diagram and source bytes disagree".into());
     }
+    let rule = rule.ok_or("missing primary rule")?;
+    let secondary_rules = secondary.unwrap_or_default();
+    if secondary_rules.contains(&rule) {
+        return Err("secondary rule duplicates primary rule".into());
+    }
     Ok(Source {
         bytes,
-        rule: rule.ok_or("missing primary rule")?,
+        rule,
+        secondary_rules,
         runs,
     })
 }
@@ -259,7 +258,8 @@ pub fn extract(markdown: &str) -> Result<BTreeMap<String, Source>> {
                 current = (level == 3).then_some(title);
                 continue;
             }
-            if current.is_some() && line.trim().starts_with("主根拠：") {
+            let trimmed = line.trim();
+            if current.is_some() && trimmed.starts_with("- 主根拠：") {
                 has_rule = true;
             }
         }

@@ -19,13 +19,34 @@ pub(super) fn contains(ty: Type, scope: &Scope) -> bool {
 
 fn contains_in(ty: Type, structs: &super::type_parameters::structs::Structs) -> bool {
     match ty {
-        Type::Pointer { .. } => true,
+        Type::Pointer { .. } | Type::ArrayRef { mutable: true, .. } => true,
         Type::Struct(id) => structs
             .get(id)
             .fields
             .iter()
             .any(|f| contains_in(f.ty, structs)),
         _ => false,
+    }
+}
+
+// textとCのバイト列は、Suzから読み書きできる参照先の型を持たない。
+// 寿命グラフでは葉の実体として扱い、言語上のpointeeやポインタ禁止規則は変えない。
+fn reference_target(ty: Type) -> Option<Type> {
+    match ty {
+        Type::ArrayRef { id, .. } => Some(Type::Array(id)),
+        Type::Text | Type::CPointer => Some(Type::Void),
+        _ => ty.pointee(),
+    }
+}
+
+fn contains_references(ty: Type, structs: &super::type_parameters::structs::Structs) -> bool {
+    match ty {
+        Type::Struct(id) => structs
+            .get(id)
+            .fields
+            .iter()
+            .any(|field| contains_references(field.ty, structs)),
+        _ => reference_target(ty).is_some(),
     }
 }
 
@@ -36,7 +57,9 @@ pub(super) fn callable_type(ty: Type, structs: &super::type_parameters::structs:
     while let Some(ty) = pending.pop() {
         match ty {
             Type::Function(_) | Type::StaticFunction(_) => return true,
-            Type::Array(id) => pending.push(structs.arrays.borrow().get(id).element),
+            Type::Array(id) | Type::ArrayRef { id, .. } => {
+                pending.push(structs.arrays.borrow().get(id).element)
+            }
             Type::Pointer { .. } => pending.push(ty.pointee().unwrap()),
             Type::Struct(id) if seen.insert(id) => {
                 pending.extend(structs.get(id).fields.iter().map(|f| f.ty))
@@ -49,18 +72,24 @@ pub(super) fn callable_type(ty: Type, structs: &super::type_parameters::structs:
 pub(super) fn observe_type(ty: Type, scope: &Scope) {
     if !matches!(
         ty,
-        Type::Pointer { .. } | Type::Struct(_) | Type::Function(_) | Type::StaticFunction(_)
+        Type::Pointer { .. }
+            | Type::ArrayRef { .. }
+            | Type::Text
+            | Type::CPointer
+            | Type::Struct(_)
+            | Type::Function(_)
+            | Type::StaticFunction(_)
     ) {
         return;
     }
-    if !scope.program_pointers_used.get() && contains(ty, scope) {
-        scope.program_pointers_used.set(true);
+    if !scope.program_references_used.get() && contains_references(ty, &scope.structs) {
+        scope.program_references_used.set(true);
     }
     if !scope.callables_used.get() && callable_type(ty, &scope.structs) {
         scope.callables_used.set(true);
         scope.lifetime_used.set(true);
     }
-    if !scope.lifetime_used.get() && contains(ty, scope) {
+    if !scope.lifetime_used.get() && contains_references(ty, &scope.structs) {
         scope.lifetime_used.set(true);
     }
 }
@@ -69,12 +98,6 @@ pub(super) fn deref(
     value: CheckedExpression,
     location: Location,
 ) -> Result<CheckedExpression, Diagnostic> {
-    let Some(ty) = value.ty.pointee() else {
-        return Err(location.error(
-            ErrorKind::InvalidSource,
-            crate::diagnostic!("arena.ptr-operations", "dereference requires ptr"),
-        ));
-    };
     if value.ty.array_id().is_some() {
         return Err(location.error(
             ErrorKind::InvalidSource,
@@ -84,12 +107,18 @@ pub(super) fn deref(
             ),
         ));
     }
-    if !value.ty.is_nonnull() {
+    let Some(ty) = value.ty.pointee() else {
+        return Err(location.error(
+            ErrorKind::InvalidSource,
+            crate::diagnostic!("arena.ptr-operations", "dereference requires a pointer"),
+        ));
+    };
+    if !value.ty.is_nonnil() {
         return Err(location.error(
             ErrorKind::InvalidSource,
             crate::diagnostic!(
-                "arena.null-deref",
-                "use let before dereferencing a possibly null pointer"
+                "arena.nil-deref",
+                "use let before dereferencing a possibly nil pointer"
             ),
         ));
     }
@@ -105,22 +134,25 @@ pub(super) fn expression(
     scope: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
     match &expr.kind {
-        ExpressionKind::Null => {
-            let Some(ty @ Type::Pointer { .. }) = expected else {
+        ExpressionKind::Nil => {
+            let Some(ty) = expected.filter(|ty| ty.is_reference()) else {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
-                    crate::diagnostic!("arena.null", "null requires an expected ptr? type"),
+                    crate::diagnostic!(
+                        "arena.nil",
+                        "nil requires an expected nilable reference type"
+                    ),
                 ));
             };
-            if !ty.is_nullable() {
+            if !ty.is_nilable() {
                 return Err(expr.location.error(
                     ErrorKind::InvalidSource,
-                    crate::diagnostic!("arena.null", "null requires ptr?"),
+                    crate::diagnostic!("arena.nil", "nil requires a nilable reference type"),
                 ));
             }
             Ok(CheckedExpression {
                 ty,
-                value: Value::Null,
+                value: Value::Nil,
             })
         }
         ExpressionKind::New(inner) => {
@@ -132,6 +164,17 @@ pub(super) fn expression(
                         "new requires a lexical arena in this function"
                     ),
                 ));
+            }
+            if let ExpressionKind::ArrayInit { readonly, .. } = &inner.kind {
+                let array_type = expected.and_then(|ty| ty.array_id().map(Type::Array));
+                let value = super::arrays::initializer(inner, array_type, scope)?;
+                return Ok(CheckedExpression {
+                    ty: value.ty.array_reference(*readonly),
+                    value: Value::New {
+                        value: Box::new(value),
+                        location: expr.location,
+                    },
+                });
             }
             let value = expression::coerced(inner, expected.and_then(Type::pointee), scope)?;
             if value.ty == Type::Void || matches!(value.ty, Type::Function(_)) {
@@ -192,22 +235,23 @@ pub(super) fn statement(
                 ));
             }
             let value = expression::expression(value, None, context.bindings)?;
-            if value.ty.pointee().is_none() {
+            if !value.ty.is_reference() {
                 return Err(location.error(
                     ErrorKind::InvalidSource,
-                    crate::diagnostic!("arena.let", "let requires ptr"),
+                    crate::diagnostic!("arena.let", "let requires a pointer or array reference"),
                 ));
             }
             let id = *context.next_id;
             *context.next_id += 1;
-            let nonnull = value.ty.is_nonnull();
-            let ty = value.ty.with_nullable(false);
+            let nonnil = value.ty.is_nonnil();
+            let ty = value.ty.with_nilable(false);
             context.bindings.locals.insert(
                 name.clone(),
                 Binding::local(id, ty, false, false, *location),
             );
             let dimensions = super::arrays::bounds::shape(&value, context.bindings);
             super::arrays::bounds::register(id, ty, false, dimensions, context.bindings);
+            let after_value = context.bindings.array_bounds.facts.borrow().clone();
             let body = statements::block_with_bindings(
                 body,
                 context.bindings,
@@ -215,12 +259,22 @@ pub(super) fn statement(
                 context.loop_depth,
                 vec![name.clone()],
             )?;
+            let mut exits = Vec::new();
+            if !super::arrays::bounds::block_exits(&body) {
+                exits.push(context.bindings.array_bounds.facts.borrow().clone());
+            }
+            *context.bindings.array_bounds.facts.borrow_mut() = after_value;
             let otherwise = statements::block(
                 otherwise,
                 context.bindings,
                 context.next_id,
                 context.loop_depth,
             )?;
+            if !nonnil && !super::arrays::bounds::block_exits(&otherwise) {
+                exits.push(context.bindings.array_bounds.facts.borrow().clone());
+            }
+            *context.bindings.array_bounds.facts.borrow_mut() =
+                super::arrays::facts::Facts::join_all(&exits);
             context.output.push(CheckedStatement::Block(vec![
                 CheckedStatement::Binding {
                     location: *location,
@@ -229,14 +283,14 @@ pub(super) fn statement(
                     ty,
                     initializer: Box::new(value),
                 },
-                if nonnull {
+                if nonnil {
                     CheckedStatement::Block(body)
                 } else {
                     CheckedStatement::If {
                         branches: vec![(
                             CheckedExpression {
                                 ty: Type::Bool,
-                                value: Value::NonNull(Box::new(CheckedExpression {
+                                value: Value::NonNil(Box::new(CheckedExpression {
                                     ty,
                                     value: Value::Local(id),
                                 })),
@@ -303,48 +357,81 @@ pub(super) fn named_store(
             location: *location,
         };
     }
+    let operation_location = if matches!(value.kind, ExpressionKind::TextAppend { .. }) {
+        value.location
+    } else {
+        *location
+    };
     let (operator, value) = if *compound {
-        let ExpressionKind::Binary {
-            operator, right, ..
-        } = &value.kind
-        else {
-            unreachable!()
-        };
-        (Some(*operator), right.as_ref())
+        match &value.kind {
+            ExpressionKind::Binary {
+                operator, right, ..
+            } => (
+                Some(crate::ast::AssignmentOperator::Binary(*operator)),
+                right.as_ref(),
+            ),
+            ExpressionKind::TextAppend { right, .. } => {
+                (Some(crate::ast::AssignmentOperator::Append), right.as_ref())
+            }
+            _ => unreachable!(),
+        }
     } else {
         (None, value)
     };
-    store(&target, value, operator, *location, context)
+    store(&target, value, operator, operation_location, context)
 }
 
 fn store(
     target: &Expression,
     value: &Expression,
-    operator: Option<crate::ast::BinaryOperator>,
+    operator: Option<crate::ast::AssignmentOperator>,
     location: Location,
     context: &mut StatementContext<'_>,
 ) -> Result<(), Diagnostic> {
+    if let ExpressionKind::Slice {
+        target: base,
+        start: Some(selector),
+        end: None,
+        index: true,
+        ..
+    } = &target.kind
+        && super::arrays::bulk::is_mask_expr(selector, context.bindings)
+    {
+        return super::arrays::bulk::check_mask(base, selector, value, operator, location, context);
+    }
     super::writes::array(value, target)?;
     let target = super::arrays::write_target(target, context.bindings)?;
-    fn indirect(value: &Value) -> bool {
+    fn deref_pointer(value: &Value) -> Option<Type> {
         match value {
-            Value::Deref(_) => true,
-            Value::Field { target, .. } => indirect(&target.value),
-            _ => false,
+            Value::Deref(pointer) => Some(pointer.ty),
+            Value::Field { target, .. } => deref_pointer(&target.value),
+            _ => None,
         }
     }
-    if !indirect(&target.value) {
-        return Err(location.error(
-            ErrorKind::InvalidSource,
-            crate::diagnostic!(
-                "arena.ptr-operations",
-                "pointer assignment requires a dereferenced destination"
-            ),
-        ));
+    match deref_pointer(&target.value) {
+        None => {
+            return Err(location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "arena.ptr-operations",
+                    "pointer assignment requires a dereferenced destination"
+                ),
+            ));
+        }
+        Some(ty) if ty.is_readonly_pointer() => {
+            return Err(location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "arena.ptr-operations",
+                    "cannot write through a readonly pointer"
+                ),
+            ));
+        }
+        Some(_) => {}
     }
     let id = *context.next_id;
     *context.next_id += 1;
-    // 複合代入は保存済みの代入先から一度だけ読み、通常の算術検査を使う。
+    // 複合代入と追記は、保存済みの代入先から一度だけ読んで演算する。
     let name = format!("$arena{id}");
     context.bindings.locals.insert(
         name.clone(),
@@ -353,9 +440,8 @@ fn store(
     let compound = operator.map(|operator| Expression {
         height: value.height + 2,
         location,
-        kind: ExpressionKind::Binary {
-            operator,
-            left: Box::new(Expression {
+        kind: operator.expression(
+            Expression {
                 location,
                 height: 2,
                 kind: ExpressionKind::Deref(Box::new(Expression {
@@ -363,9 +449,9 @@ fn store(
                     height: 1,
                     kind: ExpressionKind::Name(name.clone()),
                 })),
-            }),
-            right: Box::new(value.clone()),
-        },
+            },
+            value.clone(),
+        ),
     });
     let result = if let Some(compound) = &compound {
         super::operator_methods::compound(compound, target.ty, context.bindings)
@@ -376,6 +462,12 @@ fn store(
     let mut value = result?;
     let mut body = Vec::new();
     super::control::lower_return_handler(&mut value, &mut body, context.next_id, location);
+    context
+        .bindings
+        .array_bounds
+        .facts
+        .borrow_mut()
+        .forget_shared();
     context.output.push(CheckedStatement::Store {
         target: Box::new(target),
         id,

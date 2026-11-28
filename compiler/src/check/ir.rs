@@ -4,6 +4,17 @@
 
 use crate::ast::{BinaryOperator, ComparisonOperator, Location, LogicalOperator, Type};
 
+/// 配列専用の補助情報をまとめ、ほかの式・文のIRの格納サイズを増やさない。
+#[derive(Clone)]
+pub(crate) struct ArrayMetadata {
+    /// 定数式を複製しても、同じ配列のlenを識別するための寸法の由来。
+    pub origins: Vec<(Location, usize)>,
+    /// 内側からの定数の要素数。対象C環境のsizeofでもコンパイル時に検査する。
+    pub constant_counts: Vec<u64>,
+    /// 列挙子キー初期化の記述順から宣言順スロット番号への対応。通常配列・反復初期化では空。
+    pub slots: Vec<usize>,
+}
+
 /// [`crate::ast::Program`] の意味検査結果。
 /// 型・名前を解決した関数、入口の関数番号、文字列定数と診断候補を保持する。
 /// 型宣言はASTの表現を共有し、関数は必要な汎用型の具体化も含めてC生成へ渡す。
@@ -14,8 +25,11 @@ pub(crate) struct CheckedProgram {
     pub function_types: Vec<crate::ast::FunctionType>,
     /// 整数除算を含む浮動小数点演算の警告候補。
     pub division_warnings: Vec<Location>,
+    pub float_sat_nan_warnings: Vec<Location>,
     /// 反復の外へ残らず、外側のArenaへ蓄積する確保。
     pub arena_warnings: Vec<(Location, String, Vec<crate::Diagnostic>)>,
+    /// 保証済みの配列アクセスに付いた不要なorハンドラの警告候補。
+    pub array_handler_warnings: Vec<(Location, Vec<crate::Diagnostic>)>,
     /// 定数として決まる比較の位置と結果。
     pub comparison_warnings: Vec<(Location, bool)>,
     /// 実行開始時に登録する文字列定数。
@@ -48,6 +62,34 @@ pub(crate) struct CheckedFunction {
 /// [`crate::ast::Statement`] の検査結果。
 /// 束縛と参照を番号へ解決し、束縛・代入の型を確定する。
 /// 式内の失敗時returnは専用の文へ移し、C生成で制御を組み立てられるようにする。
+/// 型検査済みの `for`・`rev` 文の反復対象。
+#[derive(Clone)]
+pub(crate) enum CheckedForTarget {
+    Range {
+        start: Box<CheckedExpression>,
+        end: Box<CheckedExpression>,
+        inclusive: bool,
+    },
+    Array(Box<CheckedExpression>),
+    Text(Box<CheckedExpression>),
+    TypeRange {
+        ty: Type,
+        lo: i128,
+        hi: i128,
+    },
+}
+
+/// 型検査済みの `for`・`rev` 文。`CheckedStatement` 全体のサイズを抑えるため `Box` で保持する。
+#[derive(Clone)]
+pub(crate) struct CheckedFor {
+    pub index: Option<(usize, Type)>,
+    pub id: usize,
+    pub variable_type: Type,
+    pub target: CheckedForTarget,
+    pub reverse: bool,
+    pub body: Vec<CheckedStatement>,
+}
+
 /// メモリ効率を高めるため、大きな列挙子の式をBoxに置き、全ての文の格納サイズを抑える。
 /// 失敗時returnの式は、検査中に作ったBoxをそのまま使う。
 #[derive(Clone)]
@@ -64,6 +106,7 @@ pub(crate) enum CheckedStatement {
         body: Vec<CheckedStatement>,
         location: Location,
     },
+    ArrayBulkWrite(Box<CheckedBulkWrite>),
 
     Ignore(Box<crate::ast::Ignore>),
     Recover(CheckedExpression),
@@ -91,15 +134,7 @@ pub(crate) enum CheckedStatement {
         arms: Vec<(Option<CheckedExpression>, Vec<CheckedStatement>)>,
         pattern_warnings: Vec<Location>,
     },
-    For {
-        id: usize,
-        variable_type: Type,
-        start: Box<CheckedExpression>,
-        end: Option<Box<CheckedExpression>>,
-        inclusive: bool,
-        reverse: bool,
-        body: Vec<CheckedStatement>,
-    },
+    For(Box<CheckedFor>),
     ArithmeticReturn {
         location: Location,
         id: usize,
@@ -109,7 +144,7 @@ pub(crate) enum CheckedStatement {
     CastReturn {
         return_location: Location,
         location: Location,
-        wrap: bool,
+        kind: crate::ast::CastKind,
         id: usize,
         ty: Type,
         operand: Box<CheckedExpression>,
@@ -149,6 +184,52 @@ pub(crate) enum CheckedStatement {
         location: Location,
     },
 }
+/// 1次元配列への一括書き込みの検査済みIR。
+#[derive(Clone)]
+pub(crate) struct CheckedBulkWrite {
+    pub target: CheckedExpression,
+    pub start: Option<CheckedExpression>,
+    pub end: Option<CheckedExpression>,
+    pub slice: bool,
+    pub slice_proven: bool,
+    pub slice_location: Location,
+    /// 左から右の評価順でループ前に1回だけ評価する入力（配列参照・ブロードキャストスカラー）。
+    pub inputs: Vec<BulkInput>,
+    /// 複合代入時に書き込み先の現在要素を参照する仮ローカルID。
+    pub out_elem_id: Option<usize>,
+    /// マスク付き書き込みの要素ごとの条件。
+    pub mask: Option<CheckedMask>,
+    /// 要素ごとの書き込み値。配列入力は`elem_id`、スカラーは`local_id`の`Local`で参照する。
+    pub element_value: CheckedExpression,
+    pub location: Location,
+}
+
+/// 一括書き込みのマスク条件。要素ごとの比較と論理演算（`&`・`|`・`^`・`~`）を表す。
+#[derive(Clone)]
+pub(crate) enum CheckedMask {
+    Leaf(Box<CheckedExpression>),
+    And(Box<CheckedMask>, Box<CheckedMask>),
+    Or(Box<CheckedMask>, Box<CheckedMask>),
+    Xor(Box<CheckedMask>, Box<CheckedMask>),
+    Not(Box<CheckedMask>),
+}
+
+/// 一括書き込みのループ前に1回だけ評価する入力。
+#[derive(Clone)]
+pub(crate) enum BulkInput {
+    Array {
+        array_id: usize,
+        elem_id: usize,
+        expr: CheckedExpression,
+        length_proven: bool,
+        location: Location,
+    },
+    Scalar {
+        local_id: usize,
+        expr: CheckedExpression,
+    },
+}
+
 /// [`crate::ast::Expression`] の検査結果。
 /// 推論・検査した型と、参照先を解決した [`Value`] を対にする。
 /// 汎用検査中は型が記号的な場合もあり、C生成に渡す前に具体化する。
@@ -242,8 +323,7 @@ pub(crate) enum Value {
         values: Vec<CheckedExpression>,
         lengths: Vec<CheckedExpression>,
         repeated: bool,
-        // 定数で決まる内側からの要素数。対象C環境のsizeofでもコンパイル時に検査する。
-        constant_counts: Vec<u64>,
+        metadata: Box<ArrayMetadata>,
     },
     /// 要素の住所。添字は書き込み先の確定時に一度だけ評価する。
     ArrayElement {
@@ -260,6 +340,13 @@ pub(crate) enum Value {
         location: Location,
         handler: Option<CheckedHandler>,
     },
+    /// SoA 配列から取り出した列（葉なら通常の配列参照、入れ子構造体なら SoA 配列参照）。
+    SoaColumn {
+        target: Box<CheckedExpression>,
+        field_index: usize,
+        leaf_offset: usize,
+        leaf_count: usize,
+    },
     ArrayLength {
         target: Box<CheckedExpression>,
         dimension: usize,
@@ -274,13 +361,23 @@ pub(crate) enum Value {
         address: Box<CheckedExpression>,
         handler: Option<CheckedHandler>,
     },
+    TextAppend {
+        left: Box<CheckedExpression>,
+        right: Box<CheckedExpression>,
+        location: Location,
+    },
+    TextBuffer {
+        capacity: Option<Box<CheckedExpression>>,
+        value: Box<CheckedExpression>,
+        location: Location,
+    },
     New {
         value: Box<CheckedExpression>,
         location: Location,
     },
     Deref(Box<CheckedExpression>),
-    NonNull(Box<CheckedExpression>),
-    Null,
+    NonNil(Box<CheckedExpression>),
+    Nil,
 
     CBytes(Box<CheckedExpression>),
     CByteLen {
@@ -375,7 +472,7 @@ pub(crate) enum Value {
     CastReturn {
         return_location: Location,
         location: Location,
-        wrap: bool,
+        kind: crate::ast::CastKind,
         operand: Box<CheckedExpression>,
         return_value: Box<CheckedExpression>,
     },
@@ -383,7 +480,7 @@ pub(crate) enum Value {
     CheckedCast {
         location: Location,
         constant_struct: Option<Box<CheckedExpression>>,
-        wrap: bool,
+        kind: crate::ast::CastKind,
         operand: Box<CheckedExpression>,
         fallback: Box<CheckedExpression>,
     },
@@ -395,7 +492,10 @@ pub(crate) enum Value {
         otherwise: Box<CheckedExpression>,
     },
     Truncate(Box<CheckedExpression>),
+    SaturatingCast(Box<CheckedExpression>),
     BitNot(Box<CheckedExpression>),
+    WrapNegate(Box<CheckedExpression>),
+    SaturatingNegate(Box<CheckedExpression>),
     Binary {
         operator: BinaryOperator,
         left: Box<CheckedExpression>,
@@ -452,7 +552,7 @@ macro_rules! constant_children_visitor {
                     }
                     return handler(h, visit);
                 }
-                Self::ArrayLength { target: v, .. } | Self::Receiver { target: v, .. } | Self::New { value: v, .. } | Self::Deref(v) | Self::NonNull(v) | Self::CBytes(v) | Self::CByteLen { operand: v, .. } | Self::FunctionBorrow(v) | Self::Len(v) | Self::Cast(v) | Self::Negate(v) | Self::Truncate(v) | Self::BitNot(v)
+                Self::ArrayLength { target: v, .. } | Self::Receiver { target: v, .. } | Self::New { value: v, .. } | Self::Deref(v) | Self::NonNil(v) | Self::CBytes(v) | Self::CByteLen { operand: v, .. } | Self::FunctionBorrow(v) | Self::Len(v) | Self::Cast(v) | Self::Negate(v) | Self::Truncate(v) | Self::SaturatingCast(v) | Self::BitNot(v) | Self::WrapNegate(v) | Self::SaturatingNegate(v)
                 | Self::Not(v) | Self::TextView(v) | Self::Intern { operand: v, .. }
                 | Self::Field { target: v, .. } => visit(v),
                 // constant_structはオペランドの解析から得た具体的なキャッシュであり、ソースのオペランドではない。
@@ -470,6 +570,14 @@ macro_rules! constant_children_visitor {
                         visit(value);
                     }
                     return !methods.iter().any(Option::is_some);
+                }
+                Self::TextAppend { left, right, .. } => {
+                    visit(left); visit(right); return false;
+                }
+                Self::TextBuffer { capacity, value, .. } => {
+                    if let Some(capacity) = capacity { visit(capacity); }
+                    visit(value);
+                    return false;
                 }
                 Self::Template { parts, .. } => {
                     for part in parts {
@@ -504,6 +612,7 @@ macro_rules! constant_children_visitor {
                     visit(address);
                     return handler(h, visit);
                 }
+                Self::SoaColumn { target, .. } => visit(target),
                 Self::ArrayView { target, start, end, handler: h, .. } | Self::Slice { target, start, end, handler: h, .. } => {
                     visit(target);
                     for value in [start, end].into_iter().flatten() {
@@ -511,7 +620,7 @@ macro_rules! constant_children_visitor {
                     }
                     return handler(h, visit);
                 }
-                Self::Null | Self::CIntegerLiteral { .. } | Self::GenericNumericLiteral { .. } | Self::Integer { .. } | Self::Float(_)
+                Self::Nil | Self::CIntegerLiteral { .. } | Self::GenericNumericLiteral { .. } | Self::Integer { .. } | Self::Float(_)
                 | Self::Function { .. } | Self::Bool(_) | Self::Text { .. } => {}
                 Self::Panic { .. } | Self::HandledCall { .. } | Self::Closure(_) | Self::Local(_) | Self::Void | Self::Invoke { .. } | Self::Call { .. } | Self::Block { .. }
                 | Self::Match { .. } | Self::If { .. } | Self::CastReturn { .. } => return false,

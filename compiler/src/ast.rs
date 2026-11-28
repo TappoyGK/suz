@@ -148,6 +148,63 @@ pub(crate) struct EnumDeclaration {
     pub end: usize,
 }
 
+/// 値域制限型の識別番号、整数の基底型、宣言された最小値・最大値（両端含む）。
+/// `Type` のサイズを増やさないよう、上下限は基底型の符号付き／符号なし表現として64ビットで保持する。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct RangeType {
+    pub id: usize,
+    pub base: IntegerType,
+    min_bits: u64,
+    max_bits: u64,
+    resolved: bool,
+}
+
+impl RangeType {
+    pub fn unresolved(id: usize, base: IntegerType) -> Self {
+        Self {
+            id,
+            base,
+            min_bits: 0,
+            max_bits: 0,
+            resolved: false,
+        }
+    }
+    pub fn set_bounds(&mut self, min: i128, max: i128) {
+        if self.base.bounds().0 < 0 {
+            self.min_bits = (min as i64) as u64;
+            self.max_bits = (max as i64) as u64;
+        } else {
+            self.min_bits = min as u64;
+            self.max_bits = max as u64;
+        }
+        self.resolved = true;
+    }
+    pub fn bounds(self) -> (i128, i128) {
+        debug_assert!(self.resolved, "unresolved range type {}", self.id);
+        if self.base.bounds().0 < 0 {
+            (
+                i128::from(self.min_bits as i64),
+                i128::from(self.max_bits as i64),
+            )
+        } else {
+            (i128::from(self.min_bits), i128::from(self.max_bits))
+        }
+    }
+}
+
+/// 値域制限型の宣言。上下限の定数式と、宣言を読み飛ばすためのトークン範囲を保持する。
+#[derive(Clone)]
+pub(crate) struct RangeDeclaration {
+    pub name: String,
+    pub location: Location,
+    pub ty: RangeType,
+    pub start_expr: Expression,
+    pub end_expr: Expression,
+    pub inclusive: bool,
+    pub start: usize,
+    pub end: usize,
+}
+
 /// 汎用数値型を具体化した一つの整数型または浮動小数点型。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum ScalarType {
@@ -163,7 +220,13 @@ pub(crate) const NUMERIC_COMBINATIONS: usize = 18;
 /// Structの番号は構造体宣言、Functionの番号は共通化した関数値の型を参照する。汎用の型はC生成までに具体化する。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Type {
-    Array(usize), // ポインタの参照先専用。配列値は単独では保存しない。
+    /// 配列への参照値。`mutable=true` は `#[T]`、`false` は `.[T]`。`nilable=true` は `?` 付き。
+    ArrayRef {
+        id: usize,
+        mutable: bool,
+        nilable: bool,
+    },
+    Array(usize), // 寿命グラフ内部の配列本体専用。単独の値型としては使わない。
     Pointer {
         leaf: PointerLeaf,
         shape: PointerShape,
@@ -182,6 +245,7 @@ pub(crate) enum Type {
     StaticFunction(usize), // 保存・返却できるトップレベルの関数値。
     Function(usize),       // 呼び出しと転送だけができる仮引数。
     Enum(EnumType),
+    Range(RangeType),
     Void,
     Float(FloatType),
     Integer(IntegerType),
@@ -191,9 +255,14 @@ pub(crate) enum Type {
     Text,
 }
 
-/// ポインタの末端の値型。各段のnull許容性はPointerShapeで別に持つ。
+/// ポインタの末端の値型。各段のnil許容性はPointerShapeで別に持つ。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum PointerLeaf {
+    ArrayRef {
+        id: usize,
+        mutable: bool,
+        nilable: bool,
+    },
     Array(usize),
     CPointer,
     CInteger(CIntegerType),
@@ -209,6 +278,7 @@ pub(crate) enum PointerLeaf {
     StaticFunction(usize),
     Function(usize),
     Enum(EnumType),
+    Range(RangeType),
     Void,
     Float(FloatType),
     Integer(IntegerType),
@@ -219,9 +289,23 @@ pub(crate) enum PointerLeaf {
 }
 impl Type {
     pub fn array_id(self) -> Option<usize> {
-        match self.pointee() {
-            Some(Self::Array(id)) => Some(id),
+        match self {
+            Self::ArrayRef { id, .. } => Some(id),
             _ => None,
+        }
+    }
+    pub fn is_readonly_array(self) -> bool {
+        matches!(self, Self::ArrayRef { mutable: false, .. })
+    }
+    /// 部分配列でも、元の参照の書き込み可否を引き継ぐ。
+    pub fn array_reference(self, readonly: bool) -> Self {
+        let Self::Array(id) = self else {
+            unreachable!("array storage type")
+        };
+        Self::ArrayRef {
+            id,
+            mutable: !readonly,
+            nilable: false,
         }
     }
     pub fn pointer(self) -> Self {
@@ -232,6 +316,15 @@ impl Type {
                     shape: shape.push(),
                 };
             }
+            Self::ArrayRef {
+                id,
+                mutable,
+                nilable,
+            } => PointerLeaf::ArrayRef {
+                id,
+                mutable,
+                nilable,
+            },
             Self::Array(id) => PointerLeaf::Array(id),
             Self::CPointer => PointerLeaf::CPointer,
             Self::CInteger(v) => PointerLeaf::CInteger(v),
@@ -247,6 +340,7 @@ impl Type {
             Self::StaticFunction(v) => PointerLeaf::StaticFunction(v),
             Self::Function(v) => PointerLeaf::Function(v),
             Self::Enum(v) => PointerLeaf::Enum(v),
+            Self::Range(v) => PointerLeaf::Range(v),
             Self::Void => PointerLeaf::Void,
             Self::Float(v) => PointerLeaf::Float(v),
             Self::Integer(v) => PointerLeaf::Integer(v),
@@ -260,24 +354,74 @@ impl Type {
             shape: PointerShape::new(),
         }
     }
-    pub fn is_nullable(self) -> bool {
-        matches!(self, Self::Pointer { shape, .. } if shape.is_nullable())
+    pub fn is_reference(self) -> bool {
+        matches!(self, Self::Pointer { .. } | Self::ArrayRef { .. })
     }
-    pub fn is_nonnull(self) -> bool {
-        matches!(self, Self::Pointer { .. }) && !self.is_nullable()
+    pub fn is_nilable(self) -> bool {
+        matches!(self, Self::Pointer { shape, .. } if shape.is_nilable())
+            || matches!(self, Self::ArrayRef { nilable: true, .. })
     }
-    pub fn with_nullable(self, enabled: bool) -> Self {
+    pub fn is_readonly_pointer(self) -> bool {
+        matches!(self, Self::Pointer { shape, .. } if shape.is_readonly())
+    }
+    pub fn is_nonnil(self) -> bool {
+        self.is_reference() && !self.is_nilable()
+    }
+    pub fn with_nilable(self, enabled: bool) -> Self {
         match self {
             Self::Pointer { leaf, shape } => Self::Pointer {
                 leaf,
-                shape: shape.with_nullable(enabled),
+                shape: shape.with_nilable(enabled),
+            },
+            Self::ArrayRef { id, mutable, .. } => Self::ArrayRef {
+                id,
+                mutable,
+                nilable: enabled,
             },
             _ => self,
         }
     }
-    /// 外側のnull許容性だけを広げる。参照先の型は変更しない。
+    pub fn with_readonly(self, enabled: bool) -> Self {
+        match self {
+            Self::Pointer { leaf, shape } => Self::Pointer {
+                leaf,
+                shape: shape.with_readonly(enabled),
+            },
+            _ => self,
+        }
+    }
+    /// 最外側のnil許容性・読み取り専用性を広げる。要素型と実体は保つ。
     pub fn lifts_to(self, to: Self) -> bool {
-        self.is_nonnull() && to.is_nullable() && self.pointee() == to.pointee()
+        match (self, to) {
+            (Self::Pointer { .. }, Self::Pointer { .. }) => {
+                let from_ro = self.is_readonly_pointer();
+                let to_ro = to.is_readonly_pointer();
+                let from_nil = self.is_nilable();
+                let to_nil = to.is_nilable();
+                self.pointee() == to.pointee()
+                    && (!from_ro || to_ro)
+                    && (!from_nil || to_nil)
+                    && (from_ro != to_ro || from_nil != to_nil)
+            }
+            (
+                Self::ArrayRef {
+                    id: from_id,
+                    mutable: from_mut,
+                    nilable: from_nil,
+                },
+                Self::ArrayRef {
+                    id: to_id,
+                    mutable: to_mut,
+                    nilable: to_nil,
+                },
+            ) => {
+                from_id == to_id
+                    && (from_mut || !to_mut)
+                    && (!from_nil || to_nil)
+                    && (from_mut != to_mut || from_nil != to_nil)
+            }
+            _ => false,
+        }
     }
     pub fn pointee(self) -> Option<Self> {
         let Self::Pointer { leaf, shape } = self else {
@@ -290,6 +434,15 @@ impl Type {
             });
         }
         Some(match leaf {
+            PointerLeaf::ArrayRef {
+                id,
+                mutable,
+                nilable,
+            } => Self::ArrayRef {
+                id,
+                mutable,
+                nilable,
+            },
             PointerLeaf::Array(id) => Self::Array(id),
             PointerLeaf::CPointer => Self::CPointer,
             PointerLeaf::CInteger(v) => Self::CInteger(v),
@@ -305,6 +458,7 @@ impl Type {
             PointerLeaf::StaticFunction(v) => Self::StaticFunction(v),
             PointerLeaf::Function(v) => Self::Function(v),
             PointerLeaf::Enum(v) => Self::Enum(v),
+            PointerLeaf::Range(v) => Self::Range(v),
             PointerLeaf::Void => Self::Void,
             PointerLeaf::Float(v) => Self::Float(v),
             PointerLeaf::Integer(v) => Self::Integer(v),
@@ -333,7 +487,7 @@ impl Type {
     /// 取りうる結果がすべて整数である記号的な型も含む。
     pub fn is_integer(self) -> bool {
         match self {
-            Self::Integer(_) | Self::GenericInt => true,
+            Self::Integer(_) | Self::Range(_) | Self::GenericInt => true,
             Self::Numeric(types) => types
                 .iter()
                 .flatten()
@@ -363,6 +517,7 @@ impl Type {
         match self {
             Self::Char => Some((0, 0x10ffff)),
             Self::Integer(ty) => Some(ty.bounds()),
+            Self::Range(ty) => Some(ty.bounds()),
             Self::Enum(ty) => Some((0, ty.count as i128 - 1)),
             _ => None,
         }
@@ -371,6 +526,7 @@ impl Type {
         match self {
             Self::Char => Some(IntegerType::U32),
             Self::Integer(ty) => Some(ty),
+            Self::Range(ty) => Some(ty.base),
             Self::Enum(ty) => Some(ty.base),
             _ => None,
         }
@@ -402,13 +558,32 @@ impl Type {
     }
     pub fn name(self) -> &'static str {
         match self {
-            Self::Pointer { .. } => {
-                if self.is_nullable() {
-                    "ptr?"
-                } else {
-                    "ptr"
-                }
-            }
+            Self::Pointer { .. } => match (self.is_readonly_pointer(), self.is_nilable()) {
+                (false, false) => "mut",
+                (false, true) => "mut?",
+                (true, false) => "ref",
+                (true, true) => "ref?",
+            },
+            Self::ArrayRef {
+                mutable: false,
+                nilable: false,
+                ..
+            } => "readonly array",
+            Self::ArrayRef {
+                mutable: false,
+                nilable: true,
+                ..
+            } => "nilable readonly array",
+            Self::ArrayRef {
+                mutable: true,
+                nilable: false,
+                ..
+            } => "array",
+            Self::ArrayRef {
+                mutable: true,
+                nilable: true,
+                ..
+            } => "nilable array",
             Self::Array(_) => "array",
             Self::CPointer => "*const void",
             Self::CInteger(ty) => ty.name(),
@@ -434,15 +609,19 @@ impl Type {
             Self::Bool => "bool",
             Self::Void => "void",
             Self::Enum(_) => "enum",
+            Self::Range(_) => "range",
             Self::Struct(_) => "struct",
             Self::StaticFunction(_) | Self::Function(_) => "function",
         }
     }
     pub fn c_name(self) -> String {
         match self {
-            Self::Pointer { .. } if self.array_id().is_some() => {
-                format!("suz_array_{}", self.array_id().unwrap())
-            }
+            Self::ArrayRef {
+                id, mutable: true, ..
+            } => format!("suz_array_{id}"),
+            Self::ArrayRef {
+                id, mutable: false, ..
+            } => format!("suz_readonly_array_{id}"),
             Self::Array(_) => unreachable!("array storage has no standalone C value type"),
             Self::Pointer { .. } => format!("typeof({} *)", self.pointee().unwrap().c_name()),
             Self::CPointer => "suz_ffi_bytes".into(),
@@ -468,6 +647,17 @@ impl Type {
             Self::Bool => "_Bool".into(),
             Self::Void => "void".into(),
             Self::Enum(ty) => ty.base.c_name().into(),
+            Self::Range(ty) => ty.base.c_name().into(),
+        }
+    }
+    pub fn patch_ranges(&mut self, ranges: &[RangeDeclaration]) {
+        match self {
+            Self::Range(ty) => *ty = ranges[ty.id].ty,
+            Self::Pointer {
+                leaf: PointerLeaf::Range(ty),
+                ..
+            } => *ty = ranges[ty.id].ty,
+            _ => {}
         }
     }
 }
@@ -511,6 +701,7 @@ pub(crate) struct FieldInitializer {
 }
 
 /// トップレベルのfixの宣言。省略可能な型注釈と、まだ評価していない初期化式。
+#[derive(Clone)]
 pub(crate) struct TopLevelBinding {
     pub name: String,
     pub location: Location,
@@ -550,6 +741,7 @@ pub(crate) struct FnShapeDeclaration {
 
 /// 構文解析の結果全体。型宣言・トップレベル束縛・関数とallowの範囲を保持する。
 /// [`crate::check`] が検査して [`crate::check::ir::CheckedProgram`] へ変換する。
+#[derive(Clone)]
 pub(crate) struct Program {
     pub arrays: arrays::Types,
     pub need_groups: Vec<generics::NeedGroup>,
@@ -560,8 +752,345 @@ pub(crate) struct Program {
     pub allows: Vec<crate::warnings::AllowScope>,
     pub structs: Vec<StructDeclaration>,
     pub enums: Vec<EnumDeclaration>,
+    pub ranges: Vec<RangeDeclaration>,
     pub bindings: Vec<TopLevelBinding>,
     pub functions: Vec<Function>,
+}
+
+impl Program {
+    /// 定数評価で確定した値域制限型の上下限を、AST内のすべての型表現へ反映する。
+    pub fn patch_ranges(&mut self, ranges: &[RangeDeclaration]) {
+        self.ranges = ranges.to_vec();
+        self.arrays.patch_ranges(ranges);
+        for app in &mut self.applications {
+            for arg in &mut app.arguments {
+                arg.patch_ranges(ranges);
+            }
+        }
+        for ft in &mut self.function_types {
+            for p in &mut ft.parameters {
+                p.patch_ranges(ranges);
+            }
+            ft.result.patch_ranges(ranges);
+        }
+        for s in &mut self.structs {
+            for f in &mut s.fields {
+                f.ty.patch_ranges(ranges);
+            }
+        }
+        for b in &mut self.bindings {
+            if let Some(ty) = &mut b.annotation {
+                ty.patch_ranges(ranges);
+            }
+            patch_expr(&mut b.initializer, ranges);
+        }
+        for f in &mut self.functions {
+            if let Some(m) = &mut f.method {
+                m.owner.patch_ranges(ranges);
+            }
+            for p in &mut f.parameters {
+                p.ty.patch_ranges(ranges);
+            }
+            f.result.patch_ranges(ranges);
+            for c in &mut f.contracts {
+                patch_expr(&mut c.condition, ranges);
+            }
+            patch_statements(&mut f.statements, ranges);
+        }
+        for e in &mut self.externs {
+            for p in &mut e.parameters {
+                p.ty.patch_ranges(ranges);
+            }
+            e.result.patch_ranges(ranges);
+        }
+    }
+}
+
+fn patch_statements(statements: &mut [Statement], ranges: &[RangeDeclaration]) {
+    for stmt in statements {
+        match stmt {
+            Statement::Arena { body, .. }
+            | Statement::Block(body)
+            | Statement::Trusted(body)
+            | Statement::Objection(body) => {
+                patch_statements(body, ranges);
+            }
+            Statement::Let {
+                value,
+                body,
+                otherwise,
+                ..
+            } => {
+                patch_expr(value, ranges);
+                patch_statements(body, ranges);
+                patch_statements(otherwise, ranges);
+            }
+            Statement::Store { target, value, .. } => {
+                patch_expr(target, ranges);
+                patch_expr(value, ranges);
+            }
+            Statement::ArrayBulkWrite(write) => {
+                patch_expr(&mut write.target, ranges);
+                if let BulkSelector::Slice { start, end } = &mut write.selector {
+                    if let Some(s) = start {
+                        patch_expr(s, ranges);
+                    }
+                    if let Some(e) = end {
+                        patch_expr(e, ranges);
+                    }
+                }
+                patch_expr(&mut write.value, ranges);
+            }
+            Statement::Log { parts, .. } => {
+                for part in parts {
+                    if let TemplatePart::Value(v) = part {
+                        patch_expr(v, ranges);
+                    }
+                }
+            }
+            Statement::Expression(expr)
+            | Statement::Return(expr)
+            | Statement::Fail(expr)
+            | Statement::Recover(expr) => patch_expr(expr, ranges),
+            Statement::Match { target, arms, .. } => {
+                patch_expr(target, ranges);
+                for arm in arms {
+                    if let Some(p) = &mut arm.pattern {
+                        patch_expr(p, ranges);
+                    }
+                    patch_statements(&mut arm.body, ranges);
+                }
+            }
+            Statement::For(for_stmt) => {
+                match &mut for_stmt.target {
+                    ForTarget::Range { start, end, .. } => {
+                        patch_expr(start, ranges);
+                        patch_expr(end, ranges);
+                    }
+                    ForTarget::Expression(expr) => patch_expr(expr, ranges),
+                    ForTarget::Type { .. } => {}
+                }
+                patch_statements(&mut for_stmt.body, ranges);
+            }
+            Statement::Loop { condition, body } => {
+                if let Some(c) = condition {
+                    patch_expr(c, ranges);
+                }
+                patch_statements(body, ranges);
+            }
+            Statement::If {
+                branches,
+                otherwise,
+            } => {
+                for (cond, body) in branches {
+                    patch_expr(cond, ranges);
+                    patch_statements(body, ranges);
+                }
+                if let Some(body) = otherwise {
+                    patch_statements(body, ranges);
+                }
+            }
+            Statement::Binding {
+                annotation,
+                initializer,
+                ..
+            } => {
+                if let Some(ty) = annotation {
+                    ty.patch_ranges(ranges);
+                }
+                patch_expr(initializer, ranges);
+            }
+            Statement::Assign { value, .. } => patch_expr(value, ranges),
+            Statement::Break(_) | Statement::Continue(_) | Statement::Ignore(_) => {}
+        }
+    }
+}
+
+fn patch_handler(handler: &mut Option<FailureHandler>, ranges: &[RangeDeclaration]) {
+    let Some(handler) = handler else {
+        return;
+    };
+    match handler {
+        FailureHandler::Value(expr) => patch_expr(expr, ranges),
+        FailureHandler::Return { value, .. } => patch_expr(value, ranges),
+        FailureHandler::Fail { value, .. } => {
+            if let Some(v) = value {
+                patch_expr(v, ranges);
+            }
+        }
+        FailureHandler::Errors(err) => {
+            for arm in &mut err.arms {
+                match &mut arm.body {
+                    ErrorArmBody::Value(v) => patch_expr(v, ranges),
+                    ErrorArmBody::Statements { body, .. } => patch_statements(body, ranges),
+                }
+            }
+        }
+        FailureHandler::Ignore(_) => {}
+    }
+}
+
+fn patch_expr(expr: &mut Expression, ranges: &[RangeDeclaration]) {
+    match &mut expr.kind {
+        ExpressionKind::ArrayInit {
+            values,
+            lengths,
+            keys,
+            ..
+        } => {
+            for v in values.iter_mut().chain(lengths.iter_mut()) {
+                patch_expr(v, ranges);
+            }
+            if let Some(keys) = keys {
+                for k in keys {
+                    patch_expr(k, ranges);
+                }
+            }
+        }
+        ExpressionKind::TextBuffer { capacity, value } => {
+            if let Some(c) = capacity {
+                patch_expr(c, ranges);
+            }
+            patch_expr(value, ranges);
+        }
+        ExpressionKind::New(inner)
+        | ExpressionKind::Deref(inner)
+        | ExpressionKind::Field { target: inner, .. }
+        | ExpressionKind::Receiver { target: inner, .. }
+        | ExpressionKind::CBytes(inner)
+        | ExpressionKind::CByteLen(inner)
+        | ExpressionKind::Len(inner)
+        | ExpressionKind::Negate(inner)
+        | ExpressionKind::BitNot(inner)
+        | ExpressionKind::WrapNegate(inner)
+        | ExpressionKind::SaturatingNegate(inner)
+        | ExpressionKind::Not(inner)
+        | ExpressionKind::Group(inner) => patch_expr(inner, ranges),
+        ExpressionKind::Closure(closure) => {
+            for p in &mut closure.function.parameters {
+                p.ty.patch_ranges(ranges);
+            }
+            closure.function.result.patch_ranges(ranges);
+            patch_statements(&mut closure.function.statements, ranges);
+        }
+        ExpressionKind::FunctionValue { type_arguments, .. } => {
+            for t in type_arguments {
+                t.patch_ranges(ranges);
+            }
+        }
+        ExpressionKind::Invoke { target, arguments }
+        | ExpressionKind::MethodCall {
+            target, arguments, ..
+        } => {
+            patch_expr(target, ranges);
+            for a in arguments {
+                patch_expr(a, ranges);
+            }
+        }
+        ExpressionKind::Slice {
+            target,
+            start,
+            end,
+            fallback,
+            ..
+        } => {
+            patch_expr(target, ranges);
+            if let Some(s) = start {
+                patch_expr(s, ranges);
+            }
+            if let Some(e) = end {
+                patch_expr(e, ranges);
+            }
+            patch_handler(fallback, ranges);
+        }
+        ExpressionKind::Template(parts) | ExpressionKind::Panic(parts) => {
+            for part in parts {
+                if let TemplatePart::Value(v) = part {
+                    patch_expr(v, ranges);
+                }
+            }
+        }
+        ExpressionKind::Struct { ty, fields } => {
+            ty.patch_ranges(ranges);
+            for f in fields {
+                patch_expr(&mut f.value, ranges);
+            }
+        }
+        ExpressionKind::With { target, fields } => {
+            patch_expr(target, ranges);
+            for f in fields {
+                patch_expr(&mut f.value, ranges);
+            }
+        }
+        ExpressionKind::Call {
+            type_arguments,
+            arguments,
+            ..
+        } => {
+            for t in type_arguments {
+                t.patch_ranges(ranges);
+            }
+            for a in arguments {
+                patch_expr(a, ranges);
+            }
+        }
+        ExpressionKind::Block { statements, value } => {
+            patch_statements(statements, ranges);
+            patch_expr(value, ranges);
+        }
+        ExpressionKind::Match { target, arms } => {
+            patch_expr(target, ranges);
+            for arm in arms {
+                if let Some(p) = &mut arm.pattern {
+                    patch_expr(p, ranges);
+                }
+                patch_expr(&mut arm.body, ranges);
+            }
+        }
+        ExpressionKind::ArithmeticHandler { operand, fallback } => {
+            patch_expr(operand, ranges);
+            patch_handler(fallback, ranges);
+        }
+        ExpressionKind::Cast {
+            operand,
+            target,
+            fallback,
+            ..
+        } => {
+            patch_expr(operand, ranges);
+            target.patch_ranges(ranges);
+            patch_handler(fallback, ranges);
+        }
+        ExpressionKind::If {
+            branches,
+            otherwise,
+        } => {
+            for (c, v) in branches {
+                patch_expr(c, ranges);
+                patch_expr(v, ranges);
+            }
+            patch_expr(otherwise, ranges);
+        }
+        ExpressionKind::Binary { left, right, .. }
+        | ExpressionKind::Logical { left, right, .. }
+        | ExpressionKind::TextAppend { left, right } => {
+            patch_expr(left, ranges);
+            patch_expr(right, ranges);
+        }
+        ExpressionKind::Comparison { operands, .. } => {
+            for o in operands {
+                patch_expr(o, ranges);
+            }
+        }
+        ExpressionKind::Nil
+        | ExpressionKind::Char(_)
+        | ExpressionKind::Variant { .. }
+        | ExpressionKind::Void
+        | ExpressionKind::Float(_)
+        | ExpressionKind::Integer { .. }
+        | ExpressionKind::Bool(_)
+        | ExpressionKind::Name(_) => {}
+    }
 }
 
 /// 関数の仮引数。ソース上の名前・型注釈・位置を保持する。
@@ -573,11 +1102,26 @@ pub(crate) struct Parameter {
     pub location: Location,
 }
 
+/// 関数の契約（事前条件 `@expects` / 事後条件 `@ensures`）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ContractKind {
+    Expects,
+    Ensures,
+}
+
+#[derive(Clone)]
+pub(crate) struct Contract {
+    pub kind: ContractKind,
+    pub condition: Expression,
+    pub location: Location,
+}
+
 /// 関数の構文。仮引数・戻り値型・本体の文と、宣言の開始・終了位置を保持する。
 #[derive(Clone)]
 pub(crate) struct Function {
     pub type_parameters: Vec<generics::TypeParameter>,
     pub needs: Vec<generics::Need>,
+    pub contracts: Vec<Contract>,
     pub method: Option<Method>,
     pub keyword_location: Location,
     pub name: String,
@@ -626,6 +1170,33 @@ pub(crate) enum LogLevel {
     Panic,
 }
 
+/// `for`・`rev` 文の反復対象。
+#[derive(Clone)]
+pub(crate) enum ForTarget {
+    Range {
+        start: Expression,
+        // メモリ効率を高めるため、終了式をBoxに置き、Forを含まない文の格納サイズも抑える。
+        end: Box<Expression>,
+        inclusive: bool,
+    },
+    Expression(Expression),
+    Type {
+        name: String,
+        location: Location,
+    },
+}
+
+/// `for`・`rev` 文。`Statement` 全体のサイズを抑えるため `Box` で保持する。
+#[derive(Clone)]
+pub(crate) struct ForStatement {
+    pub index: Option<(String, Location)>,
+    pub name: String,
+    pub location: Location,
+    pub target: ForTarget,
+    pub reverse: bool,
+    pub body: Vec<Statement>,
+}
+
 /// 構文解析済みの文。束縛やフィールドの参照はまだソース上の名前で保持する。
 #[derive(Clone)]
 pub(crate) enum Statement {
@@ -644,9 +1215,10 @@ pub(crate) enum Statement {
     Store {
         target: Box<Expression>,
         value: Box<Expression>,
-        operator: Option<BinaryOperator>,
+        operator: Option<AssignmentOperator>,
         location: Location,
     },
+    ArrayBulkWrite(Box<ArrayBulkWrite>),
 
     Trusted(Vec<Statement>),
     Objection(Vec<Statement>),
@@ -661,16 +1233,7 @@ pub(crate) enum Statement {
         arms: Vec<MatchArm>,
         location: Location,
     },
-    For {
-        name: String,
-        location: Location,
-        start: Expression,
-        // メモリ効率を高めるため、終了式をBoxに置き、Forを含まない文の格納サイズも抑える。
-        end: Option<Box<Expression>>,
-        inclusive: bool,
-        reverse: bool,
-        body: Vec<Statement>,
-    },
+    For(Box<ForStatement>),
     Loop {
         condition: Option<Expression>,
         body: Vec<Statement>,
@@ -683,7 +1246,6 @@ pub(crate) enum Statement {
     },
     Block(Vec<Statement>),
     Binding {
-        pointer: bool,
         mutable: bool,
         name: String,
         location: Location,
@@ -703,6 +1265,48 @@ pub(crate) enum Statement {
     Fail(Expression),
     Recover(Expression),
     Ignore(Box<Ignore>),
+}
+
+/// 1次元配列への一括書き込み文（`out#[] = 式`、`out#[s:e] = 式`、複合代入）。
+#[derive(Clone)]
+pub(crate) struct ArrayBulkWrite {
+    pub target: Expression,
+    pub selector: BulkSelector,
+    pub value: Expression,
+    pub operator: Option<AssignmentOperator>,
+    pub location: Location,
+}
+
+/// 配列一括書き込みの対象範囲指定。
+#[derive(Clone)]
+pub(crate) enum BulkSelector {
+    All,
+    Slice {
+        start: Option<Box<Expression>>,
+        end: Option<Box<Expression>>,
+    },
+}
+
+/// 代入文の読み出しと右辺を、算術またはtext追記として組み立てる。
+#[derive(Clone, Copy)]
+pub(crate) enum AssignmentOperator {
+    Binary(BinaryOperator),
+    Append,
+}
+impl AssignmentOperator {
+    pub fn expression(self, left: Expression, right: Expression) -> ExpressionKind {
+        match self {
+            Self::Binary(operator) => ExpressionKind::Binary {
+                operator,
+                left: Box::new(left),
+                right: Box::new(right),
+            },
+            Self::Append => ExpressionKind::TextAppend {
+                left: Box::new(left),
+                right: Box::new(right),
+            },
+        }
+    }
 }
 
 /// 構文解析済みの式とソース位置。型は意味検査で決定する。
@@ -739,7 +1343,7 @@ impl LogicalOperator {
 }
 
 /// 等値・順序比較の演算子。比較の連鎖では各境界の演算子として保持する。
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub(crate) enum ComparisonOperator {
     Equal,
     NotEqual,
@@ -784,25 +1388,43 @@ impl ComparisonOperator {
 }
 
 /// 算術・ラップ・シフト・ビット演算の二項演算子。構文の優先順位もここで定める。
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub(crate) enum BinaryOperator {
     Add,
     Subtract,
     Multiply,
     Divide,
     Remainder,
+    EuclideanRemainder,
     ShiftLeft,
     ShiftRight,
+    LogicalShiftRight,
     WrapAdd,
     WrapSubtract,
     WrapMultiply,
+    WrapShiftLeft,
+    WrapShiftRight,
+    WrapLogicalShiftRight,
+    SaturatingAdd,
+    SaturatingSubtract,
+    SaturatingMultiply,
+    SaturatingShiftLeft,
     Or,
     Xor,
     And,
 }
 impl BinaryOperator {
     pub fn is_shift(self) -> bool {
-        matches!(self, Self::ShiftLeft | Self::ShiftRight)
+        matches!(
+            self,
+            Self::ShiftLeft
+                | Self::ShiftRight
+                | Self::LogicalShiftRight
+                | Self::WrapShiftLeft
+                | Self::WrapShiftRight
+                | Self::WrapLogicalShiftRight
+                | Self::SaturatingShiftLeft
+        )
     }
     pub fn is_arithmetic(self) -> bool {
         matches!(
@@ -812,8 +1434,11 @@ impl BinaryOperator {
                 | Self::Multiply
                 | Self::Divide
                 | Self::Remainder
+                | Self::EuclideanRemainder
                 | Self::ShiftLeft
                 | Self::ShiftRight
+                | Self::LogicalShiftRight
+                | Self::SaturatingShiftLeft
         )
     }
     pub fn from_symbol(symbol: &str) -> Option<Self> {
@@ -823,15 +1448,50 @@ impl BinaryOperator {
             "*" => Some(Self::Multiply),
             "/" => Some(Self::Divide),
             "%" => Some(Self::Remainder),
+            "%%" => Some(Self::EuclideanRemainder),
             "<<" => Some(Self::ShiftLeft),
             ">>" => Some(Self::ShiftRight),
+            ">>>" => Some(Self::LogicalShiftRight),
             "|" => Some(Self::Or),
             "^" => Some(Self::Xor),
             "&" => Some(Self::And),
             "+%" => Some(Self::WrapAdd),
             "-%" => Some(Self::WrapSubtract),
             "*%" => Some(Self::WrapMultiply),
+            "<<%" => Some(Self::WrapShiftLeft),
+            ">>%" => Some(Self::WrapShiftRight),
+            ">>>%" => Some(Self::WrapLogicalShiftRight),
+            "+|" => Some(Self::SaturatingAdd),
+            "-|" => Some(Self::SaturatingSubtract),
+            "*|" => Some(Self::SaturatingMultiply),
+            "<<|" => Some(Self::SaturatingShiftLeft),
             _ => None,
+        }
+    }
+    pub fn symbol(self) -> &'static str {
+        match self {
+            Self::Add => "+",
+            Self::Subtract => "-",
+            Self::Multiply => "*",
+            Self::Divide => "/",
+            Self::Remainder => "%",
+            Self::EuclideanRemainder => "%%",
+            Self::ShiftLeft => "<<",
+            Self::ShiftRight => ">>",
+            Self::LogicalShiftRight => ">>>",
+            Self::WrapAdd => "+%",
+            Self::WrapSubtract => "-%",
+            Self::WrapMultiply => "*%",
+            Self::WrapShiftLeft => "<<%",
+            Self::WrapShiftRight => ">>%",
+            Self::WrapLogicalShiftRight => ">>>%",
+            Self::SaturatingAdd => "+|",
+            Self::SaturatingSubtract => "-|",
+            Self::SaturatingMultiply => "*|",
+            Self::SaturatingShiftLeft => "<<|",
+            Self::Or => "|",
+            Self::Xor => "^",
+            Self::And => "&",
         }
     }
     // 値が大きいほど強く結合する。加算と減算は同じ優先順位。
@@ -840,23 +1500,42 @@ impl BinaryOperator {
             Self::Or => 0,
             Self::Xor => 1,
             Self::And => 2,
-            Self::ShiftLeft | Self::ShiftRight => 3,
-            Self::WrapAdd | Self::WrapSubtract | Self::Add | Self::Subtract => 4,
-            Self::WrapMultiply | Self::Multiply | Self::Divide | Self::Remainder => 5,
+            Self::ShiftLeft
+            | Self::ShiftRight
+            | Self::LogicalShiftRight
+            | Self::WrapShiftLeft
+            | Self::WrapShiftRight
+            | Self::WrapLogicalShiftRight
+            | Self::SaturatingShiftLeft => 3,
+            Self::WrapAdd
+            | Self::WrapSubtract
+            | Self::SaturatingAdd
+            | Self::SaturatingSubtract
+            | Self::Add
+            | Self::Subtract => 4,
+            Self::WrapMultiply
+            | Self::SaturatingMultiply
+            | Self::Multiply
+            | Self::Divide
+            | Self::Remainder
+            | Self::EuclideanRemainder => 5,
         }
     }
     pub fn c_symbol(self) -> &'static str {
         match self {
             Self::Divide => "/",
-            Self::Remainder => "%",
-            Self::ShiftLeft => "<<",
-            Self::ShiftRight => ">>",
+            Self::Remainder | Self::EuclideanRemainder => "%",
+            Self::ShiftLeft | Self::WrapShiftLeft | Self::SaturatingShiftLeft => "<<",
+            Self::ShiftRight
+            | Self::LogicalShiftRight
+            | Self::WrapShiftRight
+            | Self::WrapLogicalShiftRight => ">>",
             Self::Or => "|",
             Self::Xor => "^",
             Self::And => "&",
-            Self::WrapAdd | Self::Add => "+",
-            Self::WrapSubtract | Self::Subtract => "-",
-            Self::WrapMultiply | Self::Multiply => "*",
+            Self::WrapAdd | Self::SaturatingAdd | Self::Add => "+",
+            Self::WrapSubtract | Self::SaturatingSubtract | Self::Subtract => "-",
+            Self::WrapMultiply | Self::SaturatingMultiply | Self::Multiply => "*",
         }
     }
 }
@@ -906,6 +1585,14 @@ pub(crate) struct Capture {
     pub location: Location,
 }
 
+/// 型変換の種別（検査あり `as`・ラップ `as%`・飽和 `as|`）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CastKind {
+    Checked,
+    Wrap,
+    Saturating,
+}
+
 /// 式の構文ごとの内容。名前・リテラルの綴り・子の式を保持し、意味検査で [`crate::check::ir::Value`] へ変換する。
 #[derive(Clone)]
 pub(crate) enum ExpressionKind {
@@ -923,11 +1610,23 @@ pub(crate) enum ExpressionKind {
     ArrayInit {
         values: Vec<Expression>,
         lengths: Vec<Expression>,
+        keys: Option<Vec<Expression>>,
         repeated: bool,
+        readonly: bool,
+        soa: bool,
     },
     New(Box<Expression>),
+    /// 追記文の型検査用。ソースから値式として書くことはできない。
+    TextAppend {
+        left: Box<Expression>,
+        right: Box<Expression>,
+    },
+    TextBuffer {
+        capacity: Option<Box<Expression>>,
+        value: Box<Expression>,
+    },
     Deref(Box<Expression>),
-    Null,
+    Nil,
     /// or panicの内部表現。通常の値式としては構文から作らない。
     Panic(Vec<TemplatePart<Expression>>),
     Closure(Box<Closure>),
@@ -945,6 +1644,7 @@ pub(crate) enum ExpressionKind {
         end: Option<Box<Expression>>,
         index: bool,
         fallback: Option<FailureHandler>,
+        fallback_location: Option<Location>,
     },
     Char(u32),
     Template(Vec<TemplatePart<Expression>>),
@@ -983,7 +1683,7 @@ pub(crate) enum ExpressionKind {
         fallback: Option<FailureHandler>,
     },
     Cast {
-        wrap: bool,
+        kind: CastKind,
         operand: Box<Expression>,
         target: Type,
         fallback: Option<FailureHandler>,
@@ -998,6 +1698,8 @@ pub(crate) enum ExpressionKind {
         otherwise: Box<Expression>,
     },
     BitNot(Box<Expression>),
+    WrapNegate(Box<Expression>),
+    SaturatingNegate(Box<Expression>),
     Binary {
         operator: BinaryOperator,
         left: Box<Expression>,
@@ -1094,7 +1796,7 @@ pub(crate) struct ExternFunction {
     pub location: Location,
 }
 
-/// 外部関数の仮引数。型付きCポインタはSuz側では非nullのptr Tとして検査する。
+/// 外部関数の仮引数。型付きCポインタはSuz側では非nilのptr Tとして検査する。
 #[derive(Clone)]
 pub(crate) struct ExternParameter {
     /// Cが呼び出し後も参照を保持する。蓄積警告の逃避先として使う。

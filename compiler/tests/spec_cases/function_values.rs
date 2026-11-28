@@ -56,23 +56,23 @@ fn main() -> u8 {
 #[test]
 fn function_values_capture_the_target_before_evaluating_arguments() {
     let source = r#"
-fnshape Pair(ptr State, i32, i32) -> i32
+fnshape Pair(mut State, i32, i32) -> i32
 struct Holder { action: static fn Pair }
 struct State { current: static fn Pair, holder: Holder, trace: i32 }
-fn first(state: ptr State, a: i32, b: i32) -> i32 { state#trace = state.trace * 10 + 4
+fn first(state: mut State, a: i32, b: i32) -> i32 { state#trace = state.trace * 10 + 4
 return a * 10 + b }
-fn second(state: ptr State, a: i32, b: i32) -> i32 { return 99 }
-fn pick(state: ptr State) -> static fn Pair { state#trace = state.trace * 10 + 1
+fn second(state: mut State, a: i32, b: i32) -> i32 { return 99 }
+fn pick(state: mut State) -> static fn Pair { state#trace = state.trace * 10 + 1
 return state.current }
-fn change(state: ptr State) -> i32 { state#trace = state.trace * 10 + 2
+fn change(state: mut State) -> i32 { state#trace = state.trace * 10 + 2
 state#current = fn second
 state.holder#action = fn second
 return 2 }
-fn next(state: ptr State) -> i32 { state#trace = state.trace * 10 + 3
+fn next(state: mut State) -> i32 { state#trace = state.trace * 10 + 3
 return 3 }
 fn main() -> u8 {
     arena {
-    fix ptr state = new State { current: fn first, holder: Holder { action: fn first }, trace: 0 }
+    fix state = new State { current: fn first, holder: Holder { action: fn first }, trace: 0 }
     if pick(state)(state, change(state), next(state)) != 23 || state.trace != 1234 { return 1 }
     state#trace = 0
     state.holder#action = fn first
@@ -147,7 +147,7 @@ fn function_values_reject_invalid_types_and_missing_context() {
             "fn.value-compare",
         ),
         (
-            "fn main() -> u8 { fix f = fn fixed\nfix label = `${f}`\nreturn 0 }",
+            "fn main() -> u8 { fix f = fn fixed\nfix label = \"${f}\"\nreturn 0 }",
             "symbol.interpolation",
         ),
         (
@@ -171,7 +171,7 @@ fn function_values_reject_invalid_types_and_missing_context() {
             "fn.value-compare",
         ),
         (
-            "struct Holder { action: static fn Transform }\nfn main() -> u8 { fix h = `` as Holder or Holder { action: fn fixed }\nreturn 0 }",
+            "struct Holder { action: static fn Transform }\nfn main() -> u8 { fix h = \"\" as Holder or Holder { action: fn fixed }\nreturn 0 }",
             "symbol.cast",
         ),
         (
@@ -270,14 +270,14 @@ fn function_values_check_unused_specializations_and_report_the_value_site() {
 fn function_values_stop_at_a_panicking_target_or_argument() {
     let prelude = r#"
 fnshape Action(u8, u8) -> u8
-fn target(a: u8, b: u8) -> u8 { log info `body`
+fn target(a: u8, b: u8) -> u8 { log info "body"
 return a }
-fn pick() -> static fn Action { log info `target`
+fn pick() -> static fn Action { log info "target"
 return fn target }
-fn stop_now() -> u8 { log info `fail`
+fn stop_now() -> u8 { log info "fail"
 fix n: u8 = 255
 return n + 1 }
-fn later() -> u8 { log info `later`
+fn later() -> u8 { log info "later"
 return 1 }
 fn bad_pick() -> static fn Action { fix n = stop_now()
 return fn target }
@@ -531,7 +531,7 @@ fn call_only_functions_reject_storage_and_non_parameter_annotations() {
         "apply((f))",
         "apply(ifexpr true { f } else { f })",
         "fix result = f == f",
-        "fix result = `${f}`",
+        "fix result = \"${f}\"",
         "return f",
     ] {
         let source = format!(

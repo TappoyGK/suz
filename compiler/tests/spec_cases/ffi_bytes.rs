@@ -49,7 +49,7 @@ struct Data { pointer: *const void, size: _size_t }
 fnshape Message() -> symbol
 fn message(make: fn Message) -> symbol { return make() }
 fn make_data(value: i32) -> Data {
-    fix message_text = `x${value}`
+    fix message_text: symbol = "x${value}"
     trusted { return Data { pointer: c_bytes message_text, size: c_byte_len message_text } }
 }
 fn forward(pointer: *const void) -> *const void { return pointer }
@@ -58,26 +58,27 @@ fn get(f: fn Get) -> *const void { return f() }
 fn main() -> u8 {
     var calls: i32 = 0
     fix original = message(fn [var calls]() -> symbol { calls += 1
-return `Aあ\0B` })
-    fix part = original[1:3] or return 1
+return "Aあ\0B" })
+    fix part = original.[1:3] or return 1
     if c_byte_len original != 6 || c_byte_len part != 4 || len original != 4 { return 2 }
     trusted {
         if identity(c_bytes original, c_byte_len original) != 1 { return 3 }
         if view(c_bytes original, c_byte_len original, c_bytes part, c_byte_len part) != 1 { return 4 }
         if identity(c_bytes message(fn [var calls]() -> symbol { calls += 1
-return `Aあ\0B` }), c_byte_len message(fn [var calls]() -> symbol { calls += 1
-return `Aあ\0B` })) != 1 || calls != 3 { return 5 }
+return "Aあ\0B" }), c_byte_len message(fn [var calls]() -> symbol { calls += 1
+return "Aあ\0B" })) != 1 || calls != 3 { return 5 }
         fix stored = make_data(42)
         fix pointer = forward(stored.pointer)
         var current = c_bytes original
         current = get(fn [pointer]() -> *const void { return pointer })
         save(current, stored.size)
     }
-    for i in 0..<100 { fix churn = `new${i}` }
+    for i in 0..<100 { fix churn: symbol = "new${i}" }
     trusted { if retained() != 1 { return 6 } }
-    fix empty = original[4:4] or return 7
-    if c_byte_len empty != 0 || c_byte_len `` != 0 { return 8 }
-    trusted { if identity(c_bytes ``, c_byte_len ``) != 1 { return 9 } }
+    fix empty = original.[4:4] or return 7
+    if c_byte_len empty != 0 || c_byte_len "" != 0 { return 8 }
+    fix empty_symbol: symbol = ""
+    trusted { if identity(c_bytes empty_symbol, c_byte_len empty_symbol) != 1 { return 9 } }
     return 0
 }
 "#;
@@ -101,71 +102,74 @@ return `Aあ\0B` })) != 1 || calls != 3 { return 5 }
 #[test]
 fn ffi_pointer_operations_and_trusted_boundaries_are_rejected() {
     for (body, rule) in [
-        ("fix p = c_bytes `x`", "ffi.trusted"),
-        ("trusted { }\nfix p = c_bytes `x`", "ffi.trusted"),
+        ("fix p = c_bytes \"x\"", "ffi.trusted"),
+        ("trusted { }\nfix p = c_bytes \"x\"", "ffi.trusted"),
         ("fix n = c_byte_len 42", "ffi.bytes-source"),
         ("trusted { fix p = c_bytes 42 }", "ffi.bytes-source"),
         (
-            "trusted { fix p = c_bytes `x`\nfix q = p == p }",
+            "trusted { fix p = c_bytes \"x\"\nfix q = p == p }",
             "ffi.pointer-operations",
         ),
         (
-            "trusted { fix p = c_bytes `x`\nfix q = p < p }",
+            "trusted { fix p = c_bytes \"x\"\nfix q = p < p }",
             "ffi.pointer-operations",
         ),
         (
-            "trusted { fix p = c_bytes `x`\nfix q = p + 1 }",
+            "trusted { fix p = c_bytes \"x\"\nfix q = p + 1 }",
             "expr.operator-types",
         ),
         (
-            "trusted { fix p = c_bytes `x`\nfix q = p as u64 or 0 }",
+            "trusted { fix p = c_bytes \"x\"\nfix q = p as u64 or 0 }",
             "ffi.pointer-operations",
         ),
         (
-            "trusted { fix p = 0 as *const void or c_bytes `x` }",
+            "trusted { fix p = 0 as *const void or c_bytes \"x\" }",
             "ffi.pointer-operations",
         ),
         ("fix p: *const void = 0", "type.expected"),
         (
-            "trusted { fix p = c_bytes `x`\nlog info `${p}` }",
+            "trusted { fix p = c_bytes \"x\"\nlog info \"${p}\" }",
             "symbol.interpolation",
         ),
         (
-            "trusted { fix p = c_bytes `x`\nfix q = `${p}` }",
+            "trusted { fix p = c_bytes \"x\"\nfix q = \"${p}\" }",
             "symbol.interpolation",
         ),
         (
-            "trusted { fix p = c_bytes `x`\nfix n = c_byte_len p }",
+            "trusted { fix p = c_bytes \"x\"\nfix n = c_byte_len p }",
             "ffi.bytes-source",
         ),
         (
-            "trusted { fix a = Data { pointer: c_bytes `x` }\nfix b = a == a }",
+            "trusted { fix a = Data { pointer: c_bytes \"x\" }\nfix b = a == a }",
             "ffi.pointer-operations",
         ),
         (
-            "fix p = `Data { pointer: 0 }` as Data or return 1",
+            "fix p = \"Data { pointer: 0 }\" as Data or return 1",
             "symbol.cast",
         ),
-        ("trusted { fix p: *void = c_bytes `x` }", "ffi.pointer-type"),
         (
-            "trusted { fix p: *const u8 = c_bytes `x` }",
+            "trusted { fix p: *void = c_bytes \"x\" }",
             "ffi.pointer-type",
         ),
         (
-            "trusted { fix p = call(fn []() -> *const void { return c_bytes `x` }) }",
+            "trusted { fix p: *const u8 = c_bytes \"x\" }",
+            "ffi.pointer-type",
+        ),
+        (
+            "trusted { fix p = call(fn []() -> *const void { return c_bytes \"x\" }) }",
             "ffi.trusted",
         ),
         (
-            "trusted { fix p: *const _int = c_bytes `x` }",
+            "trusted { fix p: *const _int = c_bytes \"x\" }",
             "ffi.pointer-type",
         ),
         (
-            "fix a = `abc`\nfix n = c_byte_len a + 1",
+            "fix a = \"abc\"\nfix n = c_byte_len a + 1",
             "expr.operator-types",
         ),
         (
-            "fix a = `abc`\nfix n = c_byte_len (a + 1)",
-            "symbol.operations",
+            "fix a = \"abc\"\nfix n = c_byte_len (a + 1)",
+            "text.operations",
         ),
     ] {
         let source = format!(
@@ -178,7 +182,7 @@ fn ffi_pointer_operations_and_trusted_boundaries_are_rejected() {
         b"extern \"header.h\" { fn pointer() -> *const void }\nfn main() -> u8 { return 0 }";
     let error = suz::compile(source).unwrap_err();
     assert_eq!(error.rule(), "ffi.type");
-    for operand in ["'a'", "Item { n: 1 }", "native"] {
+    for operand in ["\\a", "Item { n: 1 }", "native"] {
         for operation in ["c_bytes", "c_byte_len"] {
             let source = format!(
                 "struct Item {{ n: i32 }}\nfn main() -> u8 {{ fix native: _int = 1\ntrusted {{ fix n = {operation} {operand} }}\nreturn 0 }}"
@@ -193,7 +197,7 @@ fn ffi_pointer_operations_and_trusted_boundaries_are_rejected() {
 fn ffi_byte_length_overflow_panics_before_truncation() {
     let directory = TemporaryDirectory::new();
     let source =
-        suz::compile(b"fn main() -> u8 { fix n = c_byte_len `abcd`\nreturn n as u8 or 0 }")
+        suz::compile(b"fn main() -> u8 { fix n = c_byte_len \"abcd\"\nreturn n as u8 or 0 }")
             .unwrap();
     // このホストではsize_tが64ビットなので、狭い対象の上限をCマクロで再現して実際の検査を通す。
     let source = source.replace(
@@ -216,19 +220,14 @@ fn ffi_constant_initializers_are_source_errors() {
     let path = directory.0.join("constant.suz");
     // CLIの終了コードまで検査し、内部エラーに戻らないことを確認する。
     for declaration in [
-        "fix N: _size_t = c_byte_len `ab`",
-        "fix T: text = `ab`
-fix N: _size_t = c_byte_len T",
+        "fix N: _size_t = c_byte_len \"ab\"",
+        "fix T: text = \"ab\"\nfix N: _size_t = c_byte_len T",
         "fix N: _int = 5",
         "fix N = (5 as _int or 0) as i32 or 0",
         "fix N = (5 as _int or 0) == 5",
-        "struct Item { n: _int }
-fix N = Item { n: 5 }",
+        "struct Item { n: _int }\nfix N = Item { n: 5 }",
     ] {
-        let source = format!(
-            "{declaration}
-fn main() -> u8 {{ return 0 }}"
-        );
+        let source = format!("{declaration}\nfn main() -> u8 {{ return 0 }}");
         fs::write(&path, source).unwrap();
         let output = Command::new(env!("CARGO_BIN_EXE_suz"))
             .arg("check")
@@ -246,13 +245,9 @@ fn main() -> u8 {{ return 0 }}"
 #[test]
 fn ffi_const_qualifier_preserves_identifiers() {
     for source in [
-        "fn main() -> u8 { fix const: u8 = 0
-return const }",
-        "struct Item { const: u8 }
-fn main() -> u8 { fix item = Item { const: 0 }
-return item.const }",
-        "fn const() -> u8 { return 0 }
-fn main() -> u8 { return const() }",
+        "fn main() -> u8 { fix const: u8 = 0\nreturn const }",
+        "struct Item { const: u8 }\nfn main() -> u8 { fix item = Item { const: 0 }\nreturn item.const }",
+        "fn const() -> u8 { return 0 }\nfn main() -> u8 { return const() }",
     ] {
         suz::compile(source.as_bytes()).unwrap();
     }
@@ -261,11 +256,9 @@ fn main() -> u8 { return const() }",
 #[test]
 fn ffi_byte_length_needs_no_call_when_size_t_can_hold_length() {
     let directory = TemporaryDirectory::new();
-    let source = suz::compile(
-        b"fn main() -> u8 { fix n = c_byte_len `abc`
-return n as u8 or 0 }",
-    )
-    .unwrap();
+    let source =
+        suz::compile(b"fn main() -> u8 { fix n = c_byte_len \"abc\"\nreturn n as u8 or 0 }")
+            .unwrap();
     // 最適化器に頼らず、Cの前処理だけで呼び出しが消えることを確認する。
     // size_tが狭いホストでも、ここでは検査不要な分岐を選ぶ。
     let source = source.replace(

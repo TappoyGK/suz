@@ -94,7 +94,14 @@ fn arithmetic_handlers_check_types_and_control_transfer_positions() {
             "fix value = ifexpr true { -1 or return 7 } else { 0 }\nreturn 0",
             "expr.jump-prohibited",
         ),
-        ("fix value = 1.0 % 2.0\nreturn 0", "expr.operator-types"),
+        (
+            "fix value = 1.0 % 2.0 or 0.0\nreturn 0",
+            "expr.arithmetic-handler",
+        ),
+        (
+            "fix value = 1.0 %% 2.0 or 0.0\nreturn 0",
+            "expr.arithmetic-handler",
+        ),
         ("fix value = true % false\nreturn 0", "expr.operator-types"),
         ("fix value = 1 / 2 or false\nreturn 0", "type.expected"),
         (

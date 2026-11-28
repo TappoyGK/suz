@@ -148,7 +148,25 @@ impl Constraints<'_, '_> {
             (Type::Array(parameter), Type::Array(actual)) => {
                 let p = self.scope.structs.arrays.borrow().get(parameter);
                 let a = self.scope.structs.arrays.borrow().get(actual);
-                if p.rank == a.rank {
+                if p.rank == a.rank && p.index_enum == a.index_enum && p.soa == a.soa {
+                    self.apply(p.element, a.element)?;
+                }
+            }
+            (
+                Type::ArrayRef {
+                    id: parameter,
+                    mutable: p_mut,
+                    ..
+                },
+                Type::ArrayRef {
+                    id: actual,
+                    mutable: a_mut,
+                    ..
+                },
+            ) if !p_mut || a_mut => {
+                let p = self.scope.structs.arrays.borrow().get(parameter);
+                let a = self.scope.structs.arrays.borrow().get(actual);
+                if p.rank == a.rank && p.index_enum == a.index_enum && p.soa == a.soa {
                     self.apply(p.element, a.element)?;
                 }
             }
@@ -240,7 +258,7 @@ impl Constraints<'_, '_> {
     }
 }
 
-/// 型ヒントのない式にも、既存の数値の既定型を適用する。nullには型を作らない。
+/// 型ヒントのない式にも、既存の数値の既定型を適用する。nilには型を作らない。
 fn defaulted(expr: &Expression, scope: &Scope) -> Option<Type> {
     if let Some(ty) = known_type(expr, scope) {
         return Some(ty);
@@ -251,6 +269,8 @@ fn defaulted(expr: &Expression, scope: &Scope) -> Option<Type> {
         ExpressionKind::Group(inner)
         | ExpressionKind::Negate(inner)
         | ExpressionKind::BitNot(inner)
+        | ExpressionKind::WrapNegate(inner)
+        | ExpressionKind::SaturatingNegate(inner)
         | ExpressionKind::ArithmeticHandler { operand: inner, .. } => defaulted(inner, scope),
         ExpressionKind::New(inner) => defaulted(inner, scope).map(Type::pointer),
         ExpressionKind::Binary {

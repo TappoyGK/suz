@@ -30,14 +30,14 @@ Suzは、`new`で確保する実体を作業領域（arena）に置き、その�
 
 ```suz
 fn main() -> u8 {
-    fix ptr saved = new 10 // mainの終了まで保持する実体
+    fix saved = new 10 // mainの終了まで保持する実体
     arena {
-        fix ptr temporary = new 20
+        fix temporary = new 20
         fix total = .saved + .temporary
-        log info `${total}`
+        log info "${total}"
     } // temporaryが指す実体を回収する
     fix value = .saved // 外側の実体は引き続き使える
-    log info `${value}`
+    log info "${value}"
     return 0
 }
 ```
@@ -103,7 +103,7 @@ xcode-select --install
 
 ```suz
 fn main() -> u8 {
-    log info `Hello, Suz!`
+    log info "Hello, Suz!"
     return 0
 }
 ```
@@ -139,6 +139,8 @@ suz emit-c hello.suz -o generated
 [文書目録](docs/README.md)から、言語仕様・ランタイム仕様・ツール仕様・仕様例集・リリース手順を参照できる。
 
 ## 開発
+
+イシューの書き方と更新方法は[開発への参加](CONTRIBUTING.md)を参照する。
 
 Rustのツールチェーンは `rust-toolchain.toml` で指定する。リポジトリのルートでビルドと通常テストを実行する。
 

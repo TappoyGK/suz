@@ -1,22 +1,14 @@
 use crate::support::{Mode, Outcome, extract, validate_inventory};
 
 pub(super) const SMALL: &str = r#"### lex-001 example
-
-主根拠：`[src.encoding]`。
+- 主根拠：`[src.encoding]`
+- 結果：正常終了
 
 自由な説明。
-
-**ソース：**
 
 ```suz
 fn main() -> u8 { return 0 }
 ```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | 正常終了 | 0 | 0 |
 
 "#;
 
@@ -36,6 +28,11 @@ const ONE_CASE_INVENTORY: &str = r#"## 目次と件数
 | 実行時パニック | 0 |
 | 診断設定の比較 | 0 |
 | 合計 | 1 |
+
+## 欠番一覧
+
+| 欠番ID | 移管先テスト |
+|---|---|
 
 "#;
 
@@ -70,26 +67,20 @@ fn split_catalog_checks_cross_file_duplicates_and_missing_cases() {
 fn malformed_markdown_is_rejected() {
     for (input, message) in [
         (format!("{SMALL}{SMALL}"), "duplicate ID"),
-        (SMALL.replace("```suz", "```rust"), "expected suz fence"),
+        (SMALL.replace("```suz", "```rust"), "unlabelled fence"),
         (SMALL.replace("lex-001", "../bad"), "invalid case heading"),
         (SMALL.replacen("\n```\n", "\n", 1), "unclosed fence"),
         (
-            SMALL.replace(
-                "**ソース：**\n\n```suz\nfn main() -> u8 { return 0 }\n```",
-                "",
-            ),
+            SMALL.replace("```suz\nfn main() -> u8 { return 0 }\n```", ""),
             "missing source",
         ),
+        (format!("{SMALL}\n```suz\nother\n```\n"), "duplicate source"),
         (
-            format!("{SMALL}\n**ソース：**\n\n```suz\nother\n```\n"),
-            "duplicate source",
-        ),
-        (
-            SMALL.replace("主根拠：`[src.encoding]`。", ""),
+            SMALL.replace("- 主根拠：`[src.encoding]`\n", ""),
             "missing primary rule",
         ),
         (
-            SMALL.replace("**ソース：**", "**ソースの誤記：**"),
+            SMALL.replace("```suz", "**ソースの誤記：**\n\n```suz"),
             "unlabelled fence",
         ),
     ] {
@@ -99,10 +90,30 @@ fn malformed_markdown_is_rejected() {
 }
 
 #[test]
+fn legacy_table_format_is_rejected() {
+    for label in [
+        "**期待結果：**",
+        "**コンパイル診断：**",
+        "**パニック診断：**",
+        "**警告：**",
+    ] {
+        let legacy = format!(
+            "### lex-001 example\n- 主根拠：`[src.encoding]`\n- 結果：正常終了\n\n```suz\nfn main() -> u8 {{ return 0 }}\n```\n\n{label}\n"
+        );
+        assert!(
+            extract(&legacy)
+                .unwrap_err()
+                .contains("legacy table format is no longer supported"),
+            "expected legacy error for {label}"
+        );
+    }
+}
+
+#[test]
 fn malformed_hex_is_rejected() {
     for digits in ["f", "ff gg", "é0", ""] {
         let input = SMALL.replace(
-            "**ソース：**\n\n```suz\nfn main() -> u8 { return 0 }\n```",
+            "```suz\nfn main() -> u8 { return 0 }\n```",
             &format!("**保存用のバイト列（16進数）：**\n\n```text\n{digits}\n```"),
         );
         assert!(extract(&input).unwrap_err().contains("invalid hex"));
@@ -113,7 +124,7 @@ fn malformed_hex_is_rejected() {
 fn headings_and_labels_inside_source_are_not_metadata() {
     let input = SMALL.replace(
         "fn main() -> u8 { return 0 }",
-        "### not-a-case\n主根拠：`[not.metadata]`。\n**期待結果：**",
+        "### not-a-case\n- 主根拠：`[not.metadata]`\n- 結果：パニック `[rt.div-zero]` 1:1",
     );
     let s = extract(&input).unwrap();
     assert_eq!(s.len(), 1);
@@ -122,85 +133,29 @@ fn headings_and_labels_inside_source_are_not_metadata() {
 }
 
 #[test]
-fn malformed_expectation_tables_are_rejected() {
-    let row = "| 通常 | 正常終了 | 0 | 0 |";
-    for (input, message) in [
-        (
-            SMALL.replace("**期待結果：**", "自由な文章"),
-            "missing expectation table",
-        ),
-        (
-            SMALL.replace("| 設定 |", "| モード |"),
-            "invalid table header",
-        ),
-        (
-            SMALL.replace("|---|---|---:|---:|", "|---|---|oops|---|"),
-            "invalid table separator",
-        ),
-        (SMALL.replace(row, ""), "empty expectation table"),
-        (
-            SMALL.replace(row, &format!("{row}\n{row}")),
-            "duplicate mode",
-        ),
-        (
-            SMALL.replace(row, "| 不明 | 正常終了 | 0 | 0 |"),
-            "unknown mode",
-        ),
-        (
-            SMALL.replace(row, "| 通常 | 不明 | 0 | 0 |"),
-            "unknown outcome",
-        ),
-        (
-            SMALL.replace(row, "| 通常 | 正常終了 | 256 | 0 |"),
-            "integer out of range",
-        ),
-        (
-            SMALL.replace(row, "| 通常 | 正常終了 | — | 0 |"),
-            "invalid exit code",
-        ),
-        (
-            SMALL.replace(row, "| 通常 | コンパイルエラー | 0 | 0 |"),
-            "invalid exit code",
-        ),
-        (
-            SMALL.replace(row, "| 通常 | 正常終了 | 0 | -1 |"),
-            "invalid unsigned integer",
-        ),
-        (
-            SMALL.replace(row, "| 通常 | 正常終了 | 0 | 0 | extra |"),
-            "4 table columns",
-        ),
-        (
-            format!(
-                "{SMALL}\n**期待結果：**\n\n| 設定 | 結果 | 終了コード | 警告数 |\n|---|---|---|---|\n{row}\n"
-            ),
-            "duplicate expectation table",
-        ),
-    ] {
-        let error = extract(&input).unwrap_err();
-        assert!(error.contains(message), "expected {message}, got {error}");
-    }
-}
-
-#[test]
 fn labelled_output_is_exact_and_prose_is_not_parsed() {
     let input = format!(
-        "{SMALL}\n**標準出力：**\n\n```text\nhello\n\n```\n\n**標準エラー：**\n\n```text\n### not-a-case\n**期待結果：**\n```\n"
+        "{SMALL}\n**標準出力：**\n\n```text\nhello\n\n```\n\n**標準エラー：**\n\n```text\n### not-a-case\n- 結果：正常終了\n```\n"
     );
     let s = extract(&input).unwrap();
     let run = &s["lex-001"].runs[0];
     assert_eq!(run.stdout.as_deref(), Some("hello\n\n"));
     assert_eq!(
         run.stderr.as_deref(),
-        Some("### not-a-case\n**期待結果：**\n")
+        Some("### not-a-case\n- 結果：正常終了\n")
     );
     let s = extract(&SMALL.replace(
         "自由な説明。",
-        "**期待：** 実行時パニック。終了コード 101。",
+        "実行時パニック。終了コード 101。\n\n- 箇条書きの説明。\n- 結果は、名前のエラーになる。\n  - 結果として拒否される。\n結果：は説明文の中で書ける。\n\n| 列A | 列B |\n|---|---|\n| 1 | 2 |",
     ))
     .unwrap();
     assert_eq!(s["lex-001"].runs[0].result, Outcome::Exit);
     assert_eq!(s["lex-001"].runs[0].code, Some(0));
+
+    // 補助根拠の区切り（・と、）、空白だけの行によるメタ行かたまり終了、CRLF改行を受理する。
+    let extra = "### lex-001 example\r\n- 主根拠：`[src.encoding]`\r\n- 補助根拠：`[lex.a]`・`[lex.b]`、`[lex.c]`\r\n- 結果：正常終了\r\n   \r\n説明。\r\n\r\n```suz\r\nfn main() -> u8 { return 0 }\r\n```\r\n";
+    let s = extract(extra).unwrap();
+    assert_eq!(s["lex-001"].secondary_rules, ["lex.a", "lex.b", "lex.c"]);
 }
 
 #[test]
@@ -222,6 +177,8 @@ fn malformed_output_blocks_are_rejected() {
             "\n**パニック前の標準エラー：**\n```text\nx\n```\n",
             "does not apply",
         ),
+        ("\n**標準出力：**\n\n```text\n```\n", "empty output block"),
+        ("\n**標準エラー：**\n\n```text\n```\n", "empty output block"),
     ] {
         assert!(
             extract(&format!("{SMALL}{suffix}"))
@@ -229,15 +186,22 @@ fn malformed_output_blocks_are_rejected() {
                 .contains(message)
         );
     }
+    let panic_empty = format!(
+        "{}\n**パニック前の標準エラー：**\n\n```text\n```\n",
+        SMALL.replace("- 結果：正常終了", "- 結果：パニック `[rt.div-zero]` 1:1")
+    );
+    assert!(
+        extract(&panic_empty)
+            .unwrap_err()
+            .contains("empty output block")
+    );
 }
 
 #[test]
 fn cases_and_modes_come_from_the_document() {
-    // 新しい分類と異なる例数を加えても、解析処理の変更は不要。
-    let row = "| 通常 | 正常終了 | 0 | 0 |";
     let second = SMALL.replace("lex-001", "example-042").replace(
-        row,
-        "| 警告 | 正常終了 | 7 | 2 |\n| 強制 | コンパイルエラー | — | 0 |",
+        "- 結果：正常終了",
+        "- 結果（警告）：正常終了 7 / 警告：`[diagnostic.arithmetic]` 1:1, `[diagnostic.arithmetic]` 1:2\n- 結果（強制）：コンパイルエラー `[diagnostic.arithmetic]` 1:1",
     );
     let s = extract(&format!("{SMALL}\n{second}")).unwrap();
     assert_eq!(s.len(), 2);
@@ -250,7 +214,6 @@ fn cases_and_modes_come_from_the_document() {
     assert_eq!(runs[1].result, Outcome::CompileError);
     assert_eq!(runs[1].code, None);
     assert!(runs[1].stdout.is_none());
-    // グループ名によって実行モードを選ばない。
     assert_eq!(
         extract(&SMALL.replace("lex-001", "diag-001")).unwrap()["diag-001"]
             .runs
@@ -289,18 +252,87 @@ fn inventory_is_checked_against_the_parsed_cases() {
         SMALL.replace("lex-001", "lex-002")
     );
     validate_inventory(&extended, &extract(&extended).unwrap()).unwrap();
-    // 二つの設定が両方とも正常終了しても、比較例としては一例に数える。
     let compared = format!(
         "{}{}",
         ONE_CASE_INVENTORY
             .replace("| 受理 | 1 |", "| 受理 | 0 |")
             .replace("| 診断設定の比較 | 0 |", "| 診断設定の比較 | 1 |"),
         SMALL.replace(
-            "| 通常 | 正常終了 | 0 | 0 |",
-            "| 通常 | 正常終了 | 0 | 0 |\n| 警告 | 正常終了 | 0 | 0 |"
+            "- 結果：正常終了",
+            "- 結果（通常）：正常終了\n- 結果（警告）：正常終了"
         )
     );
     validate_inventory(&compared, &extract(&compared).unwrap()).unwrap();
+
+    // 欠番一覧の欠落・ID再利用・重複・不正範囲・未知接頭辞・空移管先・表後行を拒否する。
+    let retired_ok = doc.replace(
+        "| 欠番ID | 移管先テスト |\n|---|---|\n",
+        "| 欠番ID | 移管先テスト |\n|---|---|\n| `lex-002`〜`lex-004`・`lex-010` | test |\n",
+    );
+    validate_inventory(&retired_ok, &cases).unwrap();
+    for bad_retired in [
+        doc.replace("## 欠番一覧", "## 欠番の一覧"),
+        doc.replace(
+            "| 欠番ID | 移管先テスト |\n|---|---|\n",
+            "| 欠番ID | 移管先テスト |\n|---|---|\n| `lex-001` | test |\n",
+        ),
+        doc.replace(
+            "| 欠番ID | 移管先テスト |\n|---|---|\n",
+            "| 欠番ID | 移管先テスト |\n|---|---|\n| `lex-002`・`lex-002` | test |\n",
+        ),
+        doc.replace(
+            "| 欠番ID | 移管先テスト |\n|---|---|\n",
+            "| 欠番ID | 移管先テスト |\n|---|---|\n| `lex-004`〜`lex-002` | test |\n",
+        ),
+        doc.replace(
+            "| 欠番ID | 移管先テスト |\n|---|---|\n",
+            "| 欠番ID | 移管先テスト |\n|---|---|\n| `lex-002`〜`prog-003` | test |\n",
+        ),
+        doc.replace(
+            "| 欠番ID | 移管先テスト |\n|---|---|\n",
+            "| 欠番ID | 移管先テスト |\n|---|---|\n| `zzz-001` | test |\n",
+        ),
+        doc.replace(
+            "| 欠番ID | 移管先テスト |\n|---|---|\n",
+            "| 欠番ID | 移管先テスト |\n|---|---|\n| `lex-002` |  |\n",
+        ),
+        doc.replace(
+            "| 欠番ID | 移管先テスト |\n|---|---|\n",
+            "| 欠番ID | 移管先テスト |\n|---|---|\n| `lex-002` | test |\n\nメモ\n\n| `lex-003` | test |\n",
+        ),
+        doc.replace(
+            "| 欠番ID | 移管先テスト |\n|---|---|\n",
+            "| 欠番ID | 移管先テスト |\n|---|---|\n| `lex-002` | test |\n\n  | `lex-003` | test |\n",
+        ),
+        format!("{doc}\n## 欠番一覧\n\n| 欠番ID | 移管先テスト |\n|---|---|\n| `lex-002` | test |\n"),
+    ] {
+        assert!(
+            validate_inventory(&bad_retired, &cases).is_err(),
+            "expected error for:\n{bad_retired}"
+        );
+    }
+}
+
+#[test]
+fn next_ids_accounts_for_active_and_retired_cases() {
+    use crate::{support::catalog, test_util::TemporaryDirectory};
+    use std::fs;
+
+    let directory = TemporaryDirectory::new();
+    let inventory = ONE_CASE_INVENTORY.replace(
+        "| 欠番ID | 移管先テスト |\n|---|---|\n",
+        "| 欠番ID | 移管先テスト |\n|---|---|\n| `lex-002`〜`lex-005` | test |\n",
+    );
+    fs::write(directory.0.join("spec-cases.md"), inventory).unwrap();
+    let cases = directory.0.join("spec-cases");
+    fs::create_dir(&cases).unwrap();
+    fs::write(cases.join("lex.md"), SMALL).unwrap();
+    assert_eq!(catalog::next_ids(&directory.0, None).unwrap(), ["lex-006"]);
+    assert_eq!(
+        catalog::next_ids(&directory.0, Some("lex")).unwrap(),
+        ["lex-006"]
+    );
+    assert!(catalog::next_ids(&directory.0, Some("unknown")).is_err());
 }
 
 #[test]
@@ -311,7 +343,12 @@ fn input_diagrams_are_compared_with_bytes_for_any_id() {
         ("<CR><EOF>", "0d", b"\r".as_slice()),
         ("あ<LF>\nb<EOF>", "e3 81 82 0a 62", "あ\nb".as_bytes()),
     ] {
-        let input = SMALL.replace("**ソース：**\n\n```suz\nfn main() -> u8 { return 0 }\n```", &format!("**入力図：**\n\n```text\n{diagram}\n```\n\n**保存用のバイト列（16進数）：**\n\n```text\n{hex}\n```"));
+        let input = SMALL.replace(
+            "```suz\nfn main() -> u8 { return 0 }\n```",
+            &format!(
+                "**入力図：**\n\n```text\n{diagram}\n```\n\n**保存用のバイト列（16進数）：**\n\n```text\n{hex}\n```"
+            ),
+        );
         assert_eq!(extract(&input).unwrap()["lex-001"].bytes, expected);
         let bad = input.replace(&format!("\n{hex}\n"), "\n00\n");
         assert!(extract(&bad).unwrap_err().contains("disagree"));
@@ -329,11 +366,8 @@ fn input_diagrams_are_compared_with_bytes_for_any_id() {
 }
 
 #[test]
-fn panic_expectation_is_read_from_the_table() {
-    let input = SMALL.replace(
-        "| 通常 | 正常終了 | 0 | 0 |",
-        "| 通常 | パニック | 101 | 0 |",
-    );
+fn panic_expectation_is_read_from_result_line() {
+    let input = SMALL.replace("- 結果：正常終了", "- 結果：パニック `[rt.div-zero]` 2:10");
     let input =
         format!("{input}\n**パニック前の標準エラー：**\n\n```text\nlogged before panic\n```\n");
     let cases = extract(&input).unwrap();
@@ -342,7 +376,7 @@ fn panic_expectation_is_read_from_the_table() {
     assert_eq!(run.code, Some(101));
     assert_eq!(run.stderr_prefix.as_deref(), Some("logged before panic\n"));
     assert!(run.stderr.is_none());
-    assert!(run.panic_diagnostic.is_none());
+    assert_eq!(run.panic_diagnostic.as_ref().unwrap().rule, "rt.div-zero");
 }
 
 #[test]
@@ -355,7 +389,9 @@ This fenced example is documentation, not a test case.
 
 ````markdown
 ### fake-001 example
-主根拠：`[fake.rule]`。
+- 主根拠：`[fake.rule]`
+- 結果：正常終了
+
 ```suz
 fn main() -> u8 { return 7 }
 ```
@@ -363,26 +399,18 @@ fn main() -> u8 { return 7 }
 
 ~~~text
 ### fake-002 example
-主根拠：`[fake.rule]`。
+- 主根拠：`[fake.rule]`
 ~~~
 
 ## Cases
 
 ### lex-001 example ###
-
-主根拠：  `[src.encoding]`
+- 主根拠：`[src.encoding]`
+- 結果：正常終了
 
 #### Explanation within the case
 
 The following program returns zero.
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | 正常終了 | 0 | 0 |
-
-**ソース：**
 
 ```suz
 fn main() -> u8 { return 0 }
@@ -398,16 +426,15 @@ This must not be read as case data.
 
 ## Appendix
 
-**期待結果：**
+- 結果：正常終了
 
-This is not an expectation table.
+This is not a case.
 "#;
     let cases = extract(document).unwrap();
     assert_eq!(cases.len(), 1);
     assert_eq!(cases["lex-001"].rule, "src.encoding");
     assert_eq!(cases["lex-001"].bytes, b"fn main() -> u8 { return 0 }\n");
 
-    // 例と同じ階層かそれより上の見出しは、現在の例を終了させる。
     for heading in ["# Appendix", "## Appendix", "### Further reading"] {
         let input = document.replace("### Further reading", heading);
         assert_eq!(extract(&input).unwrap().len(), 1);
@@ -423,14 +450,378 @@ This is not an expectation table.
             "### lex-001",
             "invalid case heading",
         ),
-        ("主根拠：  `[src.encoding]`", "", "missing primary rule"),
-        (
-            "**ソース：**",
-            "## Appendix\n\n**ソース：**",
-            "missing source",
-        ),
+        ("- 主根拠：`[src.encoding]`\n", "", "missing primary rule"),
+        ("```suz", "## Appendix\n\n```suz", "missing source"),
     ] {
         let error = extract(&document.replace(from, to)).unwrap_err();
         assert!(error.contains(reason), "{error}");
+    }
+}
+
+#[test]
+fn compact_format_parses_all_variants_and_rejects_malformed_lines() {
+    let doc = r#"### lex-001 exit default
+- 主根拠：`[src.encoding]`
+- 結果：正常終了
+
+```suz
+fn main() -> u8 { return 0 }
+```
+
+### lex-002 exit code with warning
+- 主根拠：`[src.encoding]`
+- 結果：正常終了 7 / 警告：`[diagnostic.arithmetic]` 2:10, `[array.redundant-handler]` 3:5
+
+```suz
+fn main() -> u8 { return 7 }
+```
+
+### lex-003 compile error
+- 主根拠：`[char.literal]`
+- 結果：コンパイルエラー `[char.literal]` 2:14
+
+```suz
+fn main() -> u8 { return 0 }
+```
+
+### lex-004 panic
+- 主根拠：`[rt.div-zero]`
+- 結果：パニック `[rt.div-zero]` 2:12
+
+```suz
+fn main() -> u8 { return 0 }
+```
+
+**パニック前の標準エラー：**
+
+```text
+before
+```
+
+### array-090 multi mode
+- 主根拠：`[diagnostic.arithmetic-target]`
+- 補助根拠：`[array.bulk-handler]`
+- 結果（通常）：正常終了
+- 結果（警告）：正常終了 / 警告：`[diagnostic.arithmetic]` 4:16
+- 結果（強制）：コンパイルエラー `[diagnostic.arithmetic]` 4:16
+
+```suz
+fn main() -> u8 { return 0 }
+```
+"#;
+    let cases = extract(doc).unwrap();
+    assert_eq!(cases.len(), 5);
+    assert_eq!(cases["lex-001"].runs[0].code, Some(0));
+    assert_eq!(cases["lex-001"].runs[0].warning_count, 0);
+    assert_eq!(cases["lex-002"].runs[0].code, Some(7));
+    assert_eq!(cases["lex-002"].runs[0].warning_count, 2);
+    assert_eq!(cases["lex-002"].runs[0].warnings.len(), 2);
+    assert_eq!(cases["lex-003"].runs[0].result, Outcome::CompileError);
+    assert_eq!(
+        cases["lex-003"].runs[0].diagnostic.as_ref().unwrap().column,
+        14
+    );
+    assert_eq!(cases["lex-004"].runs[0].result, Outcome::Panic);
+    assert_eq!(cases["lex-004"].runs[0].code, Some(101));
+    assert_eq!(
+        cases["lex-004"].runs[0].stderr_prefix.as_deref(),
+        Some("before\n")
+    );
+    assert_eq!(cases["array-090"].runs.len(), 3);
+    assert_eq!(cases["array-090"].runs[1].mode, Mode::Warn);
+    assert_eq!(cases["array-090"].runs[2].mode, Mode::Deny);
+
+    let base = "### lex-001 test\n- 主根拠：`[src.encoding]`\n- 結果：正常終了\n\n```suz\nfn main() -> u8 { return 0 }\n```\n";
+    for (bad, reason) in [
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：正常終了\n- 結果（通常）：正常終了",
+            ),
+            "duplicate mode",
+        ),
+        (base.replace("- 結果：", "- 結果（未知）："), "unknown mode"),
+        (
+            base.replace("- 結果：正常終了", "- 結果：コンパイルエラー"),
+            "unknown outcome",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：コンパイルエラー `[char.literal]`",
+            ),
+            "missing diagnostic position",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：コンパイルエラー `[char.literal]` 0:1",
+            ),
+            "positive",
+        ),
+        (
+            base.replace("- 結果：正常終了", "- 結果：パニック `[char.literal]` 2:1"),
+            "runtime panic rule",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：正常終了 / 警告：`[char.literal]` 2:1",
+            ),
+            "supported warning rule",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：正常終了 / 警告：`[diagnostic.arithmetic]` 2:1, `[diagnostic.arithmetic]` 2:1",
+            ),
+            "duplicate warning expectation",
+        ),
+        (
+            base.replace("- 結果：正常終了", "- 結果：正常終了 / 警告："),
+            "empty warning list",
+        ),
+        (
+            format!("{base}\n```suz\nfn other() -> void {{}}\n```\n"),
+            "duplicate source",
+        ),
+        (format!("{base}\n```text\nhello\n```\n"), "unlabelled fence"),
+        (format!("{base}\n~~~text\nhi\n~~~\n"), "unlabelled fence"),
+        (
+            format!("{base}\n  ```text\nhi\n  ```\n"),
+            "unlabelled fence",
+        ),
+        (
+            base.replace("- 結果：正常終了\n", ""),
+            "missing result line",
+        ),
+        (
+            base.replace("- 結果：正常終了", "- 結果：正常終了 0"),
+            "exit code 0 must be omitted",
+        ),
+        (
+            base.replace("- 結果：正常終了", "- 結果：正常終了 256"),
+            "integer out of range",
+        ),
+        (
+            base.replace("- 結果：正常終了", "- 結果：正常終了 01"),
+            "invalid unsigned integer",
+        ),
+        (
+            base.replace("- 結果：正常終了", "- 結果：正常終了  1"),
+            "invalid unsigned integer",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：コンパイルエラー `[char.literal]` -1:1",
+            ),
+            "invalid unsigned integer",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：コンパイルエラー `[char.literal]` a:1",
+            ),
+            "invalid unsigned integer",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：コンパイルエラー `[char.literal]` 1:b",
+            ),
+            "invalid unsigned integer",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：コンパイルエラー `[char.literal]` 01:1",
+            ),
+            "invalid unsigned integer",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：コンパイルエラー  `[char.literal]` 1:1",
+            ),
+            "invalid diagnostic rule",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：コンパイルエラー `[char.literal]`  1:1",
+            ),
+            "invalid unsigned integer",
+        ),
+        (
+            base.replace("- 結果：正常終了", "- 結果:正常終了"),
+            "invalid result line",
+        ),
+        (
+            base.replace("- 結果：正常終了", "- 結果(通常):正常終了"),
+            "invalid result line",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：正常終了/警告：`[diagnostic.arithmetic]` 2:1",
+            ),
+            "unknown outcome",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：正常終了 /警告：`[diagnostic.arithmetic]` 2:1",
+            ),
+            "invalid unsigned integer",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：正常終了 / 警告:`[diagnostic.arithmetic]` 2:1",
+            ),
+            "invalid warning specification",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：正常終了\n-  結果（警告）：正常終了",
+            ),
+            "invalid metadata line",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：正常終了\n-\t結果（警告）：正常終了",
+            ),
+            "invalid metadata line",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：正常終了\n-　結果（警告）：正常終了",
+            ),
+            "invalid metadata line",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：正常終了\n-結果（警告）：正常終了",
+            ),
+            "invalid metadata line",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：正常終了\n* 結果（警告）：正常終了",
+            ),
+            "invalid metadata line",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：正常終了\n+ 結果（警告）：正常終了",
+            ),
+            "invalid metadata line",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：正常終了\n－ 結果（警告）：正常終了",
+            ),
+            "invalid metadata line",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：正常終了\n- 副根拠：`[src.encoding]`",
+            ),
+            "invalid metadata line",
+        ),
+        (
+            base.replace("- 主根拠：", "- 主根據："),
+            "invalid metadata line",
+        ),
+        (
+            base.replace("- 結果：正常終了", "  - 結果：正常終了"),
+            "invalid metadata line",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：正常終了\n結果（強制）：正常終了",
+            ),
+            "invalid metadata line",
+        ),
+        (
+            base.replace("- 結果：正常終了", "\n- 結果：正常終了"),
+            "metadata line must appear in header block",
+        ),
+        (
+            format!("{base}\n- 結果（警告）：正常終了\n"),
+            "metadata line must appear in header block",
+        ),
+        (
+            base.replace("`[src.encoding]`", "`[src.encoding]`、`[lex.x]`"),
+            "invalid primary rule",
+        ),
+        (
+            base.replace("`[src.encoding]`", "`[src encoding!]`"),
+            "invalid primary rule",
+        ),
+        (
+            base.replace("`[src.encoding]`", " `[src.encoding]`"),
+            "invalid primary rule",
+        ),
+        (
+            base.replace("`[src.encoding]`", "`[src.encoding]` "),
+            "invalid primary rule",
+        ),
+        (
+            base.replace("`[src.encoding]`", "`[src.encoding]`。"),
+            "invalid primary rule",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 補助根拠：なにか\n- 結果：正常終了",
+            ),
+            "invalid secondary rule",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 補助根拠：`[src.encoding]`\n- 補助根拠：`[lex.x]`\n- 結果：正常終了",
+            ),
+            "duplicate secondary rule",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 補助根拠：`[lex.a]` ・ `[lex.b]`\n- 結果：正常終了",
+            ),
+            "invalid secondary rule",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 補助根拠：`[lex.a]`・`[lex.a]`\n- 結果：正常終了",
+            ),
+            "duplicate secondary rule id",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 補助根拠：`[src.encoding]`\n- 結果：正常終了",
+            ),
+            "secondary rule duplicates primary rule",
+        ),
+        (
+            format!("{base}\n**標準出力：**\n\n```text\nhi\n```\n\n- 結果（警告）：正常終了\n"),
+            "metadata line must appear in header block",
+        ),
+    ] {
+        let error = extract(&bad).unwrap_err();
+        assert!(error.contains(reason), "expected {reason}, got {error}");
     }
 }

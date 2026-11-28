@@ -146,6 +146,7 @@ impl Parser<'_, '_> {
 pub(super) fn collect(
     tokens: &[Token<'_>],
     enums: &[EnumDeclaration],
+    ranges: &[crate::ast::RangeDeclaration],
     fnshapes: &[crate::ast::FnShapeDeclaration],
     applications: crate::ast::generics::Applications,
     need_groups: std::rc::Rc<super::need_groups::Groups>,
@@ -155,10 +156,13 @@ pub(super) fn collect(
         applications,
         type_parameters: Vec::new(),
         pending_needs: Vec::new(),
+        pending_contracts: Vec::new(),
+        in_ensures: false,
         generic_functions: Default::default(),
         allows: Vec::new(),
         tokens,
         enums,
+        ranges,
         structs: &[],
         fnshapes,
         fnshape_names: super::function_types::name_index(fnshapes),
@@ -183,7 +187,14 @@ pub(super) fn collect(
             && matches!(
                 p.token().kind,
                 Kind::Keyword(
-                    "fn" | "arena" | "fnshape" | "needs" | "fix" | "extern" | "enum" | "error"
+                    "fn" | "arena"
+                        | "fnshape"
+                        | "needs"
+                        | "fix"
+                        | "extern"
+                        | "enum"
+                        | "range"
+                        | "error"
                 )
             )
         {
@@ -257,6 +268,7 @@ pub(super) fn collect(
             // 列挙型との重複と同じく、構造体の名前の位置で報告する。
             if fnshapes.iter().any(|decl| decl.name == name)
                 || enums.iter().any(|decl| decl.name == name)
+                || ranges.iter().any(|decl| decl.name == name)
                 || headers.iter().any(|decl| decl.name == name)
             {
                 return Err(location.error(
@@ -382,8 +394,8 @@ pub(crate) fn validate_layout_range<'a>(
         return Ok(());
     }
     for include_pointers in [false, true] {
-        // 先に値だけの循環を調べ、その後に非nullポインタを含む初期化の循環を調べる。
-        // nullableの辺は初期化をnullで打ち切れるため、後者の依存から除く。
+        // 先に値だけの循環を調べ、その後に非nilポインタを含む初期化の循環を調べる。
+        // nilableの辺は初期化をnilで打ち切れるため、後者の依存から除く。
         let dependencies: Vec<Vec<_>> = (start..end)
             .map(|id| {
                 let decl = declaration(id);
@@ -394,13 +406,16 @@ pub(crate) fn validate_layout_range<'a>(
                         if include_pointers {
                             loop {
                                 if let Some(inner) = ty.pointee() {
-                                    if ty.is_nullable() {
+                                    if ty.is_nilable() {
                                         return None;
                                     }
                                     ty = inner;
-                                } else if let Type::Array(id) = ty {
+                                } else if let Type::ArrayRef { id, nilable, .. } = ty {
+                                    if nilable {
+                                        return None;
+                                    }
                                     let array = arrays.get(id);
-                                    // 一次元はnew []で初期化を打ち切れる。多次元は初期値が必要。
+                                    // 一次元はnew #[]や.[]で初期化を打ち切れる。多次元は初期値が必要。
                                     if array.rank == 1 {
                                         return None;
                                     }
@@ -460,7 +475,7 @@ pub(crate) fn validate_layout_range<'a>(
                         ErrorKind::InvalidSource,
                         crate::diagnostic!(
                             "arena.recursive-struct",
-                            "non-null initialization cycle: {}",
+                            "non-nil initialization cycle: {}",
                             fields
                         ),
                     ));

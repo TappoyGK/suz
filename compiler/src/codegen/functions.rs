@@ -9,7 +9,126 @@ use crate::{
 };
 use std::fmt::Write;
 
-pub(super) fn declaration(function: &CheckedFunction) -> String {
+/// 64-bit ABI（AAPCS64 / System V x86-64）では 16 バイト以下の構造体はレジスタ 2 本で値渡しされる。
+/// 16 バイトを超える構造体だけをポインタ渡しにして、小さな構造体の再帰等での速度低下を避ける。
+const SMALL_STRUCT_VALUE_LIMIT_BYTES: usize = 16;
+
+fn align_up(offset: usize, align: usize) -> usize {
+    let align = align.max(1);
+    (offset + (align - 1)) & !(align - 1)
+}
+
+fn type_layout(ty: Type, context: &ExpressionContext) -> (usize, usize) {
+    use crate::ast::{CIntegerType, FloatType, IntegerType};
+    match ty {
+        Type::Bool => (1, 1),
+        Type::Char => (4, 4),
+        Type::Integer(t) => match t {
+            IntegerType::I8 | IntegerType::U8 => (1, 1),
+            IntegerType::I16 | IntegerType::U16 => (2, 2),
+            IntegerType::I32 | IntegerType::U32 | IntegerType::Len => (4, 4),
+            IntegerType::I64 | IntegerType::U64 => (8, 8),
+        },
+        Type::Float(FloatType::F32) => (4, 4),
+        Type::Float(FloatType::F64) => (8, 8),
+        Type::Enum(e) => type_layout(Type::Integer(e.base), context),
+        Type::Range(r) => type_layout(Type::Integer(r.base), context),
+        Type::CInteger(t) => match t {
+            CIntegerType::Char => (1, 1),
+            CIntegerType::Int | CIntegerType::Uint => (4, 4),
+            CIntegerType::Long | CIntegerType::Ulong | CIntegerType::Size => (8, 8),
+        },
+        Type::Pointer { .. } | Type::CPointer | Type::Symbol | Type::StaticFunction(_) => (8, 8),
+        Type::Function(_) => (16, 8),
+        Type::Text => (32, 8),
+        Type::ArrayRef { id, .. } => {
+            let array = context.arrays.get(id);
+            let ptr_count = if array.soa {
+                let Type::Struct(sid) = array.element else {
+                    unreachable!()
+                };
+                super::soa::leaves(sid, context).len()
+            } else {
+                1
+            };
+            (align_up(8 * ptr_count + 4 * array.rank, 8), 8)
+        }
+        Type::Exact => (32, 16),
+        Type::Struct(id) => {
+            let mut offset = 0usize;
+            let mut align = 1usize;
+            for field in &context.structs[id].fields {
+                let (field_size, field_align) = type_layout(field.ty, context);
+                offset = align_up(offset, field_align);
+                offset += field_size;
+                align = align.max(field_align);
+            }
+            (align_up(offset, align), align)
+        }
+        Type::Void
+        | Type::Array(_)
+        | Type::Parameter(_)
+        | Type::Application(_)
+        | Type::StaticShape(_)
+        | Type::Shape(_)
+        | Type::GenericInt
+        | Type::GenericFloat
+        | Type::Numeric(_) => (0, 1),
+    }
+}
+
+/// 構造体または SoA 配列参照の値仮引数を C の読み取り専用ポインタで渡すべきか（16 バイト超のみ）。
+pub(super) fn pass_struct_by_pointer(ty: Type, context: &ExpressionContext) -> bool {
+    let by_ref_kind = match ty {
+        Type::Struct(_) => true,
+        Type::ArrayRef { id, .. } => context.arrays.get(id).soa,
+        _ => false,
+    };
+    by_ref_kind && type_layout(ty, context).0 > SMALL_STRUCT_VALUE_LIMIT_BYTES
+}
+
+/// 16 バイト超の構造体の値仮引数は C では読み取り専用ポインタで受け取る。
+pub(super) fn parameter_type(ty: Type, context: &ExpressionContext) -> String {
+    if pass_struct_by_pointer(ty, context) {
+        format!("const {} *restrict", ty.c_name())
+    } else {
+        ty.c_name()
+    }
+}
+
+/// 呼び出し中に値が変わり得ない構造体の場所かを判定する。
+/// fix束縛・値仮引数・値キャプチャーと、それらの構造体フィールド連鎖だけが該当する。
+/// var束縛・ポインタ参照外し・参照キャプチャー・#メソッドのselfは含めない。
+pub(super) fn immutable_struct_place(
+    expr: &CheckedExpression,
+    context: &ExpressionContext,
+) -> bool {
+    match &expr.value {
+        crate::check::ir::Value::Local(id) => context.immutable_locals.contains(id),
+        crate::check::ir::Value::Receiver {
+            mutable: false,
+            target,
+        } => immutable_struct_place(target, context),
+        crate::check::ir::Value::Field { target, .. } => {
+            matches!(target.ty, Type::Struct(_)) && immutable_struct_place(target, context)
+        }
+        crate::check::ir::Value::Cast(target)
+            if expr
+                .ty
+                .array_id()
+                .is_some_and(|id| context.arrays.get(id).soa)
+                && target
+                    .ty
+                    .array_id()
+                    .is_some_and(|id| context.arrays.get(id).soa) =>
+        {
+            immutable_struct_place(target, context)
+        }
+        _ => false,
+    }
+}
+
+pub(super) fn declaration(function: &CheckedFunction, context: &ExpressionContext) -> String {
     let mut parameters = function
         .parameters
         .iter()
@@ -17,6 +136,8 @@ pub(super) fn declaration(function: &CheckedFunction) -> String {
         .map(|(id, ty)| {
             if id == 0 && function.mutable_receiver {
                 format!("{} *const suz_ref_0", ty.c_name())
+            } else if pass_struct_by_pointer(*ty, context) {
+                format!("const {} *restrict suz_ref_{id}", ty.c_name())
             } else {
                 format!("const {} suz_local_{id}", ty.c_name())
             }
@@ -54,6 +175,11 @@ pub(super) fn emit(function: &CheckedFunction, context: &mut ExpressionContext) 
     if function.mutable_receiver {
         context.references.insert(0);
     }
+    for (id, ty) in function.parameters.iter().enumerate() {
+        if !(id == 0 && function.mutable_receiver) && pass_struct_by_pointer(*ty, context) {
+            context.references.insert(id);
+        }
+    }
     context.function_result = Some(function.result);
     context.temporaries.clear();
     context.closure_environments.clear();
@@ -71,7 +197,7 @@ pub(super) fn emit(function: &CheckedFunction, context: &mut ExpressionContext) 
         String::new()
     };
     statements::emit_block(&mut body, &function.statements, 1, &mut 0, context);
-    let mut c = format!("{} {{\n", declaration(function));
+    let mut c = format!("{} {{\n", declaration(function, context));
     for (id, &ty) in function.parameters.iter().enumerate() {
         // Suzでは未使用の引数を認めるため、Cコンパイラの警告を抑える。
         writeln!(c, "    (void){};", context.local(id)).unwrap();
@@ -90,42 +216,118 @@ pub(super) fn emit(function: &CheckedFunction, context: &mut ExpressionContext) 
     c
 }
 
+fn emit_argument(
+    argument: &CheckedExpression,
+    external: bool,
+    setup: &mut Vec<String>,
+    names: &mut Vec<String>,
+    writebacks: &mut Vec<String>,
+    context: &mut ExpressionContext,
+) {
+    if let crate::check::ir::Value::Receiver {
+        target,
+        mutable: true,
+    } = &argument.value
+        && let Some(wb) = super::soa::try_mutable_receiver(target, setup, names, context)
+    {
+        writebacks.push(wb);
+        return;
+    }
+    let by_reference = matches!(
+        argument.value,
+        crate::check::ir::Value::Receiver { mutable: true, .. }
+    );
+    if !external && !by_reference && pass_struct_by_pointer(argument.ty, context) {
+        if immutable_struct_place(argument, context) {
+            let value = expression(argument, context);
+            names.push(format!("&({value})"));
+            return;
+        }
+        let unwrapped = match &argument.value {
+            crate::check::ir::Value::Receiver {
+                mutable: false,
+                target,
+            } => target.as_ref(),
+            _ => argument,
+        };
+        if let crate::check::ir::Value::With { target, fields } = &unwrapped.value {
+            let index = context.temporaries.len();
+            context.temporaries.push(argument.ty);
+            let destination = format!("suz_cmp_{index}");
+            setup.extend(super::structs::with_into(
+                &destination,
+                target,
+                fields,
+                context,
+            ));
+            names.push(format!("&{destination}"));
+            return;
+        }
+        let index = context.temporaries.len();
+        context.temporaries.push(argument.ty);
+        let value = expression(argument, context);
+        setup.push(format!("suz_cmp_{index} = {value}"));
+        names.push(format!("&suz_cmp_{index}"));
+        return;
+    }
+    let index = context.temporaries.len();
+    context.temporaries.push(if by_reference {
+        argument.ty.pointer()
+    } else {
+        argument.ty
+    });
+    let name = format!("suz_cmp_{index}");
+    let value = expression(argument, context);
+    setup.push(format!(
+        "{name} = {}",
+        if by_reference {
+            format!("&({value})")
+        } else {
+            value
+        }
+    ));
+    names.push(name);
+}
+
 pub(super) fn call(
     id: usize,
     arguments: &[CheckedExpression],
+    result_ty: Type,
     context: &mut ExpressionContext,
     error: Option<&str>,
 ) -> String {
+    let external = context.external_ids.contains(&id);
     let mut setup = Vec::new();
     let mut names = Vec::new();
+    let mut writebacks = Vec::new();
     for argument in arguments {
-        let index = context.temporaries.len();
-        let by_reference = matches!(
-            argument.value,
-            crate::check::ir::Value::Receiver { mutable: true, .. }
+        emit_argument(
+            argument,
+            external,
+            &mut setup,
+            &mut names,
+            &mut writebacks,
+            context,
         );
-        context.temporaries.push(if by_reference {
-            argument.ty.pointer()
-        } else {
-            argument.ty
-        });
-        let name = format!("suz_cmp_{index}");
-        let value = expression(argument, context);
-        setup.push(format!(
-            "{name} = {}",
-            if by_reference {
-                format!("&({value})")
-            } else {
-                value
-            }
-        ));
-        names.push(name);
     }
     if let Some(error) = error {
         names.push(format!("&{error}"));
     }
     let call = format!("suz_fn_{id}({})", names.join(", "));
-    if setup.is_empty() {
+    if !writebacks.is_empty() {
+        if result_ty == Type::Void {
+            setup.push(call);
+            setup.extend(writebacks);
+        } else {
+            let ret_idx = context.temporaries.len();
+            context.temporaries.push(result_ty);
+            let ret_tmp = format!("suz_cmp_{ret_idx}");
+            setup.push(format!("{ret_tmp} = {call}"));
+            setup.extend(writebacks);
+            setup.push(ret_tmp);
+        }
+        format!("({})", setup.join(", "))
+    } else if setup.is_empty() {
         call
     } else {
         setup.push(call);
@@ -144,14 +346,16 @@ pub(super) fn invoke(
     context.temporaries.push(target.ty);
     let mut setup = vec![format!("suz_cmp_{id} = {}", expression(target, context))];
     let mut names = Vec::new();
+    let mut writebacks = Vec::new();
     for argument in arguments {
-        let index = context.temporaries.len();
-        context.temporaries.push(argument.ty);
-        setup.push(format!(
-            "suz_cmp_{index} = {}",
-            expression(argument, context)
-        ));
-        names.push(format!("suz_cmp_{index}"));
+        emit_argument(
+            argument,
+            false,
+            &mut setup,
+            &mut names,
+            &mut writebacks,
+            context,
+        );
     }
     if let Some(error) = error {
         names.push(format!("&{error}"));
@@ -206,7 +410,7 @@ pub(super) fn type_declarations(c: &mut String, context: &ExpressionContext) {
         } else {
             ty.parameters
                 .iter()
-                .map(|t| t.c_name())
+                .map(|t| parameter_type(*t, context))
                 .collect::<Vec<_>>()
                 .join(", ")
         };
@@ -226,7 +430,7 @@ pub(super) fn type_declarations(c: &mut String, context: &ExpressionContext) {
         .unwrap();
         if context.call_only_types.contains(&id) {
             let mut arguments = vec!["void *".to_owned()];
-            arguments.extend(ty.parameters.iter().map(|ty| ty.c_name()));
+            arguments.extend(ty.parameters.iter().map(|ty| parameter_type(*ty, context)));
             if !ty.errors.is_empty() {
                 arguments.push("uint64_t *".into());
             }
@@ -267,7 +471,7 @@ pub(super) fn call_only_declarations(c: &mut String, context: &ExpressionContext
             .parameters
             .iter()
             .enumerate()
-            .map(|(i, ty)| format!("{} argument_{i}", ty.c_name()))
+            .map(|(i, ty)| format!("{} argument_{i}", parameter_type(*ty, context)))
             .collect();
         let mut with_environment = vec!["void *environment".to_owned()];
         with_environment.extend(parameters);

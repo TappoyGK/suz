@@ -32,7 +32,7 @@ pub(super) fn lift(ty: Type, name: &str) -> String {
         format!("suz_exact_make(false, {name})")
     }
 }
-fn can_fail(e: &Exact) -> bool {
+pub(super) fn can_fail(e: &Exact) -> bool {
     match &e.kind {
         ExactKind::Negate(a) => can_fail(a),
         ExactKind::Binary(op, a, b) => {
@@ -40,13 +40,34 @@ fn can_fail(e: &Exact) -> bool {
                 || can_fail(b)
                 || (matches!(
                     op,
-                    crate::ast::BinaryOperator::Divide | crate::ast::BinaryOperator::Remainder
+                    crate::ast::BinaryOperator::Divide
+                        | crate::ast::BinaryOperator::Remainder
+                        | crate::ast::BinaryOperator::EuclideanRemainder
                 ) && b
                     .range
                     .is_none_or(|r| r.min <= Int::ZERO && r.max >= Int::ZERO))
         }
         _ => false,
     }
+}
+pub(super) fn native_type(expr: &CheckedExpression) -> Option<Type> {
+    let Value::Exact(e) = &expr.value else {
+        return None;
+    };
+    native::ty(e)
+}
+pub(super) fn emit_native(expr: &CheckedExpression, ty: Type, c: &mut ExpressionContext) -> String {
+    let Value::Exact(e) = &expr.value else {
+        unreachable!()
+    };
+    native::emit(e, ty, c)
+}
+pub(super) fn native_value(
+    expr: &CheckedExpression,
+    c: &mut ExpressionContext,
+) -> Option<(Type, String)> {
+    let ty = native_type(expr)?;
+    Some((ty, emit_native(expr, ty, c)))
 }
 pub(super) fn tree(e: &Exact, c: &mut ExpressionContext) -> String {
     if let Some(ty) = native::ty(e) {
@@ -91,13 +112,31 @@ pub(super) fn tree(e: &Exact, c: &mut ExpressionContext) -> String {
                     e.location.line,
                     e.location.column
                 ),
+                EuclideanRemainder => format!(
+                    "suz_exact_euclid(suz_cmp_{i}, suz_cmp_{j}, {}, {})",
+                    e.location.line, e.location.column
+                ),
                 _ => unreachable!(),
             };
             let result = if let Some(ty) = native::operation_type(e) {
                 let left = converted(ty, &format!("suz_cmp_{i}"), c);
                 let right = converted(ty, &format!("suz_cmp_{j}"), c);
-                let native = lift(ty, &format!("({left} {} {right})", op.c_symbol()));
-                if matches!(op, Divide | Remainder) {
+                let native = if matches!(op, EuclideanRemainder)
+                    && ty == Type::Integer(crate::ast::IntegerType::I64)
+                {
+                    let rem = c.temporaries.len();
+                    let rhs = rem + 1;
+                    c.temporaries.extend([ty, ty]);
+                    lift(
+                        ty,
+                        &format!(
+                            "(suz_cmp_{rhs} = ({right}), suz_cmp_{rem} = ({left}) % suz_cmp_{rhs}, suz_cmp_{rem} < 0 ? suz_cmp_{rem} + (suz_cmp_{rhs} < 0 ? -suz_cmp_{rhs} : suz_cmp_{rhs}) : suz_cmp_{rem})"
+                        ),
+                    )
+                } else {
+                    lift(ty, &format!("({left} {} {right})", op.c_symbol()))
+                };
+                if matches!(op, Divide | Remainder | EuclideanRemainder) {
                     format!("(suz_cmp_{j}.magnitude == 0 ? {result} : {native})")
                 } else {
                     native
@@ -134,6 +173,28 @@ pub(super) fn fits(ty: Type, name: &str) -> String {
     match ty {
         Type::Float(_) => format!("!{name}.failed"),
         Type::Integer(t) => format!("suz_exact_fits({name}, {}, {})", t.bounds().0 < 0, t.bits()),
+        Type::Range(t) => {
+            let (lo, hi) = t.bounds();
+            let lo_cond = if lo < 0 {
+                format!(
+                    "(!{name}.negative || {name}.magnitude <= {}ULL)",
+                    lo.unsigned_abs()
+                )
+            } else if lo == 0 {
+                format!("!{name}.negative")
+            } else {
+                format!("(!{name}.negative && {name}.magnitude >= {}ULL)", lo as u64)
+            };
+            let hi_cond = if hi < 0 {
+                format!(
+                    "({name}.negative && {name}.magnitude >= {}ULL)",
+                    hi.unsigned_abs()
+                )
+            } else {
+                format!("({name}.negative || {name}.magnitude <= {}ULL)", hi as u64)
+            };
+            format!("(!{name}.failed && {lo_cond} && {hi_cond})")
+        }
         Type::Enum(t) => format!(
             "(!{name}.failed && !{name}.negative && {name}.magnitude < {})",
             t.count
@@ -227,12 +288,23 @@ pub(super) fn compare(
     op: crate::ast::ComparisonOperator,
 ) -> String {
     use crate::ast::ComparisonOperator::*;
-    if (a == b && matches!(a, Type::Integer(_)))
+    if (a == b && matches!(a, Type::Integer(_) | Type::Range(_)))
         || matches!((a, b), (Type::Float(_), Type::Float(_)))
     {
         return format!("{left} {} {right}", op.symbol());
     }
-    if let (Type::Integer(a), Type::Integer(b)) = (a, b) {
+    if let (Some(a), Some(b)) = (
+        match a {
+            Type::Integer(t) => Some(t),
+            Type::Range(r) => Some(r.base),
+            _ => None,
+        },
+        match b {
+            Type::Integer(t) => Some(t),
+            Type::Range(r) => Some(r.base),
+            _ => None,
+        },
+    ) {
         let signed_a = a.c_signed();
         let signed_b = b.c_signed();
         // 非負の値同士は符号なしにそろえる。32ビットに収まる比較を

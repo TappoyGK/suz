@@ -16,10 +16,10 @@ use crate::{
 };
 use std::{collections::BTreeMap, rc::Rc};
 
-pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
-    super::generic::validate(program)?;
-    let structs = Rc::new(super::type_parameters::structs::Structs::new(program));
-    structs.prepare()?;
+fn build_signatures(
+    program: &Program,
+    structs: &super::type_parameters::structs::Structs,
+) -> Result<BTreeMap<String, Signature>, Diagnostic> {
     let mut signatures = BTreeMap::new();
     for (id, function) in program.functions.iter().enumerate() {
         let mut method = function.method;
@@ -67,6 +67,7 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
         if signatures.contains_key(&function.name)
             || program.bindings.iter().any(|c| c.name == function.name)
             || program.enums.iter().any(|e| e.name == function.name)
+            || program.ranges.iter().any(|r| r.name == function.name)
             || structs.contains_name(&function.name)
             || structs.shapes.contains_name(&function.name)
         {
@@ -89,6 +90,9 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
                     )
                 }),
                 needs: function.needs.clone(),
+                parameter_names: (!function.contracts.is_empty())
+                    .then(|| Rc::new(function.parameters.iter().map(|p| p.name.clone()).collect())),
+                contracts: function.contracts.clone(),
                 method,
                 external: false,
                 id,
@@ -115,6 +119,14 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
         );
     }
     super::ffi::signatures(program, &mut signatures)?;
+    Ok(signatures)
+}
+
+pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
+    super::generic::validate(program)?;
+    let structs = Rc::new(super::type_parameters::structs::Structs::new(program));
+    structs.prepare()?;
+    let signatures = build_signatures(program, &structs)?;
     let main_id = signatures["main"].id;
     let signatures = Rc::new(signatures);
     let scope = Scope {
@@ -130,7 +142,24 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
         ))),
         ..Scope::default()
     };
-    let (globals, mut warnings) = declarations::resolve(&program.bindings, &program.enums, scope)?;
+    let (mut globals, resolved_ranges, mut warnings) =
+        declarations::resolve(&program.bindings, &program.enums, &program.ranges, scope)?;
+    let patched_program;
+    let program = if !resolved_ranges.is_empty() {
+        let mut cloned = program.clone();
+        cloned.patch_ranges(&resolved_ranges);
+        let structs = Rc::new(super::type_parameters::structs::Structs::new(&cloned));
+        structs.prepare()?;
+        let signatures = Rc::new(build_signatures(&cloned, &structs)?);
+        globals.function_types = structs.shapes.types.clone();
+        globals.structs = structs;
+        globals.functions = signatures;
+        globals.ranges = Rc::new(resolved_ranges.clone());
+        patched_program = cloned;
+        &patched_program
+    } else {
+        program
+    };
     for group in &program.need_groups {
         definition_scope(
             &globals,
@@ -225,8 +254,8 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
         }
     }
     // 関数型がスカラーだけでも、クロージャはポインタを捕捉できる。
-    // 型検査済みの全本体・捕捉・具体化でポインタがなければ、寿命解析自体が不要。
-    let arena_warnings = if globals.program_pointers_used.get() {
+    // 型検査済みの全本体・捕捉・具体化で参照を含む値がなければ、寿命解析自体が不要。
+    let arena_warnings = if globals.program_references_used.get() {
         super::arena::check_program(
             &mut functions,
             program.functions.len()..program.functions.len() + program.externs.len(),
@@ -246,12 +275,28 @@ pub(super) fn check(program: &Program) -> Result<CheckedProgram, Diagnostic> {
     Ok(CheckedProgram {
         arrays: globals.structs.arrays.borrow().clone(),
         arena_warnings,
+        array_handler_warnings: globals
+            .outputs
+            .redundant_array_handlers
+            .borrow()
+            .iter()
+            .map(|(&(line, column), related)| {
+                (crate::ast::Location { line, column }, related.clone())
+            })
+            .collect(),
         externs: program.externs.clone(),
         external_base: program.functions.len(),
         function_types: globals.function_types.borrow().clone(),
         division_warnings: globals
             .outputs
             .divisions
+            .borrow()
+            .iter()
+            .map(|&(line, column)| crate::ast::Location { line, column })
+            .collect(),
+        float_sat_nan_warnings: globals
+            .outputs
+            .float_sat_nans
             .borrow()
             .iter()
             .map(|&(line, column)| crate::ast::Location { line, column })
@@ -454,6 +499,7 @@ pub(super) fn check_function(
     id: usize,
 ) -> Result<(CheckedFunction, Vec<crate::ast::Location>), Diagnostic> {
     scope.array_bounds = Default::default();
+    scope.ref_captured = Default::default();
     let mut references = BTreeMap::new();
     if let Some(method) = function.method.filter(|m| m.mutable) {
         references.insert(
@@ -486,6 +532,7 @@ pub(super) fn check_with_captures(
     if scope.instance() {
         scope.outputs.comparisons = Default::default();
         scope.outputs.divisions = Default::default();
+        scope.outputs.float_sat_nans = Default::default();
     }
     scope.errors = Rc::new(function.errors.clone());
     scope.result = scope.resolve_type_at(function.result, function.location)?;
@@ -513,6 +560,7 @@ pub(super) fn check_with_captures(
             let mut binding = binding.clone();
             binding.id = parameter_id;
             binding.ty = parameter_type;
+            scope.ref_captured.borrow_mut().insert(parameter_id);
             scope.locals.insert(parameter.name.clone(), binding);
             continue;
         }
@@ -561,6 +609,15 @@ pub(super) fn check_with_captures(
             Some(&mut dimension_names),
         )?;
     }
+    super::contracts::validate_and_assume(&function.contracts, &mut scope)?;
+    scope.current_ensures = Rc::new(
+        function
+            .contracts
+            .iter()
+            .filter(|c| c.kind == crate::ast::ContractKind::Ensures)
+            .cloned()
+            .collect(),
+    );
     statements.extend(statements::block_with_bindings(
         &function.statements,
         &mut scope,
@@ -650,7 +707,7 @@ pub(super) fn call(
     let generic = signature.is_generic();
     let types = super::generic::resolve(signature, arguments, expected, scope, expr.location)?;
     let concrete = |ty| types.resolve(ty);
-    let arguments = arguments
+    let arguments: Vec<_> = arguments
         .iter()
         .zip(&signature.parameters)
         .map(|(argument, ty)| {
@@ -661,6 +718,7 @@ pub(super) fn call(
             }
         })
         .collect::<Result<_, _>>()?;
+    super::contracts::check_call(signature, &arguments, expr.location, scope)?;
     if generic && scope.generic_check() {
         scope.defer_call(signature.id, types.int, types.float, expr.location, false);
     }
@@ -675,7 +733,7 @@ pub(super) fn call(
     } else {
         signature.id
     };
-    super::errors::finish(
+    let result = super::errors::finish(
         CheckedExpression {
             ty: concrete(signature.result),
             value: Value::Call {
@@ -688,7 +746,9 @@ pub(super) fn call(
         handler,
         expr,
         scope,
-    )
+    )?;
+    super::arrays::bounds::forget_call(scope);
+    Ok(result)
 }
 
 pub(super) fn return_value(
@@ -705,7 +765,9 @@ pub(super) fn return_value(
             ),
         ));
     }
-    expression(value, Some(scope.result), scope)
+    let checked = expression(value, Some(scope.result), scope)?;
+    super::contracts::check_return(&checked, value.location, scope)?;
+    Ok(checked)
 }
 
 /// 要求のある定義だけで要求検査を行い、通常の宣言は呼び出し元のスコープを使う。

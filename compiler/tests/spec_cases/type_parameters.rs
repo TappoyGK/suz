@@ -78,7 +78,7 @@ error Failed { Bad }
 struct Number { n: i32 }
 fn Number.read() -> i32 or Failed { return self.n }
 fn Number#increment() -> void { self#n = self.n + 1 }
-fn Number.copy() -> ptr Number { return new self }
+fn Number.copy() -> mut Number { return new self }
 @needs T: .read() -> i32 or Failed
 @needs T: #increment() -> void
 fn use_value[T](value: T) -> i32 {
@@ -86,11 +86,11 @@ fn use_value[T](value: T) -> i32 {
     copy#increment()
     return copy.read() or 99
 }
-@needs T: .copy() -> ptr T
-fn duplicate[T](value: T) -> ptr T { return value.copy() }
+@needs T: .copy() -> mut T
+fn duplicate[T](value: T) -> mut T { return value.copy() }
 fn main() -> u8 {
     arena {
-        fix ptr p = duplicate[Number](Number { n: 4 })
+        fix p = duplicate[Number](Number { n: 4 })
         if use_value[Number](.p) != 5 { return 1 }
     }
     return 0
@@ -106,11 +106,11 @@ fn generic_calls_reject_unsatisfied_unused_requirements() {
     for (requirement, ty, argument) in [
         ("+(T) -> T", "bool", "true"),
         ("~() -> T", "len_t", "1"),
-        ("== (T) -> bool", "ptr i32", "p"),
+        ("== (T) -> bool", "mut i32", "p"),
         ("*(T) -> f32", "i64", "1"),
     ] {
         let source = format!(
-            "@needs T: {requirement}\nfn identity[T](value: T) -> T {{ return value }}\nfn main() -> u8 {{ arena {{ fix ptr p = new (1 as i32)\nidentity[{ty}]({argument}) }}\nreturn 0 }}"
+            "@needs T: {requirement}\nfn identity[T](value: T) -> T {{ return value }}\nfn main() -> u8 {{ arena {{ fix p = new (1 as i32)\nidentity[{ty}]({argument}) }}\nreturn 0 }}"
         );
         let error = suz::compile(source.as_bytes()).expect_err(&source);
         assert!(
@@ -148,10 +148,10 @@ fn named_generics_preserve_lifetimes_and_bound_recursive_instantiation() {
 fn identity[T](value: T) -> T { return value }
 fn main() -> u8 {
     arena {
-        var ptr escaped: ptr? i32 = null
+        var escaped: mut? i32 = nil
         arena {
-            fix ptr p = new (1 as i32)
-            escaped = identity[ptr i32](p)
+            fix p = new (1 as i32)
+            escaped = identity[mut i32](p)
         }
     }
     return 0
@@ -159,10 +159,10 @@ fn main() -> u8 {
 "#;
     let error = suz::compile(source.as_bytes()).unwrap_err();
     assert!(error.message().contains("arena.store"), "{error:?}");
-    let ordinary = b"fn identity[T](value: T) -> T { return value }\nfn main() -> u8 { arena { fix ptr p = new (1 as i32)\nidentity[ptr i32](p) }\nreturn 0 }";
+    let ordinary = b"fn identity[T](value: T) -> T { return value }\nfn main() -> u8 { arena { fix p = new (1 as i32)\nidentity[mut i32](p) }\nreturn 0 }";
     suz::compile(ordinary).unwrap();
     let recursive = r#"
-fn grow[T]() -> void { grow[ptr T]() }
+fn grow[T]() -> void { grow[mut T]() }
 fn main() -> u8 { grow[i32]()
 return 0 }
 "#;
@@ -186,10 +186,10 @@ fn main() -> u8 { return countdown[u8](0, 3) }
 fn substituted_requirements_and_call_only_types_cannot_hide_invalid_signatures() {
     for source in [
         "@needs T: +(T) -> i8\n@needs U: +(U) -> i64\nfn keep[T, U](a: T, b: U) -> U { return b }\nfn main() -> u8 { keep[i8, i8](1, 2)\nreturn 0 }",
-        "fnshape Action() -> void\nfn local[T]() -> void { fix ptr p: ptr T = panic `stop` }\nfn main() -> u8 { local[fn Action]()\nreturn 0 }",
-        "fnshape Action() -> void\nfn local[T]() -> void { fix p: T = panic `stop` }\nfn main() -> u8 { local[fn Action]()\nreturn 0 }",
-        "fnshape Action() -> void\nfn exit_now[T]() -> T { return panic `stop` }\nfn main() -> u8 { exit_now[fn Action]()\nreturn 0 }",
-        "fnshape Action() -> void\nfn unused[T](p: ptr? T) -> void {}\nfn forward(f: fn Action) -> void { unused[fn Action](null) }\nfn main() -> u8 { return 0 }",
+        "fnshape Action() -> void\nfn local[T]() -> void { fix p: mut T = panic \"stop\" }\nfn main() -> u8 { local[fn Action]()\nreturn 0 }",
+        "fnshape Action() -> void\nfn local[T]() -> void { fix p: T = panic \"stop\" }\nfn main() -> u8 { local[fn Action]()\nreturn 0 }",
+        "fnshape Action() -> void\nfn exit_now[T]() -> T { return panic \"stop\" }\nfn main() -> u8 { exit_now[fn Action]()\nreturn 0 }",
+        "fnshape Action() -> void\nfn unused[T](p: mut? T) -> void {}\nfn forward(f: fn Action) -> void { unused[fn Action](nil) }\nfn main() -> u8 { return 0 }",
     ] {
         assert!(suz::compile(source.as_bytes()).is_err(), "{source}");
     }
@@ -280,7 +280,7 @@ return 0 }
     let error = suz::compile(source.as_bytes()).unwrap_err();
     assert_eq!(error.rule(), "generic.needs-check");
     let source = source
-        .replace("fn missing[U](a: U) -> U { return add[U](a, a) }", "")
+        .replace("fn missing[U](a: U) -> U { return add.[U](a, a) }", "")
         .replace(
             "add[i32](1, 2)",
             "add[i32](1, 2)\nadd[i32](3, 4)\nadd[bool](true, false)",
@@ -322,8 +322,8 @@ fn inferred_types_follow_nested_structures_pointers_and_forwarded_requirements()
         r#"
 struct Box[T] { value: T }
 fn unbox[T](box: Box[T]) -> T { return box.value }
-fn read[T](p: ptr T) -> T { return .p }
-fn nullable[T](p: ptr? T, value: T) -> T { let q = p { return .q }
+fn read[T](p: mut T) -> T { return .p }
+fn nilable[T](p: mut? T, value: T) -> T { let q = p { return .q }
 return value }
 @needs T: +(T) -> T
 fn add[T](a: T, b: T) -> T { return a + b }
@@ -335,10 +335,10 @@ fn main() -> u8 {
     fix n: i32 = 3
     if forward(n, 4) != 7 { return 2 }
     arena {
-        fix ptr p = new n
+        fix p = new n
         if read(p) != 3 { return 3 }
-        if nullable(null, n) != 3 { return 4 }
-        if nullable(p, n) != 3 { return 5 }
+        if nilable(nil, n) != 3 { return 4 }
+        if nilable(p, n) != 3 { return 5 }
         if read(new 4) != 4 { return 6 }
     }
     return 0
@@ -379,7 +379,7 @@ fn inference_requires_evidence_and_preserves_explicit_arguments() {
         ("fn empty[T]() -> void {}", "empty()", "generic.inference"),
         (
             "fn identity[T](a: T) -> T { return a }",
-            "fix n: ptr? i32 = identity(null)",
+            "fix n: mut? i32 = identity(nil)",
             "generic.inference",
         ),
         (
@@ -413,7 +413,7 @@ fn inference_requires_evidence_and_preserves_explicit_arguments() {
 #[test]
 fn inferred_calls_preserve_lifetimes_and_function_value_restrictions() {
     for source in [
-        "fn identity[T](value: T) -> T { return value }\nfn main() -> u8 { arena { var ptr saved: ptr? i32 = null\narena { fix ptr p = new (1 as i32)\nsaved = identity(p) } }\nreturn 0 }",
+        "fn identity[T](value: T) -> T { return value }\nfn main() -> u8 { arena { var saved: mut? i32 = nil\narena { fix p = new (1 as i32)\nsaved = identity(p) } }\nreturn 0 }",
         "fn identity[T](value: T) -> T { return value }\nfn main() -> u8 { identity(fn [](n: i32) -> i32 { return n })\nreturn 0 }",
         "fn nothing() -> void {}\nfn consume[T](v: T) -> void {}\nfn main() -> u8 { consume(nothing())\nreturn 0 }",
     ] {
@@ -492,8 +492,8 @@ fn main() -> u8 {
     );
     assert!(output.status.success(), "{output:?}");
     for source in [
-        "struct Box[T] { value: T }\nfn take[T](b: Box[ptr? T]) -> void {}\nfn main() -> u8 { arena { fix ptr p = new (1 as i32)\ntake(Box[ptr i32] { value: p }) }\nreturn 0 }",
-        "fn same[T](a: T, b: T) -> void {}\nfn main() -> u8 { arena { fix ptr p = new (1 as i32)\nfix ptr q: ptr? i32 = p\nsame(p, q) }\nreturn 0 }",
+        "struct Box[T] { value: T }\nfn take[T](b: Box[mut? T]) -> void {}\nfn main() -> u8 { arena { fix p = new (1 as i32)\ntake(Box[mut i32] { value: p }) }\nreturn 0 }",
+        "fn same[T](a: T, b: T) -> void {}\nfn main() -> u8 { arena { fix p = new (1 as i32)\nfix q: mut? i32 = p\nsame(p, q) }\nreturn 0 }",
     ] {
         assert!(suz::compile(source.as_bytes()).is_err(), "{source}");
     }
@@ -524,13 +524,13 @@ fn inference_diagnostics_name_the_callee_type_parameters() {
             "conflicting types Left and Right for type parameter Item",
         ),
         (
-            "fn make[Result]() -> Result { panic `missing` }",
+            "fn make[Result]() -> Result { panic \"missing\" }",
             "fix n: i32 = make()",
             "cannot infer type parameter Result; specify all type arguments explicitly",
         ),
         (
-            "fn accept[Element](p: ptr? Element) -> void {}",
-            "accept(null)",
+            "fn accept[Element](p: mut? Element) -> void {}",
+            "accept(nil)",
             "cannot infer type parameter Element; specify all type arguments explicitly",
         ),
         (

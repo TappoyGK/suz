@@ -28,7 +28,7 @@ class ChangeTests(unittest.TestCase):
         # 文書は、拡張子が.mdでも検査が必要。コードとの混在時も省略しない。
         self.assertFalse(ci.requires_checks(['HUMANS.md', 'docs/releasing.md', 'compiler/README.md']))
         self.assertFalse(ci.requires_checks([]))
-        for path in ['README.md', 'docs/spec.md', 'docs/spec-cases.md', 'docs/spec-cases/flow.md',
+        for path in ['README.md', 'docs/spec.md', 'docs/spec-cases.md', 'docs/spec-cases/flow-control.md',
                      'docs/spec-cases/new.md', 'runtime/third_party/ryu/README.md',
                      '.github/workflows/ci.yml', 'compiler/src/main.rs', 'Cargo.lock',
                      'scripts/ci-changes.py', 'LICENSE-MIT']:

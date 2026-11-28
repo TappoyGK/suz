@@ -449,3 +449,146 @@ fn ifexpr_checks_all_branches_and_requires_values() {
     let source = b"fn main() -> u8 { return ifexpr true { fix x: u8 = 0\nx } else { 1 } }";
     assert!(suz::compile(source).is_ok());
 }
+
+#[test]
+fn unary_wrapping_negation_works_at_runtime_and_compile_time() {
+    let source = r#"fix C_I8_MIN: i8 = -%(-128 as i8)
+fix C_I8_POS: i8 = -%(42 as i8)
+fix C_I8_ZERO: i8 = -%(0 as i8)
+fix C_U8_ONE: u8 = -%(1 as u8)
+fix C_U8_ZERO: u8 = -%(0 as u8)
+fix C_I64_MIN: i64 = -%(-9223372036854775808 as i64)
+fix C_DOUBLE: i8 = -% -%(17 as i8)
+
+fn main() -> u8 {
+    if C_I8_MIN != -128 || C_I8_POS != -42 || C_I8_ZERO != 0 { return 1 }
+    if C_U8_ONE != 255 || C_U8_ZERO != 0 { return 2 }
+    if C_I64_MIN != (-1 << 63) || C_DOUBLE != 17 { return 3 }
+
+    fix s8: i8 = -128
+    if -%s8 != -128 || -%(-%s8) != -128 { return 4 }
+
+    fix u: u8 = 1
+    if -%u != 255 || (-%u +% 1) != 0 { return 5 }
+
+    fix s64: i64 = -9223372036854775808
+    if -%s64 != s64 { return 6 }
+
+    // 単項 -% は二項 -% と組み合わせて使える
+    fix a: u8 = 10
+    fix b: u8 = 3
+    if a -% -%b != 13 { return 7 }
+
+    return 0
+}
+"#;
+    let directory = TemporaryDirectory::new();
+    let path = directory.0.join("wrap-neg.c");
+    fs::write(&path, suz::compile(source.as_bytes()).unwrap()).unwrap();
+    let output = build_and_run_c(&path, &directory.0.join("wrap-neg"));
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stdout.is_empty() && output.stderr.is_empty());
+
+    // --deny-unhandled-arithmetic 下でも警告なし
+    let no_warn = b"fn main() -> u8 {\n    fix x: u8 = 1\n    fix y = -%x\n    return y\n}\n";
+    suz::compile_with_mode(no_warn, suz::ArithmeticMode::Deny).unwrap();
+
+    // 不正な型と or 付与の拒否
+    for (body, rule) in [
+        (
+            "fix n: len_t = 1\nfix y = -%n\nreturn 0",
+            "expr.operator-types",
+        ),
+        (
+            "fix x: f64 = 1.0\nfix y = -%x\nreturn 0",
+            "expr.operator-types",
+        ),
+        ("fix x = -%true\nreturn 0", "expr.operator-types"),
+        (
+            "fix x: u8 = 1\nfix y = (-%x) or 0\nreturn y",
+            "expr.arithmetic-handler",
+        ),
+    ] {
+        let bad = format!("fn main() -> u8 {{\n{body}\n}}\n");
+        let error = suz::compile(bad.as_bytes()).unwrap_err();
+        assert!(error.message().contains(rule), "{body}: {error:?}");
+    }
+}
+
+#[test]
+fn migrated_jump_and_or_return_position_diagnostics() {
+    for (id, source, rule, line, column) in [
+        (
+            "expr-006",
+            "fn main() -> u8 {\n    fix raw: i64 = 300\n    fix result: u8 = expr {\n        fix converted = raw as u8 or return 1\n        converted\n    }\n    return result\n}\n",
+            "expr.jump-prohibited",
+            4,
+            38,
+        ),
+        (
+            "expr-008",
+            "fn main() -> u8 {\n    fix result: u8 = matchexpr true {\n        true => {\n            return 1\n            2\n        }\n        false => 3\n    }\n    return result\n}\n",
+            "expr.jump-prohibited",
+            4,
+            13,
+        ),
+        (
+            "expr-011",
+            "fn main() -> u8 {\n    fix result: u8 = expr {\n        for i in 0..<1 {\n            continue\n        }\n        1\n    }\n    return result\n}\n",
+            "expr.jump-prohibited",
+            4,
+            13,
+        ),
+        (
+            "expr-070",
+            "fn main() -> u8 {\n    fix value = expr {\n        rev i in 0..<1 { continue }\n        0\n    }\n    return value\n}\n",
+            "expr.jump-prohibited",
+            3,
+            26,
+        ),
+        (
+            "expr-055",
+            "fn use(value: u8) -> void {}\n\nfn main() -> u8 {\n    fix raw: i64 = 300\n    use(raw as u8 or return 1)\n    return 0\n}\n",
+            "expr.or-return-position",
+            5,
+            22,
+        ),
+        (
+            "expr-056",
+            "fn main() -> u8 {\n    fix raw: i64 = 300\n    return raw as u8 or return 7\n}\n",
+            "expr.or-return-position",
+            3,
+            25,
+        ),
+        (
+            "expr-057",
+            "struct Counter { value: u8 }\n\nfn main() -> u8 {\n    fix raw: i64 = 300\n    fix counter = Counter { value: raw as u8 or return 7 }\n    return counter.value\n}\n",
+            "expr.or-return-position",
+            5,
+            49,
+        ),
+        (
+            "expr-058",
+            "fn main() -> u8 {\n    fix first: i64 = 300\n    fix second: i64 = 400\n    fix value = first as u8 or (second as u8 or return 7)\n    return value\n}\n",
+            "expr.or-return-position",
+            4,
+            49,
+        ),
+        (
+            "text-014",
+            "fn main() -> u8 {\n    fix value: symbol = \"${\"bad\" as u8 or return 1}\"\n    return 0\n}\n",
+            "expr.or-return-position",
+            2,
+            43,
+        ),
+    ] {
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(error.kind, suz::ErrorKind::InvalidSource, "{id}");
+        assert_eq!(error.rule(), rule, "{id}: {error:?}");
+        assert_eq!(
+            (error.line, error.column),
+            (line, column),
+            "{id}: {error:?}"
+        );
+    }
+}

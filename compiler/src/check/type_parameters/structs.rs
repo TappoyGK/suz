@@ -25,6 +25,7 @@ pub(in crate::check) struct Structs {
     need_names: BTreeSet<String>,
     original_count: usize,
     enums: Vec<crate::ast::EnumDeclaration>,
+    ranges: Vec<crate::ast::RangeDeclaration>,
 }
 impl From<Vec<StructDeclaration>> for Structs {
     fn from(declarations: Vec<StructDeclaration>) -> Self {
@@ -44,6 +45,7 @@ impl Structs {
             applications: program.applications.clone(),
             shapes: super::shapes::Shapes::new(program),
             enums: program.enums.clone(),
+            ranges: program.ranges.clone(),
             ..Self::from(program.structs.clone())
         }
     }
@@ -61,13 +63,40 @@ impl Structs {
             return self
                 .normalize(inner)
                 .pointer()
-                .with_nullable(ty.is_nullable());
+                .with_readonly(ty.is_readonly_pointer())
+                .with_nilable(ty.is_nilable());
         }
         match ty {
             Type::Array(id) => {
                 let array = self.arrays.borrow().get(id);
                 let element = self.normalize(array.element);
-                self.arrays.borrow_mut().intern(element, array.rank)
+                self.arrays.borrow_mut().intern_full(
+                    element,
+                    array.rank,
+                    array.index_enum,
+                    array.soa,
+                )
+            }
+            Type::ArrayRef {
+                id,
+                mutable,
+                nilable,
+            } => {
+                let array = self.arrays.borrow().get(id);
+                let element = self.normalize(array.element);
+                let Type::Array(id) = self.arrays.borrow_mut().intern_full(
+                    element,
+                    array.rank,
+                    array.index_enum,
+                    array.soa,
+                ) else {
+                    unreachable!()
+                };
+                Type::ArrayRef {
+                    id,
+                    mutable,
+                    nilable,
+                }
             }
             Type::Struct(id) => Type::Struct(self.canonical_id(id)),
             _ => self.shapes.normalize(ty),
@@ -195,7 +224,9 @@ impl Structs {
     #[inline]
     pub fn symbolic(&self, ty: Type) -> bool {
         match ty.leaf() {
-            Type::Array(id) => self.symbolic(self.arrays.borrow().get(id).element),
+            Type::Array(id) | Type::ArrayRef { id, .. } => {
+                self.symbolic(self.arrays.borrow().get(id).element)
+            }
             Type::Parameter(_) => true,
             Type::Struct(id) => self.get(id).symbolic,
             Type::Application(id) | Type::StaticShape(id) | Type::Shape(id) => self.applications
@@ -211,7 +242,9 @@ impl Structs {
     }
     fn symbolic_inner(&self, ty: Type, seen: &mut BTreeSet<usize>) -> bool {
         match ty.leaf() {
-            Type::Array(id) => self.symbolic_inner(self.arrays.borrow().get(id).element, seen),
+            Type::Array(id) | Type::ArrayRef { id, .. } => {
+                self.symbolic_inner(self.arrays.borrow().get(id).element, seen)
+            }
             Type::Parameter(_) => true,
             Type::Struct(id) => self.get(id).symbolic,
             Type::StaticFunction(id) | Type::Function(id) => {
@@ -235,7 +268,7 @@ impl Structs {
     }
     /// コード生成前に解決する型。名前付き型引数と、既存のint・floatの両方を含む。
     pub fn unresolved(&self, ty: Type) -> bool {
-        if let Type::Array(id) = ty.leaf() {
+        if let Type::Array(id) | Type::ArrayRef { id, .. } = ty.leaf() {
             return self.unresolved(self.arrays.borrow().get(id).element);
         }
         ty.leaf().symbolic() || self.symbolic(ty)
@@ -243,14 +276,54 @@ impl Structs {
     pub fn name(&self, ty: Type) -> String {
         if let Some(inner) = ty.pointee() {
             return format!(
-                "ptr{} {}",
-                if ty.is_nullable() { "?" } else { "" },
+                "{}{} {}",
+                if ty.is_readonly_pointer() {
+                    "ref"
+                } else {
+                    "mut"
+                },
+                if ty.is_nilable() { "?" } else { "" },
                 self.name(inner)
             );
         }
         match ty {
+            Type::Array(id) => {
+                let array = self.arrays.borrow().get(id);
+                let element = self.name(array.element);
+                if let Some(index_enum) = array.index_enum {
+                    format!("[{element}; {}]", self.enums[index_enum.id].name)
+                } else if array.rank == 1 {
+                    format!("[{element}]")
+                } else {
+                    format!("[{element}; {}]", vec!["_"; array.rank].join(", "))
+                }
+            }
+            Type::ArrayRef {
+                id,
+                mutable,
+                nilable,
+            } => {
+                let array = self.arrays.borrow().get(id);
+                let element = self.name(array.element);
+                let prefix = if mutable { "#" } else { "." };
+                let suffix = if nilable { "?" } else { "" };
+                if let Some(index_enum) = array.index_enum {
+                    format!(
+                        "{prefix}[{element}; {}]{suffix}",
+                        self.enums[index_enum.id].name
+                    )
+                } else if array.rank == 1 {
+                    format!("{prefix}[{element}]{suffix}")
+                } else {
+                    format!(
+                        "{prefix}[{element}; {}]{suffix}",
+                        vec!["_"; array.rank].join(", ")
+                    )
+                }
+            }
             Type::Struct(id) => self.get(id).name.clone(),
             Type::Enum(ty) => self.enums[ty.id].name.clone(),
+            Type::Range(ty) => self.ranges[ty.id].name.clone(),
             Type::Parameter(id) => format!("T{}", id + 1),
             Type::Application(id) => {
                 let app = &self.applications[id];
@@ -270,12 +343,51 @@ impl Structs {
     pub fn name_with_parameters(&self, ty: Type, parameters: &[TypeParameter]) -> String {
         if let Some(inner) = ty.pointee() {
             return format!(
-                "ptr{} {}",
-                if ty.is_nullable() { "?" } else { "" },
+                "{}{} {}",
+                if ty.is_readonly_pointer() {
+                    "ref"
+                } else {
+                    "mut"
+                },
+                if ty.is_nilable() { "?" } else { "" },
                 self.name_with_parameters(inner, parameters)
             );
         }
         match ty {
+            Type::Array(id) => {
+                let array = self.arrays.borrow().get(id);
+                let element = self.name_with_parameters(array.element, parameters);
+                if let Some(index_enum) = array.index_enum {
+                    format!("[{element}; {}]", self.enums[index_enum.id].name)
+                } else if array.rank == 1 {
+                    format!("[{element}]")
+                } else {
+                    format!("[{element}; {}]", vec!["_"; array.rank].join(", "))
+                }
+            }
+            Type::ArrayRef {
+                id,
+                mutable,
+                nilable,
+            } => {
+                let array = self.arrays.borrow().get(id);
+                let element = self.name_with_parameters(array.element, parameters);
+                let prefix = if mutable { "#" } else { "." };
+                let suffix = if nilable { "?" } else { "" };
+                if let Some(index_enum) = array.index_enum {
+                    format!(
+                        "{prefix}[{element}; {}]{suffix}",
+                        self.enums[index_enum.id].name
+                    )
+                } else if array.rank == 1 {
+                    format!("{prefix}[{element}]{suffix}")
+                } else {
+                    format!(
+                        "{prefix}[{element}; {}]{suffix}",
+                        vec!["_"; array.rank].join(", ")
+                    )
+                }
+            }
             Type::Parameter(id) => parameters
                 .get(id)
                 .map_or_else(|| self.name(ty), |p| p.name.clone()),
@@ -313,7 +425,9 @@ impl Structs {
                 continue;
             }
             match ty {
-                Type::Array(id) => pending.push(self.arrays.borrow().get(id).element),
+                Type::Array(id) | Type::ArrayRef { id, .. } => {
+                    pending.push(self.arrays.borrow().get(id).element)
+                }
                 Type::Struct(id) => {
                     if let Some(app) = &self.get(id).application {
                         pending.extend(&app.arguments);
@@ -370,7 +484,11 @@ impl Structs {
             return Ok(ty);
         }
         match ty.leaf() {
-            Type::Array(_) | Type::Application(_) | Type::StaticShape(_) | Type::Shape(_) => {}
+            Type::Array(_)
+            | Type::ArrayRef { .. }
+            | Type::Application(_)
+            | Type::StaticShape(_)
+            | Type::Shape(_) => {}
             Type::Parameter(_) | Type::Struct(_) | Type::StaticFunction(_) | Type::Function(_) => {
                 // 既に解決した型へ置き換える型引数がなければ、展開表に触れない。
                 if arguments.is_empty() {
@@ -456,7 +574,10 @@ impl Structs {
                     crate::diagnostic!("arena.ptr-type", "pointer requires a stored value type"),
                 ));
             }
-            return Ok(inner.pointer().with_nullable(ty.is_nullable()));
+            return Ok(inner
+                .pointer()
+                .with_readonly(ty.is_readonly_pointer())
+                .with_nilable(ty.is_nilable()));
         }
         if matches!(
             ty,
@@ -474,7 +595,53 @@ impl Structs {
                     crate::diagnostic!("array.type", "array elements require stored value types"),
                 ));
             }
-            return Ok(self.arrays.borrow_mut().intern(element, array.rank));
+            if array.soa && !matches!(element, Type::Struct(_) | Type::Parameter(_)) {
+                return Err(location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("array.soa-type", "soa array elements must be structs"),
+                ));
+            }
+            return Ok(self.arrays.borrow_mut().intern_full(
+                element,
+                array.rank,
+                array.index_enum,
+                array.soa,
+            ));
+        }
+        if let Type::ArrayRef {
+            id,
+            mutable,
+            nilable,
+        } = ty
+        {
+            let array = self.arrays.borrow().get(id);
+            let element =
+                self.resolve_inner(array.element, arguments, location, path, parameters)?;
+            if element == Type::Void || matches!(element, Type::Function(_)) {
+                return Err(location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("array.type", "array elements require stored value types"),
+                ));
+            }
+            if array.soa && !matches!(element, Type::Struct(_) | Type::Parameter(_)) {
+                return Err(location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("array.soa-type", "soa array elements must be structs"),
+                ));
+            }
+            let Type::Array(id) = self.arrays.borrow_mut().intern_full(
+                element,
+                array.rank,
+                array.index_enum,
+                array.soa,
+            ) else {
+                unreachable!()
+            };
+            return Ok(Type::ArrayRef {
+                id,
+                mutable,
+                nilable,
+            });
         }
         let application = match ty {
             Type::Parameter(id) => return Ok(arguments.get(id).copied().unwrap_or(ty)),

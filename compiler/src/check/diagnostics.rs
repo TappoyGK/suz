@@ -20,6 +20,18 @@ pub(super) fn collect(expr: &CheckedExpression, locations: &mut Vec<Location>) {
             }
             e.leaves(&mut |v| collect(v, locations));
         }
+        Value::TextAppend { left, right, .. } => {
+            collect(left, locations);
+            collect(right, locations);
+        }
+        Value::TextBuffer {
+            capacity, value, ..
+        } => {
+            if let Some(capacity) = capacity {
+                collect(capacity, locations);
+            }
+            collect(value, locations);
+        }
         Value::TextView(inner) | Value::Intern { operand: inner, .. } => collect(inner, locations),
         Value::Slice {
             target,
@@ -54,7 +66,7 @@ pub(super) fn collect(expr: &CheckedExpression, locations: &mut Vec<Location>) {
                 collect(field, locations);
             }
         }
-        Value::Field { target, .. } => collect(target, locations),
+        Value::Field { target, .. } | Value::SoaColumn { target, .. } => collect(target, locations),
         Value::Invoke {
             target, arguments, ..
         } => {
@@ -132,8 +144,11 @@ pub(super) fn collect(expr: &CheckedExpression, locations: &mut Vec<Location>) {
         }
         Value::Cast(inner)
         | Value::Truncate(inner)
+        | Value::SaturatingCast(inner)
         | Value::Not(inner)
         | Value::BitNot(inner)
+        | Value::WrapNegate(inner)
+        | Value::SaturatingNegate(inner)
         | Value::Negate(inner) => collect(inner, locations),
         Value::Logical { left, right, .. } | Value::Binary { left, right, .. } => {
             collect(left, locations);
@@ -186,12 +201,18 @@ fn collect_statements(statements: &[CheckedStatement], locations: &mut Vec<Locat
                     collect_statements(body, locations);
                 }
             }
-            CheckedStatement::For {
-                start, end, body, ..
-            } => {
-                collect(start, locations);
-                if let Some(end) = end {
-                    collect(end, locations);
+            CheckedStatement::For(for_stmt) => {
+                let crate::check::ir::CheckedFor { target, body, .. } = for_stmt.as_ref();
+                match target {
+                    super::ir::CheckedForTarget::Range { start, end, .. } => {
+                        collect(start, locations);
+                        collect(end, locations);
+                    }
+                    super::ir::CheckedForTarget::Array(expr)
+                    | super::ir::CheckedForTarget::Text(expr) => {
+                        collect(expr, locations);
+                    }
+                    super::ir::CheckedForTarget::TypeRange { .. } => {}
                 }
                 collect_statements(body, locations);
             }
@@ -253,6 +274,25 @@ fn collect_statements(statements: &[CheckedStatement], locations: &mut Vec<Locat
                 collect_statements(body, locations);
                 collect(value, locations);
             }
+            CheckedStatement::ArrayBulkWrite(bulk) => {
+                collect(&bulk.target, locations);
+                if let Some(start) = &bulk.start {
+                    collect(start, locations);
+                }
+                if let Some(end) = &bulk.end {
+                    collect(end, locations);
+                }
+                for input in &bulk.inputs {
+                    match input {
+                        super::ir::BulkInput::Array { expr, .. }
+                        | super::ir::BulkInput::Scalar { expr, .. } => collect(expr, locations),
+                    }
+                }
+                if let Some(mask) = &bulk.mask {
+                    collect_mask(mask, locations);
+                }
+                collect(&bulk.element_value, locations);
+            }
             CheckedStatement::Binding { initializer, .. } => collect(initializer, locations),
             CheckedStatement::Assign { value, .. } => collect(value, locations),
             CheckedStatement::Return { value, .. } => collect(value, locations),
@@ -264,6 +304,19 @@ pub(super) fn unhandled_arithmetic(statements: &[CheckedStatement]) -> Vec<Locat
     let mut locations = Vec::new();
     collect_statements(statements, &mut locations);
     locations
+}
+
+fn collect_mask(mask: &super::ir::CheckedMask, locations: &mut Vec<Location>) {
+    match mask {
+        super::ir::CheckedMask::Leaf(expr) => collect(expr, locations),
+        super::ir::CheckedMask::And(l, r)
+        | super::ir::CheckedMask::Or(l, r)
+        | super::ir::CheckedMask::Xor(l, r) => {
+            collect_mask(l, locations);
+            collect_mask(r, locations);
+        }
+        super::ir::CheckedMask::Not(inner) => collect_mask(inner, locations),
+    }
 }
 
 fn collect_handler(handler: &super::ir::CallHandler, locations: &mut Vec<Location>) {

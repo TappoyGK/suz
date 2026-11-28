@@ -32,14 +32,14 @@ extern "fixture.h" {
     fn read_number(p: *const i32) -> i32
     fn set_number(p: *i32) -> void
 }
-struct Holder { p: ptr Sample }
-fn forward(p: ptr Sample) -> void { trusted { set_sample(p, 11) } }
-fn make() -> ptr Sample { return new Sample { value: 0 } }
+struct Holder { p: mut Sample }
+fn forward(p: mut Sample) -> void { trusted { set_sample(p, 11) } }
+fn make() -> mut Sample { return new Sample { value: 0 } }
 fn main() -> u8 {
     arena {
-        fix ptr first = make()
-        fix ptr second = make()
-        var ptr selected = first
+        fix first = make()
+        fix second = make()
+        var selected = first
         var evaluations = 0
         trusted {
             set_sample(expr { evaluations += 1
@@ -52,21 +52,21 @@ fn main() -> u8 {
         fix holder = Holder { p: first }
         forward(holder.p)
         if first.value != 11 { return 3 }
-        fix ptr optional: ptr? Sample = first
+        fix optional: mut? Sample = first
         let p = optional { trusted { set_sample(p, 12) } } else { return 4 }
         if first.value != 12 { return 5 }
         arena {
-            fix ptr inner = make()
+            fix inner = make()
             forward(inner)
             trusted { set_sample(first, 13) }
             if inner.value != 11 { return 6 }
         }
         if first.value != 13 { return 7 }
         fix native: _int = 0
-        fix ptr n = new native
-        fix ptr byte = new (0 as u8)
-        fix ptr floating = new 0.0
-        fix ptr number = new (3 as i32)
+        fix n = new native
+        fix byte = new (0 as u8)
+        fix floating = new 0.0
+        fix number = new (3 as i32)
         trusted {
             set_native(n)
             set_byte(byte)
@@ -138,30 +138,27 @@ fn c_pointer_headers_require_exact_pointees_and_const() {
 }
 
 #[test]
-fn c_pointer_calls_reject_wrong_types_nullability_and_untrusted_calls() {
+fn c_pointer_calls_reject_wrong_types_nilability_and_untrusted_calls() {
     let declarations = "struct Local { value: i32 }\nextern \"fixture.h\" {\nstruct sample as Sample { value: i32 }\nstruct other as Other { value: i32 }\nfn take(p: *const Sample) -> void\nfn number(p: *i32) -> void\n}";
     for (body, rule) in [
+        ("fix p = new Sample { value: 0 }\ntake(p)", "ffi.trusted"),
         (
-            "fix ptr p = new Sample { value: 0 }\ntake(p)",
-            "ffi.trusted",
-        ),
-        (
-            "fix ptr p: ptr? Sample = new Sample { value: 0 }\ntrusted { take(p) }",
+            "fix p: mut? Sample = new Sample { value: 0 }\ntrusted { take(p) }",
             "type.expected",
         ),
-        ("trusted { take(null) }", "arena.null"),
+        ("trusted { take(nil) }", "arena.nil"),
         ("trusted { take(Sample { value: 0 }) }", "type.expected"),
         (
-            "fix ptr p = new Local { value: 0 }\ntrusted { take(p) }",
+            "fix p = new Local { value: 0 }\ntrusted { take(p) }",
             "type.expected",
         ),
         (
-            "fix ptr p = new Other { value: 0 }\ntrusted { take(p) }",
+            "fix p = new Other { value: 0 }\ntrusted { take(p) }",
             "type.expected",
         ),
-        ("trusted { take(c_bytes `x`) }", "type.expected"),
+        ("trusted { take(c_bytes \"x\") }", "type.expected"),
         (
-            "fix n: _int = 0\nfix ptr p = new n\ntrusted { number(p) }",
+            "fix n: _int = 0\nfix p = new n\ntrusted { number(p) }",
             "type.expected",
         ),
     ] {
@@ -174,7 +171,7 @@ fn c_pointer_calls_reject_wrong_types_nullability_and_untrusted_calls() {
 #[test]
 fn typed_c_pointers_are_limited_to_supported_extern_parameters() {
     for ty in [
-        "ptr i32", "*void", "*Local", "*bool", "*len_t", "*char", "*text", "*symbol", "*ptr i32",
+        "mut i32", "*void", "*Local", "*bool", "*len_t", "*char", "*text", "*symbol", "*mut i32",
         "**i32",
     ] {
         let source = format!(
@@ -224,15 +221,15 @@ extern "fixture.h" {
     fn detach() -> void
     fn active() -> _int
 }
-fn register(p: ptr State, q: ptr f64) -> void { trusted { attach(p, q) } }
+fn register(p: mut State, q: mut f64) -> void { trusted { attach(p, q) } }
 fnshape Action() -> void
 fn invoke(f: fn Action) -> void { f() }
-fn make() -> ptr State { return new State { value: 0 } }
+fn make() -> mut State { return new State { value: 0 } }
 fn main() -> u8 {
     for i in 0..<2 {
         arena {
-            fix ptr p = make()
-            fix ptr q = new 2.5
+            fix p = make()
+            fix q = new 2.5
             invoke(fn [p, q]() -> void { register(p, q) })
             // 登録した関数・クロージャ・trustedを抜けても、実体のArenaは生きている。
             trusted { tick() }
@@ -259,8 +256,24 @@ fn main() -> u8 {
 }
 
 #[test]
-fn keep_is_a_typed_pointer_modifier_not_a_reserved_name() {
-    for ty in ["i32", "_int", "f64", "bool", "*const void", "State"] {
+fn keep_is_a_c_pointer_modifier_not_a_reserved_name() {
+    // Cが保持するバイト列も、型付きポインタと同じく反復外へ残る実体として扱う。
+    for (keep, warnings) in [("keep ", 0), ("", 1)] {
+        let source = format!(
+            "extern \"retain.h\" {{ fn retain({keep}bytes: *const void) -> void }}\nfn main() -> u8 {{ for i in 0..<2 {{ fix t = textbuf \"held\"\ntrusted {{ retain(c_bytes t) }} }}\nreturn 0 }}"
+        );
+        let compiled = suz::compile_with_source_name(
+            source.as_bytes(),
+            suz::ArithmeticMode::Default,
+            "keep.suz",
+        )
+        .unwrap();
+        assert_eq!(compiled.warnings.len(), warnings);
+        if let Some(warning) = compiled.warnings.first() {
+            assert_eq!(warning.rule(), "arena.loop-allocation");
+        }
+    }
+    for ty in ["i32", "_int", "f64", "bool", "State"] {
         let source = format!(
             "extern \"f.h\" {{\nstruct state as State {{ value: i32 }}\nfn attach(keep p: {ty}) -> void\n}}\nfn main() -> u8 {{ return 0 }}"
         );
@@ -281,9 +294,9 @@ fn keep_is_a_typed_pointer_modifier_not_a_reserved_name() {
 #[test]
 fn keep_on_suz_parameters_explains_the_extern_only_modifier() {
     for declaration in [
-        "fn wrapper(keep p: ptr i32) -> void {}",
-        "fn wrapper(keep p: ptr i32) -> void {}",
-        "fn wrapper() -> void { fix f = fn [](keep p: ptr i32) -> void {} }",
+        "fn wrapper(keep p: mut i32) -> void {}",
+        "fn wrapper(keep p: mut i32) -> void {}",
+        "fn wrapper() -> void { fix f = fn [](keep p: mut i32) -> void {} }",
     ] {
         let source = format!("{declaration}\nfn main() -> u8 {{ return 0 }}");
         let error = suz::compile(source.as_bytes()).unwrap_err();
@@ -291,7 +304,7 @@ fn keep_on_suz_parameters_explains_the_extern_only_modifier() {
         assert!(
             error
                 .to_string()
-                .contains("only allowed on extern typed C pointer parameters")
+                .contains("only allowed on extern C pointer parameters")
         );
     }
     suz::compile(b"fn value(keep: i32) -> i32 { return keep }\nfn main() -> u8 { return value(0) as u8 or 1 }").unwrap();
@@ -300,23 +313,89 @@ fn keep_on_suz_parameters_explains_the_extern_only_modifier() {
 #[test]
 fn keep_preserves_call_type_trusted_and_suz_lifetime_checks() {
     for (body, rule) in [
-        ("fix ptr p = new (1 as i32)\nattach(p)", "ffi.trusted"),
+        ("fix p = new (1 as i32)\nattach(p)", "ffi.trusted"),
         (
-            "fix ptr p: ptr? i32 = new 1\ntrusted { attach(p) }",
+            "fix p: mut? i32 = new 1\ntrusted { attach(p) }",
             "type.expected",
         ),
-        ("trusted { attach(null) }", "arena.null"),
+        ("trusted { attach(nil) }", "arena.nil"),
         (
-            "fix ptr p = new (1 as u32)\ntrusted { attach(p) }",
+            "fix p = new (1 as u32)\ntrusted { attach(p) }",
             "type.expected",
         ),
         (
-            "var ptr p: ptr? i32 = null\ntrusted { arena { p = new (1 as i32)\nlet q = p { attach(q) } } }",
+            "var p: mut? i32 = nil\ntrusted { arena { p = new (1 as i32)\nlet q = p { attach(q) } } }",
             "arena.store",
         ),
     ] {
         let source = format!(
             "extern \"f.h\" {{ fn attach(keep p: *i32) -> void }}\nfn main() -> u8 {{ arena {{ {body}\n}}\nreturn 0 }}"
+        );
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(error.rule(), rule, "{body}: {error}");
+    }
+}
+
+#[test]
+fn c_const_pointer_accepts_ref_and_mut_while_mutable_c_pointer_rejects_ref() {
+    let directory = TemporaryDirectory::new();
+    fs::write(
+        directory.0.join("fixture.h"),
+        r#"
+#include <stdint.h>
+struct sample { int32_t value; };
+static inline int32_t read_sample(const struct sample *p) { return p->value; }
+static inline void set_sample(struct sample *p, int32_t value) { p->value = value; }
+"#,
+    )
+    .unwrap();
+    fs::write(
+        directory.0.join("main.suz"),
+        r#"
+extern "fixture.h" {
+    struct sample as Sample { value: i32 }
+    fn read_sample(p: *const Sample) -> i32
+    fn set_sample(p: *Sample, value: i32) -> void
+}
+fn main() -> u8 {
+    arena {
+        fix m = new Sample { value: 5 }
+        fix r: ref Sample = m
+        fix ro: ref? Sample = r
+        trusted {
+            set_sample(m, 9)
+            if read_sample(m) != 9 || read_sample(r) != 9 { return 1 }
+            let q = ro {
+                if read_sample(q) != 9 { return 2 }
+            } else {
+                return 3
+            }
+        }
+    }
+    return 0
+}
+"#,
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_suz"))
+        .current_dir(&directory.0)
+        .args(["run", "main.suz", "--include-dir", "."])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+
+    for (body, rule) in [
+        (
+            "fix r: ref Sample = new Sample { value: 1 }\ntrusted { set_sample(r, 2) }",
+            "type.expected",
+        ),
+        (
+            "fix r: ref? Sample = new Sample { value: 1 }\ntrusted { fix n = read_sample(r) }",
+            "type.expected",
+        ),
+    ] {
+        let source = format!(
+            "extern \"fixture.h\" {{\nstruct sample as Sample {{ value: i32 }}\nfn read_sample(p: *const Sample) -> i32\nfn set_sample(p: *Sample, value: i32) -> void\n}}\nfn main() -> u8 {{ arena {{ {body} }}\nreturn 0 }}"
         );
         let error = suz::compile(source.as_bytes()).unwrap_err();
         assert_eq!(error.rule(), rule, "{body}: {error}");

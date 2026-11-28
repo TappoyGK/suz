@@ -37,7 +37,7 @@ fn moved_binary_exports_bundled_sources_and_custom_environment_without_tools() {
     fs::copy(env!("CARGO_BIN_EXE_suz"), &binary).unwrap();
     fs::write(
         directory.0.join("input.suz"),
-        "fn main() -> u8 { log info `hello`\nreturn 7 }",
+        "fn main() -> u8 { log info \"hello\"\nreturn 7 }",
     )
     .unwrap();
     success(&emit(
@@ -198,7 +198,7 @@ fn exported_sources_build_independently_with_standard_and_custom_environments() 
     let binary = Path::new(env!("CARGO_BIN_EXE_suz"));
     fs::write(
         directory.0.join("input.suz"),
-        "fn main() -> u8 {\nfix fraction = 1.5\nfix yes = true\nlog info `${fraction} ${yes}`\nreturn 7\n}",
+        "fn main() -> u8 {\nfix fraction = 1.5\nfix yes = true\nlog info \"${fraction} ${yes}\"\nreturn 7\n}",
     )
     .unwrap();
     fs::write(
@@ -256,11 +256,11 @@ _Noreturn void suz_env_panic(void) { exit(101); }
 }
 
 #[test]
-fn exported_text_pool_limits_preserve_units_defaults_and_full_u64_range() {
+fn exported_symbol_pool_limits_preserve_units_defaults_and_full_u64_range() {
     let directory = TemporaryDirectory::new();
     fs::write(
         directory.0.join("input.suz"),
-        "fn main() -> u8 { fix value = `x`\nreturn 0 }",
+        "fn main() -> u8 { fix value: symbol = \"x\"\nreturn 0 }",
     )
     .unwrap();
     let binary = Path::new(env!("CARGO_BIN_EXE_suz"));
@@ -281,12 +281,12 @@ fn exported_text_pool_limits_preserve_units_defaults_and_full_u64_range() {
         let output = format!("output-{index}");
         let mut args = vec!["input.suz", "-o", output.as_str()];
         if let Some(value) = value {
-            args.extend(["--text-pool-limit", value]);
+            args.extend(["--symbol-pool-limit", value]);
         }
         success(&emit(binary, &directory.0, &args));
         let generated = fs::read_to_string(directory.0.join(&output).join("program.c")).unwrap();
         assert!(
-            generated.contains(&format!("suz_text_pool_init(UINT64_C({expected}));")),
+            generated.contains(&format!("suz_symbol_pool_init(UINT64_C({expected}));")),
             "{value:?}: {generated}"
         );
     }
@@ -297,17 +297,20 @@ fn exported_text_pool_limits_preserve_units_defaults_and_full_u64_range() {
             .unwrap();
         assert!(output.status.success());
         let help = String::from_utf8(output.stdout).unwrap();
-        assert_eq!(help.contains("--text-pool-limit"), command_name != "check");
+        assert_eq!(
+            help.contains("--symbol-pool-limit"),
+            command_name != "check"
+        );
     }
 }
 
 #[test]
 #[ignore = "release check: run scripts/test-release.sh"]
-fn emitted_c_preserves_text_pool_limits() {
+fn emitted_c_preserves_symbol_pool_limits() {
     let directory = TemporaryDirectory::new();
     fs::write(
         directory.0.join("input.suz"),
-        "fn main() -> u8 { fix value = `x`\nreturn 0 }",
+        "fn main() -> u8 { fix value: symbol = \"x\"\nreturn 0 }",
     )
     .unwrap();
     let binary = Path::new(env!("CARGO_BIN_EXE_suz"));
@@ -318,7 +321,7 @@ fn emitted_c_preserves_text_pool_limits() {
         let name = format!("generated-{index}");
         let mut args = vec!["input.suz", "-o", name.as_str()];
         if let Some(limit) = limit {
-            args.extend(["--text-pool-limit", limit]);
+            args.extend(["--symbol-pool-limit", limit]);
         }
         success(&emit(binary, &directory.0, &args));
         let generated = directory.0.join(name);
@@ -340,7 +343,7 @@ fn emitted_c_preserves_text_pool_limits() {
         if limit == Some("1") {
             assert!(
                 String::from_utf8_lossy(&output.stderr)
-                    .contains("text pool limit exceeded: limit=1, used=0")
+                    .contains("symbol pool limit exceeded: limit=1, used=0")
             );
         } else {
             assert!(output.stderr.is_empty());

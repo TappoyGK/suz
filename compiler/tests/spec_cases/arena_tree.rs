@@ -5,13 +5,13 @@ use suz::{ArenaOptions, ArenaReportFormat, ArenaReportOptions, CompilationOption
 
 const RECURSIVE: &str = r#"fn a(n: i64) -> void {
     arena {
-        fix ptr p = new n
+        fix p = new n
         if n > 0 { b(n -% 1) }
     }
 }
 fn b(n: i64) -> void {
     arena {
-        fix ptr p = new [n; 2]
+        fix p = new #[n; 2]
         if n > 0 { a(n -% 1) }
     }
 }
@@ -19,7 +19,7 @@ fn main() -> u8 {
     a(4)
     for i in 0..<3 {
         arena {
-            fix ptr p = new (1 as i64)
+            fix p = new (1 as i64)
             a(0)
         }
     }
@@ -201,7 +201,7 @@ fn arena_tree_cli_defaults_units_limits_and_csv_escaping() {
     let source = directory.0.join("main.suz");
     fs::write(
         &source,
-        "fn main() -> u8 { arena { fix ptr p = new [0 as u8; 1536] }\nreturn 0 }",
+        "fn main() -> u8 { arena { fix p = new #[0 as u8; 1536] }\nreturn 0 }",
     )
     .unwrap();
     let binary = env!("CARGO_BIN_EXE_suz");
@@ -246,7 +246,7 @@ fn arena_tree_cli_defaults_units_limits_and_csv_escaping() {
     }
     let path = directory.0.join("quoted.c");
     let generated = suz::compile_with_options(
-        b"fn main() -> u8 { arena { fix ptr p = new (1 as u8) }\nreturn 0 }",
+        b"fn main() -> u8 { arena { fix p = new (1 as u8) }\nreturn 0 }",
         "日本語,\"quoted\"\n.suz",
         &options(ArenaReportFormat::Csv, 256),
     )
@@ -298,7 +298,7 @@ fn arena_tree_exports_separate_storage_and_does_not_allocate_during_output() {
     let source = directory.0.join("main.suz");
     fs::write(
         &source,
-        "fn main() -> u8 { arena { fix ptr p = new (1 as u8) }\nreturn 0 }",
+        "fn main() -> u8 { arena { fix p = new (1 as u8) }\nreturn 0 }",
     )
     .unwrap();
     let environment = directory.0.join("environment.c");
@@ -425,7 +425,7 @@ fn arena_tree_indexes_alternating_parents_and_names_generic_methods() {
     let directory = TemporaryDirectory::new();
     // 同じ子の直前の親が毎回変わる。キャッシュが外れても索引から既存行を取得する。
     let mut many = String::from(
-        "fn child() -> void { arena { fix ptr p = new [0 as u8; 3] } }\nfn main() -> u8 { for i in 0..<5 {\n",
+        "fn child() -> void { arena { fix p = new #[0 as u8; 3] } }\nfn main() -> u8 { for i in 0..<5 {\n",
     );
     for _ in 0..64 {
         many.push_str("arena { child() }\n");
@@ -434,12 +434,12 @@ fn arena_tree_indexes_alternating_parents_and_names_generic_methods() {
     let methods = r#"
 struct Pt { x: i64 }
 fn Pt#bump() -> void {
-    arena { fix ptr p = new [0 as u8; 4] }
+    arena { fix p = new #[0 as u8; 4] }
     self#x = self.x +% 1
 }
 struct Box[T] { v: T }
 fn Box[T].get() -> T {
-    arena { fix ptr p = new [0 as u8; 2] }
+    arena { fix p = new #[0 as u8; 2] }
     return self.v
 }
 fn main() -> u8 {
@@ -502,7 +502,7 @@ fn disabled_arena_reporting_does_not_link_reporting_functions() {
     let source = directory.0.join("main.suz");
     fs::write(
         &source,
-        "fn main() -> u8 { arena { fix ptr p = new (1 as u8) }\nreturn 0 }",
+        "fn main() -> u8 { arena { fix p = new (1 as u8) }\nreturn 0 }",
     )
     .unwrap();
     let native = directory.0.join("native");
@@ -552,7 +552,7 @@ fn disabled_arena_reporting_does_not_link_reporting_functions() {
 fn arena_tree_report_is_independent_of_optimization() {
     let directory = TemporaryDirectory::new();
     let source = directory.0.join("main.suz");
-    fs::write(&source, "fn main() -> u8 {\narena { fix ptr p = new (1 as u8) }\narena { fix ptr p = new (2 as i64) }\nreturn 0 }").unwrap();
+    fs::write(&source, "fn main() -> u8 {\narena { fix p = new (1 as u8) }\narena { fix p = new (2 as i64) }\nreturn 0 }").unwrap();
     let mut reports = Vec::new();
     for optimization in ["-O0", "-O2"] {
         let executable = directory.0.join(format!("app{optimization}"));

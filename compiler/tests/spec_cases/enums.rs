@@ -67,7 +67,7 @@ fn main() -> u8 {
             inner
         }
     }
-    log info `${selected}/${CHOSEN}`
+    log info "${selected}/${CHOSEN}"
     match selected {
         Mode.A => { return 0 }
         Mode.B => { return 3 }

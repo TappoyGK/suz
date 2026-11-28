@@ -240,7 +240,7 @@ fn run_inherits_streams_and_cwd_and_cleans_up_after_signals() {
     let directory = setup();
     fs::write(
         directory.0.join("input.suz"),
-        "fn main() -> u8 { log info `ready`\nreturn 7 }",
+        "fn main() -> u8 { log info \"ready\"\nreturn 7 }",
     )
     .unwrap();
     fs::write(
@@ -327,11 +327,11 @@ _Noreturn void suz_env_panic(void) { exit(101); }
 
 #[test]
 #[ignore = "release check: run scripts/test-release.sh"]
-fn build_and_run_apply_text_pool_limits() {
+fn build_and_run_apply_symbol_pool_limits() {
     let directory = setup();
     fs::write(
         directory.0.join("input.suz"),
-        "fn main() -> u8 { fix value = `x`\nreturn 0 }",
+        "fn main() -> u8 { fix value = \"x\"\nreturn 0 }",
     )
     .unwrap();
     for (index, limit) in [None, Some("256M"), Some("2G"), Some("unlimited"), Some("1")]
@@ -346,7 +346,7 @@ fn build_and_run_apply_text_pool_limits() {
                 args.extend(["-o", name.as_str()]);
             }
             if let Some(limit) = limit {
-                args.extend(["--text-pool-limit", limit]);
+                args.extend(["--symbol-pool-limit", limit]);
             }
             let output = code(
                 command(&directory.0).args(args).output().unwrap(),
@@ -363,7 +363,7 @@ fn build_and_run_apply_text_pool_limits() {
             if expected == 101 {
                 assert!(
                     String::from_utf8_lossy(&output.stderr).starts_with(
-                        "panic input.suz:1:1: text pool limit exceeded: limit=1, used=0"
+                        "panic input.suz:1:1: symbol pool limit exceeded: limit=1, used=0"
                     ),
                     "{output:?}"
                 );

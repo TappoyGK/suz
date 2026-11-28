@@ -32,9 +32,23 @@ pub(crate) fn walk_expression<V: Visitor + ?Sized>(
     expr: &Expression,
 ) -> Result<(), Diagnostic> {
     match &expr.kind {
+        ExpressionKind::TextBuffer { capacity, value } => {
+            if let Some(capacity) = capacity {
+                visitor.expression(capacity)?;
+            }
+            visitor.expression(value)?;
+        }
         ExpressionKind::ArrayInit {
-            values, lengths, ..
+            values,
+            lengths,
+            keys,
+            ..
         } => {
+            if let Some(keys) = keys {
+                for key in keys {
+                    visitor.expression(key)?;
+                }
+            }
             for value in values.iter().chain(lengths) {
                 visitor.expression(value)?;
             }
@@ -89,7 +103,7 @@ pub(crate) fn walk_expression<V: Visitor + ?Sized>(
                 visitor.expression(argument)?;
             }
         }
-        ExpressionKind::Null | ExpressionKind::Void | ExpressionKind::Variant { .. } => {}
+        ExpressionKind::Nil | ExpressionKind::Void | ExpressionKind::Variant { .. } => {}
         ExpressionKind::Block { statements, value } => visitor.scope(statements, Some(value))?,
         ExpressionKind::If {
             branches,
@@ -125,8 +139,11 @@ pub(crate) fn walk_expression<V: Visitor + ?Sized>(
         | ExpressionKind::CByteLen(inner)
         | ExpressionKind::Len(inner)
         | ExpressionKind::Not(inner)
-        | ExpressionKind::BitNot(inner) => visitor.expression(inner)?,
-        ExpressionKind::Binary { left, right, .. }
+        | ExpressionKind::BitNot(inner)
+        | ExpressionKind::WrapNegate(inner)
+        | ExpressionKind::SaturatingNegate(inner) => visitor.expression(inner)?,
+        ExpressionKind::TextAppend { left, right }
+        | ExpressionKind::Binary { left, right, .. }
         | ExpressionKind::Logical { left, right, .. } => {
             visitor.expression(left)?;
             visitor.expression(right)?;
@@ -164,6 +181,18 @@ pub(crate) fn walk_statement<V: Visitor + ?Sized>(
             visitor.expression(target)?;
             visitor.expression(value)?;
         }
+        Statement::ArrayBulkWrite(bulk) => {
+            visitor.expression(&bulk.target)?;
+            if let crate::ast::BulkSelector::Slice { start, end } = &bulk.selector {
+                if let Some(start) = start {
+                    visitor.expression(start)?;
+                }
+                if let Some(end) = end {
+                    visitor.expression(end)?;
+                }
+            }
+            visitor.expression(&bulk.value)?;
+        }
         Statement::Binding { initializer, .. } => visitor.expression(initializer)?,
         Statement::Assign { value, .. }
         | Statement::Return(value)
@@ -187,14 +216,16 @@ pub(crate) fn walk_statement<V: Visitor + ?Sized>(
             }
             visitor.scope(body, None)?;
         }
-        Statement::For {
-            start, end, body, ..
-        } => {
-            visitor.expression(start)?;
-            if let Some(end) = end {
-                visitor.expression(end)?;
+        Statement::For(for_stmt) => {
+            match &for_stmt.target {
+                crate::ast::ForTarget::Range { start, end, .. } => {
+                    visitor.expression(start)?;
+                    visitor.expression(end)?;
+                }
+                crate::ast::ForTarget::Expression(expr) => visitor.expression(expr)?,
+                crate::ast::ForTarget::Type { .. } => {}
             }
-            visitor.scope(body, None)?;
+            visitor.scope(&for_stmt.body, None)?;
         }
         Statement::If {
             branches,

@@ -12,6 +12,8 @@ pub(super) struct Signature {
     // 診断用の名前は汎用宣言だけに保持し、署名を複製するときも共有する。
     pub type_parameter_names: Option<Rc<Vec<String>>>,
     pub needs: Vec<crate::ast::generics::Need>,
+    pub parameter_names: Option<Rc<Vec<String>>>,
+    pub contracts: Vec<crate::ast::Contract>,
     pub method: Option<crate::ast::Method>,
     pub external: bool,
     pub id: usize,
@@ -32,12 +34,16 @@ impl Signature {
     }
 }
 
+type RedundantHandlers = BTreeMap<(usize, usize), Vec<crate::Diagnostic>>;
+
 // 診断とランタイム定数の出力先を、字句スコープ間で共有する。
 #[derive(Clone, Default)]
 pub(super) struct Outputs {
     pub divisions: Rc<std::cell::RefCell<std::collections::BTreeSet<(usize, usize)>>>,
+    pub float_sat_nans: Rc<std::cell::RefCell<std::collections::BTreeSet<(usize, usize)>>>,
     pub comparisons: Rc<std::cell::RefCell<BTreeMap<(usize, usize), bool>>>,
     pub constant_texts: Rc<std::cell::RefCell<std::collections::BTreeSet<String>>>,
+    pub redundant_array_handlers: Rc<std::cell::RefCell<RedundantHandlers>>,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -124,6 +130,7 @@ pub(super) struct NamedTypes {
 #[derive(Clone)]
 pub(super) struct Scope {
     pub array_bounds: super::arrays::bounds::State,
+    pub ref_captured: Rc<std::cell::RefCell<std::collections::BTreeSet<usize>>>,
     pub named: Rc<NamedTypes>,
 
     // 定義のないプログラムでは、演算子用の型ヒント取得を省く。
@@ -136,7 +143,7 @@ pub(super) struct Scope {
     pub calls_used: Rc<std::cell::Cell<bool>>,
     // ループがないプログラムでは、寿命検査だけを行い蓄積警告の情報を作らない。
     pub program_loops_used: Rc<std::cell::Cell<bool>>,
-    pub program_pointers_used: Rc<std::cell::Cell<bool>>,
+    pub program_references_used: Rc<std::cell::Cell<bool>>,
     pub callables_used: Rc<std::cell::Cell<bool>>,
     pub trusted_block: bool,
     // 最も内側のerror腕の成功型。関数の戻り値型とは独立し、クロージャ境界で解除する。
@@ -160,10 +167,12 @@ pub(super) struct Scope {
     // 不変の宣言は共有し、ローカル束縛の状態だけを複製する。
     pub constants: Rc<BTreeMap<String, Binding>>,
     pub enums: Rc<Vec<crate::ast::EnumDeclaration>>,
+    pub ranges: Rc<Vec<crate::ast::RangeDeclaration>>,
     pub structs: Rc<super::type_parameters::structs::Structs>,
     pub functions: Rc<BTreeMap<String, Signature>>,
     pub result: Type,
     pub errors: Rc<Vec<crate::ast::ErrorVariant>>,
+    pub current_ensures: Rc<Vec<crate::ast::Contract>>,
 }
 impl Scope {
     pub fn contains_function(&self, ty: Type) -> bool {
@@ -219,12 +228,16 @@ impl Scope {
         ty: Type,
         location: crate::ast::Location,
     ) -> Result<Type, crate::Diagnostic> {
+        if let Type::Range(r) = ty {
+            return Ok(Type::Range(self.ranges[r.id].ty));
+        }
         if !matches!(
             ty,
             Type::Parameter(_)
                 | Type::Application(_)
                 | Type::Struct(_)
                 | Type::Pointer { .. }
+                | Type::ArrayRef { .. }
                 | Type::StaticShape(_)
                 | Type::Shape(_)
                 | Type::StaticFunction(_)
@@ -268,10 +281,37 @@ impl Scope {
             Type::Array(id) => {
                 let array = self.structs.arrays.borrow().get(id);
                 let element = self.type_name(array.element);
-                if array.rank == 1 {
-                    format!("[{element}]")
+                let soa = if array.soa { "soa " } else { "" };
+                if let Some(index_enum) = array.index_enum {
+                    format!("{soa}[{element}; {}]", self.enums[index_enum.id].name)
+                } else if array.rank == 1 {
+                    format!("{soa}[{element}]")
                 } else {
-                    format!("[{element}; {}]", vec!["_"; array.rank].join(", "))
+                    format!("{soa}[{element}; {}]", vec!["_"; array.rank].join(", "))
+                }
+            }
+            Type::ArrayRef {
+                id,
+                mutable,
+                nilable,
+            } => {
+                let array = self.structs.arrays.borrow().get(id);
+                let element = self.type_name(array.element);
+                let soa = if array.soa { "soa " } else { "" };
+                let prefix = if mutable { "#" } else { "." };
+                let suffix = if nilable { "?" } else { "" };
+                if let Some(index_enum) = array.index_enum {
+                    format!(
+                        "{soa}{prefix}[{element}; {}]{suffix}",
+                        self.enums[index_enum.id].name
+                    )
+                } else if array.rank == 1 {
+                    format!("{soa}{prefix}[{element}]{suffix}")
+                } else {
+                    format!(
+                        "{soa}{prefix}[{element}; {}]{suffix}",
+                        vec!["_"; array.rank].join(", ")
+                    )
                 }
             }
             Type::Parameter(id) => self
@@ -280,11 +320,17 @@ impl Scope {
                 .get(id)
                 .map_or_else(|| "type parameter".into(), |p| p.name.clone()),
             Type::Pointer { .. } => format!(
-                "ptr{} {}",
-                if ty.is_nullable() { "?" } else { "" },
+                "{}{} {}",
+                if ty.is_readonly_pointer() {
+                    "ref"
+                } else {
+                    "mut"
+                },
+                if ty.is_nilable() { "?" } else { "" },
                 self.type_name(ty.pointee().unwrap())
             ),
             Type::Enum(ty) => self.enums[ty.id].name.clone(),
+            Type::Range(ty) => self.ranges[ty.id].name.clone(),
             Type::Struct(id) => {
                 let declaration = self.structs.get(id);
                 if declaration.symbolic {
@@ -336,6 +382,7 @@ impl Scope {
     pub fn is_type_name(&self, name: &str) -> bool {
         self.structs.shapes.contains_name(name)
             || self.enums.iter().any(|decl| decl.name == name)
+            || self.ranges.iter().any(|decl| decl.name == name)
             || self.structs.contains_name(name)
     }
 }
@@ -350,7 +397,7 @@ impl Default for Scope {
             lifetime_used: Default::default(),
             calls_used: Default::default(),
             program_loops_used: Default::default(),
-            program_pointers_used: Default::default(),
+            program_references_used: Default::default(),
             callables_used: Default::default(),
             trusted_block: false,
             recovery: None,
@@ -361,6 +408,7 @@ impl Default for Scope {
             generic_calls: None,
             instances: Rc::default(),
             array_bounds: Default::default(),
+            ref_captured: Default::default(),
             type_hints: Rc::default(),
             hint_depth: Rc::default(),
             float_hints: Rc::default(),
@@ -370,10 +418,12 @@ impl Default for Scope {
             uncaptured: Default::default(),
             constants: Rc::default(),
             enums: Rc::default(),
+            ranges: Rc::default(),
             structs,
             functions: Rc::default(),
             result: Type::Integer(IntegerType::U8),
             errors: Rc::default(),
+            current_ensures: Rc::default(),
         }
     }
 }

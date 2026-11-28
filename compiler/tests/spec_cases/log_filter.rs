@@ -16,7 +16,7 @@ const LEVELS: [LogLevel; 5] = [
     LogLevel::Error,
     LogLevel::Off,
 ];
-const SOURCE: &str = "fn main() -> u8 {\nfix value = 7\nlog debug `debug-only ${value}`\nlog info `info-only ${value}`\nlog warn `warn-only ${value}`\nlog error `error-only ${value}`\nreturn 0 }";
+const SOURCE: &str = "fn main() -> u8 {\nfix value = 7\nlog debug \"debug-only ${value}\"\nlog info \"info-only ${value}\"\nlog warn \"warn-only ${value}\"\nlog error \"error-only ${value}\"\nreturn 0 }";
 
 #[test]
 fn log_threshold_removes_reads_output_and_log_only_data() {
@@ -61,7 +61,7 @@ fn log_threshold_removes_reads_output_and_log_only_data() {
     );
 
     // log固有の表示名は消す。独立した定数宣言や、残るログの表示名は消さない。
-    let source = b"enum Hidden: u8 { HiddenVariant }\nenum Visible: u8 { VisibleVariant }\nfix DECLARED = `declared-symbol`\nfn main() -> u8 { log debug `${Hidden.HiddenVariant} ${Visible.VisibleVariant} ${DECLARED}`\nlog warn `${Visible.VisibleVariant}`\nreturn 0 }";
+    let source = b"enum Hidden: u8 { HiddenVariant }\nenum Visible: u8 { VisibleVariant }\nfix DECLARED: symbol = \"declared-symbol\"\nfn main() -> u8 { log debug \"${Hidden.HiddenVariant} ${Visible.VisibleVariant} ${DECLARED}\"\nlog warn \"${Visible.VisibleVariant}\"\nreturn 0 }";
     let c = suz::compile_with_options(source, "data.suz", &options(LogLevel::Warn))
         .unwrap()
         .c;
@@ -73,10 +73,10 @@ fn log_threshold_removes_reads_output_and_log_only_data() {
 #[test]
 fn filtering_keeps_diagnostics_and_all_panic_paths() {
     for source in [
-        "fn main() -> u8 { log debug `${missing}`\nreturn 0 }",
-        "struct Point { x: u8 }\nfn main() -> u8 { fix point = Point { x: 1 }\nlog debug `${point}`\nreturn 0 }",
-        "fn main() -> u8 { log debug `${1 + 2}`\nreturn 0 }",
-        "fix BAD: u8 = 1 / 0\nfn main() -> u8 { log debug `${BAD}`\nreturn 0 }",
+        "fn main() -> u8 { log debug \"${missing}\"\nreturn 0 }",
+        "struct Point { x: u8 }\nfn main() -> u8 { fix point = Point { x: 1 }\nlog debug \"${point}\"\nreturn 0 }",
+        "fn main() -> u8 { log debug \"${1 + 2}\"\nreturn 0 }",
+        "fix BAD: u8 = 1 / 0\nfn main() -> u8 { log debug \"${BAD}\"\nreturn 0 }",
     ] {
         let expected =
             suz::compile_with_options(source.as_bytes(), "check.suz", &options(LogLevel::Debug))
@@ -100,7 +100,7 @@ fn filtering_keeps_diagnostics_and_all_panic_paths() {
             );
         }
     }
-    let source = b"fn main() -> u8 { fix n: u8 = 1 + 2 allow [diagnostic.arithmetic: small]\nlog debug `${n}`\nreturn 0 }";
+    let source = b"fn main() -> u8 { fix n: u8 = 1 + 2 allow [diagnostic.arithmetic: small]\nlog debug \"${n}\"\nreturn 0 }";
     for level in LEVELS {
         let config = CompilationOptions {
             arithmetic_mode: suz::ArithmeticMode::Warn,
@@ -116,8 +116,8 @@ fn filtering_keeps_diagnostics_and_all_panic_paths() {
     let directory = TemporaryDirectory::new();
     let mut files = Vec::new();
     for (i, body) in [
-        "panic `explicit`",
-        "fix n = risky() or panic `handler`\nreturn 0",
+        "panic \"explicit\"",
+        "fix n = risky() or panic \"handler\"\nreturn 0",
         "fix zero: u8 = 0\nreturn 1 / zero",
     ]
     .iter()

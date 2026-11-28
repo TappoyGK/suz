@@ -111,7 +111,8 @@ static bool value(reader *r, const suz_parse_type *type, suz_parsed_value *outpu
         output->bits = scalar;
     } else if (type->kind == SUZ_PARSE_TEXT) {
         uint64_t consumed, decoded;
-        if (!suz_parse_string(r->bytes + r->index, r->length - r->index, &consumed, NULL, &decoded)) return false;
+        if (!suz_parse_string_counts(r->bytes + r->index, r->length - r->index, &consumed, NULL, &decoded, &output->scalars)) return false;
+        output->decoded_length = decoded;
         output->start = r->index;
         output->length = consumed;
         r->index += consumed;
@@ -135,6 +136,15 @@ static bool value(reader *r, const suz_parse_type *type, suz_parsed_value *outpu
         switch (type->kind) {
             case SUZ_PARSE_INTEGER:
                 if (!suz_parse_integer(bytes, length, type->bits, type->signed_integer, false, &output->bits)) return false;
+                break;
+            case SUZ_PARSE_RANGE:
+                if (!suz_parse_integer(bytes, length, 64, type->signed_integer, false, &output->bits)) return false;
+                if (type->signed_integer) {
+                    int64_t v = (int64_t)output->bits;
+                    if (v < (int64_t)type->range_min || v > (int64_t)type->range_max) return false;
+                } else {
+                    if (output->bits < type->range_min || output->bits > type->range_max) return false;
+                }
                 break;
             case SUZ_PARSE_FLOAT:
                 if (!suz_parse_float_bits(bytes, length, type->bits, &output->bits)) return false;

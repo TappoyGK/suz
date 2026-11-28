@@ -39,11 +39,14 @@ pub(super) fn collect(tokens: &[Token<'_>]) -> Result<Rc<Groups>, Diagnostic> {
         applications: Default::default(),
         type_parameters: Vec::new(),
         pending_needs: Vec::new(),
+        pending_contracts: Vec::new(),
+        in_ensures: false,
         need_groups: Default::default(),
         generic_functions: Default::default(),
         allows: Vec::new(),
         tokens,
         enums: &[],
+        ranges: &[],
         structs: &[],
         fnshapes: &[],
         fnshape_names: Default::default(),
@@ -310,7 +313,8 @@ impl Parser<'_, '_> {
             return self
                 .replace_need_type(inner, arguments)
                 .pointer()
-                .with_nullable(ty.is_nullable());
+                .with_readonly(ty.is_readonly_pointer())
+                .with_nilable(ty.is_nilable());
         }
         match ty {
             Type::Parameter(id) => arguments[id],

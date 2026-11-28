@@ -6,14 +6,18 @@
 use crate::{Diagnostic, ErrorKind};
 mod reasons;
 pub(crate) mod templates;
+mod unicode_display;
 use std::ops::Range;
 
 const KEYWORDS: &[&str] = &[
     "arena",
     "objection",
     "new",
-    "ptr",
-    "null",
+    "textbuf",
+    "ref",
+    "mut",
+    "soa",
+    "nil",
     "let",
     "extern",
     "c_bytes",
@@ -29,6 +33,7 @@ const KEYWORDS: &[&str] = &[
     "static",
     "struct",
     "enum",
+    "range",
     "error",
     "fail",
     "ignore",
@@ -66,10 +71,11 @@ const TYPES: &[&str] = &[
     "_char",
 ];
 const SYMBOLS: &[&str] = &[
-    ";", "(", ")", "[", "]", "{", "}", ",", ":", ".", "->", "=>", "=", "+=", "-=", "*=", "/=",
-    "%=", "+%=", "-%=", "*%=", "&=", "|=", "^=", "<<=", ">>=", "+", "-", "*", "/", "%", "+%", "-%",
-    "*%", "&", "|", "^", "~", "<<", ">>", "==", "!=", "<", "<=", ">", ">=", "&&", "||", "..<",
-    "..=", "?", "#", "@",
+    ";", "(", ")", "[", "]", "{", "}", ",", ":", ".", "<-", "->", "=>", "=", "+=", "-=", "*=",
+    "/=", "%=", "%%=", "+%=", "-%=", "*%=", "+|=", "-|=", "*|=", "&=", "|=", "^=", "<<=", ">>=",
+    ">>>=", "<<%=", ">>%=", ">>>%=", "<<|=", "+", "-", "*", "/", "%", "%%", "+%", "-%", "*%", "+|",
+    "-|", "*|", "&", "|", "^", "~", "<<", ">>", ">>>", "<<%", ">>%", ">>>%", "<<|", "==", "!=",
+    "<", "<=", ">", ">=", "&&", "||", "..<", "..=", "?", "#", "@",
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -220,7 +226,7 @@ fn can_end_operand(kind: Option<Kind<'_>>) -> bool {
 fn continues_line(kind: Kind<'_>, previous: Option<Kind<'_>>) -> bool {
     match kind {
         Kind::Keyword("or") => true,
-        Kind::Symbol("-") => can_end_operand(previous),
+        Kind::Symbol("-" | "-%" | "-|") => can_end_operand(previous),
         Kind::Symbol(symbol) => matches!(
             symbol,
             "=" | "+="
@@ -228,30 +234,47 @@ fn continues_line(kind: Kind<'_>, previous: Option<Kind<'_>>) -> bool {
                 | "*="
                 | "/="
                 | "%="
+                | "%%="
                 | "+%="
                 | "-%="
                 | "*%="
+                | "+|="
+                | "-|="
+                | "*|="
                 | "&="
                 | "|="
                 | "^="
                 | "<<="
                 | ">>="
+                | ">>>="
+                | "<<%="
+                | ">>%="
+                | ">>>%="
+                | "<<|="
                 | "+"
                 | "*"
                 | "/"
                 | "%"
+                | "%%"
                 | "+%"
-                | "-%"
                 | "*%"
+                | "+|"
+                | "*|"
                 | "&"
                 | "|"
                 | "^"
                 | "<<"
                 | ">>"
+                | ">>>"
+                | "<<%"
+                | ">>%"
+                | ">>>%"
+                | "<<|"
                 | "=="
                 | "!="
                 | "<"
                 | "<="
+                | "<-"
                 | ">"
                 | ">="
                 | "&&"
@@ -338,7 +361,7 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
                 continuation = false;
                 continue;
             }
-            '\'' => {
+            '\\' => {
                 let (value, length) = char_literal(rest)
                     .map_err(|message| error(line, column, ErrorKind::InvalidSource, message))?;
                 tokens.push(Token {
@@ -409,7 +432,7 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
                 continuation = false;
                 continue;
             }
-            '`' => {
+            '"' => {
                 let length = templates::scan(rest, line, column)?.0;
                 tokens.push(Token {
                     kind: Kind::Template(&rest[..length]),
@@ -432,6 +455,8 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
             let word = &rest[..length];
             if word == "as" && rest.as_bytes().get(length) == Some(&b'%') {
                 (Kind::Symbol("as%"), length + 1)
+            } else if word == "as" && rest.as_bytes().get(length) == Some(&b'|') {
+                (Kind::Symbol("as|"), length + 1)
             } else {
                 let kind = if word == "_" {
                     Kind::Wildcard
@@ -466,7 +491,11 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
                 line,
                 column,
                 ErrorKind::InvalidSource,
-                crate::diagnostic!("syntax.grammar", "unexpected character {ch:?}"),
+                crate::diagnostic!(
+                    "syntax.grammar",
+                    "unexpected character {}",
+                    format_char_literal(ch)
+                ),
             ));
         };
         continuation = continues_line(kind, tokens.last().map(|token| token.kind));
@@ -572,10 +601,31 @@ pub(crate) fn char_literal(input: &str) -> Result<(u32, usize), crate::Diagnosti
             "char.literal",
             "Unicode escape exceeds U+10FFFF"
         )),
+        6 => Err(crate::diagnostic!(
+            "char.literal",
+            "whitespace, control, or format character in character literal must use a named escape or \\u{{...}}"
+        )),
+        7 => Err(crate::diagnostic!(
+            "char.literal",
+            "unknown named character literal"
+        )),
         _ => Err(crate::diagnostic!(
             "char.literal",
             "expected one Unicode scalar in a character literal"
         )),
+    }
+}
+
+/// 値を文字リテラルの形で表示する（`[lit.display]`）。
+pub(crate) fn format_char_literal(ch: char) -> String {
+    match ch {
+        '\0' => "\\nul".into(),
+        '\t' => "\\tab".into(),
+        '\n' => "\\newline".into(),
+        '\r' => "\\return".into(),
+        ' ' => "\\space".into(),
+        _ if unicode_display::needs_unicode_escape(ch) => format!("\\u{{{:x}}}", ch as u32),
+        _ => format!("\\{ch}"),
     }
 }
 
@@ -632,12 +682,22 @@ mod tests {
     #[test]
     fn takes_the_longest_operator_and_preserves_cast_boundaries() {
         assert_eq!(
-            kinds("+%= +% += + <<= << <= < >>= >> >= > != == -> => as% as % aside%"),
+            kinds(
+                "+%= +% += + +|= +| -|= -| *|= *| <<|= <<| <<= << <= < >>= >> >= > != == -> => as% as| as % as | aside% aside|"
+            ),
             vec![
                 Kind::Symbol("+%="),
                 Kind::Symbol("+%"),
                 Kind::Symbol("+="),
                 Kind::Symbol("+"),
+                Kind::Symbol("+|="),
+                Kind::Symbol("+|"),
+                Kind::Symbol("-|="),
+                Kind::Symbol("-|"),
+                Kind::Symbol("*|="),
+                Kind::Symbol("*|"),
+                Kind::Symbol("<<|="),
+                Kind::Symbol("<<|"),
                 Kind::Symbol("<<="),
                 Kind::Symbol("<<"),
                 Kind::Symbol("<="),
@@ -651,10 +711,15 @@ mod tests {
                 Kind::Symbol("->"),
                 Kind::Symbol("=>"),
                 Kind::Symbol("as%"),
+                Kind::Symbol("as|"),
                 Kind::Keyword("as"),
                 Kind::Symbol("%"),
+                Kind::Keyword("as"),
+                Kind::Symbol("|"),
                 Kind::Ident("aside"),
                 Kind::Symbol("%"),
+                Kind::Ident("aside"),
+                Kind::Symbol("|"),
                 Kind::End,
             ]
         );
@@ -854,12 +919,12 @@ mod tests {
 
     #[test]
     fn distinguishes_invalid_characters_from_template_text() {
-        for source in ["!", "\u{000b}", "名前"] {
+        for source in ["!", "\u{000b}", "名前", "`"] {
             assert_eq!(lex(source).unwrap_err().kind, ErrorKind::InvalidSource);
         }
         assert_eq!(
-            lex("log info `a // b`").unwrap()[2].kind,
-            Kind::Template("`a // b`")
+            lex(r#"log info "a // b `raw`""#).unwrap()[2].kind,
+            Kind::Template(r#""a // b `raw`""#)
         );
     }
 }

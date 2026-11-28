@@ -80,6 +80,7 @@ pub(super) fn is_operator(expr: &Expression) -> bool {
                 | BinaryOperator::Multiply
                 | BinaryOperator::Divide
                 | BinaryOperator::Remainder
+                | BinaryOperator::EuclideanRemainder
         ),
         _ => false,
     }
@@ -168,10 +169,12 @@ fn build<const DECLARED_OPERATIONS: bool>(
                 ));
             }
             let (min, max) = domain::bounds(value.ty).unwrap();
-            (
-                ExactKind::Leaf(Box::new(value)),
-                Some(Range::bounds(min, max)),
-            )
+            let range = if !value.ty.symbolic() {
+                super::contracts::narrow_leaf_range(&value, min, max, bindings)
+            } else {
+                Range::bounds(min, max)
+            };
+            (ExactKind::Leaf(Box::new(value)), Some(range))
         }
     };
     let domains = match &kind {
@@ -275,9 +278,13 @@ pub(super) fn check(
         let mut known = None;
         let mut incompatible = false;
         exact.leaves(&mut |v| {
+            let leaf_ty = match v.ty {
+                Type::Range(r) => Type::Integer(r.base),
+                ty => ty,
+            };
             known = match known {
-                None => Some(v.ty),
-                Some(a) => match join(a, v.ty) {
+                None => Some(leaf_ty),
+                Some(a) => match join(a, leaf_ty) {
                     Some(t) => Some(t),
                     None => {
                         incompatible = true;
@@ -405,6 +412,7 @@ pub(super) fn evaluate(e: &Exact) -> Option<Result<Int, Location>> {
                 Multiply => a.mul(b),
                 Divide => a.div(b),
                 Remainder => a.rem(b),
+                EuclideanRemainder => a.rem_euclid(b),
                 _ => unreachable!(),
             }
             .ok_or(e.location)
@@ -431,7 +439,16 @@ pub(super) fn widening(from: Type, to: Type) -> bool {
             let (lo, hi) = b.bounds();
             min >= lo && max <= hi
         }
+        (Type::Range(a), Type::Integer(b)) => {
+            let (min, max) = a.bounds();
+            let (lo, hi) = b.bounds();
+            min >= lo && max <= hi
+        }
         (Type::Integer(a), Type::Float(b)) => {
+            let (lo, hi) = a.bounds();
+            Range::bounds(lo, hi).exact_float(b == FloatType::F32)
+        }
+        (Type::Range(a), Type::Float(b)) => {
             let (lo, hi) = a.bounds();
             Range::bounds(lo, hi).exact_float(b == FloatType::F32)
         }
@@ -451,7 +468,12 @@ pub(super) fn join(a: Type, b: Type) -> Option<Type> {
     if a.is_text() && b.is_text() {
         return Some(Type::Text);
     }
-    if matches!((a, b), (Type::Integer(_), Type::Integer(_))) {
+    if matches!(
+        (a, b),
+        (Type::Integer(_), Type::Integer(_))
+            | (Type::Range(_), Type::Integer(_))
+            | (Type::Integer(_), Type::Range(_))
+    ) {
         for ty in [
             IntegerType::U8,
             IntegerType::I8,
@@ -468,8 +490,9 @@ pub(super) fn join(a: Type, b: Type) -> Option<Type> {
                 return Some(ty);
             }
         }
-    } else if matches!(a, Type::Float(_) | Type::Integer(_))
-        && matches!(b, Type::Float(_) | Type::Integer(_))
+    } else if matches!(a, Type::Float(_) | Type::Integer(_) | Type::Range(_))
+        && matches!(b, Type::Float(_) | Type::Integer(_) | Type::Range(_))
+        && (matches!(a, Type::Float(_)) || matches!(b, Type::Float(_)))
     {
         for ty in [Type::Float(FloatType::F32), Type::Float(FloatType::F64)] {
             if widening(a, ty) && widening(b, ty) {
@@ -482,42 +505,58 @@ pub(super) fn join(a: Type, b: Type) -> Option<Type> {
 pub(super) fn cast(
     operand: CheckedExpression,
     target: Type,
-    wrap: bool,
+    kind: crate::ast::CastKind,
     fallback: &Option<crate::ast::FailureHandler>,
     location: Location,
     bindings: &Scope,
 ) -> Result<CheckedExpression, Diagnostic> {
-    use crate::ast::FailureHandler;
+    use crate::ast::{CastKind, FailureHandler};
     if matches!(target, Type::Enum(e) if e.is_error) {
         return Err(location.error(
             ErrorKind::InvalidSource,
             crate::diagnostic!("error.ops", "integers cannot be converted to errors"),
         ));
     }
-    if wrap {
+    if matches!(kind, CastKind::Wrap | CastKind::Saturating) {
         if fallback.is_some() {
             return Err(location.error(
                 ErrorKind::InvalidSource,
-                crate::diagnostic!(
-                    "expr.cast-wrap-handler-syntax",
-                    "integer as% does not accept or"
-                ),
+                if kind == CastKind::Wrap {
+                    crate::diagnostic!(
+                        "expr.cast-wrap-handler-syntax",
+                        "integer as% does not accept or"
+                    )
+                } else {
+                    crate::diagnostic!(
+                        "expr.cast-sat-handler-syntax",
+                        "integer as| does not accept or"
+                    )
+                },
             ));
         }
         if !target.is_integer() {
             return Err(location.error(
                 ErrorKind::InvalidSource,
-                crate::diagnostic!("expr.as-trunc", "as% requires an integer target"),
+                if kind == CastKind::Wrap {
+                    crate::diagnostic!("expr.as-trunc", "as% requires an integer target")
+                } else {
+                    crate::diagnostic!("expr.as-sat", "as| requires an integer target")
+                },
             ));
         }
         return Ok(CheckedExpression {
             ty: target,
-            value: Value::Truncate(Box::new(operand)),
+            value: if kind == CastKind::Wrap {
+                Value::Truncate(Box::new(operand))
+            } else {
+                Value::SaturatingCast(Box::new(operand))
+            },
         });
     }
     if !matches!(
         target,
         Type::Integer(_)
+            | Type::Range(_)
             | Type::Float(_)
             | Type::GenericInt
             | Type::GenericFloat
@@ -546,22 +585,33 @@ pub(super) fn cast(
             FailureHandler::Fail { location, .. } => {
                 return Err(super::errors::invalid_handler(*location));
             }
-            FailureHandler::Value(v) => Value::CheckedCast {
-                location,
-                constant_struct: None,
-                wrap: false,
-                operand: Box::new(operand),
-                fallback: Box::new(super::expression::coerced(v, Some(target), bindings)?),
-            },
+            FailureHandler::Value(v) => {
+                let exits = matches!(v.kind, ExpressionKind::Panic(_));
+                Value::CheckedCast {
+                    location,
+                    constant_struct: None,
+                    kind: CastKind::Checked,
+                    operand: Box::new(operand),
+                    fallback: Box::new(super::arrays::bounds::with_fallback(
+                        bindings,
+                        exits,
+                        || super::expression::coerced(v, Some(target), bindings),
+                    )?),
+                }
+            }
             FailureHandler::Return {
                 value,
                 location: return_location,
             } => Value::CastReturn {
                 return_location: *return_location,
                 location,
-                wrap: false,
+                kind: CastKind::Checked,
                 operand: Box::new(operand),
-                return_value: Box::new(super::functions::return_value(value, bindings)?),
+                return_value: Box::new(super::arrays::bounds::with_fallback(
+                    bindings,
+                    true,
+                    || super::functions::return_value(value, bindings),
+                )?),
             },
         };
         return Ok(CheckedExpression { ty: target, value });

@@ -19,9 +19,31 @@ pub(super) fn dependencies(
     names: &mut Vec<(String, Location)>,
 ) -> Result<(), Diagnostic> {
     match &expr.kind {
-        ExpressionKind::ArrayInit { .. }
-        | ExpressionKind::MethodCall { .. }
-        | ExpressionKind::Receiver { .. } => {
+        ExpressionKind::ArrayInit {
+            values, lengths, ..
+        } => {
+            for value in values.iter().chain(lengths) {
+                dependencies(value, names)?;
+            }
+        }
+        ExpressionKind::TextBuffer { .. } => {
+            return Err(expr.location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("const.expression", "textbuf is not a constant expression"),
+            ));
+        }
+        ExpressionKind::New(inner) => {
+            let message = if matches!(inner.kind, ExpressionKind::ArrayInit { .. }) {
+                crate::diagnostic!(
+                    "const.expression",
+                    "array allocation is not a constant expression"
+                )
+            } else {
+                crate::diagnostic!("const.expression", "new is not a constant expression")
+            };
+            return Err(expr.location.error(ErrorKind::InvalidSource, message));
+        }
+        ExpressionKind::MethodCall { .. } | ExpressionKind::Receiver { .. } => {
             return Err(expr.location.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(
@@ -75,7 +97,7 @@ pub(super) fn dependencies(
         }
         ExpressionKind::Field { target, .. } => dependencies(target, names)?,
         ExpressionKind::Name(name) => names.push((name.clone(), expr.location)),
-        ExpressionKind::Null
+        ExpressionKind::Nil
         | ExpressionKind::FunctionValue { .. }
         | ExpressionKind::Integer { .. }
         | ExpressionKind::Float(_)
@@ -84,14 +106,16 @@ pub(super) fn dependencies(
         | ExpressionKind::Variant { .. } => {}
         ExpressionKind::Group(inner)
         | ExpressionKind::Negate(inner)
-        | ExpressionKind::New(inner)
         | ExpressionKind::Deref(inner)
         | ExpressionKind::CBytes(inner)
         | ExpressionKind::CByteLen(inner)
         | ExpressionKind::Len(inner)
         | ExpressionKind::Not(inner)
-        | ExpressionKind::BitNot(inner) => dependencies(inner, names)?,
-        ExpressionKind::Binary { left, right, .. }
+        | ExpressionKind::BitNot(inner)
+        | ExpressionKind::WrapNegate(inner)
+        | ExpressionKind::SaturatingNegate(inner) => dependencies(inner, names)?,
+        ExpressionKind::TextAppend { left, right }
+        | ExpressionKind::Binary { left, right, .. }
         | ExpressionKind::Logical { left, right, .. } => {
             dependencies(left, names)?;
             dependencies(right, names)?;
@@ -161,12 +185,111 @@ fn handler_dependencies(
 
 struct Resolver<'a> {
     declarations: BTreeMap<String, &'a TopLevelBinding>,
+    ranges: Vec<crate::ast::RangeDeclaration>,
+    resolved_ranges: Vec<bool>,
+    visiting_ranges: BTreeSet<usize>,
     bindings: Scope,
     visiting: BTreeSet<String>,
     warnings: Vec<Location>,
 }
 
 impl Resolver<'_> {
+    fn resolve_range(&mut self, id: usize) -> Result<(), Diagnostic> {
+        if self.resolved_ranges[id] {
+            return Ok(());
+        }
+        if !self.visiting_ranges.insert(id) {
+            return Err(self.ranges[id].location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("const.initializer", "cyclic constant dependency"),
+            ));
+        }
+        let decl = self.ranges[id].clone();
+        let lo = self.evaluate_range_bound(&decl.start_expr)?;
+        let hi_raw = self.evaluate_range_bound(&decl.end_expr)?;
+        let hi = if decl.inclusive {
+            hi_raw
+        } else {
+            hi_raw
+                .sub(crate::numeric::Int::from_i128(1))
+                .ok_or_else(|| {
+                    decl.location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!("range.bounds", "range bounds exceed base type"),
+                    )
+                })?
+        };
+        if lo > hi {
+            return Err(decl.location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("range.bounds", "range must contain at least one value"),
+            ));
+        }
+        let (base_min, base_max) = decl.ty.base.bounds();
+        if lo < crate::numeric::Int::from_i128(base_min)
+            || hi > crate::numeric::Int::from_i128(base_max)
+        {
+            return Err(decl.location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "range.bounds",
+                    "range bounds exceed base type {}",
+                    decl.ty.base.name()
+                ),
+            ));
+        }
+        self.ranges[id].ty.set_bounds(
+            lo.to_i128().expect("range min fits in i128"),
+            hi.to_i128().expect("range max fits in i128"),
+        );
+        self.resolved_ranges[id] = true;
+        self.visiting_ranges.remove(&id);
+        self.bindings.ranges = std::rc::Rc::new(self.ranges.clone());
+        Ok(())
+    }
+
+    fn evaluate_range_bound(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<crate::numeric::Int, Diagnostic> {
+        let mut names = Vec::new();
+        dependencies(expr, &mut names)?;
+        for (dependency, location) in names {
+            self.resolve(&dependency, location)?;
+        }
+        let mut scope = self.bindings.clone();
+        scope.constant_initializer = true;
+        let checked = super::exact::comparison_value(expr, &scope)?;
+        if super::ffi::uses_c_environment(&checked) {
+            return Err(expr.location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!(
+                    "const.expression",
+                    "C-dependent values are not constant expressions"
+                ),
+            ));
+        }
+        if checked.ty != crate::ast::Type::Exact && !checked.ty.is_integer() {
+            return Err(expr.location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("range.bounds", "range bounds must be integer constants"),
+            ));
+        }
+        diagnostics::collect(&checked, &mut self.warnings);
+        let evaluated = constants::evaluate(&checked)?.ok_or_else(|| {
+            expr.location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("range.bounds", "range bounds must be constant expressions"),
+            )
+        })?;
+        super::exact::constant(&evaluated).ok_or_else(|| {
+            expr.location.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("range.bounds", "range bounds must be integer constants"),
+            )
+        })
+    }
+
     fn resolve(&mut self, name: &str, location: Location) -> Result<(), Diagnostic> {
         if self.bindings.contains_key(name) {
             return Ok(());
@@ -216,15 +339,15 @@ impl Resolver<'_> {
         scope.constant_initializer = true;
         let annotation = declaration
             .annotation
-            .map(|ty| scope.resolve_type_at(ty, declaration.location))
+            .map(|ty| {
+                if let crate::ast::Type::Range(r) = ty.leaf() {
+                    self.resolve_range(r.id)?;
+                }
+                scope.ranges = self.bindings.ranges.clone();
+                scope.resolve_type_at(ty, declaration.location)
+            })
             .transpose()?;
         let checked = expression(&declaration.initializer, annotation, &scope)?;
-        if super::arena::contains(checked.ty, &self.bindings) {
-            return Err(declaration.location.error(
-                ErrorKind::InvalidSource,
-                crate::diagnostic!("arena.store", "arena pointers cannot be stored globally"),
-            ));
-        }
         if super::ffi::uses_c_environment(&checked) {
             return Err(declaration.initializer.location.error(
                 ErrorKind::InvalidSource,
@@ -252,12 +375,17 @@ impl Resolver<'_> {
 pub(super) fn resolve(
     declarations: &[TopLevelBinding],
     enums: &[crate::ast::EnumDeclaration],
+    ranges: &[crate::ast::RangeDeclaration],
     scope: Scope,
-) -> Result<(Scope, Vec<Location>), Diagnostic> {
+) -> Result<(Scope, Vec<crate::ast::RangeDeclaration>, Vec<Location>), Diagnostic> {
     let mut resolver = Resolver {
         declarations: BTreeMap::new(),
+        ranges: ranges.to_vec(),
+        resolved_ranges: vec![false; ranges.len()],
+        visiting_ranges: BTreeSet::new(),
         bindings: Scope {
             enums: std::rc::Rc::new(enums.to_vec()),
+            ranges: std::rc::Rc::new(ranges.to_vec()),
             ..scope
         },
         visiting: BTreeSet::new(),
@@ -271,6 +399,7 @@ pub(super) fn resolve(
             .contains_name(&declaration.name)
             || resolver.bindings.structs.contains_name(&declaration.name)
             || enums.iter().any(|e| e.name == declaration.name)
+            || ranges.iter().any(|r| r.name == declaration.name)
             || declaration.name == "main"
             || resolver
                 .declarations
@@ -287,10 +416,13 @@ pub(super) fn resolve(
             ));
         }
     }
+    for id in 0..ranges.len() {
+        resolver.resolve_range(id)?;
+    }
     for declaration in declarations {
         resolver.resolve(&declaration.name, declaration.location)?;
     }
     // 定数は不変であり、すべての関数スコープと型の代入で共有する。
     resolver.bindings.constants = std::rc::Rc::new(std::mem::take(&mut resolver.bindings.locals));
-    Ok((resolver.bindings, resolver.warnings))
+    Ok((resolver.bindings, resolver.ranges, resolver.warnings))
 }
