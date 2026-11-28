@@ -386,6 +386,20 @@ pub(super) fn check(
             if let Some(value) = super::super::operator_methods::comparison(expr, bindings)? {
                 return Ok(value);
             }
+            for (index, operand) in operands.iter().enumerate() {
+                if operand_type(operand, bindings)
+                    .is_some_and(|t| crate::check::arrays::contains_reference(t, bindings))
+                {
+                    let location = locations[index.min(locations.len() - 1)];
+                    return Err(location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "array.value",
+                            "array references and structs containing them cannot be compared"
+                        ),
+                    ));
+                }
+            }
             let ty = super::joined_type(
                 operands
                     .iter()
@@ -424,6 +438,18 @@ pub(super) fn check(
                     }
                 })
                 .collect::<Result<Vec<_>, _>>()?;
+            for (index, operand) in operands.iter().enumerate() {
+                if crate::check::arrays::contains_reference(operand.ty, bindings) {
+                    let location = locations[index.min(locations.len() - 1)];
+                    return Err(location.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!(
+                            "array.value",
+                            "array references and structs containing them cannot be compared"
+                        ),
+                    ));
+                }
+            }
             if numeric
                 && operands
                     .iter()
