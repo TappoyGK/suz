@@ -42,8 +42,16 @@ fn type_layout(ty: Type, context: &ExpressionContext) -> (usize, usize) {
         Type::Function(_) => (16, 8),
         Type::Text => (32, 8),
         Type::ArrayRef { id, .. } => {
-            let rank = context.arrays.get(id).rank;
-            (align_up(8 + 4 * rank, 8), 8)
+            let array = context.arrays.get(id);
+            let ptr_count = if array.soa {
+                let Type::Struct(sid) = array.element else {
+                    unreachable!()
+                };
+                super::soa::leaves(sid, context).len()
+            } else {
+                1
+            };
+            (align_up(8 * ptr_count + 4 * array.rank, 8), 8)
         }
         Type::Exact => (32, 16),
         Type::Struct(id) => {
@@ -69,9 +77,14 @@ fn type_layout(ty: Type, context: &ExpressionContext) -> (usize, usize) {
     }
 }
 
-/// 構造体の値仮引数を C の読み取り専用ポインタで渡すべきか（16 バイト超の構造体のみ）。
+/// 構造体または SoA 配列参照の値仮引数を C の読み取り専用ポインタで渡すべきか（16 バイト超のみ）。
 pub(super) fn pass_struct_by_pointer(ty: Type, context: &ExpressionContext) -> bool {
-    matches!(ty, Type::Struct(_)) && type_layout(ty, context).0 > SMALL_STRUCT_VALUE_LIMIT_BYTES
+    let by_ref_kind = match ty {
+        Type::Struct(_) => true,
+        Type::ArrayRef { id, .. } => context.arrays.get(id).soa,
+        _ => false,
+    };
+    by_ref_kind && type_layout(ty, context).0 > SMALL_STRUCT_VALUE_LIMIT_BYTES
 }
 
 /// 16 バイト超の構造体の値仮引数は C では読み取り専用ポインタで受け取る。

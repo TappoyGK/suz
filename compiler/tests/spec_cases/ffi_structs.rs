@@ -210,12 +210,16 @@ fn main() -> u8 {
     assert_eq!(err.rule(), "expr.operator-types", "{err}");
 
     // 生成 C は SoA 参照に列ごとの連続ポインタ (.cols) と 1 回の領域確保を使い、
-    // 葉列への一括書き込みは restrict 付きの連続ループになる。
+    // 葉列への一括書き込みは restrict 付きの連続ループ、16 バイト超の SoA 仮引数は const *restrict ポインタ渡し、
+    // 単一葉フィールド書き込みは参照全体をコピーしない。
     let soa_codegen_src = br#"
 struct Vec2 { x: f32, y: f32 }
 struct Particle { pos: Vec2, vel: Vec2, life: f32 }
 fn step(p: soa #[Particle; n], dt: f32) -> void {
     p.pos.x#[p.life > 0.0] += p.vel.x * dt
+    for i in 0..<n {
+        p.[i]#life -= dt
+    }
 }
 fn main() -> u8 {
     fix p = new soa #[Particle { pos: Vec2 { x: 1.0, y: 2.0 }, vel: Vec2 { x: 3.0, y: 4.0 }, life: 1.0 }; 4]
@@ -231,5 +235,13 @@ fn main() -> u8 {
     assert!(
         c_code.contains("float *restrict suz_bulk_dst_"),
         "expected restrict bulk loop on leaf column:\n{c_code}"
+    );
+    assert!(
+        c_code.contains("const suz_array_0 *restrict suz_ref_0"),
+        "expected large SoA parameter to be passed by const restrict pointer:\n{c_code}"
+    );
+    assert!(
+        !c_code.contains("suz_soa_src_"),
+        "expected single-leaf field store to avoid copying whole SoA ref:\n{c_code}"
     );
 }

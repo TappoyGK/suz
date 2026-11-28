@@ -524,18 +524,31 @@ pub(super) fn try_emit_store(
     writeln!(c, "{indent}{{").unwrap();
     writeln!(c, "{indent}    {setup};").unwrap();
     writeln!(c, "{indent}    (void)({condition});").unwrap();
-    writeln!(
-        c,
-        "{indent}    const {} suz_soa_src_{id} = {source};",
-        array_target.ty.c_name()
-    )
-    .unwrap();
     writeln!(c, "{indent}    const size_t suz_soa_off_{id} = {offset};").unwrap();
     if let Type::Struct(sub_id) = target.ty {
+        let cols_expr = if matches!(
+            array_target.value,
+            Value::Local(lid) if context.immutable_locals.contains(&lid)
+        ) {
+            writeln!(
+                c,
+                "{indent}    void *const *const suz_soa_cols_{id} = {source}.cols;"
+            )
+            .unwrap();
+            format!("suz_soa_cols_{id}")
+        } else {
+            writeln!(
+                c,
+                "{indent}    const {} suz_soa_src_{id} = {source};",
+                array_target.ty.c_name()
+            )
+            .unwrap();
+            format!("suz_soa_src_{id}.cols")
+        };
         if !body.is_empty() {
             let gathered = gather_expr(
                 sub_id,
-                &format!("suz_soa_src_{id}.cols"),
+                &cols_expr,
                 &format!("suz_soa_off_{id}"),
                 leaf_offset,
                 context,
@@ -564,7 +577,7 @@ pub(super) fn try_emit_store(
         .unwrap();
         let scatter = scatter_stmts(
             sub_id,
-            &format!("suz_soa_src_{id}.cols"),
+            &cols_expr,
             &format!("suz_soa_off_{id}"),
             &format!("suz_soa_val_{id}"),
             leaf_offset,
@@ -575,7 +588,7 @@ pub(super) fn try_emit_store(
         let leaf_ty = target.ty.c_name();
         writeln!(
             c,
-            "{indent}    {leaf_ty} *const suz_local_{id} = (({leaf_ty} *)suz_soa_src_{id}.cols[{leaf_offset}]) + suz_soa_off_{id};"
+            "{indent}    {leaf_ty} *const suz_local_{id} = (({leaf_ty} *){source}.cols[{leaf_offset}]) + suz_soa_off_{id};"
         )
         .unwrap();
         super::statements::emit_block(c, body, depth + 1, next_assignment, context);

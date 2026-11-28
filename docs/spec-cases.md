@@ -154,7 +154,7 @@ IDは分野の接頭辞と番号で構成し、期待結果の種類を含めな
 | 対象 | 検証テスト | 例集と分ける理由 |
 |---|---|---|
 | FFIのポインタ書き換え・keepによる保持 | [ffi_pointers.rs](../compiler/tests/spec_cases/ffi_pointers.rs) | 独自のCヘッダーと関数の実体が必要であり、例集はSuzソースだけを入力とする |
-| C構造体・関数型のヘッダー照合、リンク失敗 | [ffi_structs.rs](../compiler/tests/spec_cases/ffi_structs.rs)・[ffi_link.rs](../compiler/tests/spec_cases/ffi_link.rs) | 不一致のCヘッダーやリンク対象を用意する必要がある |
+| C構造体・関数型のヘッダー照合、リンク失敗、extern構造体のSoA結合・生成C検査 | [ffi_structs.rs](../compiler/tests/spec_cases/ffi_structs.rs)・[ffi_link.rs](../compiler/tests/spec_cases/ffi_link.rs) | 不一致のCヘッダーやリンク対象・C関数実体を用意し、生成Cの列配置や一括ループを直接検査する必要がある |
 | 作業領域の容量と計測 | [arena.rs](../compiler/tests/spec_cases/arena.rs)・[arena_report.rs](../compiler/tests/spec_cases/arena_report.rs) | 初期容量・追加容量・上限・計測の設定を切り替える必要があり、例集の設定欄では指定できない |
 | 関数値・クロージャの環境をヒープへ確保しない保証 | [closures.rs](../compiler/tests/spec_cases/closures.rs)・[function_values.rs](../compiler/tests/spec_cases/function_values.rs) | 正常終了するだけでは無確保を確認できない。生成Cの確保呼び出しを検査する |
 
