@@ -1,8 +1,14 @@
 use super::{
-    Outcome, Result, Source, extract,
+    Outcome, Result, Source,
+    cases::valid_id,
+    extract,
     markdown::{number, skip_blank, table_cells, table_separator, unique},
 };
-use std::{collections::BTreeMap, fs, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::Path,
+};
 
 pub fn load(docs: &Path) -> Result<BTreeMap<String, Source>> {
     let index = docs.join("spec-cases.md");
@@ -73,7 +79,108 @@ pub fn validate_inventory(markdown: &str, sources: &BTreeMap<String, Source>) ->
         &["結果", "件数"],
         |row| Ok(row[0]),
         &outcomes,
-    )
+    )?;
+    for id in retired_ids(markdown)? {
+        if sources.contains_key(&id) {
+            return Err(format!("reused retired ID: {id}"));
+        }
+    }
+    Ok(())
+}
+
+pub fn retired_ids(markdown: &str) -> Result<BTreeSet<String>> {
+    let mut lines = markdown.lines().skip_while(|line| *line != "## 欠番一覧");
+    if lines.next().is_none() {
+        return Ok(BTreeSet::new());
+    }
+    let lines: Vec<_> = lines.take_while(|line| !line.starts_with('#')).collect();
+    let mut i = 0;
+    while i < lines.len() && !lines[i].starts_with('|') {
+        i += 1;
+    }
+    let header = ["欠番ID", "移管先テスト"];
+    if table_cells(
+        lines.get(i).ok_or("missing retired IDs table")?,
+        header.len(),
+    )? != header
+    {
+        return Err("invalid retired IDs header".into());
+    }
+    i += 1;
+    table_separator(&lines, &mut i, header.len())?;
+    let mut retired = BTreeSet::new();
+    while i < lines.len() && lines[i].starts_with('|') {
+        let row = table_cells(lines[i], header.len())?;
+        i += 1;
+        for token in row[0].split('・') {
+            if let Some((start, end)) = token.split_once('〜') {
+                let start = parse_retired_id(start)?;
+                let end = parse_retired_id(end)?;
+                let (start_prefix, start_num) = split_id(start)?;
+                let (end_prefix, end_num) = split_id(end)?;
+                if start_prefix != end_prefix || start_num >= end_num {
+                    return Err(format!("invalid retired ID range: {token}"));
+                }
+                for n in start_num..=end_num {
+                    let id = format!("{start_prefix}-{n:03}");
+                    if !retired.insert(id.clone()) {
+                        return Err(format!("duplicate retired ID: {id}"));
+                    }
+                }
+            } else {
+                let id = parse_retired_id(token)?;
+                if !retired.insert(id.to_owned()) {
+                    return Err(format!("duplicate retired ID: {id}"));
+                }
+            }
+        }
+    }
+    Ok(retired)
+}
+
+fn parse_retired_id(token: &str) -> Result<&str> {
+    let id = token
+        .strip_prefix('`')
+        .and_then(|s| s.strip_suffix('`'))
+        .ok_or_else(|| format!("invalid retired ID token: {token}"))?;
+    if !valid_id(id) {
+        return Err(format!("invalid retired ID: {id}"));
+    }
+    Ok(id)
+}
+
+fn split_id(id: &str) -> Result<(&str, u16)> {
+    let (prefix, num_str) = id
+        .split_once('-')
+        .ok_or_else(|| format!("invalid ID: {id}"))?;
+    let num = num_str
+        .parse::<u16>()
+        .map_err(|_| format!("invalid ID number: {id}"))?;
+    Ok((prefix, num))
+}
+
+pub fn next_ids(docs: &Path) -> Result<BTreeMap<String, String>> {
+    let sources = load(docs)?;
+    let index = fs::read_to_string(docs.join("spec-cases.md"))
+        .map_err(|error| format!("spec-cases.md: {error}"))?;
+    let retired = retired_ids(&index)?;
+    let mut max_by_prefix = BTreeMap::<String, u16>::new();
+    for id in sources.keys().chain(&retired) {
+        let (prefix, num) = split_id(id)?;
+        let entry = max_by_prefix.entry(prefix.to_owned()).or_default();
+        if num > *entry {
+            *entry = num;
+        }
+    }
+    let mut next = BTreeMap::new();
+    for (prefix, max) in max_by_prefix {
+        let next_num = max + 1;
+        if next_num > 999 {
+            return Err(format!("ID number overflow for prefix: {prefix}"));
+        }
+        next.insert(prefix.clone(), format!("{prefix}-{next_num:03}"));
+    }
+    Ok(next)
 }
 
 fn validate_count_table<'a>(

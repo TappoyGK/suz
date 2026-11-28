@@ -5,7 +5,7 @@ use super::{
 };
 use std::collections::BTreeMap;
 
-fn valid_id(id: &str) -> bool {
+pub(super) fn valid_id(id: &str) -> bool {
     let Some((group, number)) = id.split_once('-') else {
         return false;
     };
