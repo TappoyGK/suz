@@ -741,15 +741,15 @@ fn main() -> u8 {
 }
 ```
 
-### array-070 多次元配列の内側の行に列挙子キーを書けない
+### array-070 多次元配列の同じ深さで列挙子キー行と位置列挙行を混在させない
 - 主根拠：`[array.enumeration]`
 - 補助根拠：`[array.enum-type]`、`[array.enum-init]`
-- 結果：コンパイルエラー `[array.enumeration]` 3:16
+- 結果：コンパイルエラー `[array.enumeration]` 3:14
 
 ```suz
 enum Wave: u8 { Saw, Square }
 fn main() -> u8 {
-    fix a = .[[Wave.Square: 10, Wave.Saw: 20]]
+    fix a = .[[Wave.Square: 10, Wave.Saw: 20], [10, 20]]
     return 0
 }
 ```

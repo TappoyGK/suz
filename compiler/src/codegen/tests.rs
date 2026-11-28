@@ -501,6 +501,60 @@ fn main() -> u8 {
 }
 
 #[test]
+fn multidimensional_enum_indexed_arrays_use_constant_strides_and_omit_enum_lengths() {
+    let source = r#"
+enum Wave: u8 { Sine, Saw, Square }
+enum Ch: u8 { Left, Right }
+
+fn read_stereo(buf: .[f32; _, Ch], i: len_t, ch: Ch) -> f32 {
+    if i < len buf {
+        return buf.[i].[ch]
+    }
+    return 0.0
+}
+
+fn read_gain(gains: .[f32; Wave, Ch], w: Wave, c: Ch) -> f32 {
+    return gains.[w].[c]
+}
+
+fn main() -> u8 {
+    fix stereo: #[f32; _, Ch] = new #[0.0; 4, Ch]
+    fix gains: .[f32; Wave, Ch] = .[0.5; Wave, Ch]
+    fix a = read_stereo(stereo, 1, Ch.Right)
+    fix b = read_gain(gains, Wave.Saw, Ch.Left)
+    return ifexpr a == 0.0 && b == 0.5 { 0 } else { 1 }
+}
+"#;
+    let (program, _) =
+        crate::analyze(source.as_bytes(), &crate::CompilationOptions::default()).unwrap();
+    let c = generate(
+        &program,
+        "multi-enum-array.suz",
+        crate::SymbolPoolLimit::default(),
+        crate::ArenaOptions::default(),
+        crate::LogLevel::default(),
+        false,
+        None,
+    );
+    assert!(
+        !c.contains("suz_array_bounds"),
+        "expected no runtime bounds checks:\n{c}"
+    );
+    assert!(
+        c.contains("typedef struct { const void *data; int32_t lengths[1]; }"),
+        "expected #[f32; _, Ch] to store only 1 runtime length:\n{c}"
+    );
+    assert!(
+        c.contains("typedef struct { const void *data; }"),
+        "expected .[f32; Wave, Ch] to store no runtime lengths:\n{c}"
+    );
+    assert!(
+        c.contains("* (size_t)2"),
+        "expected constant stride 2 for inner Ch dimension:\n{c}"
+    );
+}
+
+#[test]
 fn nonzero_range_divisor_omits_division_by_zero_check_in_generated_c() {
     let source = r#"
 range Divisor: u16 = 1..=1000

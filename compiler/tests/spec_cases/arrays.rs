@@ -1452,31 +1452,138 @@ fn main() -> u8 {
             "enum Wave: u8 { Saw, Square }\nenum Other: u8 { A, B }\nfn main() -> u8 {\nfix a: .[i32; Wave] = .[0; Other]\nreturn 0\n}",
             "array.enum-init",
         ),
-        // error 型や未定義型名・多次元
+        // error 型や未定義型名・キー混在
         (
             "error Err { A, B }\nfn main() -> u8 {\nfix a: .[i32; Err] = .[0; Err]\nreturn 0\n}",
             "array.enum-dimension",
-        ),
-        (
-            "enum Wave: u8 { Saw, Square }\nfn f(a: #[f32; Wave, _]) -> void {}\nfn main() -> u8 { return 0 }",
-            "array.enum-type",
         ),
         (
             "enum Wave: u8 { Saw, Square }\nfn main() -> u8 {\nfix a = new #[0; Wav]\nreturn 0\n}",
             "array.enum-dimension",
         ),
         (
-            "enum Wave: u8 { Saw, Square }\nfn main() -> u8 {\nfix a = new #[0; Wave, 3]\nreturn 0\n}",
-            "array.enum-init",
-        ),
-        (
             "enum Wave: u8 { Saw, Square }\nfn main() -> u8 {\nfix a = .[[1, Wave.Saw: 2]]\nreturn 0\n}",
-            "array.enumeration",
+            "array.enum-init",
         ),
         // 寿命エスケープ拒否
         (
             "enum Wave: u8 { Saw, Square }\nfn main() -> u8 {\nvar out: #[i64; Wave]? = nil\narena {\nfix inner = new #[0; Wave]\nout = inner\n}\nreturn 0\n}",
             "arena.store",
+        ),
+    ] {
+        let err = suz::compile(code.as_bytes()).unwrap_err();
+        assert_eq!(err.rule(), rule, "{code}\n{err}");
+    }
+}
+
+#[test]
+fn multidimensional_enum_indexed_arrays_cover_runtime_and_rejections() {
+    let source = r#"
+enum Wave: u8 { Sine, Saw }
+enum Ch: u8 { Left, Right }
+struct Frame { l: i32, r: i32 }
+
+fn pick_wave(c: mut i32) -> Wave {
+    #c = .c + 1 or 0
+    return Wave.Saw
+}
+
+fn main() -> u8 {
+    // 1次元配列の配列（.[...] は独立した定数配列の値式）
+    fix jagged: #[.[i32]; Wave] = new #[
+        Wave.Sine: .[1, 2, 3],
+        Wave.Saw:  .[4],
+    ]
+    if len jagged.[Wave.Sine] != 3 || len jagged.[Wave.Saw] != 1 { return 1 }
+
+    // 3次元混在（Wave, _, Ch）と反復・部分配列切り出し
+    fix cube: #[i32; Wave, _, Ch] = new #[0; Wave, 2, Ch]
+    cube.[Wave.Sine].[0]#[Ch.Left] = 11
+    cube.[Wave.Saw].[1]#[Ch.Right] = 22
+    fix saw_plane: #[i32; _, Ch] = cube.[Wave.Saw]
+    fix sliced: #[i32; _, Ch] = saw_plane.[1:2] or return 2
+    if sliced.[0].[Ch.Right] != 22 { return 3 }
+
+    // 列挙型添字式の副作用は維持される
+    fix calls = new (0 as i32)
+    if cube.[pick_wave(calls)].[1].[Ch.Right] != 22 || .calls != 1 { return 4 }
+
+    // 外側が0、内側が列挙型（len == 0、反復0回、範囲外はor）
+    fix empty_outer = new #[0; 0, Ch]
+    var outer_iters: len_t = 0
+    for i, row in empty_outer {
+        outer_iters = outer_iters + 1
+    }
+    if len empty_outer != 0 || outer_iters != 0 { return 6 }
+    fix miss = empty_outer.[0].[Ch.Left] or 77
+    if miss != 77 { return 7 }
+
+    // 定数 SoA 多次元列挙配列
+    fix csoa: soa .[Frame; Wave, Ch] = soa .[
+        Wave.Saw:  [Ch.Right: Frame { l: 4, r: 40 }, Ch.Left: Frame { l: 3, r: 30 }],
+        Wave.Sine: [Ch.Left: Frame { l: 1, r: 10 }, Ch.Right: Frame { l: 2, r: 20 }],
+    ]
+    fix rcol: .[i32; Wave, Ch] = csoa.r
+    if rcol.[Wave.Sine].[Ch.Right] != 20 || rcol.[Wave.Saw].[Ch.Left] != 30 { return 8 }
+
+    // 2変数反復（外側が整数長、内側が列挙型）
+    var acc: i32 = 0
+    for i, row in saw_plane {
+        acc = acc + row.[Ch.Right]
+    }
+    if acc != 22 { return 10 }
+    return 0
+}
+"#;
+    let output = compile_and_run_c23(source, "multi-enum-array.suz");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // 拒否ケース
+    for (code, rule) in [
+        // 内側の行の長さが不一致
+        (
+            "enum Wave: u8 { Sine, Saw }\nfn main() -> u8 {\nfix a = new #[Wave.Sine: [1, 2], Wave.Saw: [1]]\nreturn 0\n}",
+            "array.enumeration",
+        ),
+        // 内側の行にセミコロン
+        (
+            "enum Wave: u8 { Sine, Saw }\nfn main() -> u8 {\nfix a = new #[Wave.Sine: [0; 2], Wave.Saw: [0; 2]]\nreturn 0\n}",
+            "array.enumeration",
+        ),
+        // 同じ深さで異なる列挙型
+        (
+            "enum Wave: u8 { Sine, Saw }\nenum Ch: u8 { Left, Right }\nfn main() -> u8 {\nfix a = new #[[Wave.Sine: 1, Wave.Saw: 2], [Ch.Left: 3, Ch.Right: 4]]\nreturn 0\n}",
+            "array.enum-init",
+        ),
+        // 内側の行で列挙子が欠落
+        (
+            "enum Ch: u8 { Left, Right }\nfn main() -> u8 {\nfix a = new #[[Ch.Left: 1, Ch.Right: 2], [Ch.Left: 3]]\nreturn 0\n}",
+            "array.enumeration",
+        ),
+        // 要求型と次元順が異なる
+        (
+            "enum Wave: u8 { Sine, Saw }\nfn main() -> u8 {\nfix a: #[i32; Wave, _] = new #[0; 2, Wave]\nreturn 0\n}",
+            "array.enum-init",
+        ),
+        // 内側の列挙型次元に整数添字
+        (
+            "enum Ch: u8 { Left, Right }\nfn main() -> u8 {\nfix a = new #[0; 2, Ch]\nfix x = a.[0].[0]\nreturn 0\n}",
+            "array.enum-index",
+        ),
+        // nil 許容の列挙型多次元配列に直接 len
+        (
+            "enum Ch: u8 { Left, Right }\nfn main() -> u8 {\nfix a: #[i32; Ch, _]? = nil\nfix n = len a\nreturn 0\n}",
+            "len.targets",
+        ),
+        // 保証のない整数次元を含む len buf.[i] は or を要求する
+        (
+            "enum Ch: u8 { Left, Right }\nfn f(buf: .[i32; _, Ch], i: len_t) -> len_t {\nreturn len buf.[i]\n}\nfn main() -> u8 { return 0 }",
+            "array.access-handler",
         ),
     ] {
         let err = suz::compile(code.as_bytes()).unwrap_err();
