@@ -61,13 +61,13 @@ pub(in crate::check) fn check(
         .arrays
         .borrow()
         .get(target_array_id);
-    if target_array.rank != 1 {
+    if target_array.rank() != 1 {
         return Err(bulk.location.error(
             ErrorKind::InvalidSource,
             crate::diagnostic!("array.write", "bulk write requires a 1D array"),
         ));
     }
-    let target_enum = target_array.index_enum;
+    let target_enum = target_array.first_enum();
     if target_enum.is_some() && matches!(bulk.selector, BulkSelector::Slice { .. }) {
         return Err(bulk.location.error(
             ErrorKind::InvalidSource,
@@ -325,13 +325,13 @@ pub(in crate::check) fn check_mask(
         .arrays
         .borrow()
         .get(target_array_id);
-    if target_array.rank != 1 {
+    if target_array.rank() != 1 {
         return Err(location.error(
             ErrorKind::InvalidSource,
             crate::diagnostic!("array.write", "bulk write requires a 1D array"),
         ));
     }
-    let target_enum = target_array.index_enum;
+    let target_enum = target_array.first_enum();
     let out_elem_ty = target_array.element;
 
     lower_return_handler(
@@ -699,13 +699,13 @@ impl Lowerer<'_, '_> {
             .arrays
             .borrow()
             .get(array_id_ty);
-        if array.rank != 1 {
+        if array.rank() != 1 {
             return Err(expr.location.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!("array.bulk", "bulk write requires 1D arrays"),
             ));
         }
-        if array.index_enum != self.target_enum {
+        if array.first_enum() != self.target_enum {
             return Err(expr.location.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(

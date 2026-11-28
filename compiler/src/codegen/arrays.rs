@@ -26,7 +26,7 @@ pub(super) fn declarations(c: &mut String, context: &ExpressionContext) {
             writeln!(
                 c,
                 "typedef struct {{ void *cols[{leaf_count}]; int32_t lengths[{}]; }} suz_array_{id};",
-                array.rank
+                array.rank()
             )
             .unwrap();
             writeln!(c, "typedef suz_array_{id} suz_readonly_array_{id};").unwrap();
@@ -35,13 +35,13 @@ pub(super) fn declarations(c: &mut String, context: &ExpressionContext) {
         writeln!(
             c,
             "typedef struct {{ const void *data; int32_t lengths[{}]; }} suz_readonly_array_{id};",
-            array.rank
+            array.rank()
         )
         .unwrap();
         writeln!(
             c,
             "typedef struct {{ void *data; int32_t lengths[{}]; }} suz_array_{id};",
-            array.rank
+            array.rank()
         )
         .unwrap();
     }
@@ -65,7 +65,7 @@ pub(super) fn cache(
         )
         .unwrap();
     }
-    for dimension in 0..array.rank {
+    for dimension in 0..array.rank() {
         writeln!(c, "{indent}const int32_t suz_array_length_{id}_{dimension} = ({source}).lengths[{dimension}];\n{indent}(void)suz_array_length_{id}_{dimension};").unwrap();
     }
 }
@@ -92,7 +92,7 @@ pub(super) fn readonly(value: &CheckedExpression, context: &mut ExpressionContex
     if array.soa {
         return expression(value, context);
     }
-    let rank = array.rank;
+    let rank = array.rank();
     let (setup, source) = if direct_reference(value) {
         (String::new(), format!("({})", expression(value, context)))
     } else {
@@ -491,7 +491,7 @@ fn access_parts(
         test
     });
     let condition = sequence(&previous, &format!("({})", evaluations.join(", ")), write);
-    let stride = (1..array.rank)
+    let stride = (1..array.rank())
         .map(|i| format!("(size_t){source}.lengths[{i}]"))
         .collect::<Vec<_>>();
     let stride = if stride.is_empty() {
@@ -500,13 +500,13 @@ fn access_parts(
         stride.join(" * ")
     };
     let lengths = if *index {
-        (1..array.rank)
+        (1..array.rank())
             .map(|i| format!("{source}.lengths[{i}]"))
             .collect::<Vec<_>>()
             .join(", ")
     } else {
         std::iter::once(format!("(int32_t)((uint64_t){last} - (uint64_t){first})"))
-            .chain((1..array.rank).map(|i| format!("{source}.lengths[{i}]")))
+            .chain((1..array.rank()).map(|i| format!("{source}.lengths[{i}]")))
             .collect::<Vec<_>>()
             .join(", ")
     };
@@ -583,7 +583,7 @@ pub(super) fn emit_loop(
         )
         .unwrap();
     }
-    for dimension in 0..array.rank {
+    for dimension in 0..array.rank() {
         writeln!(c, "{indent}    const int32_t suz_iter_length_{id}_{dimension} = suz_iter_{id}.lengths[{dimension}];").unwrap();
     }
     let (initial, condition, position) = if reverse {
@@ -613,7 +613,7 @@ pub(super) fn emit_loop(
         let Type::Struct(struct_id) = array.element else {
             unreachable!("soa array element must be a struct");
         };
-        if array.rank == 1 {
+        if array.rank() == 1 {
             super::soa::gather_expr(
                 struct_id,
                 &format!("suz_iter_{id}.cols"),
@@ -623,7 +623,7 @@ pub(super) fn emit_loop(
             )
             .0
         } else {
-            let lengths = (1..array.rank)
+            let lengths = (1..array.rank())
                 .map(|i| format!("suz_iter_length_{id}_{i}"))
                 .collect::<Vec<_>>();
             let stride = lengths
@@ -649,10 +649,10 @@ pub(super) fn emit_loop(
                 lengths.join(", ")
             )
         }
-    } else if array.rank == 1 {
+    } else if array.rank() == 1 {
         format!("suz_iter_data_{id}[suz_pos_{id}]")
     } else {
-        let lengths = (1..array.rank)
+        let lengths = (1..array.rank())
             .map(|i| format!("suz_iter_length_{id}_{i}"))
             .collect::<Vec<_>>();
         let stride = lengths

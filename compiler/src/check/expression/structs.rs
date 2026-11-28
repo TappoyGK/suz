@@ -92,7 +92,7 @@ pub(super) fn check(expr: &Expression, scope: &Scope) -> Result<CheckedExpressio
                         .structs
                         .arrays
                         .borrow_mut()
-                        .intern_full(field_ty, array.rank, array.index_enum, col_soa)
+                        .intern_dims(field_ty, array.dims, col_soa)
                         .array_reference(target.ty.is_readonly_array());
                     return Ok(CheckedExpression {
                         ty,

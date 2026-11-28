@@ -872,7 +872,7 @@ impl Walk<'_> {
                         crate::check::ir::CheckedForTarget::Array(start) => {
                             let mut values = self.expr(start);
                             if let Some(array) = start.ty.array_id() {
-                                if self.analysis.structs.arrays.borrow().get(array).rank == 1 {
+                                if self.analysis.structs.arrays.borrow().get(array).rank() == 1 {
                                     let pointers = values;
                                     values = Values::new();
                                     for pointer in pointers.values().flat_map(|s| s.values()) {

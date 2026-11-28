@@ -47,18 +47,55 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
         ExpressionKind::ArrayInit {
             values,
             lengths,
+            key_groups,
+            repeated,
             soa,
             ..
         } => {
             let element = values
                 .first()
                 .map(|v| operand_type(v, bindings).unwrap_or_else(|| default_type(v, bindings)))?;
+            let dims: Vec<Option<crate::ast::EnumType>> = if *repeated {
+                lengths
+                    .iter()
+                    .map(|length| match &length.kind {
+                        ExpressionKind::Name(name)
+                            if crate::parser::names::is_type_spelling(name) =>
+                        {
+                            bindings
+                                .enums
+                                .iter()
+                                .find(|d| &d.name == name && !d.ty.is_error)
+                                .map(|d| d.ty)
+                        }
+                        _ => None,
+                    })
+                    .collect()
+            } else {
+                key_groups
+                    .iter()
+                    .map(|group| {
+                        group
+                            .as_ref()
+                            .and_then(|brackets| brackets.first())
+                            .and_then(|keys| keys.first())
+                            .and_then(|key| match &key.kind {
+                                ExpressionKind::Variant { enum_name, .. } => bindings
+                                    .enums
+                                    .iter()
+                                    .find(|d| &d.name == enum_name && !d.ty.is_error)
+                                    .map(|d| d.ty),
+                                _ => None,
+                            })
+                    })
+                    .collect()
+            };
             Some(
                 bindings
                     .structs
                     .arrays
                     .borrow_mut()
-                    .intern_full(element, lengths.len(), None, *soa)
+                    .intern_dims(element, dims, *soa)
                     .array_reference(true),
             )
         }
@@ -109,14 +146,14 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
                 let a = bindings.structs.arrays.borrow().get(id);
                 return Some(if !index {
                     Type::Array(id).array_reference(readonly)
-                } else if a.rank == 1 {
+                } else if a.rank() == 1 {
                     a.element
                 } else {
                     bindings
                         .structs
                         .arrays
                         .borrow_mut()
-                        .intern_full(a.element, a.rank - 1, None, a.soa)
+                        .intern_dims(a.element, a.sub_dims(), a.soa)
                         .array_reference(readonly)
                 });
             }
@@ -169,7 +206,7 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
                             .structs
                             .arrays
                             .borrow_mut()
-                            .intern_full(field_ty, array.rank, array.index_enum, col_soa)
+                            .intern_dims(field_ty, array.dims, col_soa)
                             .array_reference(known.is_readonly_array()),
                     );
                 }

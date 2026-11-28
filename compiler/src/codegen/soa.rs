@@ -127,7 +127,7 @@ pub(super) fn column(
         let value = expression(target, context);
         (format!("{source} = {value}, "), source)
     };
-    let lengths = (0..target_array.rank)
+    let lengths = (0..target_array.rank())
         .map(|axis| format!("{source}.lengths[{axis}]"))
         .collect::<Vec<_>>()
         .join(", ");

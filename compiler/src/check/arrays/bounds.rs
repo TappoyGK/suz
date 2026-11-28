@@ -109,7 +109,7 @@ pub(in crate::check) fn shape(v: &CheckedExpression, scope: &Scope) -> Vec<Optio
     let Some(id) = v.ty.array_id() else {
         return Vec::new();
     };
-    let unknown = || vec![None; scope.structs.arrays.borrow().get(id).rank];
+    let unknown = || vec![None; scope.structs.arrays.borrow().get(id).rank()];
     match &v.value {
         Value::Array {
             metadata, lengths, ..
@@ -232,7 +232,7 @@ pub(in crate::check) fn register(
         scope.array_bounds.arrays.remove(&id);
         return;
     }
-    dimensions.resize(scope.structs.arrays.borrow().get(array).rank, None);
+    dimensions.resize(scope.structs.arrays.borrow().get(array).rank(), None);
     for (axis, dimension) in dimensions.iter_mut().enumerate() {
         *dimension = Some(match *dimension {
             Some(Dimension::Source(..) | Dimension::Static(..)) => dimension.unwrap(),

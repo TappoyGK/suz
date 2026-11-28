@@ -484,7 +484,7 @@ fn check_for(statement: &Statement, context: &mut StatementContext<'_>) -> Resul
             let value = expression(start, None, context.bindings)?;
             if let Some(id) = value.ty.array_id().filter(|_| !value.ty.is_nilable()) {
                 let array = context.bindings.structs.arrays.borrow().get(id);
-                let elem_ty = if array.rank == 1 {
+                let elem_ty = if array.rank() == 1 {
                     array.element
                 } else {
                     context
@@ -492,12 +492,12 @@ fn check_for(statement: &Statement, context: &mut StatementContext<'_>) -> Resul
                         .structs
                         .arrays
                         .borrow_mut()
-                        .intern_full(array.element, array.rank - 1, None, array.soa)
+                        .intern_dims(array.element, array.sub_dims(), array.soa)
                         .array_reference(value.ty.is_readonly_array())
                 };
                 let idx_ty = index.as_ref().map(|_| {
                     array
-                        .index_enum
+                        .first_enum()
                         .map(Type::Enum)
                         .unwrap_or(Type::Integer(crate::ast::IntegerType::Len))
                 });
@@ -619,7 +619,7 @@ fn check_for(statement: &Statement, context: &mut StatementContext<'_>) -> Resul
                 }
             }
             if let Some(array) = start.ty.array_id() {
-                let rank = context.bindings.structs.arrays.borrow().get(array).rank;
+                let rank = context.bindings.structs.arrays.borrow().get(array).rank();
                 if rank > 1 {
                     let dimensions = super::arrays::bounds::shape(start, context.bindings)
                         .into_iter()
