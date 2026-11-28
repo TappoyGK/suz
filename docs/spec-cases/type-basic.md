@@ -1,4 +1,6 @@
-# 仕様例：型（基本型・構造体・列挙型）
+# 型（基本型・構造体・列挙型）
+
+[目次と書式](../spec-cases.md)
 
 ### type-001 整数でboolの変数を初期化する
 - 主根拠：`[type.bool]`
@@ -633,25 +635,6 @@ fn main() -> u8 {
 ```suz
 fn main() -> u8 {
     fix value: int = 0
-    return 0
-}
-```
-
-### type-071 extern関数の引数に値域制限型を指定すると拒否する
-- 主根拠：`[ffi.type]`
-- 補助根拠：`[range.places]`
-- 結果：コンパイルエラー `[ffi.type]` 4:8
-
-値域制限型は `extern` 関数の引数・戻り値に直接使えない。
-
-```suz
-range Note: u8 = 0..=127
-
-extern "stdint.h" {
-    fn f(n: Note) -> u8
-}
-
-fn main() -> u8 {
     return 0
 }
 ```

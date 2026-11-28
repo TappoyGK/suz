@@ -1,4 +1,6 @@
-# 仕様例：式（算術・変換・キャスト）
+# 式（算術・変換・キャスト）
+
+[目次と書式](../spec-cases.md)
 
 ### expr-001 ラップする算術・シフトと切り詰め
 - 主根拠：`[expr.wrap]`
@@ -165,23 +167,6 @@ fn main() -> u8 {
     if not same { return 1 }
     if not (18446744073709551615 == (top)) { return 2 }
     return 7
-}
-```
-
-### expr-026 同じ優先順位の二項演算は左から結合する
-- 主根拠：`[expr.associativity]`
-- 結果：正常終了
-
-10 - 3 - 2は5、20 / 2 / 2は5になる。右側を括弧でまとめると、それぞれ9と20になる。
-
-```suz
-fn main() -> u8 {
-    fix subtracted = 10 - 3 - 2
-    fix divided = 20 / 2 / 2
-    fix grouped_subtraction = 10 - (3 - 2)
-    fix grouped_division = 20 / (2 / 2)
-    return ifexpr subtracted == 5 && divided == 5 &&
-        grouped_subtraction == 9 && grouped_division == 20 { 0 } else { 1 }
 }
 ```
 

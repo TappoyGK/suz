@@ -1,4 +1,6 @@
-# 仕様例：式（演算子・比較連鎖・値ブロック・制御）
+# 式（演算子・比較連鎖・値ブロック・制御）
+
+[目次と書式](../spec-cases.md)
 
 ### expr-003 ifexprの分岐の型不一致
 - 主根拠：`[branch.expression]`
@@ -48,18 +50,19 @@ fn main() -> u8 {
 }
 ```
 
-### expr-006 expr内部のor return
+### expr-007 ifexpr内部のreturn
 - 主根拠：`[expr.jump-prohibited]`
-- 結果：コンパイルエラー `[expr.jump-prohibited]` 4:38
+- 結果：コンパイルエラー `[expr.jump-prohibited]` 3:9
 
-初期値全体であってもexpr内部のreturnは禁止。
+末尾に値があっても、途中のreturnは禁止。
 
 ```suz
 fn main() -> u8 {
-    fix raw: i64 = 300
-    fix result: u8 = expr {
-        fix converted = raw as u8 or return 1
-        converted
+    fix result: u8 = ifexpr true {
+        return 1
+        2
+    } else {
+        3
     }
     return result
 }
@@ -342,6 +345,23 @@ fn main() -> u8 {
     fix shifted = 1 << 1 + 2
     fix matched = 6 & 3 == 2
     return ifexpr arithmetic == 14 && shifted == 8 && matched { 0 } else { 1 }
+}
+```
+
+### expr-026 同じ優先順位の二項演算は左から結合する
+- 主根拠：`[expr.associativity]`
+- 結果：正常終了
+
+10 - 3 - 2は5、20 / 2 / 2は5になる。右側を括弧でまとめると、それぞれ9と20になる。
+
+```suz
+fn main() -> u8 {
+    fix subtracted = 10 - 3 - 2
+    fix divided = 20 / 2 / 2
+    fix grouped_subtraction = 10 - (3 - 2)
+    fix grouped_division = 20 / (2 / 2)
+    return ifexpr subtracted == 5 && divided == 5 &&
+        grouped_subtraction == 9 && grouped_division == 20 { 0 } else { 1 }
 }
 ```
 

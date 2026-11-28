@@ -86,24 +86,25 @@ fn malformed_markdown_is_rejected() {
 
 #[test]
 fn legacy_table_format_is_rejected() {
-    let legacy = r#"### lex-001 example
-
-主根拠：`[src.encoding]`。
-
-**ソース：**
-
-```suz
-fn main() -> u8 { return 0 }
-```
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | 正常終了 | 0 | 0 |
-"#;
+    for label in [
+        "**期待結果：**",
+        "**コンパイル診断：**",
+        "**パニック診断：**",
+        "**警告：**",
+    ] {
+        let legacy = format!(
+            "### lex-001 example\n- 主根拠：`[src.encoding]`\n- 結果：正常終了\n\n```suz\nfn main() -> u8 {{ return 0 }}\n```\n\n{label}\n"
+        );
+        assert!(
+            extract(&legacy)
+                .unwrap_err()
+                .contains("legacy table format is no longer supported"),
+            "expected legacy error for {label}"
+        );
+    }
+    let bare_table = format!("{SMALL}\n| 通常 | 正常終了 | 0 | 0 |\n");
     assert!(
-        extract(legacy)
+        extract(&bare_table)
             .unwrap_err()
             .contains("legacy table format is no longer supported")
     );
@@ -168,6 +169,8 @@ fn malformed_output_blocks_are_rejected() {
             "\n**パニック前の標準エラー：**\n```text\nx\n```\n",
             "does not apply",
         ),
+        ("\n**標準出力：**\n\n```text\n```\n", "empty output block"),
+        ("\n**標準エラー：**\n\n```text\n```\n", "empty output block"),
     ] {
         assert!(
             extract(&format!("{SMALL}{suffix}"))
@@ -175,6 +178,15 @@ fn malformed_output_blocks_are_rejected() {
                 .contains(message)
         );
     }
+    let panic_empty = format!(
+        "{}\n**パニック前の標準エラー：**\n\n```text\n```\n",
+        SMALL.replace("- 結果：正常終了", "- 結果：パニック `[rt.div-zero]` 1:1")
+    );
+    assert!(
+        extract(&panic_empty)
+            .unwrap_err()
+            .contains("empty output block")
+    );
 }
 
 #[test]
@@ -496,6 +508,143 @@ fn main() -> u8 { return 0 }
             "duplicate source",
         ),
         (format!("{base}\n```text\nhello\n```\n"), "unlabelled fence"),
+        (format!("{base}\n~~~text\nhi\n~~~\n"), "unlabelled fence"),
+        (
+            format!("{base}\n  ```text\nhi\n  ```\n"),
+            "unlabelled fence",
+        ),
+        (
+            base.replace("- 結果：正常終了\n", ""),
+            "missing result line",
+        ),
+        (
+            base.replace("- 結果：正常終了", "- 結果：正常終了 0"),
+            "exit code 0 must be omitted",
+        ),
+        (
+            base.replace("- 結果：正常終了", "- 結果：正常終了 256"),
+            "integer out of range",
+        ),
+        (
+            base.replace("- 結果：正常終了", "- 結果：正常終了 01"),
+            "invalid unsigned integer",
+        ),
+        (
+            base.replace("- 結果：正常終了", "- 結果：正常終了  1"),
+            "invalid unsigned integer",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：コンパイルエラー `[char.literal]` -1:1",
+            ),
+            "invalid unsigned integer",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：コンパイルエラー `[char.literal]` a:1",
+            ),
+            "invalid unsigned integer",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：コンパイルエラー `[char.literal]` 1:b",
+            ),
+            "invalid unsigned integer",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：コンパイルエラー `[char.literal]` 01:1",
+            ),
+            "invalid unsigned integer",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：コンパイルエラー  `[char.literal]` 1:1",
+            ),
+            "invalid diagnostic rule",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：コンパイルエラー `[char.literal]`  1:1",
+            ),
+            "invalid unsigned integer",
+        ),
+        (
+            base.replace("- 結果：正常終了", "- 結果:正常終了"),
+            "invalid result line",
+        ),
+        (
+            base.replace("- 結果：正常終了", "- 結果(通常):正常終了"),
+            "invalid result line",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：正常終了/警告：`[diagnostic.arithmetic]` 2:1",
+            ),
+            "unknown outcome",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：正常終了 /警告：`[diagnostic.arithmetic]` 2:1",
+            ),
+            "invalid unsigned integer",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：正常終了 / 警告:`[diagnostic.arithmetic]` 2:1",
+            ),
+            "invalid warning specification",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：正常終了\n-  結果（警告）：正常終了",
+            ),
+            "unknown metadata line",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：正常終了\n- 副根拠：`[src.encoding]`",
+            ),
+            "unknown metadata line",
+        ),
+        (
+            base.replace("- 主根拠：", "- 主根據："),
+            "unknown metadata line",
+        ),
+        (
+            base.replace("- 結果：正常終了", "  - 結果：正常終了"),
+            "unknown metadata line",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 結果：正常終了\n結果（強制）：正常終了",
+            ),
+            "invalid result line",
+        ),
+        (
+            format!("{base}\n- 結果（警告）：正常終了\n"),
+            "result line must appear before source",
+        ),
+        (
+            base.replace("`[src.encoding]`", "`[src.encoding]`、`[lex.x]`"),
+            "invalid primary rule",
+        ),
+        (
+            base.replace("`[src.encoding]`", "`[src encoding!]`"),
+            "invalid primary rule",
+        ),
     ] {
         let error = extract(&bad).unwrap_err();
         assert!(error.contains(reason), "expected {reason}, got {error}");

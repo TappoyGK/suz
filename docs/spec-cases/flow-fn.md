@@ -1,4 +1,6 @@
-# 仕様例：関数と制御（関数・fnshape）
+# 関数と制御（関数・fnshape）
+
+[目次と書式](../spec-cases.md)
 
 ### flow-001 関数の戻り値型を省略する
 - 主根拠：`[fn.return-type]`

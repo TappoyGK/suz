@@ -69,7 +69,7 @@ pub(super) fn is_supported_warning_rule(rule: &str) -> bool {
     )
 }
 
-fn parse_rule_token(token: &str) -> Result<String> {
+pub(super) fn parse_rule_token(token: &str) -> Result<String> {
     token
         .strip_prefix("`[")
         .and_then(|s| s.strip_suffix("]`"))
@@ -85,7 +85,6 @@ fn parse_rule_token(token: &str) -> Result<String> {
 fn parse_rule_position(text: &str) -> Result<ExpectedDiagnostic> {
     let (rule_part, pos_part) = text.split_once(' ').ok_or("missing diagnostic position")?;
     let rule = parse_rule_token(rule_part)?;
-    let pos_part = pos_part.trim();
     let (line_str, col_str) = pos_part
         .split_once(':')
         .ok_or("invalid diagnostic position")?;
@@ -100,7 +99,7 @@ fn parse_rule_position(text: &str) -> Result<ExpectedDiagnostic> {
 pub(super) fn parse_result_line(line: &str) -> Result<Run> {
     let rest = line.strip_prefix("- 結果").ok_or("invalid result line")?;
     let (mode, body) = if let Some(body) = rest.strip_prefix('：') {
-        (Mode::Default, body.trim())
+        (Mode::Default, body)
     } else if let Some(after_open) = rest.strip_prefix('（') {
         let (mode_str, body) = after_open
             .split_once("）：")
@@ -111,7 +110,7 @@ pub(super) fn parse_result_line(line: &str) -> Result<Run> {
             "強制" => Mode::Deny,
             _ => return Err("unknown mode".into()),
         };
-        (mode, body.trim())
+        (mode, body)
     } else {
         return Err("invalid result line".into());
     };
@@ -122,14 +121,13 @@ pub(super) fn parse_result_line(line: &str) -> Result<Run> {
         }
         let warn_str = right
             .strip_prefix("警告：")
-            .ok_or("invalid warning specification")?
-            .trim();
+            .ok_or("invalid warning specification")?;
         if warn_str.is_empty() {
             return Err("empty warning list".into());
         }
         let mut warnings = Vec::new();
-        for item in warn_str.split(',') {
-            let diag = parse_rule_position(item.trim())?;
+        for item in warn_str.split(", ") {
+            let diag = parse_rule_position(item)?;
             if !is_supported_warning_rule(&diag.rule) {
                 return Err("expected a supported warning rule".into());
             }
@@ -138,7 +136,7 @@ pub(super) fn parse_result_line(line: &str) -> Result<Run> {
             }
             warnings.push(diag);
         }
-        (left.trim(), warnings)
+        (left, warnings)
     } else {
         (body, Vec::new())
     };
@@ -146,21 +144,20 @@ pub(super) fn parse_result_line(line: &str) -> Result<Run> {
     let (result, code, diagnostic, panic_diagnostic) = if outcome_str == "正常終了" {
         (Outcome::Exit, Some(0), None, None)
     } else if let Some(code_str) = outcome_str.strip_prefix("正常終了 ") {
-        (
-            Outcome::Exit,
-            Some(number::<u8>(code_str.trim())?),
-            None,
-            None,
-        )
+        let code = number::<u8>(code_str)?;
+        if code == 0 {
+            return Err("exit code 0 must be omitted".into());
+        }
+        (Outcome::Exit, Some(code), None, None)
     } else if let Some(diag_str) = outcome_str.strip_prefix("コンパイルエラー ") {
         (
             Outcome::CompileError,
             None,
-            Some(parse_rule_position(diag_str.trim())?),
+            Some(parse_rule_position(diag_str)?),
             None,
         )
     } else if let Some(diag_str) = outcome_str.strip_prefix("パニック ") {
-        let diag = parse_rule_position(diag_str.trim())?;
+        let diag = parse_rule_position(diag_str)?;
         if !diag.rule.starts_with("rt.") {
             return Err("expected runtime panic rule".into());
         }

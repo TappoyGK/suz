@@ -515,16 +515,16 @@ fn main() -> u8 {
     }
 }
 
-/// 仕様例集（旧 `expr-007`・`expr-008`・`expr-011`・`expr-070`・`expr-055`〜`expr-058`）から移管した派生拒否ケース。
+/// 仕様例集（旧 `expr-006`・`expr-008`・`expr-011`・`expr-070`・`expr-055`〜`expr-058`・`text-014`）から移管した派生拒否ケース。
 #[test]
 fn migrated_jump_and_or_return_position_diagnostics() {
     for (id, source, rule, line, column) in [
         (
-            "expr-007",
-            "fn main() -> u8 {\n    fix result: u8 = ifexpr true {\n        return 1\n        2\n    } else {\n        3\n    }\n    return result\n}\n",
+            "expr-006",
+            "fn main() -> u8 {\n    fix raw: i64 = 300\n    fix result: u8 = expr {\n        fix converted = raw as u8 or return 1\n        converted\n    }\n    return result\n}\n",
             "expr.jump-prohibited",
-            3,
-            9,
+            4,
+            38,
         ),
         (
             "expr-008",
@@ -574,6 +574,13 @@ fn migrated_jump_and_or_return_position_diagnostics() {
             "expr.or-return-position",
             4,
             49,
+        ),
+        (
+            "text-014",
+            "fn main() -> u8 {\n    fix value: symbol = \"${\"bad\" as u8 or return 1}\"\n    return 0\n}\n",
+            "expr.or-return-position",
+            2,
+            43,
         ),
     ] {
         let error = suz::compile(source.as_bytes()).unwrap_err();

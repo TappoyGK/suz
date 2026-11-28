@@ -1,4 +1,6 @@
-# 仕様例：symbol と text（基本操作・変換・切り出し）
+# symbolとtext（基本操作・変換・切り出し）
+
+[目次と書式](../spec-cases.md)
 
 ### text-001 関数から返したsymbolを構造体へ保存してコピーする
 - 主根拠：`[symbol.copy]`
@@ -123,17 +125,6 @@ fix OBJECT = "Label { name: \"Suz\" }" as Label or Label { name: "" }
 fn main() -> u8 {
     if LABEL == "Suz 1" && COUNT == 10 && WRAPPED == 1 && OBJECT.name == PRODUCT { return 0 }
     return 1
-}
-```
-
-### text-014 テンプレートの埋め込みにor returnを置く
-- 主根拠：`[expr.or-return-position]`
-- 結果：コンパイルエラー `[expr.or-return-position]` 2:43
-
-```suz
-fn main() -> u8 {
-    fix value: symbol = "${"bad" as u8 or return 1}"
-    return 0
 }
 ```
 
@@ -701,16 +692,4 @@ fn main() -> u8 {
 ```suz
 fix T = textbuf "constant"
 fn main() -> u8 { return 0 }
-```
-
-### text-062 追記の左辺は書き込み可能でなければならない
-- 主根拠：`[var.fix-assign]`
-- 結果：コンパイルエラー `[var.fix-assign]` 3:5
-
-```suz
-fn main() -> u8 {
-    fix t = textbuf "fixed"
-    t <- "x"
-    return 0
-}
 ```

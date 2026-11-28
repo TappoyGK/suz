@@ -1,55 +1,6 @@
-# 仕様例：配列（列挙型添字配列）
+# 配列（列挙型添字配列）
 
-### array-002 列挙した行の長さが一致しない
-- 主根拠：`[array.enumeration]`
-- 結果：コンパイルエラー `[array.enumeration]` 2:18
-
-```suz
-fn main() -> u8 {
-    fix a = new #[[1, 2], [3]]
-    return 0
-}
-```
-
-### array-040 要素として書いた定数配列は行ではなく値として扱う
-- 主根拠：`[array.enumeration]`
-- 補助根拠：`[array.constant]`
-- 結果：正常終了
-
-```suz
-fix JAGGED: .[.[i32]] = .[.[1, 2], .[3]]
-fn main() -> u8 {
-    arena {
-        fix a: #[.[i32]] = new #[.[1, 2], .[3, 4]]
-        if (a.[0].[1] or 0) != 2 || len JAGGED.[0] != 2 || len JAGGED.[1] != 1 { return 1 }
-    }
-    return 0
-}
-```
-
-### array-041 配列初期化の同じ段に値と行を混在させない
-- 主根拠：`[array.enumeration]`
-- 結果：コンパイルエラー `[array.enumeration]` 2:18
-
-```suz
-fn main() -> u8 {
-    fix a = new #[.[1, 2], [3, 4]]
-    return 0
-}
-```
-
-### array-070 多次元配列の内側の行に列挙子キーを書けない
-- 主根拠：`[array.enumeration]`
-- 補助根拠：`[array.enum-type]`、`[array.enum-init]`
-- 結果：コンパイルエラー `[array.enumeration]` 3:16
-
-```suz
-enum Wave: u8 { Saw, Square }
-fn main() -> u8 {
-    fix a = .[[Wave.Square: 10, Wave.Saw: 20]]
-    return 0
-}
-```
+[目次と書式](../spec-cases.md)
 
 ### array-057 列挙型を添字にする定数関数表と配列参照の読み書き
 - 主根拠：`[array.enum-type]`

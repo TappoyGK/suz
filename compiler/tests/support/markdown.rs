@@ -51,7 +51,10 @@ pub(super) fn table_cells(line: &str, columns: usize) -> Result<Vec<&str>> {
 }
 
 pub(super) fn number<T: std::str::FromStr>(text: &str) -> Result<T> {
-    if text.is_empty() || !text.bytes().all(|b| b.is_ascii_digit()) {
+    if text.is_empty()
+        || !text.bytes().all(|b| b.is_ascii_digit())
+        || (text.len() > 1 && text.starts_with('0'))
+    {
         return Err("invalid unsigned integer".into());
     }
     text.parse().map_err(|_| "integer out of range".into())

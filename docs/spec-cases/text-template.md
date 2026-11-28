@@ -1,4 +1,6 @@
-# 仕様例：symbol と text（テンプレート・追記・textbuf）
+# symbolとtext（テンプレート・追記・textbuf）
+
+[目次と書式](../spec-cases.md)
 
 ### text-024 symbol生成でも埋め込みを左から右へ1回ずつ評価する
 - 主根拠：`[symbol.interpolation]`
@@ -434,6 +436,18 @@ fn main() -> u8 {
 fn main() -> u8 {
     var s: symbol = "symbol"
     s <- "x"
+    return 0
+}
+```
+
+### text-062 追記の左辺は書き込み可能でなければならない
+- 主根拠：`[var.fix-assign]`
+- 結果：コンパイルエラー `[var.fix-assign]` 3:5
+
+```suz
+fn main() -> u8 {
+    fix t = textbuf "fixed"
+    t <- "x"
     return 0
 }
 ```

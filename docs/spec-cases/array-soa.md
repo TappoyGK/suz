@@ -1,4 +1,6 @@
-# 仕様例：配列（SoA 配列）
+# 配列（SoA配列）
+
+[目次と書式](../spec-cases.md)
 
 ### array-094 多次元SoA配列の部分配列・切り出し・反復
 - 主根拠：`[array.soa-type]`

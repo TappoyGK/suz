@@ -1,6 +1,6 @@
 use super::{
     Outcome, Result, Source,
-    expectations::{parse_result_line, validate},
+    expectations::{parse_result_line, parse_rule_token, validate},
     markdown::{block, fence, heading, unique},
 };
 use std::collections::BTreeMap;
@@ -52,6 +52,7 @@ fn source(lines: &[&str]) -> Result<Source> {
     let mut stderr = None;
     let mut stderr_prefix = None;
     let mut diagram = None;
+    let mut seen_body = false;
     let mut i = 0;
     while i < lines.len() {
         let line = lines[i];
@@ -62,6 +63,7 @@ fn source(lines: &[&str]) -> Result<Source> {
                 return Err("legacy table format is no longer supported".into());
             }
             "**ソース：**" => {
+                seen_body = true;
                 let code = block(lines, &mut i, "suz")?;
                 if code.is_empty() {
                     return Err("empty source".into());
@@ -69,6 +71,7 @@ fn source(lines: &[&str]) -> Result<Source> {
                 unique(&mut bytes, code.into_bytes(), "source")?;
             }
             "**保存用のバイト列（16進数）：**" => {
+                seen_body = true;
                 let body = block(lines, &mut i, "text")?;
                 let digits: String = body.chars().filter(|c| !c.is_ascii_whitespace()).collect();
                 if digits.is_empty()
@@ -83,16 +86,32 @@ fn source(lines: &[&str]) -> Result<Source> {
                     .collect();
                 unique(&mut bytes, decoded, "source")?;
             }
-            "**標準出力：**" => unique(&mut stdout, block(lines, &mut i, "text")?, "stdout")?,
-            "**標準エラー：**" => {
-                unique(&mut stderr, block(lines, &mut i, "text")?, "stderr")?
+            "**標準出力：**" => {
+                seen_body = true;
+                let content = block(lines, &mut i, "text")?;
+                if content.is_empty() {
+                    return Err("empty output block".into());
+                }
+                unique(&mut stdout, content, "stdout")?;
             }
-            "**パニック前の標準エラー：**" => unique(
-                &mut stderr_prefix,
-                block(lines, &mut i, "text")?,
-                "panic stderr",
-            )?,
+            "**標準エラー：**" => {
+                seen_body = true;
+                let content = block(lines, &mut i, "text")?;
+                if content.is_empty() {
+                    return Err("empty output block".into());
+                }
+                unique(&mut stderr, content, "stderr")?;
+            }
+            "**パニック前の標準エラー：**" => {
+                seen_body = true;
+                let content = block(lines, &mut i, "text")?;
+                if content.is_empty() {
+                    return Err("empty output block".into());
+                }
+                unique(&mut stderr_prefix, content, "panic stderr")?;
+            }
             "**入力図：**" => {
+                seen_body = true;
                 unique(
                     &mut diagram,
                     decode_diagram(&block(lines, &mut i, "text")?)?,
@@ -101,25 +120,46 @@ fn source(lines: &[&str]) -> Result<Source> {
             }
             _ => {
                 let trimmed = line.trim();
-                if let Some(value) = trimmed.strip_prefix("- 主根拠：") {
+                if let Some(value) = line.strip_prefix("- 主根拠：") {
+                    if seen_body {
+                        return Err("metadata line must appear before source".into());
+                    }
                     let value = value.trim().trim_end_matches('。').trim();
-                    let value = value
-                        .strip_prefix("`[")
-                        .and_then(|s| s.strip_suffix("]`"))
-                        .ok_or("invalid primary rule")?;
-                    unique(&mut rule, value.to_owned(), "primary rule")?;
-                } else if trimmed.starts_with("- 結果") {
-                    runs.push(parse_result_line(trimmed)?);
+                    let value = parse_rule_token(value).map_err(|_| "invalid primary rule")?;
+                    unique(&mut rule, value, "primary rule")?;
+                } else if let Some(value) = line.strip_prefix("- 補助根拠：") {
+                    if seen_body {
+                        return Err("metadata line must appear before source".into());
+                    }
+                    if value.trim().is_empty() {
+                        return Err("empty secondary rule".into());
+                    }
+                } else if line.starts_with("- 結果") {
+                    if seen_body {
+                        return Err("result line must appear before source".into());
+                    }
+                    runs.push(parse_result_line(line)?);
+                } else if trimmed.starts_with("- ") || trimmed == "-" {
+                    return Err("unknown metadata line".into());
+                } else if trimmed.starts_with("結果：")
+                    || trimmed.starts_with("結果（")
+                    || trimmed.starts_with("結果:")
+                    || trimmed.starts_with("結果(")
+                {
+                    return Err("invalid result line".into());
+                } else if trimmed.starts_with('|') {
+                    return Err("legacy table format is no longer supported".into());
                 } else if trimmed.starts_with("**") && trimmed.ends_with("：**") {
                     return Err("unsupported or unlabelled fence".into());
                 } else if line == "```suz" {
+                    seen_body = true;
                     i -= 1;
                     let code = block(lines, &mut i, "suz")?;
                     if code.is_empty() {
                         return Err("empty source".into());
                     }
                     unique(&mut bytes, code.into_bytes(), "source")?;
-                } else if line.starts_with("```") {
+                } else if fence(line).is_some() {
                     return Err("unsupported or unlabelled fence".into());
                 }
             }

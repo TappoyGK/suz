@@ -1,4 +1,6 @@
-# 仕様例：配列（範囲保証・ハンドラ・寿命）
+# 配列（範囲保証・ハンドラ・寿命）
+
+[目次と書式](../spec-cases.md)
 
 ### array-004 範囲外の書き込みは右辺より先に失敗する
 - 主根拠：`[rt.array-bounds]`
@@ -120,26 +122,6 @@ fn main() -> u8 {
     arena {
         fix x: i32 = 3
         escaped = new .[x, 4]
-    }
-    return 0
-}
-```
-
-### array-044 #[T]?と.[T]の分岐を.[T]?へ揃える
-- 主根拠：`[arena.ptr-join]`
-- 補助根拠：`[array.readonly-conversion]`
-- 結果：正常終了
-
-```suz
-fn main() -> u8 {
-    arena {
-        fix rw: #[i32] = new #[1, 2]
-        fix opt: #[i32]? = rw
-        fix ro: .[i32] = .[3, 4]
-        fix joined = ifexpr false { opt } else { ro }
-        let v = joined {
-            if (v.[0] or 0) != 3 { return 1 }
-        } else { return 2 }
     }
     return 0
 }

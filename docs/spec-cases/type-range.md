@@ -1,4 +1,6 @@
-# 仕様例：型（値域制限型）
+# 型（値域制限型）
+
+[目次と書式](../spec-cases.md)
 
 ### type-038 値域制限型の宣言（半開区間と1値型）
 - 主根拠：`[range.decl]`
@@ -672,5 +674,24 @@ fn main() -> u8 {
         return 0
     }
     return 1
+}
+```
+
+### type-071 extern関数の引数に値域制限型を指定すると拒否する
+- 主根拠：`[ffi.type]`
+- 補助根拠：`[range.places]`
+- 結果：コンパイルエラー `[ffi.type]` 4:8
+
+値域制限型は `extern` 関数の引数・戻り値に直接使えない。
+
+```suz
+range Note: u8 = 0..=127
+
+extern "stdint.h" {
+    fn f(n: Note) -> u8
+}
+
+fn main() -> u8 {
+    return 0
 }
 ```
