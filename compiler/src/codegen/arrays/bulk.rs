@@ -24,7 +24,10 @@ pub(in crate::codegen) fn emit_bulk_write(
     *next_assignment += 1;
     let indent = "    ".repeat(depth);
     let inner = "    ".repeat(depth + 1);
-    let out_array = context.arrays.get(bulk.target.ty.array_id().unwrap());
+    let out_array = context
+        .arrays
+        .get(bulk.target.ty.array_id().unwrap())
+        .clone();
     let out_elem_ty = out_array.element;
     let dst_c_ty = out_elem_ty.c_name();
 
@@ -70,7 +73,10 @@ pub(in crate::codegen) fn emit_bulk_write(
             .then(|| format!("suz_bulk_e_{bid} < 0"));
         (format!("suz_bulk_e_{bid}"), neg)
     } else {
-        (format!("suz_bulk_out_{bid}.lengths[0]"), None)
+        (
+            super::dim_length_expr(&out_array, &format!("suz_bulk_out_{bid}"), None, 0),
+            None,
+        )
     };
 
     // 右辺の配列参照とブロードキャストスカラーを左から右へ1回ずつ評価する。
@@ -199,9 +205,10 @@ pub(in crate::codegen) fn emit_bulk_write(
         )
         .unwrap();
     } else {
+        let len_expr = super::dim_length_expr(&out_array, &format!("suz_bulk_out_{bid}"), None, 0);
         writeln!(
             c,
-            "{inner}const size_t suz_bulk_n_{bid} = (size_t)suz_bulk_out_{bid}.lengths[0];"
+            "{inner}const size_t suz_bulk_n_{bid} = (size_t){len_expr};"
         )
         .unwrap();
     }

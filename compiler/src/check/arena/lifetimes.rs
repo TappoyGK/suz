@@ -978,7 +978,7 @@ impl Analysis {
                     if let Some((start_ty, source)) = source
                         && let Some(array) = start_ty.array_id()
                     {
-                        let rank = self.structs.arrays.borrow().get(array).rank;
+                        let rank = self.structs.arrays.borrow().get(array).rank();
                         let value = if rank == 1 {
                             self.read(*variable_type, Place::Indirect(source[&vec![]], vec![]))
                         } else {

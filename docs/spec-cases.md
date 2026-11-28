@@ -118,7 +118,7 @@ IDは分野の接頭辞と番号で構成し、期待結果の種類を含めな
 | [プログラムの構造](spec-cases/prog.md) | `prog` | 第4章 | 18 |
 | [型（基本型・構造体・列挙型）](spec-cases/type-basic.md)・[値域制限型](spec-cases/type-range.md) | `type` | 第3・5・10章 | 71 |
 | [symbolとtext（基本操作・変換・切り出し）](spec-cases/text-basic.md)・[テンプレート・追記・textbuf・寿命](spec-cases/text-template.md) | `text` | 第5・6・7・8・9・10・14章 | 67 |
-| [配列（基本・定数配列・読み取り専用・反復）](spec-cases/array-basic.md)・[範囲保証・ハンドラ・寿命](spec-cases/array-bounds.md)・[一括書き込み・演算・マスク](spec-cases/array-bulk.md)・[列挙型添字配列](spec-cases/array-enum.md)・[SoA配列](spec-cases/array-soa.md) | `array` | 第5・6・7・9・13・15章 | 111 |
+| [配列（基本・定数配列・読み取り専用・反復）](spec-cases/array-basic.md)・[範囲保証・ハンドラ・寿命](spec-cases/array-bounds.md)・[一括書き込み・演算・マスク](spec-cases/array-bulk.md)・[列挙型添字配列](spec-cases/array-enum.md)・[SoA配列](spec-cases/array-soa.md) | `array` | 第5・6・7・9・13・15章 | 117 |
 | [定数・変数・代入](spec-cases/bind.md) | `bind` | 第4・6・9章 | 33 |
 | [式（算術・変換・キャスト）](spec-cases/expr-arith.md)・[演算子・比較連鎖・値ブロック・制御](spec-cases/expr-ops.md) | `expr` | 第7・9章 | 81 |
 | [関数・fnshape](spec-cases/flow-fn.md)・[制御構文・反復・分岐](spec-cases/flow-control.md)・[クロージャ](spec-cases/flow-closure.md)・[契約](spec-cases/flow-contract.md)・[メソッド](spec-cases/method.md)・[匿名汎用](spec-cases/generic.md) | `flow` | 第8・11・12章 | 160 |
@@ -130,7 +130,7 @@ IDは分野の接頭辞と番号で構成し、期待結果の種類を含めな
 | [実行時の検査](spec-cases/runtime.md) | `runtime` | 第13章 | 19 |
 | [ログ](spec-cases/log.md) | `log` | 第7・14章 | 18 |
 | [警告と診断設定](spec-cases/diag.md) | `diag` | 第15章 | 15 |
-| 合計 | | | 755 |
+| 合計 | | | 761 |
 
 件数はID接頭辞ごとに数える。flow-090・flow-091はメソッドのファイルに、flow接頭辞の匿名汎用22例は汎用のファイルに掲載する。
 
@@ -138,11 +138,11 @@ IDは分野の接頭辞と番号で構成し、期待結果の種類を含めな
 
 | 結果 | 件数 |
 |---|---:|
-| 受理 | 315 |
-| コンパイルエラー | 407 |
+| 受理 | 319 |
+| コンパイルエラー | 409 |
 | 実行時パニック | 20 |
 | 診断設定の比較 | 13 |
-| 合計 | 755 |
+| 合計 | 761 |
 
 期待結果が複数の設定を持つ例は「診断設定の比較」に1例として数える。設定が1つの例は、その結果で分類する。バイト列を指定する例も同じように数える。
 

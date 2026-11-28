@@ -935,15 +935,17 @@ fn patch_expr(expr: &mut Expression, ranges: &[RangeDeclaration]) {
         ExpressionKind::ArrayInit {
             values,
             lengths,
-            keys,
+            key_groups,
             ..
         } => {
             for v in values.iter_mut().chain(lengths.iter_mut()) {
                 patch_expr(v, ranges);
             }
-            if let Some(keys) = keys {
-                for k in keys {
-                    patch_expr(k, ranges);
+            for group in key_groups.iter_mut().flatten() {
+                for keys in group {
+                    for k in keys {
+                        patch_expr(k, ranges);
+                    }
                 }
             }
         }
@@ -1610,7 +1612,7 @@ pub(crate) enum ExpressionKind {
     ArrayInit {
         values: Vec<Expression>,
         lengths: Vec<Expression>,
-        keys: Option<Vec<Expression>>,
+        key_groups: Vec<Option<Vec<Vec<Expression>>>>,
         repeated: bool,
         readonly: bool,
         soa: bool,

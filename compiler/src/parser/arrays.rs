@@ -52,34 +52,16 @@ impl Parser<'_, '_> {
                 ));
             }
             let mut dimensions = Vec::new();
-            let mut index_enum = None;
-            let mut rank = 1;
+            let mut dims = vec![None];
             if parser.token().kind == Kind::Symbol(";") {
                 parser.cursor += 1;
-                rank = 0;
+                dims.clear();
                 loop {
                     match parser.token().kind {
                         Kind::Wildcard => {
-                            if index_enum.is_some() {
-                                return Err(parser.error(
-                                    ErrorKind::InvalidSource,
-                                    crate::diagnostic!(
-                                        "array.enum-type",
-                                        "enum-indexed arrays must be 1-dimensional"
-                                    ),
-                                ));
-                            }
+                            dims.push(None);
                         }
                         Kind::Ident(name) if super::names::is_type_spelling(name) => {
-                            if rank > 0 || index_enum.is_some() {
-                                return Err(parser.error(
-                                    ErrorKind::InvalidSource,
-                                    crate::diagnostic!(
-                                        "array.enum-type",
-                                        "enum-indexed arrays must be 1-dimensional"
-                                    ),
-                                ));
-                            }
                             let Some(decl) = parser
                                 .enums
                                 .iter()
@@ -93,32 +75,23 @@ impl Parser<'_, '_> {
                                     ),
                                 ));
                             };
-                            index_enum = Some(decl.ty);
+                            dims.push(Some(decl.ty));
                         }
                         Kind::Ident(name) if names => {
-                            if index_enum.is_some() {
-                                return Err(parser.error(
-                                    ErrorKind::InvalidSource,
-                                    crate::diagnostic!(
-                                        "array.enum-type",
-                                        "enum-indexed arrays must be 1-dimensional"
-                                    ),
-                                ));
-                            }
                             let location = parser.location();
                             super::names::check(super::names::Shape::Value, name, location)?;
                             dimensions.push(crate::ast::arrays::Dimension {
                                 name: name.into(),
-                                index: rank,
+                                index: dims.len(),
                                 location,
                             });
+                            dims.push(None);
                         }
                         _ => return Err(parser.error(ErrorKind::InvalidSource, crate::diagnostic!(
                             "array.dimension-bind", "dimension names require a non-nil array parameter or fix annotation; use _ here"
                         ))),
                     }
                     parser.cursor += 1;
-                    rank += 1;
                     let comma = parser.token().kind == Kind::Symbol(",");
                     if comma {
                         parser.cursor += 1;
@@ -161,7 +134,7 @@ impl Parser<'_, '_> {
                 .applications
                 .borrow_mut()
                 .arrays
-                .intern_full(element, rank, index_enum, soa)
+                .intern_dims(element, dims, soa)
             else {
                 unreachable!()
             };
@@ -187,7 +160,7 @@ impl Parser<'_, '_> {
     fn array_initializer_inner(
         &mut self,
         readonly: bool,
-        allow_keys: bool,
+        is_top_level: bool,
         soa: bool,
     ) -> Result<Expression, Diagnostic> {
         let location = self.location();
@@ -202,15 +175,6 @@ impl Parser<'_, '_> {
             if parser.token().kind != Kind::Symbol("]") {
                 items.push(parser.array_item()?);
                 if parser.token().kind == Kind::Symbol(":") {
-                    if !allow_keys {
-                        return Err(items[0].0.location.error(
-                            ErrorKind::InvalidSource,
-                            crate::diagnostic!(
-                                "array.enumeration",
-                                "nested array rows cannot use enum keys"
-                            ),
-                        ));
-                    }
                     if items[0].1 {
                         return Err(location.error(
                             ErrorKind::InvalidSource,
@@ -223,10 +187,19 @@ impl Parser<'_, '_> {
                     keyed = true;
                     let key = items.pop().unwrap().0;
                     parser.cursor += 1;
-                    let value = parser.expression()?;
+                    let value = parser.array_item()?;
                     keys.push(key);
-                    items.push((value, false));
+                    items.push(value);
                 } else if parser.token().kind == Kind::Symbol(";") {
+                    if !is_top_level {
+                        return Err(location.error(
+                            ErrorKind::InvalidSource,
+                            crate::diagnostic!(
+                                "array.enumeration",
+                                "nested array rows cannot use repeated syntax"
+                            ),
+                        ));
+                    }
                     if items[0].1 {
                         return Err(location.error(
                             ErrorKind::InvalidSource,
@@ -277,21 +250,12 @@ impl Parser<'_, '_> {
                             ));
                         }
                         parser.cursor += 1;
-                        let value = parser.expression()?;
+                        let value = parser.array_item()?;
                         keys.push(key);
-                        items.push((value, false));
+                        items.push(value);
                     } else {
                         items.push(parser.array_item()?);
                         if parser.token().kind == Kind::Symbol(":") {
-                            if !allow_keys {
-                                return Err(items.last().unwrap().0.location.error(
-                                    ErrorKind::InvalidSource,
-                                    crate::diagnostic!(
-                                        "array.enumeration",
-                                        "nested array rows cannot use enum keys"
-                                    ),
-                                ));
-                            }
                             return Err(parser.error(
                                 ErrorKind::InvalidSource,
                                 crate::diagnostic!(
@@ -314,10 +278,12 @@ impl Parser<'_, '_> {
                 .max()
                 .unwrap_or(0);
             parser.check_height(height, location)?;
+            let mut key_groups = Vec::new();
             let values = if !repeated {
                 let count = items.len();
                 let mut flattened = Vec::new();
                 let mut shape: Option<Vec<Expression>> = None;
+                let mut child_key_groups: Option<Vec<Option<Vec<Vec<Expression>>>>> = None;
                 let nested = items.first().is_some_and(|(_, is_row)| *is_row);
                 for (value, is_row) in items {
                     if is_row {
@@ -334,16 +300,13 @@ impl Parser<'_, '_> {
                             ExpressionKind::ArrayInit {
                                 values,
                                 lengths,
-                                keys: None,
+                                key_groups: sub_keys,
                                 repeated: false,
                                 ..
                             } if !values.is_empty() => {
                                 if let Some(previous) = &shape {
-                                    if previous
-                                        .iter()
-                                        .map(dimension)
-                                        .ne(lengths.iter().map(dimension))
-                                    {
+                                    let prev_keys = child_key_groups.as_mut().unwrap();
+                                    if previous.len() != lengths.len() {
                                         return Err(location.error(
                                             ErrorKind::InvalidSource,
                                             crate::diagnostic!(
@@ -352,8 +315,38 @@ impl Parser<'_, '_> {
                                             ),
                                         ));
                                     }
+                                    for (d, (slot, sub)) in
+                                        prev_keys.iter_mut().zip(sub_keys).enumerate()
+                                    {
+                                        match (slot, sub) {
+                                            (Some(acc), Some(more)) => acc.extend(more),
+                                            (None, None) => {
+                                                if dimension(&previous[d])
+                                                    != dimension(&lengths[d])
+                                                {
+                                                    return Err(location.error(
+                                                        ErrorKind::InvalidSource,
+                                                        crate::diagnostic!(
+                                                            "array.enumeration",
+                                                            "array rows must have equal shapes"
+                                                        ),
+                                                    ));
+                                                }
+                                            }
+                                            _ => {
+                                                return Err(location.error(
+                                                    ErrorKind::InvalidSource,
+                                                    crate::diagnostic!(
+                                                        "array.enumeration",
+                                                        "cannot mix keyed and unkeyed rows at the same depth"
+                                                    ),
+                                                ));
+                                            }
+                                        }
+                                    }
                                 } else {
                                     shape = Some(lengths);
+                                    child_key_groups = Some(sub_keys);
                                 }
                                 flattened.extend(values);
                             }
@@ -384,6 +377,8 @@ impl Parser<'_, '_> {
                     location,
                 )?);
                 lengths.extend(shape.unwrap_or_default());
+                key_groups.push(keyed.then_some(vec![keys]));
+                key_groups.extend(child_key_groups.unwrap_or_default());
                 flattened
             } else {
                 items.into_iter().map(|(v, _)| v).collect()
@@ -392,7 +387,7 @@ impl Parser<'_, '_> {
                 kind: ExpressionKind::ArrayInit {
                     values,
                     lengths,
-                    keys: keyed.then_some(keys),
+                    key_groups,
                     repeated,
                     readonly,
                     soa,

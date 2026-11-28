@@ -279,15 +279,17 @@ impl Scope {
     pub fn type_name(&self, ty: Type) -> String {
         match ty {
             Type::Array(id) => {
-                let array = self.structs.arrays.borrow().get(id);
-                let element = self.type_name(array.element);
-                let soa = if array.soa { "soa " } else { "" };
-                if let Some(index_enum) = array.index_enum {
-                    format!("{soa}[{element}; {}]", self.enums[index_enum.id].name)
-                } else if array.rank == 1 {
-                    format!("{soa}[{element}]")
+                let (element_ty, soa, dims) = {
+                    let arrays = self.structs.arrays.borrow();
+                    let array = arrays.get(id);
+                    (array.element, array.soa, array.format_dims(&self.enums))
+                };
+                let element = self.type_name(element_ty);
+                let soa = if soa { "soa " } else { "" };
+                if let Some(dims) = dims {
+                    format!("{soa}[{element}; {dims}]")
                 } else {
-                    format!("{soa}[{element}; {}]", vec!["_"; array.rank].join(", "))
+                    format!("{soa}[{element}]")
                 }
             }
             Type::ArrayRef {
@@ -295,23 +297,19 @@ impl Scope {
                 mutable,
                 nilable,
             } => {
-                let array = self.structs.arrays.borrow().get(id);
-                let element = self.type_name(array.element);
-                let soa = if array.soa { "soa " } else { "" };
+                let (element_ty, soa, dims) = {
+                    let arrays = self.structs.arrays.borrow();
+                    let array = arrays.get(id);
+                    (array.element, array.soa, array.format_dims(&self.enums))
+                };
+                let element = self.type_name(element_ty);
+                let soa = if soa { "soa " } else { "" };
                 let prefix = if mutable { "#" } else { "." };
                 let suffix = if nilable { "?" } else { "" };
-                if let Some(index_enum) = array.index_enum {
-                    format!(
-                        "{soa}{prefix}[{element}; {}]{suffix}",
-                        self.enums[index_enum.id].name
-                    )
-                } else if array.rank == 1 {
-                    format!("{soa}{prefix}[{element}]{suffix}")
+                if let Some(dims) = dims {
+                    format!("{soa}{prefix}[{element}; {dims}]{suffix}")
                 } else {
-                    format!(
-                        "{soa}{prefix}[{element}; {}]{suffix}",
-                        vec!["_"; array.rank].join(", ")
-                    )
+                    format!("{soa}{prefix}[{element}]{suffix}")
                 }
             }
             Type::Parameter(id) => self

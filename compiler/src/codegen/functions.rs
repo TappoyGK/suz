@@ -51,7 +51,10 @@ fn type_layout(ty: Type, context: &ExpressionContext) -> (usize, usize) {
             } else {
                 1
             };
-            (align_up(8 * ptr_count + 4 * array.rank, 8), 8)
+            (
+                align_up(8 * ptr_count + 4 * array.runtime_dim_count(), 8),
+                8,
+            )
         }
         Type::Exact => (32, 16),
         Type::Struct(id) => {

@@ -146,10 +146,14 @@ impl Constraints<'_, '_> {
         }
         match (parameter, actual) {
             (Type::Array(parameter), Type::Array(actual)) => {
-                let p = self.scope.structs.arrays.borrow().get(parameter);
-                let a = self.scope.structs.arrays.borrow().get(actual);
-                if p.rank == a.rank && p.index_enum == a.index_enum && p.soa == a.soa {
-                    self.apply(p.element, a.element)?;
+                let pair = {
+                    let arrays = self.scope.structs.arrays.borrow();
+                    let p = arrays.get(parameter);
+                    let a = arrays.get(actual);
+                    (p.dims == a.dims && p.soa == a.soa).then_some((p.element, a.element))
+                };
+                if let Some((p_elem, a_elem)) = pair {
+                    self.apply(p_elem, a_elem)?;
                 }
             }
             (
@@ -164,10 +168,14 @@ impl Constraints<'_, '_> {
                     ..
                 },
             ) if !p_mut || a_mut => {
-                let p = self.scope.structs.arrays.borrow().get(parameter);
-                let a = self.scope.structs.arrays.borrow().get(actual);
-                if p.rank == a.rank && p.index_enum == a.index_enum && p.soa == a.soa {
-                    self.apply(p.element, a.element)?;
+                let pair = {
+                    let arrays = self.scope.structs.arrays.borrow();
+                    let p = arrays.get(parameter);
+                    let a = arrays.get(actual);
+                    (p.dims == a.dims && p.soa == a.soa).then_some((p.element, a.element))
+                };
+                if let Some((p_elem, a_elem)) = pair {
+                    self.apply(p_elem, a_elem)?;
                 }
             }
             (

@@ -1,13 +1,52 @@
-//! 配列の要素型・次元数・添字列挙型を共通化する。実行時の長さの値は型に含めない。
-use super::{EnumType, Type};
+//! 配列の要素型・次元数・次元ごとの添字列挙型を共通化する。長さの次元の値は型に含めない。
+use super::{EnumDeclaration, EnumType, Type};
 use std::collections::BTreeMap;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct ArrayType {
     pub element: Type,
-    pub rank: usize,
-    pub index_enum: Option<EnumType>,
+    pub dims: Vec<Option<EnumType>>,
     pub soa: bool,
+}
+
+impl ArrayType {
+    pub fn rank(&self) -> usize {
+        self.dims.len()
+    }
+
+    pub fn first_enum(&self) -> Option<EnumType> {
+        self.dims.first().copied().flatten()
+    }
+
+    pub fn sub_dims(&self) -> Vec<Option<EnumType>> {
+        self.dims[1..].to_vec()
+    }
+
+    pub fn runtime_dim_count(&self) -> usize {
+        self.dims.iter().filter(|d| d.is_none()).count()
+    }
+
+    pub fn runtime_dim_index(&self, axis: usize) -> Option<usize> {
+        self.dims[axis]
+            .is_none()
+            .then(|| self.dims[..axis].iter().filter(|d| d.is_none()).count())
+    }
+
+    pub fn format_dims(&self, enums: &[EnumDeclaration]) -> Option<String> {
+        if self.dims.len() == 1 && self.dims[0].is_none() {
+            return None;
+        }
+        Some(
+            self.dims
+                .iter()
+                .map(|d| match d {
+                    Some(enum_ty) => enums[enum_ty.id].name.as_str(),
+                    None => "_",
+                })
+                .collect::<Vec<_>>()
+                .join(", "),
+        )
+    }
 }
 
 #[derive(Clone, Default)]
@@ -16,38 +55,28 @@ pub(crate) struct Types {
     ids: BTreeMap<ArrayType, usize>,
 }
 impl Types {
-    pub fn intern_full(
-        &mut self,
-        element: Type,
-        rank: usize,
-        index_enum: Option<EnumType>,
-        soa: bool,
-    ) -> Type {
-        let array = ArrayType {
-            element,
-            rank,
-            index_enum,
-            soa,
-        };
-        let id = *self.ids.entry(array).or_insert_with(|| {
-            let id = self.entries.len();
-            self.entries.push(array);
-            id
-        });
+    pub fn intern_dims(&mut self, element: Type, dims: Vec<Option<EnumType>>, soa: bool) -> Type {
+        let array = ArrayType { element, dims, soa };
+        if let Some(&id) = self.ids.get(&array) {
+            return Type::Array(id);
+        }
+        let id = self.entries.len();
+        self.ids.insert(array.clone(), id);
+        self.entries.push(array);
         Type::Array(id)
     }
     pub fn truncate(&mut self, length: usize) {
         self.entries.truncate(length);
         self.ids.retain(|_, id| *id < length);
     }
-    pub fn get(&self, id: usize) -> ArrayType {
-        self.entries[id]
+    pub fn get(&self, id: usize) -> &ArrayType {
+        &self.entries[id]
     }
     pub fn patch_ranges(&mut self, ranges: &[super::RangeDeclaration]) {
         self.ids.clear();
         for (id, entry) in self.entries.iter_mut().enumerate() {
             entry.element.patch_ranges(ranges);
-            self.ids.insert(*entry, id);
+            self.ids.insert(entry.clone(), id);
         }
     }
 }

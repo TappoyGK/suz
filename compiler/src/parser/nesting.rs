@@ -200,12 +200,12 @@ fn kind_height(kind: &ExpressionKind) -> usize {
         ArrayInit {
             values,
             lengths,
-            keys,
+            key_groups,
             ..
         } => values
             .iter()
             .chain(lengths)
-            .chain(keys.iter().flatten())
+            .chain(key_groups.iter().flatten().flatten().flatten())
             .map(|v| v.height)
             .max()
             .unwrap_or(0),

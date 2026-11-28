@@ -68,28 +68,24 @@ impl Structs {
         }
         match ty {
             Type::Array(id) => {
-                let array = self.arrays.borrow().get(id);
+                let array = self.arrays.borrow().get(id).clone();
                 let element = self.normalize(array.element);
-                self.arrays.borrow_mut().intern_full(
-                    element,
-                    array.rank,
-                    array.index_enum,
-                    array.soa,
-                )
+                self.arrays
+                    .borrow_mut()
+                    .intern_dims(element, array.dims, array.soa)
             }
             Type::ArrayRef {
                 id,
                 mutable,
                 nilable,
             } => {
-                let array = self.arrays.borrow().get(id);
+                let array = self.arrays.borrow().get(id).clone();
                 let element = self.normalize(array.element);
-                let Type::Array(id) = self.arrays.borrow_mut().intern_full(
-                    element,
-                    array.rank,
-                    array.index_enum,
-                    array.soa,
-                ) else {
+                let Type::Array(id) = self
+                    .arrays
+                    .borrow_mut()
+                    .intern_dims(element, array.dims, array.soa)
+                else {
                     unreachable!()
                 };
                 Type::ArrayRef {
@@ -288,14 +284,16 @@ impl Structs {
         }
         match ty {
             Type::Array(id) => {
-                let array = self.arrays.borrow().get(id);
-                let element = self.name(array.element);
-                if let Some(index_enum) = array.index_enum {
-                    format!("[{element}; {}]", self.enums[index_enum.id].name)
-                } else if array.rank == 1 {
-                    format!("[{element}]")
+                let (element_ty, dims) = {
+                    let arrays = self.arrays.borrow();
+                    let array = arrays.get(id);
+                    (array.element, array.format_dims(&self.enums))
+                };
+                let element = self.name(element_ty);
+                if let Some(dims) = dims {
+                    format!("[{element}; {dims}]")
                 } else {
-                    format!("[{element}; {}]", vec!["_"; array.rank].join(", "))
+                    format!("[{element}]")
                 }
             }
             Type::ArrayRef {
@@ -303,22 +301,18 @@ impl Structs {
                 mutable,
                 nilable,
             } => {
-                let array = self.arrays.borrow().get(id);
-                let element = self.name(array.element);
+                let (element_ty, dims) = {
+                    let arrays = self.arrays.borrow();
+                    let array = arrays.get(id);
+                    (array.element, array.format_dims(&self.enums))
+                };
+                let element = self.name(element_ty);
                 let prefix = if mutable { "#" } else { "." };
                 let suffix = if nilable { "?" } else { "" };
-                if let Some(index_enum) = array.index_enum {
-                    format!(
-                        "{prefix}[{element}; {}]{suffix}",
-                        self.enums[index_enum.id].name
-                    )
-                } else if array.rank == 1 {
-                    format!("{prefix}[{element}]{suffix}")
+                if let Some(dims) = dims {
+                    format!("{prefix}[{element}; {dims}]{suffix}")
                 } else {
-                    format!(
-                        "{prefix}[{element}; {}]{suffix}",
-                        vec!["_"; array.rank].join(", ")
-                    )
+                    format!("{prefix}[{element}]{suffix}")
                 }
             }
             Type::Struct(id) => self.get(id).name.clone(),
@@ -355,14 +349,16 @@ impl Structs {
         }
         match ty {
             Type::Array(id) => {
-                let array = self.arrays.borrow().get(id);
-                let element = self.name_with_parameters(array.element, parameters);
-                if let Some(index_enum) = array.index_enum {
-                    format!("[{element}; {}]", self.enums[index_enum.id].name)
-                } else if array.rank == 1 {
-                    format!("[{element}]")
+                let (element_ty, dims) = {
+                    let arrays = self.arrays.borrow();
+                    let array = arrays.get(id);
+                    (array.element, array.format_dims(&self.enums))
+                };
+                let element = self.name_with_parameters(element_ty, parameters);
+                if let Some(dims) = dims {
+                    format!("[{element}; {dims}]")
                 } else {
-                    format!("[{element}; {}]", vec!["_"; array.rank].join(", "))
+                    format!("[{element}]")
                 }
             }
             Type::ArrayRef {
@@ -370,22 +366,18 @@ impl Structs {
                 mutable,
                 nilable,
             } => {
-                let array = self.arrays.borrow().get(id);
-                let element = self.name_with_parameters(array.element, parameters);
+                let (element_ty, dims) = {
+                    let arrays = self.arrays.borrow();
+                    let array = arrays.get(id);
+                    (array.element, array.format_dims(&self.enums))
+                };
+                let element = self.name_with_parameters(element_ty, parameters);
                 let prefix = if mutable { "#" } else { "." };
                 let suffix = if nilable { "?" } else { "" };
-                if let Some(index_enum) = array.index_enum {
-                    format!(
-                        "{prefix}[{element}; {}]{suffix}",
-                        self.enums[index_enum.id].name
-                    )
-                } else if array.rank == 1 {
-                    format!("{prefix}[{element}]{suffix}")
+                if let Some(dims) = dims {
+                    format!("{prefix}[{element}; {dims}]{suffix}")
                 } else {
-                    format!(
-                        "{prefix}[{element}; {}]{suffix}",
-                        vec!["_"; array.rank].join(", ")
-                    )
+                    format!("{prefix}[{element}]{suffix}")
                 }
             }
             Type::Parameter(id) => parameters
@@ -586,7 +578,7 @@ impl Structs {
             return self.resolve_shape(ty, arguments, location, path, parameters);
         }
         if let Type::Array(id) = ty {
-            let array = self.arrays.borrow().get(id);
+            let array = self.arrays.borrow().get(id).clone();
             let element =
                 self.resolve_inner(array.element, arguments, location, path, parameters)?;
             if element == Type::Void || matches!(element, Type::Function(_)) {
@@ -601,12 +593,10 @@ impl Structs {
                     crate::diagnostic!("array.soa-type", "soa array elements must be structs"),
                 ));
             }
-            return Ok(self.arrays.borrow_mut().intern_full(
-                element,
-                array.rank,
-                array.index_enum,
-                array.soa,
-            ));
+            return Ok(self
+                .arrays
+                .borrow_mut()
+                .intern_dims(element, array.dims, array.soa));
         }
         if let Type::ArrayRef {
             id,
@@ -614,7 +604,7 @@ impl Structs {
             nilable,
         } = ty
         {
-            let array = self.arrays.borrow().get(id);
+            let array = self.arrays.borrow().get(id).clone();
             let element =
                 self.resolve_inner(array.element, arguments, location, path, parameters)?;
             if element == Type::Void || matches!(element, Type::Function(_)) {
@@ -629,12 +619,11 @@ impl Structs {
                     crate::diagnostic!("array.soa-type", "soa array elements must be structs"),
                 ));
             }
-            let Type::Array(id) = self.arrays.borrow_mut().intern_full(
-                element,
-                array.rank,
-                array.index_enum,
-                array.soa,
-            ) else {
+            let Type::Array(id) = self
+                .arrays
+                .borrow_mut()
+                .intern_dims(element, array.dims, array.soa)
+            else {
                 unreachable!()
             };
             return Ok(Type::ArrayRef {

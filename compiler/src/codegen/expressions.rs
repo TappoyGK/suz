@@ -416,7 +416,14 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             ref target,
             dimension,
         } => {
-            format!("({}).lengths[{dimension}]", expression(target, context))
+            let value = expression(target, context);
+            let array = context.arrays.get(target.ty.array_id().unwrap());
+            if let Some(enum_ty) = array.dims[dimension] {
+                format!("((void)({value}), (int32_t){})", enum_ty.count)
+            } else {
+                let ridx = array.runtime_dim_index(dimension).unwrap();
+                format!("({value}).lengths[{ridx}]")
+            }
         }
         Value::ArrayDimensionGuard {
             ref name,
@@ -437,9 +444,14 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
         }
         Value::Len(ref inner) => {
             let value = expression(inner, context);
-            // 実体またはビューが保持する個数を読む。オペランドは一度だけ評価する。
-            if inner.ty.array_id().is_some() {
-                format!("({value}).lengths[0]")
+            // 実体またはビューが保持する個数、または列挙型次元の定数個数を使う。オペランドは一度だけ評価する。
+            if let Some(id) = inner.ty.array_id() {
+                let array = context.arrays.get(id);
+                if let Some(enum_ty) = array.first_enum() {
+                    format!("((void)({value}), (int32_t){})", enum_ty.count)
+                } else {
+                    format!("({value}).lengths[0]")
+                }
             } else if inner.ty == crate::ast::Type::Symbol {
                 format!("suz_text_count({value})")
             } else {
