@@ -424,7 +424,18 @@ pub(super) fn check(
             .unwrap_or(Type::Float(FloatType::F64));
             let operands = operands
                 .iter()
-                .map(|operand| {
+                .enumerate()
+                .map(|(index, operand)| {
+                    if is_empty_array_literal(operand) {
+                        let location = locations[index.saturating_sub(1)];
+                        return Err(location.error(
+                            ErrorKind::InvalidSource,
+                            crate::diagnostic!(
+                                "array.value",
+                                "array references and structs containing them cannot be compared"
+                            ),
+                        ));
+                    }
                     if numeric {
                         if operand_type(operand, bindings).is_none()
                             && has_float_source(operand, bindings)
@@ -438,55 +449,8 @@ pub(super) fn check(
                         while let ExpressionKind::Group(grouped) = &inner.kind {
                             inner = grouped;
                         }
-                        let empty_array = match &inner.kind {
-                            ExpressionKind::ArrayInit {
-                                values,
-                                repeated: false,
-                                readonly,
-                                soa,
-                                ..
-                            } if values.is_empty() => Some((*readonly, *soa)),
-                            ExpressionKind::New(boxed) => match &boxed.kind {
-                                ExpressionKind::ArrayInit {
-                                    values,
-                                    repeated: false,
-                                    readonly,
-                                    soa,
-                                    ..
-                                } if values.is_empty() => Some((*readonly, *soa)),
-                                _ => None,
-                            },
-                            _ => None,
-                        };
                         if matches!(inner.kind, ExpressionKind::Nil) && ty.is_nilable() {
                             expression(operand, Some(ty), bindings)
-                        } else if let (Some((readonly, soa)), Some(id)) =
-                            (empty_array, ty.array_id())
-                        {
-                            let arr = bindings.structs.arrays.borrow().get(id);
-                            let expected_id =
-                                if arr.rank == 1 && arr.index_enum.is_none() && arr.soa == soa {
-                                    id
-                                } else {
-                                    let Type::Array(new_id) = bindings
-                                        .structs
-                                        .arrays
-                                        .borrow_mut()
-                                        .intern_full(arr.element, 1, None, soa)
-                                    else {
-                                        unreachable!()
-                                    };
-                                    new_id
-                                };
-                            expression(
-                                operand,
-                                Some(Type::ArrayRef {
-                                    id: expected_id,
-                                    mutable: !readonly,
-                                    nilable: false,
-                                }),
-                                bindings,
-                            )
                         } else if operand_type(operand, bindings).is_none()
                             && has_float_source(operand, bindings)
                         {
@@ -636,6 +600,28 @@ pub(super) fn check(
         }
         _ => unreachable!(),
     })
+}
+
+fn is_empty_array_literal(mut expr: &Expression) -> bool {
+    while let ExpressionKind::Group(inner) = &expr.kind {
+        expr = inner;
+    }
+    match &expr.kind {
+        ExpressionKind::ArrayInit {
+            values,
+            repeated: false,
+            ..
+        } => values.is_empty(),
+        ExpressionKind::New(boxed) => matches!(
+            &boxed.kind,
+            ExpressionKind::ArrayInit {
+                values,
+                repeated: false,
+                ..
+            } if values.is_empty()
+        ),
+        _ => false,
+    }
 }
 
 fn same_width(

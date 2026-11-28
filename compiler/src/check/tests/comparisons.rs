@@ -128,6 +128,26 @@ fn array_reference_comparisons_report_array_value_at_operator() {
             15,
         ),
         (
+            "fn main() -> u8 {\n    fix a = new #[1, 2]\n    fix m = a == soa .[]\n    return 0\n}",
+            3,
+            15,
+        ),
+        (
+            "struct Holder { values: #[i32] }\nfn main() -> u8 {\n    fix h = Holder { values: new #[1] }\n    fix m = h == .[]\n    return 0\n}",
+            4,
+            15,
+        ),
+        (
+            "fn main() -> u8 {\n    fix m = .[] == .[]\n    return 0\n}",
+            2,
+            17,
+        ),
+        (
+            "fn main() -> u8 {\n    fix m = 1 == .[]\n    return 0\n}",
+            2,
+            15,
+        ),
+        (
             "struct Point { x: i32, y: i32 }\nfn main() -> u8 {\n    fix a = new soa #[Point { x: 1, y: 2 }]\n    fix m = a == 1\n    return 0\n}",
             4,
             15,
