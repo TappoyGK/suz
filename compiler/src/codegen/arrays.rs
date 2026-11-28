@@ -554,6 +554,7 @@ fn zero_bits(value: &CheckedExpression) -> bool {
 #[allow(clippy::too_many_arguments)]
 pub(super) fn emit_loop(
     c: &mut String,
+    index: Option<(usize, Type)>,
     id: usize,
     item: Type,
     source: &CheckedExpression,
@@ -599,6 +600,15 @@ pub(super) fn emit_loop(
         )
     };
     writeln!(c, "{indent}    int32_t suz_cursor_{id} = {initial};\n{indent}    while ({condition}) {{\n{indent}        const size_t suz_pos_{id} = {position};").unwrap();
+    if let Some((index_id, index_ty)) = index {
+        let index_c_ty = index_ty.c_name();
+        writeln!(
+            c,
+            "{indent}        const {index_c_ty} suz_local_{index_id} = ({index_c_ty})suz_pos_{id};\n{indent}        (void)suz_local_{index_id};"
+        )
+        .unwrap();
+        context.immutable_locals.insert(index_id);
+    }
     let value = if array.soa {
         let Type::Struct(struct_id) = array.element else {
             unreachable!("soa array element must be a struct");

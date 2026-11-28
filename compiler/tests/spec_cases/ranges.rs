@@ -294,3 +294,209 @@ fn range_bounds_check_nested_references_scope_and_control_transfers() {
         suz::compile_with_mode(source.as_bytes(), suz::ArithmeticMode::Deny).unwrap();
     }
 }
+
+#[test]
+fn indexed_array_and_type_iteration_runtime_and_diagnostics() {
+    let source = r#"
+enum Wave: u8 { Sine, Saw, Square }
+enum Single: u8 { Only }
+range Step: u8 = 0..<4
+range One: i32 = 3..=3
+range SignedByte: i8 = -128..=127
+range BigLow: i64 = -9223372036854775808..=-9223372036854775806
+range BigHigh: u64 = 18446744073709551613..=18446744073709551615
+
+struct Voice {
+    freq: i32,
+}
+
+struct State {
+    voices: #[Voice],
+}
+
+fn run_ptr(state: ref State) -> i32 {
+    var acc: i32 = 0
+    for i, v in (.state).voices {
+        acc = acc + (i as i32) * 10 + v.freq or 0
+    }
+    return acc
+}
+
+fn run_row(grid: .[i32; _, _], y: len_t) -> i32 {
+    var acc: i32 = 0
+    if y < len grid {
+        for x, v in grid.[y] {
+            acc = acc + (x as i32) * 10 + v or 0
+        }
+    }
+    return acc
+}
+
+fn main() -> u8 {
+    // SoA 列挙型添字配列の 2 変数反復
+    fix soa_enum: soa #[Voice; Wave] = new soa #[Voice { freq: 5 }; Wave]
+    for w, v in soa_enum {
+        soa_enum.[w]#freq = v.freq + (w as i32) or return 1
+    }
+    if soa_enum.[Wave.Sine].freq != 5 || soa_enum.[Wave.Saw].freq != 6 || soa_enum.[Wave.Square].freq != 7 {
+        return 2
+    }
+
+    // 切り出し・ポインタ経由・2 次元配列の 1 行の 2 変数反復
+    fix base: #[i32] = new #[10, 20, 30, 40]
+    var slice_acc: i32 = 0
+    for i, x in base.[1:] {
+        slice_acc = slice_acc + (i as i32) * 100 + x or return 3
+    }
+    if slice_acc != 390 { return 4 }
+
+    fix st = new State { voices: new #[Voice { freq: 1 }, Voice { freq: 2 }] }
+    if run_ptr(st) != 13 { return 5 }
+
+    fix grid: .[i32; _, _] = .[[1, 2], [3, 4]]
+    if run_row(grid, 1) != 17 { return 6 }
+
+    // 1 要素列挙型・1 値 range・端点（i8/i64/u64）反復
+    var single_count: i32 = 0
+    for s in Single { single_count = single_count + 1 or return 7 }
+    rev s in Single { single_count = single_count + 1 or return 8 }
+    if single_count != 2 { return 9 }
+
+    var one_sum: i32 = 0
+    for o in One { one_sum = one_sum + (o as i32) or return 10 }
+    rev o in One { one_sum = one_sum + (o as i32) or return 11 }
+    if one_sum != 6 { return 12 }
+
+    var sb: i32 = 0
+    for v in SignedByte {
+        sb = sb + 1 or return 13
+        if v == 127 { continue }
+    }
+    rev v in SignedByte {
+        sb = sb + 1 or return 14
+        if v == -128 { continue }
+    }
+    if sb != 512 { return 15 }
+
+    var bl: i32 = 0
+    for v in BigLow { bl = bl + 1 or return 16 }
+    rev v in BigLow { bl = bl + 1 or return 17 }
+    if bl != 6 { return 18 }
+
+    var bh: i32 = 0
+    for v in BigHigh {
+        bh = bh + 1 or return 19
+        if v == 18446744073709551615 { continue }
+    }
+    rev v in BigHigh { bh = bh + 1 or return 20 }
+    if bh != 6 { return 21 }
+
+    // 値域制限型の型名反復で範囲保証が効くこと
+    fix steps: .[i32] = new .[10, 20, 30, 40]
+    var step_sum: i32 = 0
+    for s in Step {
+        fix v = steps.[s]
+        step_sum = step_sum + v or return 22
+    }
+    if step_sum != 100 { return 23 }
+    return 0
+}
+"#;
+    let dir = TemporaryDirectory::new();
+    let c_path = dir.0.join("main.c");
+    fs::write(&c_path, suz::compile(source.as_bytes()).unwrap()).unwrap();
+    for optimization in ["-O0", "-O2"] {
+        let bin_path = dir.0.join(format!("main{optimization}"));
+        let out = runtime_link::compiler()
+            .args([
+                "-std=c23",
+                "-Wall",
+                "-Wextra",
+                "-Werror",
+                optimization,
+                "-fsanitize=undefined",
+                "-fno-sanitize-recover=all",
+            ])
+            .arg(&c_path)
+            .arg("-o")
+            .arg(&bin_path)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "C compile failed ({optimization}): {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let run = Command::new(&bin_path).output().unwrap();
+        assert_eq!(
+            run.status.code(),
+            Some(0),
+            "runtime failed ({optimization}): {}",
+            String::from_utf8_lossy(&run.stderr)
+        );
+    }
+
+    // 拒否ケース
+    for (source, rule) in [
+        (
+            "fn main() -> u8 { for i, x in 0..<3 {}\nreturn 0 }",
+            "for.pair-target",
+        ),
+        (
+            "fn main() -> u8 { for i, c in \"abc\" {}\nreturn 0 }",
+            "for.pair-target",
+        ),
+        (
+            "enum Wave: u8 { A }\nfn main() -> u8 { for w, x in Wave {}\nreturn 0 }",
+            "for.pair-target",
+        ),
+        (
+            "range Step: u8 = 0..<4\nfn main() -> u8 { for s, x in Step {}\nreturn 0 }",
+            "for.pair-target",
+        ),
+        (
+            "fn main() -> u8 { for w in UnknownEnum {}\nreturn 0 }",
+            "for.type-name",
+        ),
+        (
+            "struct Vec2 { x: f32 }\nfn main() -> u8 { for p in Vec2 {}\nreturn 0 }",
+            "for.type-name",
+        ),
+        (
+            "enum Wave: u8 { A }\nfn main() -> u8 { fix g = new #[1; Wave]\nfor w, _ in g {}\nreturn 0 }",
+            "src.ident",
+        ),
+        (
+            "fn main() -> u8 { fix a = new .[1, 2]\nfor x, x in a {}\nreturn 0 }",
+            "decl.duplicate",
+        ),
+        (
+            "fn main() -> u8 { fix a = new .[1, 2]\nfor i, x in a { i = 0 }\nreturn 0 }",
+            "for.variable",
+        ),
+        (
+            "fn main() -> u8 { fix a = new .[1, 2]\nfor i, x in a { x = 0 }\nreturn 0 }",
+            "for.variable",
+        ),
+        (
+            "fn main() -> u8 { var a = new .[1, 2]\nfor i, x in a {}\nreturn 0 }",
+            "for.bound-reference",
+        ),
+        // ポインタ経由の配列では範囲保証を覚えないため、別アクセスに or が必要
+        (
+            "struct State { a: .[i32] }\nfn f(s: ref State) -> i32 { for i, x in (.s).a { fix y = (.s).a.[i]\nreturn y }\nreturn 0 }\nfn main() -> u8 { return 0 }",
+            "array.access-handler",
+        ),
+        // 切り出しでは範囲保証を覚えないため、元配列へのアクセスに or が必要
+        (
+            "fn f(a: .[i32]) -> i32 { if 1 <= len a { for i, x in a.[1:] { fix y = a.[i]\nreturn y } }\nreturn 0 }\nfn main() -> u8 { return 0 }",
+            "array.access-handler",
+        ),
+    ] {
+        for source in [source.to_owned(), source.replace("for ", "rev ")] {
+            let error = suz::compile(source.as_bytes()).unwrap_err();
+            assert_eq!(error.kind, suz::ErrorKind::InvalidSource, "{source}");
+            assert!(error.message().contains(rule), "{source}: {error:?}");
+        }
+    }
+}

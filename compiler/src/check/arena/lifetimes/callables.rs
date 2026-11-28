@@ -860,26 +860,35 @@ impl Walk<'_> {
                     }
                     self.statements(body);
                 }
-                CheckedStatement::For {
-                    id,
-                    start,
-                    end,
-                    body,
-                    ..
-                } => {
-                    let mut values = self.expr(start);
-                    if let Some(e) = end {
-                        self.expr(e);
-                    }
-                    if let Some(array) = start.ty.array_id() {
-                        if self.analysis.structs.arrays.borrow().get(array).rank == 1 {
-                            let pointers = values;
-                            values = Values::new();
-                            for pointer in pointers.values().flat_map(|s| s.values()) {
-                                merge(&mut values, self.program.read(Flow::Heap(pointer.function)));
+                CheckedStatement::For(for_stmt) => {
+                    let crate::check::ir::CheckedFor {
+                        id, target, body, ..
+                    } = for_stmt.as_mut();
+                    match target {
+                        crate::check::ir::CheckedForTarget::Range { start, end, .. } => {
+                            self.expr(start);
+                            self.expr(end);
+                        }
+                        crate::check::ir::CheckedForTarget::Array(start) => {
+                            let mut values = self.expr(start);
+                            if let Some(array) = start.ty.array_id() {
+                                if self.analysis.structs.arrays.borrow().get(array).rank == 1 {
+                                    let pointers = values;
+                                    values = Values::new();
+                                    for pointer in pointers.values().flat_map(|s| s.values()) {
+                                        merge(
+                                            &mut values,
+                                            self.program.read(Flow::Heap(pointer.function)),
+                                        );
+                                    }
+                                }
+                                merge(self.locals.entry(*id).or_default(), values);
                             }
                         }
-                        merge(self.locals.entry(*id).or_default(), values);
+                        crate::check::ir::CheckedForTarget::Text(start) => {
+                            self.expr(start);
+                        }
+                        crate::check::ir::CheckedForTarget::TypeRange { .. } => {}
                     }
                     self.statements(body);
                 }

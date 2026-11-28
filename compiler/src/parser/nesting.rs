@@ -161,12 +161,12 @@ fn statement_height(statement: &Statement) -> usize {
             .as_ref()
             .map_or(0, |v| v.height)
             .max(block_height(body)),
-        Statement::For {
-            start, end, body, ..
-        } => start
-            .height
-            .max(end.as_ref().map_or(0, |v| v.height))
-            .max(block_height(body)),
+        Statement::For(for_stmt) => match &for_stmt.target {
+            crate::ast::ForTarget::Range { start, end, .. } => start.height.max(end.height),
+            crate::ast::ForTarget::Expression(expr) => expr.height,
+            crate::ast::ForTarget::Type { .. } => 0,
+        }
+        .max(block_height(&for_stmt.body)),
         Statement::If {
             branches,
             otherwise,

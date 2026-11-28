@@ -163,58 +163,7 @@ impl Parser<'_, '_> {
                     location,
                 })
             }
-            Kind::Keyword("for" | "rev") => {
-                let reverse = self.token().kind == Kind::Keyword("rev");
-                self.cursor += 1;
-                let location = self.location();
-                let Kind::Ident(name) = self.token().kind else {
-                    return Err(self.error(
-                        ErrorKind::InvalidSource,
-                        crate::diagnostic!("src.ident", "expected a loop variable name"),
-                    ));
-                };
-                super::names::check(super::names::Shape::Value, name, location)?;
-                let name = name.to_owned();
-                self.cursor += 1;
-                self.expect(FixedToken::Keyword("in"))?;
-                let start = self.condition()?;
-                let range_location = self.location();
-                let (inclusive, end) = match self.token().kind {
-                    Kind::Symbol(operator @ ("..<" | "..=")) => {
-                        self.cursor += 1;
-                        if self.token().kind == Kind::End {
-                            return Err(range_location.error(
-                                ErrorKind::InvalidSource,
-                                crate::diagnostic!(
-                                    "for.range",
-                                    "expected an end bound after the range operator"
-                                ),
-                            ));
-                        }
-                        (operator == "..=", Some(self.condition()?))
-                    }
-                    Kind::Symbol("{") => (false, None),
-                    _ => {
-                        return Err(self.error(
-                            ErrorKind::InvalidSource,
-                            crate::diagnostic!(
-                                "for.range",
-                                "expected a range operator or loop body"
-                            ),
-                        ));
-                    }
-                };
-                let (body, _) = self.block()?;
-                Ok(Statement::For {
-                    name,
-                    location,
-                    start,
-                    end: end.map(Box::new),
-                    inclusive,
-                    reverse,
-                    body,
-                })
-            }
+            Kind::Keyword("for" | "rev") => self.for_statement(),
             Kind::Keyword("fn") if self.starts_function_declaration() => Err(self.error(
                 ErrorKind::InvalidSource,
                 crate::diagnostic!(
@@ -532,5 +481,95 @@ impl Parser<'_, '_> {
         let end = self.location();
         self.expect(FixedToken::Symbol("}"))?;
         Ok((statements, end))
+    }
+
+    #[inline(never)]
+    fn for_statement(&mut self) -> Result<Statement, Diagnostic> {
+        let reverse = self.token().kind == Kind::Keyword("rev");
+        self.cursor += 1;
+        let first_location = self.location();
+        let Kind::Ident(first_name) = self.token().kind else {
+            return Err(self.error(
+                ErrorKind::InvalidSource,
+                crate::diagnostic!("src.ident", "expected a loop variable name"),
+            ));
+        };
+        super::names::check(super::names::Shape::Value, first_name, first_location)?;
+        let first_name = first_name.to_owned();
+        self.cursor += 1;
+        let (index, name, location) = if self.token().kind == Kind::Symbol(",") {
+            self.cursor += 1;
+            let second_location = self.location();
+            let Kind::Ident(second_name) = self.token().kind else {
+                return Err(self.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("src.ident", "expected a loop variable name"),
+                ));
+            };
+            super::names::check(super::names::Shape::Value, second_name, second_location)?;
+            let second_name = second_name.to_owned();
+            self.cursor += 1;
+            (
+                Some((first_name, first_location)),
+                second_name,
+                second_location,
+            )
+        } else {
+            (None, first_name, first_location)
+        };
+        self.expect(FixedToken::Keyword("in"))?;
+        let target = if let Kind::Ident(type_name) = self.token().kind
+            && super::names::is_type_spelling(type_name)
+            && self
+                .tokens
+                .get(self.cursor + 1)
+                .is_some_and(|t| t.kind == Kind::Symbol("{"))
+        {
+            let type_location = self.location();
+            let type_name = type_name.to_owned();
+            self.cursor += 1;
+            crate::ast::ForTarget::Type {
+                name: type_name,
+                location: type_location,
+            }
+        } else {
+            let start = self.condition()?;
+            let range_location = self.location();
+            match self.token().kind {
+                Kind::Symbol(operator @ ("..<" | "..=")) => {
+                    self.cursor += 1;
+                    if self.token().kind == Kind::End {
+                        return Err(range_location.error(
+                            ErrorKind::InvalidSource,
+                            crate::diagnostic!(
+                                "for.range",
+                                "expected an end bound after the range operator"
+                            ),
+                        ));
+                    }
+                    crate::ast::ForTarget::Range {
+                        start,
+                        end: Box::new(self.condition()?),
+                        inclusive: operator == "..=",
+                    }
+                }
+                Kind::Symbol("{") => crate::ast::ForTarget::Expression(start),
+                _ => {
+                    return Err(self.error(
+                        ErrorKind::InvalidSource,
+                        crate::diagnostic!("for.range", "expected a range operator or loop body"),
+                    ));
+                }
+            }
+        };
+        let (body, _) = self.block()?;
+        Ok(Statement::For(Box::new(crate::ast::ForStatement {
+            index,
+            name,
+            location,
+            target,
+            reverse,
+            body,
+        })))
     }
 }

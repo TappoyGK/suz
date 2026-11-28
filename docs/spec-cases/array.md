@@ -230,6 +230,92 @@ fn main() -> u8 {
 |---|---|---:|---:|
 | 通常 | 正常終了 | 0 | 0 |
 
+### array-110 通常配列・多次元配列・切り出しの2変数反復
+
+主根拠：`[array.iteration]`。
+
+補助根拠：`[array.bounds-proof]`。
+
+**ソース：**
+
+```suz
+fn add_same(src: .[i32; n], out: #[i32; n]) -> void {
+    for i, x in src {
+        out#[i] = out.[i] + x or 0
+    }
+}
+
+fn main() -> u8 {
+    fix src: .[i32] = new .[1, 2, 3]
+    fix out: #[i32] = new #[10, 20, 30]
+    add_same(src, out)
+    if out.[0] != 11 || out.[1] != 22 || out.[2] != 33 { return 1 }
+
+    var rev_idx: i32 = 0
+    rev i, x in src {
+        rev_idx = rev_idx * 100 + (i as i32) * 10 + x or return 2
+    }
+    if rev_idx != 231201 { return 3 }
+
+    // 切り出しの添字は切り出し先頭を0とする位置であり、元配列のオフセットは付かない
+    fix base: #[i32] = new #[10, 20, 30, 40]
+    var slice_acc: i32 = 0
+    for i, x in base.[1:] {
+        slice_acc = slice_acc + (i as i32) * 100 + x or return 4
+    }
+    if slice_acc != 390 { return 5 }
+
+    fix grid: .[i32; _, _] = .[[1, 2], [3, 4]]
+    var grid_sum: i32 = 0
+    for y, row in grid {
+        for x, v in row {
+            grid_sum = grid_sum + (y as i32) * 10 + (x as i32) + v or return 6
+        }
+    }
+    if grid_sum != 32 { return 7 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### array-111 対象が項でない2変数反復では範囲の保証を覚えない
+
+主根拠：`[array.bounds-proof]`。
+
+補助根拠：`[array.iteration]`、`[array.access-handler]`。
+
+**ソース：**
+
+```suz
+fn f(a: .[i32]) -> i32 {
+    if 1 <= len a {
+        for i, x in a.[1:] {
+            fix y = a.[i]
+            return y
+        }
+    }
+    return 0
+}
+fn main() -> u8 { return 0 }
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | コンパイルエラー | — | 0 |
+
+**コンパイル診断：**
+
+| 設定 | 規則 | 行 | 列 |
+|---|---|---:|---:|
+| 通常 | `[array.access-handler]` | 4 | 22 |
+
 
 ### array-007 寸法名の一致条件と隣接要素の範囲保証
 
@@ -2309,6 +2395,39 @@ fn main() -> u8 {
         if x == 1 { a#[Wave.Triangle] = 30 }
     }
     if sum != 33 { return 2 }
+    return 0
+}
+```
+
+**期待結果：**
+
+| 設定 | 結果 | 終了コード | 警告数 |
+|---|---|---:|---:|
+| 通常 | 正常終了 | 0 | 0 |
+
+### array-112 列挙型添字配列の2変数反復
+
+主根拠：`[array.enum-iteration]`。
+
+補助根拠：`[array.iteration]`。
+
+**ソース：**
+
+```suz
+enum Wave: u8 { Sine, Saw, Square }
+
+fn main() -> u8 {
+    fix gains: #[i32; Wave] = new #[Wave.Sine: 1, Wave.Saw: 2, Wave.Square: 3]
+    for w, g in gains {
+        gains#[w] = g * 10 or return 1
+    }
+    if gains.[Wave.Sine] != 10 || gains.[Wave.Saw] != 20 || gains.[Wave.Square] != 30 { return 2 }
+    var rev_sum: i32 = 0
+    rev w, g in gains {
+        rev_sum = rev_sum * 100 + g or return 3
+        if w == Wave.Saw { gains#[Wave.Sine] = 99 }
+    }
+    if rev_sum != 302099 { return 4 }
     return 0
 }
 ```
