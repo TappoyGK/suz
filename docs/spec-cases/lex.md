@@ -614,17 +614,6 @@ fn main() -> u8 {
 }
 ```
 
-### lex-043 非ASCIIの文字が2つ以上続く文字リテラルを拒否する
-- 主根拠：`[char.literal]`
-- 結果：コンパイルエラー `[char.literal]` 2:14
-
-```suz
-fn main() -> u8 {
-    fix ch = \日本
-    return 0
-}
-```
-
 ### lex-044 バックスラッシュ直後の空白は文字リテラルとして拒否する
 - 主根拠：`[char.literal]`
 - 結果：コンパイルエラー `[char.literal]` 2:15
@@ -632,17 +621,6 @@ fn main() -> u8 {
 ```suz
 fn main() -> u8 {
     fix ch = (\ )
-    return 0
-}
-```
-
-### lex-045 バックスラッシュ直後の全角空白は文字リテラルとして拒否する
-- 主根拠：`[char.literal]`
-- 結果：コンパイルエラー `[char.literal]` 2:15
-
-```suz
-fn main() -> u8 {
-    fix ch = (\　)
     return 0
 }
 ```

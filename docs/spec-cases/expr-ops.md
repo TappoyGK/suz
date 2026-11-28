@@ -65,43 +65,6 @@ fn main() -> u8 {
 }
 ```
 
-### expr-007 ifexpr内部のreturn
-- 主根拠：`[expr.jump-prohibited]`
-- 結果：コンパイルエラー `[expr.jump-prohibited]` 3:9
-
-末尾に値があっても、途中のreturnは禁止。
-
-```suz
-fn main() -> u8 {
-    fix result: u8 = ifexpr true {
-        return 1
-        2
-    } else {
-        3
-    }
-    return result
-}
-```
-
-### expr-008 matchexpr内部のreturn
-- 主根拠：`[expr.jump-prohibited]`
-- 結果：コンパイルエラー `[expr.jump-prohibited]` 4:13
-
-matchexprの腕の内部のreturnは禁止。
-
-```suz
-fn main() -> u8 {
-    fix result: u8 = matchexpr true {
-        true => {
-            return 1
-            2
-        }
-        false => 3
-    }
-    return result
-}
-```
-
 ### expr-009 expr系からreturnを持つ関数を呼び出す
 - 主根拠：`[expr.jump-prohibited]`
 - 補助根拠：`[fn.call]`、`[fn.return]`
@@ -141,38 +104,6 @@ fn main() -> u8 {
         1
     }
     return result
-}
-```
-
-### expr-011 expr内部のループのcontinue
-- 主根拠：`[expr.jump-prohibited]`
-- 結果：コンパイルエラー `[expr.jump-prohibited]` 4:13
-
-内側のforでもcontinueは禁止。
-
-```suz
-fn main() -> u8 {
-    fix result: u8 = expr {
-        for i in 0..<1 {
-            continue
-        }
-        1
-    }
-    return result
-}
-```
-
-### expr-070 値を作るブロック内のrevからcontinueする
-- 主根拠：`[expr.jump-prohibited]`
-- 結果：コンパイルエラー `[expr.jump-prohibited]` 3:26
-
-```suz
-fn main() -> u8 {
-    fix value = expr {
-        rev i in 0..<1 { continue }
-        0
-    }
-    return value
 }
 ```
 
@@ -687,66 +618,6 @@ fn main() -> u8 {
     fix raw: i64 = 300
     fix result = (raw as u8 or return 1) + 2
     return result
-}
-```
-
-### expr-055 関数の引数にor returnを埋め込む
-- 主根拠：`[expr.or-return-position]`
-- 結果：コンパイルエラー `[expr.or-return-position]` 5:22
-
-実引数の内部のor returnは禁止。
-
-```suz
-fn use(value: u8) -> void {}
-
-fn main() -> u8 {
-    fix raw: i64 = 300
-    use(raw as u8 or return 1)
-    return 0
-}
-```
-
-### expr-056 returnに渡す式の中にor returnを書く
-- 主根拠：`[expr.or-return-position]`
-- 結果：コンパイルエラー `[expr.or-return-position]` 3:25
-
-returnの値を作る式にはor returnを置けない。
-
-```suz
-fn main() -> u8 {
-    fix raw: i64 = 300
-    return raw as u8 or return 7
-}
-```
-
-### expr-057 構造体のフィールド初期値にor returnを書く
-- 主根拠：`[expr.or-return-position]`
-- 結果：コンパイルエラー `[expr.or-return-position]` 5:49
-
-変換はフィールド初期値の全体でも、fixの初期値全体ではない。
-
-```suz
-struct Counter { value: u8 }
-
-fn main() -> u8 {
-    fix raw: i64 = 300
-    fix counter = Counter { value: raw as u8 or return 7 }
-    return counter.value
-}
-```
-
-### expr-058 orの代替値の中にor returnを書く
-- 主根拠：`[expr.or-return-position]`
-- 結果：コンパイルエラー `[expr.or-return-position]` 4:49
-
-内側の変換は外側のorの代替値に埋め込まれているため、or returnを付けられない。
-
-```suz
-fn main() -> u8 {
-    fix first: i64 = 300
-    fix second: i64 = 400
-    fix value = first as u8 or (second as u8 or return 7)
-    return value
 }
 ```
 

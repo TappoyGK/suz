@@ -514,3 +514,75 @@ fn main() -> u8 {
         assert!(error.message().contains(rule), "{body}: {error:?}");
     }
 }
+
+/// 仕様例集（旧 `expr-007`・`expr-008`・`expr-011`・`expr-070`・`expr-055`〜`expr-058`）から移管した派生拒否ケース。
+#[test]
+fn migrated_jump_and_or_return_position_diagnostics() {
+    for (id, source, rule, line, column) in [
+        (
+            "expr-007",
+            "fn main() -> u8 {\n    fix result: u8 = ifexpr true {\n        return 1\n        2\n    } else {\n        3\n    }\n    return result\n}\n",
+            "expr.jump-prohibited",
+            3,
+            9,
+        ),
+        (
+            "expr-008",
+            "fn main() -> u8 {\n    fix result: u8 = matchexpr true {\n        true => {\n            return 1\n            2\n        }\n        false => 3\n    }\n    return result\n}\n",
+            "expr.jump-prohibited",
+            4,
+            13,
+        ),
+        (
+            "expr-011",
+            "fn main() -> u8 {\n    fix result: u8 = expr {\n        for i in 0..<1 {\n            continue\n        }\n        1\n    }\n    return result\n}\n",
+            "expr.jump-prohibited",
+            4,
+            13,
+        ),
+        (
+            "expr-070",
+            "fn main() -> u8 {\n    fix value = expr {\n        rev i in 0..<1 { continue }\n        0\n    }\n    return value\n}\n",
+            "expr.jump-prohibited",
+            3,
+            26,
+        ),
+        (
+            "expr-055",
+            "fn use(value: u8) -> void {}\n\nfn main() -> u8 {\n    fix raw: i64 = 300\n    use(raw as u8 or return 1)\n    return 0\n}\n",
+            "expr.or-return-position",
+            5,
+            22,
+        ),
+        (
+            "expr-056",
+            "fn main() -> u8 {\n    fix raw: i64 = 300\n    return raw as u8 or return 7\n}\n",
+            "expr.or-return-position",
+            3,
+            25,
+        ),
+        (
+            "expr-057",
+            "struct Counter { value: u8 }\n\nfn main() -> u8 {\n    fix raw: i64 = 300\n    fix counter = Counter { value: raw as u8 or return 7 }\n    return counter.value\n}\n",
+            "expr.or-return-position",
+            5,
+            49,
+        ),
+        (
+            "expr-058",
+            "fn main() -> u8 {\n    fix first: i64 = 300\n    fix second: i64 = 400\n    fix value = first as u8 or (second as u8 or return 7)\n    return value\n}\n",
+            "expr.or-return-position",
+            4,
+            49,
+        ),
+    ] {
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(error.kind, suz::ErrorKind::InvalidSource, "{id}");
+        assert_eq!(error.rule(), rule, "{id}: {error:?}");
+        assert_eq!(
+            (error.line, error.column),
+            (line, column),
+            "{id}: {error:?}"
+        );
+    }
+}

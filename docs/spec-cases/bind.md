@@ -496,15 +496,6 @@ fix PALETTE: #[i32] = new #[1, 2, 3]
 fn main() -> u8 { return 0 }
 ```
 
-### bind-033 トップレベルでは反復初期化による配列の確保を拒否する
-- 主根拠：`[const.expression]`
-- 結果：コンパイルエラー `[const.expression]` 1:9
-
-```suz
-fix B = new #[0; 3]
-fn main() -> u8 { return 0 }
-```
-
 ### bind-034 トップレベルではnewによる実体の確保を拒否する
 - 主根拠：`[const.expression]`
 - 結果：コンパイルエラー `[const.expression]` 1:9

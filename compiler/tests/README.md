@@ -54,7 +54,7 @@ export SUZ_JOBS=8
 SUZ_TIMINGS=1 ./scripts/test-spec-cases.sh
 ```
 
-実行テストは、正常終了と、「コンパイル診断」を記載したコンパイルエラー、「パニック診断」を記載したパニックを照合する。警告は、件数・規則・位置を照合する。普段の例集全体は `execute_spec_cases`、生成Cを最適化した例集全体は `execute_optimized_spec_cases` というテストとして実行する。
+実行テストは、正常終了・コンパイルエラー・パニックの各結果行（規則と位置、および列挙した警告）を照合する。普段の例集全体は `execute_spec_cases`、生成Cを最適化した例集全体は `execute_optimized_spec_cases` というテストとして実行する。仕様例集とRust結合テストの配置基準は[ソースの開発規約](../../docs/development.md#検証する内容)に従う。
 
 ## 管理するデータ
 
@@ -67,7 +67,7 @@ SUZ_TIMINGS=1 ./scripts/test-spec-cases.sh
 | ファイル | 内容 |
 |---|---|
 | `spec-cases.md` | 例集の書式、目次、全体の件数。 |
-| `spec-cases/*.md` | 分野別のID、ソースまたは入力バイト列、説明、期待結果の表、期待する出力。 |
+| `spec-cases/*.md` | 分野別のID、メタ行（主根拠・結果行）、説明、ソースまたは入力バイト列、期待する出力。 |
 
 ### compiler/tests/
 
@@ -82,7 +82,7 @@ SUZ_TIMINGS=1 ./scripts/test-spec-cases.sh
 | `catalog.rs` | 分野別ファイルの読み込み、ファイル間のID重複、分野別・結果別・全体の件数の検査。 |
 | `mod.rs` | 共有するデータ型とソースファイルの保存。 |
 | `cases.rs` | 各例の入力・説明・期待値の抽出。 |
-| `expectations.rs` | 期待結果・診断の表の読み取り、設定の検査、診断出力の照合。 |
+| `expectations.rs` | 結果行の読み取り、設定の検査、診断・警告出力の照合。 |
 | `markdown.rs` | 見出し、表、コードブロックの解析。 |
 | `batch.rs` | 生成Cの一括リンクとプロセスごとの実行。 |
 | `runtime_link.rs` | 生成Cを直接検証するテストで使う、標準ランタイムとのリンク設定。 |

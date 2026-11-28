@@ -1,6 +1,6 @@
 # Suz 仕様例集
 
-文書の役割と編集時の判断基準は[仕様の執筆・レビュー基準](spec-writing.md)を参照すること。
+文書の役割と編集時の判断基準は[仕様の執筆・レビュー基準](spec-writing.md)、仕様例集とRust結合テストの配置基準は[ソースの開発規約](development.md#検証する内容)を参照すること。
 
 [言語仕様](spec.md)に対する受理・拒否・実行結果の確認例。期待結果は仕様から導いたものであり、Suzコンパイラでの実行結果ではない。
 
@@ -94,13 +94,13 @@ IDは分野の接頭辞と番号で構成し、期待結果の種類を含めな
 
 | 分野 | ID接頭辞 | 対応する仕様 | 件数 |
 |---|---|---|---:|
-| [字句](spec-cases/lex.md) | `lex` | 第3章・付録A | 47 |
+| [字句](spec-cases/lex.md) | `lex` | 第3章・付録A | 45 |
 | [プログラムの構造](spec-cases/prog.md) | `prog` | 第4章 | 18 |
 | [型（基本）](spec-cases/type-basic.md)・[値域制限型](spec-cases/type-range.md) | `type` | 第3・5・10章 | 71 |
 | [symbolとtext（基本）](spec-cases/text-basic.md)・[テンプレート・追記](spec-cases/text-template.md) | `text` | 第5・6・7・8・9・10・14章 | 68 |
 | [配列（基本）](spec-cases/array-basic.md)・[範囲・寿命](spec-cases/array-bounds.md)・[一括演算](spec-cases/array-bulk.md)・[列挙型添字](spec-cases/array-enum.md)・[SoA](spec-cases/array-soa.md) | `array` | 第5・6・7・9・13・15章 | 112 |
-| [定数・変数・代入](spec-cases/bind.md) | `bind` | 第4・6・9章 | 34 |
-| [式（算術・変換）](spec-cases/expr-arith.md)・[演算子・制御](spec-cases/expr-ops.md) | `expr` | 第7・9章 | 89 |
+| [定数・変数・代入](spec-cases/bind.md) | `bind` | 第4・6・9章 | 33 |
+| [式（算術・変換）](spec-cases/expr-arith.md)・[演算子・制御](spec-cases/expr-ops.md) | `expr` | 第7・9章 | 81 |
 | [関数](spec-cases/flow-fn.md)・[制御](spec-cases/flow-control.md)・[クロージャ](spec-cases/flow-closure.md)・[契約](spec-cases/flow-contract.md)・[メソッド](spec-cases/method.md)・[匿名汎用](spec-cases/generic.md) | `flow` | 第8・11・12章 | 160 |
 | [エラー型と失敗する関数](spec-cases/errors.md) | `err` | 第8章 | 10 |
 | [作業領域とポインタ](spec-cases/arena.md) | `arena` | 第5・9・11章 | 27 |
@@ -110,7 +110,7 @@ IDは分野の接頭辞と番号で構成し、期待結果の種類を含めな
 | [実行時の検査](spec-cases/runtime.md) | `runtime` | 第13章 | 19 |
 | [ログ](spec-cases/log.md) | `log` | 第7・14章 | 18 |
 | [警告と診断設定](spec-cases/diag.md) | `diag` | 第15章 | 15 |
-| 合計 | | | 768 |
+| 合計 | | | 757 |
 
 件数はID接頭辞ごとに数える。flow-090・flow-091はメソッドのファイルに、flow接頭辞の匿名汎用22例は汎用のファイルに掲載する。
 
@@ -119,10 +119,10 @@ IDは分野の接頭辞と番号で構成し、期待結果の種類を含めな
 | 結果 | 件数 |
 |---|---:|
 | 受理 | 315 |
-| コンパイルエラー | 420 |
+| コンパイルエラー | 409 |
 | 実行時パニック | 20 |
 | 診断設定の比較 | 13 |
-| 合計 | 768 |
+| 合計 | 757 |
 
 期待結果が複数の設定を持つ例は「診断設定の比較」に1例として数える。設定が1つの例は、その結果で分類する。バイト列を指定する例も同じように数える。
 
