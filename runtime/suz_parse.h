@@ -43,6 +43,4 @@ uint32_t suz_parse_char_literal_status(const char *bytes, uint64_t length,
                                        uint32_t *output, uint64_t *consumed);
 bool suz_parse_char_literal(const char *bytes, uint64_t length,
                              uint32_t *output, uint64_t *consumed);
-/* 文字リテラルの表示規則で \u{H} 形式にすべき一般カテゴリ（Z・Cc・Cf・M）かを返す。 */
-bool suz_char_needs_unicode_escape(uint32_t scalar);
 #endif

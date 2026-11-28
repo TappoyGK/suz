@@ -205,36 +205,34 @@ uint32_t suz_parse_char_literal_status(const char *bytes, uint64_t length,
         return SUZ_CHAR_LITERAL_OK;
     }
     if (suz_unicode_is_disallowed_char_literal(first)) return SUZ_CHAR_LITERAL_DISALLOWED;
-    if (suz_unicode_is_char_name_unit(first)) {
-        uint64_t end = 1 + first_len;
-        uint64_t count = 1;
-        while (end < length) {
-            uint32_t next;
-            uint64_t next_len;
-            if (!suz_char_decode(bytes + end, length - end, &next, &next_len) ||
-                !suz_unicode_is_char_name_unit(next)) {
-                break;
-            }
+    uint64_t end = 1 + first_len;
+    if (end < length) {
+        uint32_t next;
+        uint64_t next_len;
+        if (suz_char_decode(bytes + end, length - end, &next, &next_len) &&
+            suz_unicode_is_char_name_unit(next) &&
+            suz_unicode_is_char_name_unit(first)) {
             end += next_len;
-            ++count;
-        }
-        if (count == 1) {
-            *output = first;
+            while (end < length) {
+                if (!suz_char_decode(bytes + end, length - end, &next, &next_len) ||
+                    !suz_unicode_is_char_name_unit(next)) {
+                    break;
+                }
+                end += next_len;
+            }
+            const char *name = bytes + 1;
+            uint64_t name_len = end - 1;
+            uint32_t value;
+            if (name_len == 3 && memcmp(name, "nul", 3) == 0) value = 0x0000;
+            else if (name_len == 3 && memcmp(name, "tab", 3) == 0) value = 0x0009;
+            else if (name_len == 7 && memcmp(name, "newline", 7) == 0) value = 0x000A;
+            else if (name_len == 6 && memcmp(name, "return", 6) == 0) value = 0x000D;
+            else if (name_len == 5 && memcmp(name, "space", 5) == 0) value = 0x0020;
+            else return SUZ_CHAR_LITERAL_UNKNOWN_NAME;
+            *output = value;
             *consumed = end;
             return SUZ_CHAR_LITERAL_OK;
         }
-        const char *name = bytes + 1;
-        uint64_t name_len = end - 1;
-        uint32_t value;
-        if (name_len == 3 && memcmp(name, "nul", 3) == 0) value = 0x0000;
-        else if (name_len == 3 && memcmp(name, "tab", 3) == 0) value = 0x0009;
-        else if (name_len == 7 && memcmp(name, "newline", 7) == 0) value = 0x000A;
-        else if (name_len == 6 && memcmp(name, "return", 6) == 0) value = 0x000D;
-        else if (name_len == 5 && memcmp(name, "space", 5) == 0) value = 0x0020;
-        else return SUZ_CHAR_LITERAL_UNKNOWN_NAME;
-        *output = value;
-        *consumed = end;
-        return SUZ_CHAR_LITERAL_OK;
     }
     *output = first;
     *consumed = 1 + first_len;
@@ -244,8 +242,4 @@ uint32_t suz_parse_char_literal_status(const char *bytes, uint64_t length,
 bool suz_parse_char_literal(const char *bytes, uint64_t length,
                              uint32_t *output, uint64_t *consumed) {
     return suz_parse_char_literal_status(bytes, length, output, consumed) == SUZ_CHAR_LITERAL_OK;
-}
-
-bool suz_char_needs_unicode_escape(uint32_t scalar) {
-    return suz_unicode_is_disallowed_char_literal(scalar) || suz_unicode_is_mark(scalar);
 }

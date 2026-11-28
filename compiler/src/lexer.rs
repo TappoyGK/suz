@@ -6,6 +6,7 @@
 use crate::{Diagnostic, ErrorKind};
 mod reasons;
 pub(crate) mod templates;
+mod unicode_display;
 use std::ops::Range;
 
 const KEYWORDS: &[&str] = &[
@@ -615,7 +616,7 @@ pub(crate) fn char_literal(input: &str) -> Result<(u32, usize), crate::Diagnosti
     }
 }
 
-/// 値を文字リテラルの形で表示する（`#209` 共通規則）。
+/// 値を文字リテラルの形で表示する（`[lit.display]`）。
 pub(crate) fn format_char_literal(ch: char) -> String {
     match ch {
         '\0' => "\\nul".into(),
@@ -623,17 +624,8 @@ pub(crate) fn format_char_literal(ch: char) -> String {
         '\n' => "\\newline".into(),
         '\r' => "\\return".into(),
         ' ' => "\\space".into(),
-        _ => {
-            unsafe extern "C" {
-                fn suz_char_needs_unicode_escape(scalar: u32) -> bool;
-            }
-            let cp = ch as u32;
-            if unsafe { suz_char_needs_unicode_escape(cp) } {
-                format!("\\u{{{cp:x}}}")
-            } else {
-                format!("\\{ch}")
-            }
-        }
+        _ if unicode_display::needs_unicode_escape(ch) => format!("\\u{{{:x}}}", ch as u32),
+        _ => format!("\\{ch}"),
     }
 }
 
