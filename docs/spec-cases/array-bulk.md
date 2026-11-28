@@ -147,7 +147,7 @@ fn main() -> u8 {
 
 ### array-079 構造体要素の配列への演算子メソッド適用と添字順の呼び出し順序
 - 主根拠：`[array.bulk-ops]`
-- 補助根拠：`[operator.decl]`・`[operator.arith-boundary]`
+- 補助根拠：`[operator.method]`・`[operator.arith-boundary]`
 - 結果：正常終了
 
 ```suz
@@ -201,7 +201,7 @@ fn main() -> u8 {
 
 ### array-091 or付きリテラル式と飽和演算を組み合わせた一括書き込み
 - 主根拠：`[array.bulk-ops]`
-- 補助根拠：`[array.bulk-handler]`・`[expr.sat-arith]`
+- 補助根拠：`[array.bulk-handler]`・`[expr.sat]`
 - 結果：正常終了
 
 ```suz

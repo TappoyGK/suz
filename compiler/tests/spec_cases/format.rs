@@ -141,11 +141,16 @@ fn labelled_output_is_exact_and_prose_is_not_parsed() {
     );
     let s = extract(&SMALL.replace(
         "自由な説明。",
-        "実行時パニック。終了コード 101。\n\n- 箇条書きの説明。\n結果：は説明文の中で書ける。\n\n| 列A | 列B |\n|---|---|\n| 1 | 2 |",
+        "実行時パニック。終了コード 101。\n\n- 箇条書きの説明。\n- 結果は、名前のエラーになる。\n  - 結果として拒否される。\n結果：は説明文の中で書ける。\n\n| 列A | 列B |\n|---|---|\n| 1 | 2 |",
     ))
     .unwrap();
     assert_eq!(s["lex-001"].runs[0].result, Outcome::Exit);
     assert_eq!(s["lex-001"].runs[0].code, Some(0));
+
+    // 補助根拠の区切り（・と、）、空白だけの行によるメタ行かたまり終了、CRLF改行を受理する。
+    let extra = "### lex-001 example\r\n- 主根拠：`[src.encoding]`\r\n- 補助根拠：`[lex.a]`・`[lex.b]`、`[lex.c]`\r\n- 結果：正常終了\r\n   \r\n説明。\r\n\r\n```suz\r\nfn main() -> u8 { return 0 }\r\n```\r\n";
+    let s = extract(extra).unwrap();
+    assert_eq!(s["lex-001"].secondary_rules, ["lex.a", "lex.b", "lex.c"]);
 }
 
 #[test]
@@ -714,6 +719,31 @@ fn main() -> u8 { return 0 }
                 "- 補助根拠：`[src.encoding]`\n- 補助根拠：`[lex.x]`\n- 結果：正常終了",
             ),
             "duplicate secondary rule",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 補助根拠：`[lex.a]` ・ `[lex.b]`\n- 結果：正常終了",
+            ),
+            "invalid secondary rule",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 補助根拠：`[lex.a]`・`[lex.a]`\n- 結果：正常終了",
+            ),
+            "duplicate secondary rule id",
+        ),
+        (
+            base.replace(
+                "- 結果：正常終了",
+                "- 補助根拠：`[src.encoding]`\n- 結果：正常終了",
+            ),
+            "secondary rule duplicates primary rule",
+        ),
+        (
+            format!("{base}\n**標準出力：**\n\n```text\nhi\n```\n\n- 結果（警告）：正常終了\n"),
+            "metadata line must appear in header block",
         ),
     ] {
         let error = extract(&bad).unwrap_err();

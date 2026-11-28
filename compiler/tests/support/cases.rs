@@ -67,14 +67,18 @@ fn source(lines: &[&str]) -> Result<Source> {
                 let value = parse_rule_token(value).map_err(|_| "invalid primary rule")?;
                 unique(&mut rule, value, "primary rule")?;
             } else if let Some(value) = line.strip_prefix("- 補助根拠：") {
-                if value.is_empty()
-                    || value
-                        .split(['・', '、'])
-                        .any(|token| parse_rule_token(token).is_err())
-                {
+                if value.is_empty() {
                     return Err("invalid secondary rule".into());
                 }
-                unique(&mut secondary, (), "secondary rule")?;
+                let mut tokens = Vec::new();
+                for token in value.split(['・', '、']) {
+                    let parsed = parse_rule_token(token).map_err(|_| "invalid secondary rule")?;
+                    if tokens.contains(&parsed) {
+                        return Err("duplicate secondary rule id".into());
+                    }
+                    tokens.push(parsed);
+                }
+                unique(&mut secondary, tokens, "secondary rule")?;
             } else if line.starts_with("- 結果") {
                 runs.push(parse_result_line(line)?);
             } else {
@@ -141,7 +145,8 @@ fn source(lines: &[&str]) -> Result<Source> {
                 let trimmed = line.trim();
                 if trimmed.starts_with("- 主根拠：")
                     || trimmed.starts_with("- 補助根拠：")
-                    || trimmed.starts_with("- 結果")
+                    || trimmed.starts_with("- 結果：")
+                    || trimmed.starts_with("- 結果（")
                 {
                     return Err("metadata line must appear in header block".into());
                 } else if trimmed.starts_with("**") && trimmed.ends_with("：**") {
@@ -189,9 +194,15 @@ fn source(lines: &[&str]) -> Result<Source> {
     {
         return Err("input diagram and source bytes disagree".into());
     }
+    let rule = rule.ok_or("missing primary rule")?;
+    let secondary_rules = secondary.unwrap_or_default();
+    if secondary_rules.contains(&rule) {
+        return Err("secondary rule duplicates primary rule".into());
+    }
     Ok(Source {
         bytes,
-        rule: rule.ok_or("missing primary rule")?,
+        rule,
+        secondary_rules,
         runs,
     })
 }

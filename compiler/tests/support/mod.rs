@@ -20,6 +20,7 @@ type Result<T> = std::result::Result<T, String>;
 pub struct Source {
     pub bytes: Vec<u8>,
     pub rule: String,
+    pub secondary_rules: Vec<String>,
     pub runs: Vec<Run>,
 }
 
