@@ -182,7 +182,7 @@ fn ffi_pointer_operations_and_trusted_boundaries_are_rejected() {
         b"extern \"header.h\" { fn pointer() -> *const void }\nfn main() -> u8 { return 0 }";
     let error = suz::compile(source).unwrap_err();
     assert_eq!(error.rule(), "ffi.type");
-    for operand in ["'a'", "Item { n: 1 }", "native"] {
+    for operand in ["\\a", "Item { n: 1 }", "native"] {
         for operation in ["c_bytes", "c_byte_len"] {
             let source = format!(
                 "struct Item {{ n: i32 }}\nfn main() -> u8 {{ fix native: _int = 1\ntrusted {{ fix n = {operation} {operand} }}\nreturn 0 }}"

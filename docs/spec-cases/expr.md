@@ -1563,11 +1563,11 @@ enum同士の直接変換は許可されない。orを付けても許可され�
 **ソース：**
 
 ```suz
-fn scalar(n: i32) -> char { return n as char or '?' }
+fn scalar(n: i32) -> char { return n as char or \? }
 fn main() -> u8 {
     fix byte: u8 = 65
     fix ch = byte as char
-    fix narrow: u8 = 'あ' as u8 or 7
+    fix narrow: u8 = \あ as u8 or 7
     fix code = ch as u32
     log info "${ch} ${code} ${narrow}"
     fix surrogate = scalar(55296)
@@ -2316,12 +2316,12 @@ fn main() -> u8 {
 **ソース：**
 
 ```suz
-fn parse(input: symbol) -> char { return input as char or '?' }
+fn parse(input: symbol) -> char { return input as char or \? }
 fn main() -> u8 {
     fix emoji = parse("😀")
     fix empty = parse("")
     fix multiple = parse("ab")
-    fix quoted = parse("'a'")
+    fix quoted = parse("\\a")
     log info "${emoji} ${empty} ${multiple} ${quoted}"
     return 0
 }
@@ -2347,10 +2347,10 @@ info expr-072.suz:7: 😀 ? ? ?
 
 ```suz
 struct Letter { ch: char }
-fn read(input: symbol) -> Letter { return input as Letter or Letter { ch: '?' } }
+fn read(input: symbol) -> Letter { return input as Letter or Letter { ch: \? } }
 fn main() -> u8 {
-    fix good = read("Letter { ch: '\\u{1F600}' }")
-    fix bad = read("Letter { ch: 'ab' }")
+    fix good = read("Letter { ch: \\u{1F600} }")
+    fix bad = read("Letter { ch: \\ab }")
     log info "${good.ch} ${bad.ch}"
     return 0
 }

@@ -7,15 +7,15 @@ fn views_reject_missing_handlers_wrong_types_and_hidden_returns() {
         ("fix x = \"abc\".[0]", "text.slice-handler"),
         ("fix x = \"abc\".[:2]", "text.slice-handler"),
         ("fix x = \"abc\".[:] or \"\"", "text.slice-handler"),
-        ("fix x = \"abc\".[true] or '?'", "text.slice-bounds"),
+        ("fix x = \"abc\".[true] or \\?", "text.slice-bounds"),
         ("fix x = \"abc\".[0.0:] or \"\"", "text.slice-bounds"),
         ("fix x = \"abc\".[0] or \"\"", "type.expected"),
-        ("fix x = \"abc\".[:1] or 'a'", "type.expected"),
+        ("fix x = \"abc\".[:1] or \\a", "type.expected"),
         ("fix x: symbol = \"abc\".[:]", "type.expected"),
         ("fix x = \"abc\".[:] as symbol or \"\"", "text.to-symbol"),
         ("fix x = \"abc\".[:] as% symbol or \"\"", "symbol.cast-wrap"),
         (
-            "fix x = (\"abc\".[:1] or return 1).[0] or '?'",
+            "fix x = (\"abc\".[:1] or return 1).[0] or \\?",
             "expr.or-return-position",
         ),
         (
@@ -23,7 +23,7 @@ fn views_reject_missing_handlers_wrong_types_and_hidden_returns() {
             "expr.jump-prohibited",
         ),
         (
-            "fix x = \"abc\".[(\"a\".[0] or return 1) as u32] or '?'",
+            "fix x = \"abc\".[(\"a\".[0] or return 1) as u32] or \\?",
             "expr.or-return-position",
         ),
         (
@@ -49,19 +49,19 @@ fn views_preserve_ranges_without_allocations_and_reintern_only_explicitly() {
 fn scan(input: text) -> u32 {
     fix body = input.[1:5] or return 100
     if body != "あ😀\0z" { return 101 }
-    if (body.[0] or '?') != 'あ' { return 102 }
-    if (body.[1] or '?') != '😀' { return 103 }
-    if (body.[2] or '?') != '\0' { return 104 }
-    if (body.[3] or '?') != 'z' { return 105 }
-    if (body.[4] or '?') != '?' { return 106 }
-    if (body.[-1] or '?') != '?' { return 107 }
+    if (body.[0] or \?) != \あ { return 102 }
+    if (body.[1] or \?) != \😀 { return 103 }
+    if (body.[2] or \?) != \nul { return 104 }
+    if (body.[3] or \?) != \z { return 105 }
+    if (body.[4] or \?) != \? { return 106 }
+    if (body.[-1] or \?) != \? { return 107 }
     fix maximum: u64 = 18446744073709551615
-    if (body.[maximum] or '?') != '?' { return 108 }
+    if (body.[maximum] or \?) != \? { return 108 }
     if (body.[4:] or "bad") != "" { return 109 }
     if (body.[3:2] or "bad") != "bad" { return 110 }
     if (body.[-1:] or "bad") != "bad" { return 111 }
     if (body.[:5] or "bad") != "bad" { return 112 }
-    if ((input.[1:] or "").[0] or '?') != 'あ' { return 113 }
+    if ((input.[1:] or "").[0] or \?) != \あ { return 113 }
     fix copy = Pair { first: body, second: body.[:] }
     if copy != (Pair { first: "あ😀\0z", second: body }) { return 114 }
     var count: u32 = 0
@@ -127,7 +127,7 @@ fn view_slicing_matches_unicode_boundaries_for_every_pair_of_positions() {
     let source = r#"fn slice(value: text, start: i64, end: i64) -> text {
     return value.[start:end] or "invalid"
 }
-fn at(value: text, pos: i64) -> char { return value.[pos] or '?' }
+fn at(value: text, pos: i64) -> char { return value.[pos] or \? }
 fn equal(left: text, right: text) -> bool { return left == right && not (left != right) }
 fn main() -> u8 { return 0 }
 "#;

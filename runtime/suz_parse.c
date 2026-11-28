@@ -1,4 +1,5 @@
 #include "suz_parse.h"
+#include "suz_unicode_cat.h"
 
 #include <string.h>
 
@@ -101,6 +102,32 @@ bool suz_parse_bool(const char *bytes, uint64_t length, bool *output) {
     return false;
 }
 
+/* `{H}`（Hは1〜6桁の16進数）を解析する。bytes[0]は'{'を想定する。 */
+static uint32_t suz_parse_unicode_escape(const char *bytes, uint64_t length,
+                                         uint32_t *output, uint64_t *consumed) {
+    if (length == 0 || bytes[0] != '{') return SUZ_CHAR_LITERAL_SYNTAX;
+    uint64_t index = 1;
+    uint32_t value = 0;
+    unsigned digits = 0;
+    while (index < length && bytes[index] != '}') {
+        unsigned char c = (unsigned char)bytes[index++];
+        unsigned digit;
+        if (c >= '0' && c <= '9') digit = c - '0';
+        else if (c >= 'a' && c <= 'f') digit = c - 'a' + 10;
+        else if (c >= 'A' && c <= 'F') digit = c - 'A' + 10;
+        else return SUZ_CHAR_LITERAL_SYNTAX;
+        if (++digits > 6) return SUZ_CHAR_LITERAL_TOO_MANY_DIGITS;
+        value = (value << 4) | digit;
+    }
+    if (!digits) return SUZ_CHAR_LITERAL_EMPTY_ESCAPE;
+    if (index >= length) return SUZ_CHAR_LITERAL_SYNTAX;
+    if (value >= 0xd800 && value <= 0xdfff) return SUZ_CHAR_LITERAL_SURROGATE;
+    if (value > 0x10ffff) return SUZ_CHAR_LITERAL_OUT_OF_RANGE;
+    *output = value;
+    *consumed = index + 1;
+    return SUZ_CHAR_LITERAL_OK;
+}
+
 bool suz_parse_string_counts(const char *bytes, uint64_t length, uint64_t *consumed,
                        char *output, uint64_t *decoded_length, uint64_t *scalars) {
     if (!length || bytes[0] != '"') return false;
@@ -117,6 +144,20 @@ bool suz_parse_string_counts(const char *bytes, uint64_t length, uint64_t *consu
         if (c == '$' && index + 1 < length && bytes[index + 1] == '{') return false;
         if (c == '\\') {
             if (++index == length) return false;
+            if (bytes[index] == 'u') {
+                uint32_t scalar;
+                uint64_t esc_len;
+                if (suz_parse_unicode_escape(bytes + index + 1, length - index - 1, &scalar, &esc_len) != SUZ_CHAR_LITERAL_OK) {
+                    return false;
+                }
+                char encoded[4];
+                size_t enc_len = suz_char_encode(scalar, encoded);
+                if (output) memcpy(output + written, encoded, enc_len);
+                written += enc_len;
+                ++*scalars;
+                index += esc_len;
+                continue;
+            }
             switch (bytes[index]) {
                 case '0': c = '\0'; break;
                 case 'n': c = '\n'; break;
@@ -149,50 +190,52 @@ bool suz_parse_char(const char *bytes, uint64_t length, uint32_t *output) {
 
 uint32_t suz_parse_char_literal_status(const char *bytes, uint64_t length,
                              uint32_t *output, uint64_t *consumed) {
-    if (length < 3 || bytes[0] != '\'') return SUZ_CHAR_LITERAL_SYNTAX;
-    uint64_t index = 1;
-    uint32_t value;
-    if (bytes[index] == '\\') {
-        ++index;
-        switch (bytes[index++]) {
-            case '0': value = 0; break;
-            case 'n': value = '\n'; break;
-            case 'r': value = '\r'; break;
-            case 't': value = '\t'; break;
-            case '\\': value = '\\'; break;
-            case '\'': value = '\''; break;
-            case 'u': {
-                if (index >= length || bytes[index++] != '{') return SUZ_CHAR_LITERAL_SYNTAX;
-                value = 0;
-                unsigned digits = 0;
-                while (index < length && bytes[index] != '}') {
-                    unsigned char c = (unsigned char)bytes[index++];
-                    unsigned digit;
-                    if (c >= '0' && c <= '9') digit = c - '0';
-                    else if (c >= 'a' && c <= 'f') digit = c - 'a' + 10;
-                    else if (c >= 'A' && c <= 'F') digit = c - 'A' + 10;
-                    else return SUZ_CHAR_LITERAL_SYNTAX;
-                    if (++digits > 6) return SUZ_CHAR_LITERAL_TOO_MANY_DIGITS;
-                    value = (value << 4) | digit;
-                }
-                if (!digits) return SUZ_CHAR_LITERAL_EMPTY_ESCAPE;
-                if (index >= length) return SUZ_CHAR_LITERAL_SYNTAX;
-                if (value >= 0xd800 && value <= 0xdfff) return SUZ_CHAR_LITERAL_SURROGATE;
-                if (value > 0x10ffff) return SUZ_CHAR_LITERAL_OUT_OF_RANGE;
-                ++index;
-                break;
-            }
-            default: return SUZ_CHAR_LITERAL_SYNTAX;
-        }
-    } else {
-        if (bytes[index] == '\'' || bytes[index] == '\n' || bytes[index] == '\r') return SUZ_CHAR_LITERAL_SYNTAX;
-        uint64_t count;
-        if (!suz_char_decode(bytes + index, length - index, &value, &count)) return SUZ_CHAR_LITERAL_SYNTAX;
-        index += count;
+    if (length < 2 || bytes[0] != '\\') return SUZ_CHAR_LITERAL_SYNTAX;
+    uint32_t first;
+    uint64_t first_len;
+    if (!suz_char_decode(bytes + 1, length - 1, &first, &first_len)) return SUZ_CHAR_LITERAL_SYNTAX;
+    if (first == 'u' && 1 + first_len < length && bytes[1 + first_len] == '{') {
+        uint32_t value;
+        uint64_t esc_len;
+        uint32_t status = suz_parse_unicode_escape(
+            bytes + 1 + first_len, length - 1 - first_len, &value, &esc_len);
+        if (status != SUZ_CHAR_LITERAL_OK) return status;
+        *output = value;
+        *consumed = 1 + first_len + esc_len;
+        return SUZ_CHAR_LITERAL_OK;
     }
-    if (index >= length || bytes[index++] != '\'') return SUZ_CHAR_LITERAL_SYNTAX;
-    *output = value;
-    *consumed = index;
+    if (suz_unicode_is_disallowed_char_literal(first)) return SUZ_CHAR_LITERAL_DISALLOWED;
+    uint64_t end = 1 + first_len;
+    if (end < length) {
+        uint32_t next;
+        uint64_t next_len;
+        if (suz_char_decode(bytes + end, length - end, &next, &next_len) &&
+            suz_unicode_is_char_name_unit(next) &&
+            suz_unicode_is_char_name_unit(first)) {
+            end += next_len;
+            while (end < length) {
+                if (!suz_char_decode(bytes + end, length - end, &next, &next_len) ||
+                    !suz_unicode_is_char_name_unit(next)) {
+                    break;
+                }
+                end += next_len;
+            }
+            const char *name = bytes + 1;
+            uint64_t name_len = end - 1;
+            uint32_t value;
+            if (name_len == 3 && memcmp(name, "nul", 3) == 0) value = 0x0000;
+            else if (name_len == 3 && memcmp(name, "tab", 3) == 0) value = 0x0009;
+            else if (name_len == 7 && memcmp(name, "newline", 7) == 0) value = 0x000A;
+            else if (name_len == 6 && memcmp(name, "return", 6) == 0) value = 0x000D;
+            else if (name_len == 5 && memcmp(name, "space", 5) == 0) value = 0x0020;
+            else return SUZ_CHAR_LITERAL_UNKNOWN_NAME;
+            *output = value;
+            *consumed = end;
+            return SUZ_CHAR_LITERAL_OK;
+        }
+    }
+    *output = first;
+    *consumed = 1 + first_len;
     return SUZ_CHAR_LITERAL_OK;
 }
 

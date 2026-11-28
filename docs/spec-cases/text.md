@@ -702,8 +702,8 @@ fn main() -> u8 {
     fix source = "xあ😀\0z"
     fix body = tail(source)
     if (body.[:2] or "") != "あ😀" { return 1 }
-    if (body.[2] or '?') != '\0' { return 2 }
-    if ((body.[1:] or "").[0] or '?') != '😀' { return 3 }
+    if (body.[2] or \?) != \nul { return 2 }
+    if ((body.[1:] or "").[0] or \?) != \😀 { return 3 }
     var count: u8 = 0
     for ch in body { count += 1 }
     rev ch in body {
@@ -779,9 +779,9 @@ fn main() -> u8 {
     if (source.[-1:] or "bad") != "bad" { return 2 }
     if (source.[2:1] or "bad") != "bad" { return 3 }
     if (source.[:4] or "bad") != "bad" { return 4 }
-    if (source.[3] or '?') != '?' { return 5 }
+    if (source.[3] or \?) != \? { return 5 }
     fix empty = "".[:]
-    if (empty.[0] or '?') != '?' { return 6 }
+    if (empty.[0] or \?) != \? { return 6 }
     fix result = source.[4:] or return 0
     return 7
 }
@@ -832,7 +832,7 @@ fn main() -> u8 {
     fix source = "x42y"
     if number(source.[1:3] or "") != 42 { return 1 }
     if (("xtruey".[1:5] or "") as bool or false) != true { return 2 }
-    if (("x😀y".[1:2] or "") as char or '?') != '😀' { return 3 }
+    if (("x😀y".[1:2] or "") as char or \?) != \😀 { return 3 }
     if (("x256y".[1:4] or "") as% u8 or 7) != 0 { return 4 }
     fix parsed = item("Item { name: \"Suz\" }".[:])
     if parsed.name != "Suz" { return 5 }
@@ -856,7 +856,7 @@ fn main() -> u8 {
 ```suz
 fix SOURCE = "xnamey"
 fix KEY = SOURCE.[1:5] or ""
-fix FIRST = KEY.[0] or '?'
+fix FIRST = KEY.[0] or \?
 fix FALLBACK = SOURCE.[-1:] or "bad"
 fix INTERNED = KEY as symbol
 fn classify(value: symbol) -> u8 {
@@ -866,7 +866,7 @@ fn classify(value: symbol) -> u8 {
     }
 }
 fn main() -> u8 {
-    if FIRST != 'n' { return 1 }
+    if FIRST != \n { return 1 }
     if FALLBACK != "bad" { return 2 }
     if INTERNED != "name" { return 3 }
     if classify("name") != 1 { return 4 }
@@ -1060,7 +1060,7 @@ fn main() -> u8 {
     fix negative: i64 = -1
     if (value.[negative:end] or "bad") != "bad" { return 2 }
     if (value.[start:huge] or "bad") != "bad" { return 3 }
-    if (value.[end] or '?') != '?' { return 4 }
+    if (value.[end] or \?) != \? { return 4 }
     fix tiny_end: i8 = 2
     if (value.[300:tiny_end] or "bad") != "bad" { return 5 }
     if (value.[tiny_end:300] or "bad") != "bad" { return 6 }

@@ -6,6 +6,7 @@
 use crate::{Diagnostic, ErrorKind};
 mod reasons;
 pub(crate) mod templates;
+mod unicode_display;
 use std::ops::Range;
 
 const KEYWORDS: &[&str] = &[
@@ -360,7 +361,7 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
                 continuation = false;
                 continue;
             }
-            '\'' => {
+            '\\' => {
                 let (value, length) = char_literal(rest)
                     .map_err(|message| error(line, column, ErrorKind::InvalidSource, message))?;
                 tokens.push(Token {
@@ -490,7 +491,11 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token<'_>>, Diagnostic> {
                 line,
                 column,
                 ErrorKind::InvalidSource,
-                crate::diagnostic!("syntax.grammar", "unexpected character {ch:?}"),
+                crate::diagnostic!(
+                    "syntax.grammar",
+                    "unexpected character {}",
+                    format_char_literal(ch)
+                ),
             ));
         };
         continuation = continues_line(kind, tokens.last().map(|token| token.kind));
@@ -596,10 +601,31 @@ pub(crate) fn char_literal(input: &str) -> Result<(u32, usize), crate::Diagnosti
             "char.literal",
             "Unicode escape exceeds U+10FFFF"
         )),
+        6 => Err(crate::diagnostic!(
+            "char.literal",
+            "whitespace, control, or format character in character literal must use a named escape or \\u{{...}}"
+        )),
+        7 => Err(crate::diagnostic!(
+            "char.literal",
+            "unknown named character literal"
+        )),
         _ => Err(crate::diagnostic!(
             "char.literal",
             "expected one Unicode scalar in a character literal"
         )),
+    }
+}
+
+/// 値を文字リテラルの形で表示する（`[lit.display]`）。
+pub(crate) fn format_char_literal(ch: char) -> String {
+    match ch {
+        '\0' => "\\nul".into(),
+        '\t' => "\\tab".into(),
+        '\n' => "\\newline".into(),
+        '\r' => "\\return".into(),
+        ' ' => "\\space".into(),
+        _ if unicode_display::needs_unicode_escape(ch) => format!("\\u{{{:x}}}", ch as u32),
+        _ => format!("\\{ch}"),
     }
 }
 

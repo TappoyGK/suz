@@ -894,9 +894,9 @@ fn main() -> u8 {
 struct Letter { ch: char }
 fn echo(ch: char) -> char { return ch }
 fn main() -> u8 {
-    fix original = Letter { ch: 'a' }
+    fix original = Letter { ch: \a }
     var copy = original
-    copy#ch = echo('b')
+    copy#ch = echo(\b)
     log info "${original.ch} ${copy.ch}"
     return 0
 }

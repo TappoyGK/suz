@@ -52,7 +52,7 @@ fn main() -> u8 {
     if len empty != 0 { return 5 }
     fix small: i64 = -9223372036854775808
     fix large: u64 = 18446744073709551615
-    fix number = textbuf "${small} ${large} ${true} ${'😀'} ${1.25}"
+    fix number = textbuf "${small} ${large} ${true} ${\😀} ${1.25}"
     if number != "-9223372036854775808 18446744073709551615 true 😀 1.25" { return 6 }
     return 0
 }"#;
