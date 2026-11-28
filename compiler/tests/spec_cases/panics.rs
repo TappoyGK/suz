@@ -3,37 +3,10 @@ use crate::test_util::TemporaryDirectory;
 use std::{fs, path::Path};
 
 const PANIC: &str = r#"### check-001 panic example
-
-主根拠：`[rt.int-overflow]`。
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 通常 | パニック | 101 | 0 |
-| 警告 | パニック | 101 | 1 |
-| 強制 | コンパイルエラー | — | 0 |
-
-**パニック診断：**
-
-| 設定 | 規則 | 行 | 列 |
-|---|---|---:|---:|
-| 通常 | `[rt.int-overflow]` | 3 | 22 |
-| 警告 | `[rt.int-overflow]` | 3 | 22 |
-
-**警告：**
-
-| 設定 | 規則 | 行 | 列 |
-|---|---|---:|---:|
-| 警告 | `[diagnostic.arithmetic]` | 3 | 22 |
-
-**コンパイル診断：**
-
-| 設定 | 規則 | 行 | 列 |
-|---|---|---:|---:|
-| 強制 | `[diagnostic.arithmetic]` | 3 | 22 |
-
-**ソース：**
+- 主根拠：`[rt.int-overflow]`
+- 結果（通常）：パニック `[rt.int-overflow]` 3:22
+- 結果（警告）：パニック `[rt.int-overflow]` 3:22 / 警告：`[diagnostic.arithmetic]` 3:22
+- 結果（強制）：コンパイルエラー `[diagnostic.arithmetic]` 3:22
 
 ```suz
 fn main() -> u8 {
@@ -45,7 +18,7 @@ fn main() -> u8 {
 "#;
 
 #[test]
-fn panic_tables_validate_modes_rules_and_exit_codes() {
+fn panic_lines_validate_modes_rules_and_exit_codes() {
     let cases = extract(PANIC).unwrap();
     let runs = &cases["check-001"].runs;
     assert_eq!(runs[0].result, Outcome::Panic);
@@ -60,20 +33,13 @@ fn panic_tables_validate_modes_rules_and_exit_codes() {
     assert_eq!(runs[1].panic_diagnostic, runs[0].panic_diagnostic);
     assert!(runs[2].panic_diagnostic.is_none());
     for invalid in [
-        PANIC.replace("| パニック | 101 |", "| パニック | 0 |"),
-        PANIC.replace("| パニック | 101 |", "| 正常終了 | 101 |"),
         PANIC.replace(
-            "| 通常 | `[rt.int-overflow]`",
-            "| 強制 | `[rt.int-overflow]`",
+            "- 結果（通常）：パニック `[rt.int-overflow]` 3:22",
+            "- 結果（通常）：パニック",
         ),
-        PANIC.replace(
-            "| 警告 | `[rt.int-overflow]`",
-            "| 通常 | `[rt.int-overflow]`",
-        ),
+        PANIC.replace("- 結果（警告）：", "- 結果（通常）："),
         PANIC.replace("`[rt.int-overflow]`", "`[decl.shadowing]`"),
-        format!(
-            "{PANIC}\n**パニック診断：**\n\n| 設定 | 規則 | 行 | 列 |\n|---|---|---:|---:|\n| 通常 | `[rt.int-overflow]` | 3 | 22 |\n"
-        ),
+        PANIC.replace("3:22", "0:22"),
     ] {
         assert!(extract(&invalid).is_err(), "{invalid}");
     }

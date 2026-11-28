@@ -3,15 +3,10 @@ use crate::support::{self, Mode, extract};
 
 #[test]
 fn diagnostic_expectations_are_strict() {
-    let negative = SMALL.replace("正常終了 | 0", "コンパイルエラー | —");
-    let table = r#"
-**コンパイル診断：**
-
-| 設定 | 規則 | 行 | 列 |
-|---|---|---:|---:|
-| 通常 | `[decl.shadowing]` | 4 | 13 |
-"#;
-    let input = format!("{negative}{table}");
+    let input = SMALL.replace(
+        "- 結果：正常終了",
+        "- 結果：コンパイルエラー `[decl.shadowing]` 4:13",
+    );
     let cases = extract(&input).unwrap();
     let expected = cases["lex-001"].runs[0].diagnostic.as_ref().unwrap();
     let path = std::path::Path::new("example.suz");
@@ -28,17 +23,13 @@ fn diagnostic_expectations_are_strict() {
         assert!(!expected.matches(&wrong, path), "{wrong}");
     }
     for invalid in [
-        format!("{SMALL}{table}"),
-        format!("{input}{table}"),
-        input.replace("| 4 | 13 |", "| 0 | 13 |"),
-        input.replace("| 4 | 13 |", "| 4 | 0 |"),
+        input.replace("4:13", "0:13"),
+        input.replace("4:13", "4:0"),
         input.replace("`[decl.shadowing]`", "decl.shadowing"),
-        input.replace("| 通常 | `[", "| 強制 | `["),
-        input.replace("| 規則 |", "| reason |"),
-        input.replace("| 通常 | `[decl.shadowing]` | 4 | 13 |", ""),
+        input.replace("4:13", ""),
         input.replace(
-            "| 通常 | `[decl.shadowing]` | 4 | 13 |",
-            "| 通常 | `[decl.shadowing]` | 4 | 13 |\n| 通常 | `[decl.shadowing]` | 4 | 13 |",
+            "- 結果：コンパイルエラー `[decl.shadowing]` 4:13",
+            "- 結果：コンパイルエラー `[decl.shadowing]` 4:13\n- 結果（通常）：コンパイルエラー `[decl.shadowing]` 4:13",
         ),
     ] {
         assert!(extract(&invalid).is_err(), "{invalid}");
@@ -46,25 +37,10 @@ fn diagnostic_expectations_are_strict() {
 }
 
 #[test]
-fn warning_table_is_parsed_and_validated() {
+fn warning_line_is_parsed_and_validated() {
     let input = r#"### diag-001 warning example
-
-主根拠：`[diagnostic.arithmetic]`。
-
-**期待結果：**
-
-| 設定 | 結果 | 終了コード | 警告数 |
-|---|---|---:|---:|
-| 警告 | 正常終了 | 0 | 2 |
-
-**警告：**
-
-| 設定 | 規則 | 行 | 列 |
-|---|---|---:|---:|
-| 警告 | `[diagnostic.arithmetic]` | 2 | 21 |
-| 警告 | `[diagnostic.arithmetic]` | 4 | 17 |
-
-**ソース：**
+- 主根拠：`[diagnostic.arithmetic]`
+- 結果（警告）：正常終了 / 警告：`[diagnostic.arithmetic]` 2:21, `[diagnostic.arithmetic]` 4:17
 
 ```suz
 fn main() -> u8 {
@@ -95,23 +71,10 @@ fn main() -> u8 {
         ]
     );
 
-    // Markdownの検証契約に違反するケースを、一項目ずつ変えて試す。
     for invalid in [
-        input.replace(
-            "**ソース：**",
-            r#"**警告：**
-
-| 設定 | 規則 | 行 | 列 |
-|---|---|---:|---:|
-| 警告 | `[diagnostic.arithmetic]` | 2 | 21 |
-
-**ソース：**"#,
-        ),
-        input.replace("| 0 | 2 |", "| 0 | 1 |"),
-        input.replace("| 0 | 2 |", "| 0 | 0 |"),
-        input.replace("| 4 | 17 |", "| 2 | 21 |"),
-        input.replace("| 警告 | `[", "| 強制 | `["),
+        input.replace("4:17", "2:21"),
         input.replace("diagnostic.arithmetic", "decl.shadowing"),
+        input.replace("2:21, `[diagnostic.arithmetic]` 4:17", ""),
     ] {
         assert!(extract(&invalid).is_err(), "{invalid}");
     }

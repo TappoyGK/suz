@@ -305,3 +305,30 @@ fn mutable_loop_inputs_have_a_diagnostic_shared_by_symbol_and_ranges() {
         }
     }
 }
+
+#[test]
+fn migrated_char_literal_error_derivatives() {
+    for (id, source, line, column) in [
+        (
+            "lex-043",
+            "fn main() -> u8 {\n    fix ch = \\日本\n    return 0\n}\n",
+            2,
+            14,
+        ),
+        (
+            "lex-045",
+            "fn main() -> u8 {\n    fix ch = (\\\u{3000})\n    return 0\n}\n",
+            2,
+            15,
+        ),
+    ] {
+        let error = suz::compile(source.as_bytes()).unwrap_err();
+        assert_eq!(error.kind, suz::ErrorKind::InvalidSource, "{id}");
+        assert_eq!(error.rule(), "char.literal", "{id}: {error:?}");
+        assert_eq!(
+            (error.line, error.column),
+            (line, column),
+            "{id}: {error:?}"
+        );
+    }
+}

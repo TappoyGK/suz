@@ -38,10 +38,6 @@ pub(super) fn block(lines: &[&str], i: &mut usize, language: &str) -> Result<Str
     Ok(content)
 }
 
-pub(super) fn cells(line: &str) -> Result<Vec<&str>> {
-    table_cells(line, 4)
-}
-
 pub(super) fn table_cells(line: &str, columns: usize) -> Result<Vec<&str>> {
     let inner = line
         .strip_prefix('|')
@@ -55,14 +51,13 @@ pub(super) fn table_cells(line: &str, columns: usize) -> Result<Vec<&str>> {
 }
 
 pub(super) fn number<T: std::str::FromStr>(text: &str) -> Result<T> {
-    if text.is_empty() || !text.bytes().all(|b| b.is_ascii_digit()) {
+    if text.is_empty()
+        || !text.bytes().all(|b| b.is_ascii_digit())
+        || (text.len() > 1 && text.starts_with('0'))
+    {
         return Err("invalid unsigned integer".into());
     }
     text.parse().map_err(|_| "integer out of range".into())
-}
-
-pub(super) fn separator(lines: &[&str], i: &mut usize) -> Result<()> {
-    table_separator(lines, i, 4)
 }
 
 pub(super) fn table_separator(lines: &[&str], i: &mut usize, columns: usize) -> Result<()> {

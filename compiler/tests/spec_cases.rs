@@ -160,16 +160,33 @@ fn spec_rules() -> std::collections::BTreeSet<&'static str> {
         .collect()
 }
 
+fn runtime_rules() -> std::collections::BTreeSet<&'static str> {
+    include_str!("../../docs/runtime.md")
+        .lines()
+        .filter_map(|line| {
+            line.strip_prefix("**[")
+                .and_then(|s| s.split_once("]**").map(|(id, _)| id))
+        })
+        .collect()
+}
+
 #[test]
 fn catalog_is_complete_and_sources_round_trip() {
     let sources = catalog();
     let rules = spec_rules();
+    let runtime = runtime_rules();
     for (id, case) in &sources {
         assert!(
             rules.contains(case.rule.as_str()),
             "{id}: unknown primary rule {}",
             case.rule
         );
+        for secondary in &case.secondary_rules {
+            assert!(
+                rules.contains(secondary.as_str()) || runtime.contains(secondary.as_str()),
+                "{id}: unknown secondary rule {secondary}"
+            );
+        }
     }
     for (id, case) in &sources {
         for run in &case.runs {
