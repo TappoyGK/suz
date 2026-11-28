@@ -29,6 +29,11 @@ const ONE_CASE_INVENTORY: &str = r#"## 目次と件数
 | 診断設定の比較 | 0 |
 | 合計 | 1 |
 
+## 欠番一覧
+
+| 欠番ID | 移管先テスト |
+|---|---|
+
 "#;
 
 #[test]
@@ -259,26 +264,47 @@ fn inventory_is_checked_against_the_parsed_cases() {
     );
     validate_inventory(&compared, &extract(&compared).unwrap()).unwrap();
 
-    // 欠番一覧のID再利用・重複・不正範囲を拒否する。
-    let retired_ok = format!(
-        "{doc}\n## 欠番一覧\n\n| 欠番ID | 移管先テスト |\n|---|---|\n| `lex-002`〜`lex-004`・`lex-010` | test |\n"
+    // 欠番一覧の欠落・ID再利用・重複・不正範囲・未知接頭辞・空移管先・表後行を拒否する。
+    let retired_ok = doc.replace(
+        "| 欠番ID | 移管先テスト |\n|---|---|\n",
+        "| 欠番ID | 移管先テスト |\n|---|---|\n| `lex-002`〜`lex-004`・`lex-010` | test |\n",
     );
     validate_inventory(&retired_ok, &cases).unwrap();
     for bad_retired in [
-        format!(
-            "{doc}\n## 欠番一覧\n\n| 欠番ID | 移管先テスト |\n|---|---|\n| `lex-001` | test |\n"
+        doc.replace("## 欠番一覧", "## 欠番の一覧"),
+        doc.replace(
+            "| 欠番ID | 移管先テスト |\n|---|---|\n",
+            "| 欠番ID | 移管先テスト |\n|---|---|\n| `lex-001` | test |\n",
         ),
-        format!(
-            "{doc}\n## 欠番一覧\n\n| 欠番ID | 移管先テスト |\n|---|---|\n| `lex-002`・`lex-002` | test |\n"
+        doc.replace(
+            "| 欠番ID | 移管先テスト |\n|---|---|\n",
+            "| 欠番ID | 移管先テスト |\n|---|---|\n| `lex-002`・`lex-002` | test |\n",
         ),
-        format!(
-            "{doc}\n## 欠番一覧\n\n| 欠番ID | 移管先テスト |\n|---|---|\n| `lex-004`〜`lex-002` | test |\n"
+        doc.replace(
+            "| 欠番ID | 移管先テスト |\n|---|---|\n",
+            "| 欠番ID | 移管先テスト |\n|---|---|\n| `lex-004`〜`lex-002` | test |\n",
         ),
-        format!(
-            "{doc}\n## 欠番一覧\n\n| 欠番ID | 移管先テスト |\n|---|---|\n| `lex-002`〜`prog-003` | test |\n"
+        doc.replace(
+            "| 欠番ID | 移管先テスト |\n|---|---|\n",
+            "| 欠番ID | 移管先テスト |\n|---|---|\n| `lex-002`〜`prog-003` | test |\n",
+        ),
+        doc.replace(
+            "| 欠番ID | 移管先テスト |\n|---|---|\n",
+            "| 欠番ID | 移管先テスト |\n|---|---|\n| `zzz-001` | test |\n",
+        ),
+        doc.replace(
+            "| 欠番ID | 移管先テスト |\n|---|---|\n",
+            "| 欠番ID | 移管先テスト |\n|---|---|\n| `lex-002` |  |\n",
+        ),
+        doc.replace(
+            "| 欠番ID | 移管先テスト |\n|---|---|\n",
+            "| 欠番ID | 移管先テスト |\n|---|---|\n| `lex-002` | test |\n\nメモ\n\n| `lex-003` | test |\n",
         ),
     ] {
-        assert!(validate_inventory(&bad_retired, &cases).is_err());
+        assert!(
+            validate_inventory(&bad_retired, &cases).is_err(),
+            "expected error for:\n{bad_retired}"
+        );
     }
 }
 
@@ -288,15 +314,20 @@ fn next_ids_accounts_for_active_and_retired_cases() {
     use std::fs;
 
     let directory = TemporaryDirectory::new();
-    let inventory = format!(
-        "{ONE_CASE_INVENTORY}\n## 欠番一覧\n\n| 欠番ID | 移管先テスト |\n|---|---|\n| `lex-002`〜`lex-005` | test |\n"
+    let inventory = ONE_CASE_INVENTORY.replace(
+        "| 欠番ID | 移管先テスト |\n|---|---|\n",
+        "| 欠番ID | 移管先テスト |\n|---|---|\n| `lex-002`〜`lex-005` | test |\n",
     );
     fs::write(directory.0.join("spec-cases.md"), inventory).unwrap();
     let cases = directory.0.join("spec-cases");
     fs::create_dir(&cases).unwrap();
     fs::write(cases.join("lex.md"), SMALL).unwrap();
-    let next = catalog::next_ids(&directory.0).unwrap();
-    assert_eq!(next.get("lex").map(String::as_str), Some("lex-006"));
+    assert_eq!(catalog::next_ids(&directory.0, None).unwrap(), ["lex-006"]);
+    assert_eq!(
+        catalog::next_ids(&directory.0, Some("lex")).unwrap(),
+        ["lex-006"]
+    );
+    assert!(catalog::next_ids(&directory.0, Some("unknown")).is_err());
 }
 
 #[test]

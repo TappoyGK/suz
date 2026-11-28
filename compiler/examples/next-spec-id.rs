@@ -16,25 +16,15 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
     let docs = Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs");
-    let next = match support::catalog::next_ids(&docs) {
-        Ok(next) => next,
+    let ids = match support::catalog::next_ids(&docs, args.first().map(String::as_str)) {
+        Ok(ids) => ids,
         Err(error) => {
             eprintln!("error: {error}");
             return ExitCode::FAILURE;
         }
     };
-    if let Some(prefix) = args.first() {
-        match next.get(prefix) {
-            Some(id) => println!("{id}"),
-            None => {
-                eprintln!("unknown prefix: {prefix}");
-                return ExitCode::FAILURE;
-            }
-        }
-    } else {
-        for id in next.values() {
-            println!("{id}");
-        }
+    for id in ids {
+        println!("{id}");
     }
     ExitCode::SUCCESS
 }

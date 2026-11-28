@@ -81,6 +81,10 @@ pub fn validate_inventory(markdown: &str, sources: &BTreeMap<String, Source>) ->
         &outcomes,
     )?;
     for id in retired_ids(markdown)? {
+        let (prefix, _) = split_id(&id)?;
+        if !groups.contains_key(prefix) {
+            return Err(format!("unknown retired ID prefix: {id}"));
+        }
         if sources.contains_key(&id) {
             return Err(format!("reused retired ID: {id}"));
         }
@@ -90,9 +94,7 @@ pub fn validate_inventory(markdown: &str, sources: &BTreeMap<String, Source>) ->
 
 pub fn retired_ids(markdown: &str) -> Result<BTreeSet<String>> {
     let mut lines = markdown.lines().skip_while(|line| *line != "## 欠番一覧");
-    if lines.next().is_none() {
-        return Ok(BTreeSet::new());
-    }
+    lines.next().ok_or("missing retired IDs section")?;
     let lines: Vec<_> = lines.take_while(|line| !line.starts_with('#')).collect();
     let mut i = 0;
     while i < lines.len() && !lines[i].starts_with('|') {
@@ -112,6 +114,9 @@ pub fn retired_ids(markdown: &str) -> Result<BTreeSet<String>> {
     while i < lines.len() && lines[i].starts_with('|') {
         let row = table_cells(lines[i], header.len())?;
         i += 1;
+        if row[1].is_empty() {
+            return Err("empty retired ID destination".into());
+        }
         for token in row[0].split('・') {
             if let Some((start, end)) = token.split_once('〜') {
                 let start = parse_retired_id(start)?;
@@ -134,6 +139,9 @@ pub fn retired_ids(markdown: &str) -> Result<BTreeSet<String>> {
                 }
             }
         }
+    }
+    if lines[i..].iter().any(|line| line.starts_with('|')) {
+        return Err("unexpected table row after retired IDs table".into());
     }
     Ok(retired)
 }
@@ -159,7 +167,7 @@ fn split_id(id: &str) -> Result<(&str, u16)> {
     Ok((prefix, num))
 }
 
-pub fn next_ids(docs: &Path) -> Result<BTreeMap<String, String>> {
+pub fn next_ids(docs: &Path, target_prefix: Option<&str>) -> Result<Vec<String>> {
     let sources = load(docs)?;
     let index = fs::read_to_string(docs.join("spec-cases.md"))
         .map_err(|error| format!("spec-cases.md: {error}"))?;
@@ -172,15 +180,25 @@ pub fn next_ids(docs: &Path) -> Result<BTreeMap<String, String>> {
             *entry = num;
         }
     }
-    let mut next = BTreeMap::new();
-    for (prefix, max) in max_by_prefix {
+    let format_next = |prefix: &str, max: u16| -> Result<String> {
         let next_num = max + 1;
         if next_num > 999 {
             return Err(format!("ID number overflow for prefix: {prefix}"));
         }
-        next.insert(prefix.clone(), format!("{prefix}-{next_num:03}"));
+        Ok(format!("{prefix}-{next_num:03}"))
+    };
+    if let Some(prefix) = target_prefix {
+        let max = max_by_prefix
+            .get(prefix)
+            .copied()
+            .ok_or_else(|| format!("unknown prefix: {prefix}"))?;
+        Ok(vec![format_next(prefix, max)?])
+    } else {
+        max_by_prefix
+            .into_iter()
+            .map(|(prefix, max)| format_next(&prefix, max))
+            .collect()
     }
-    Ok(next)
 }
 
 fn validate_count_table<'a>(

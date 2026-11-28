@@ -9,6 +9,7 @@
 | `compiler/src/` | Rustのコンパイラ・CLIと、その内部を直接検証する単体テスト |
 | `compiler/tests/spec_cases/` | 公開API、CLI、生成C、環境層の振る舞いを確認するテスト |
 | `compiler/tests/support/`・`compiler/tests/fixtures/` | テストの共通処理と入力データ |
+| `compiler/examples/` | テスト基盤の解析処理などを共有する開発用コマンド |
 | `runtime/` | 自作のCランタイムと環境層 |
 | `runtime/third_party/` | 取得元・ライセンスを明記した外部コード |
 | `scripts/` | 開発・検査・配布の操作に使うスクリプト |
