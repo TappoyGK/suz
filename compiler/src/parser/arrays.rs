@@ -7,13 +7,14 @@ use crate::{
 };
 
 impl Parser<'_, '_> {
-    pub(super) fn array_type(&mut self) -> Result<Type, Diagnostic> {
-        self.array_type_dimensions(false).map(|(ty, _)| ty)
+    pub(super) fn array_type(&mut self, soa: bool) -> Result<Type, Diagnostic> {
+        self.array_type_dimensions(false, soa).map(|(ty, _)| ty)
     }
 
     pub(super) fn array_type_dimensions(
         &mut self,
         names: bool,
+        soa: bool,
     ) -> Result<(Type, Vec<crate::ast::arrays::Dimension>), Diagnostic> {
         let location = self.location();
         let mutable = match self.token().kind {
@@ -37,6 +38,17 @@ impl Parser<'_, '_> {
                 return Err(location.error(
                     ErrorKind::InvalidSource,
                     crate::diagnostic!("array.type", "array elements require a stored value type"),
+                ));
+            }
+            if soa
+                && !matches!(
+                    element,
+                    Type::Struct(_) | Type::Application(_) | Type::Parameter(_)
+                )
+            {
+                return Err(location.error(
+                    ErrorKind::InvalidSource,
+                    crate::diagnostic!("array.soa-type", "soa array elements must be structs"),
                 ));
             }
             let mut dimensions = Vec::new();
@@ -149,7 +161,7 @@ impl Parser<'_, '_> {
                 .applications
                 .borrow_mut()
                 .arrays
-                .intern_indexed(element, rank, index_enum)
+                .intern_full(element, rank, index_enum, soa)
             else {
                 unreachable!()
             };
@@ -164,14 +176,19 @@ impl Parser<'_, '_> {
         })
     }
 
-    pub(super) fn array_initializer(&mut self, readonly: bool) -> Result<Expression, Diagnostic> {
-        self.array_initializer_inner(readonly, true)
+    pub(super) fn array_initializer(
+        &mut self,
+        readonly: bool,
+        soa: bool,
+    ) -> Result<Expression, Diagnostic> {
+        self.array_initializer_inner(readonly, true, soa)
     }
 
     fn array_initializer_inner(
         &mut self,
         readonly: bool,
         allow_keys: bool,
+        soa: bool,
     ) -> Result<Expression, Diagnostic> {
         let location = self.location();
         self.nested(location, |parser| {
@@ -378,6 +395,7 @@ impl Parser<'_, '_> {
                     keys: keyed.then_some(keys),
                     repeated,
                     readonly,
+                    soa,
                 },
                 location,
                 height,
@@ -386,7 +404,7 @@ impl Parser<'_, '_> {
     }
     fn array_item(&mut self) -> Result<(Expression, bool), Diagnostic> {
         if self.token().kind == Kind::Symbol("[") {
-            Ok((self.array_initializer_inner(false, false)?, true))
+            Ok((self.array_initializer_inner(false, false, false)?, true))
         } else {
             Ok((self.expression()?, false))
         }

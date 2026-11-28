@@ -426,7 +426,7 @@ fn check_for(statement: &Statement, context: &mut StatementContext<'_>) -> Resul
                     .structs
                     .arrays
                     .borrow_mut()
-                    .intern(array.element, array.rank - 1)
+                    .intern_full(array.element, array.rank - 1, None, array.soa)
                     .array_reference(value.ty.is_readonly_array())
             }
         } else if value.ty.is_text() {

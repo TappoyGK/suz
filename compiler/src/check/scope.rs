@@ -281,12 +281,13 @@ impl Scope {
             Type::Array(id) => {
                 let array = self.structs.arrays.borrow().get(id);
                 let element = self.type_name(array.element);
+                let soa = if array.soa { "soa " } else { "" };
                 if let Some(index_enum) = array.index_enum {
-                    format!("[{element}; {}]", self.enums[index_enum.id].name)
+                    format!("{soa}[{element}; {}]", self.enums[index_enum.id].name)
                 } else if array.rank == 1 {
-                    format!("[{element}]")
+                    format!("{soa}[{element}]")
                 } else {
-                    format!("[{element}; {}]", vec!["_"; array.rank].join(", "))
+                    format!("{soa}[{element}; {}]", vec!["_"; array.rank].join(", "))
                 }
             }
             Type::ArrayRef {
@@ -296,18 +297,19 @@ impl Scope {
             } => {
                 let array = self.structs.arrays.borrow().get(id);
                 let element = self.type_name(array.element);
+                let soa = if array.soa { "soa " } else { "" };
                 let prefix = if mutable { "#" } else { "." };
                 let suffix = if nilable { "?" } else { "" };
                 if let Some(index_enum) = array.index_enum {
                     format!(
-                        "{prefix}[{element}; {}]{suffix}",
+                        "{soa}{prefix}[{element}; {}]{suffix}",
                         self.enums[index_enum.id].name
                     )
                 } else if array.rank == 1 {
-                    format!("{prefix}[{element}]{suffix}")
+                    format!("{soa}{prefix}[{element}]{suffix}")
                 } else {
                     format!(
-                        "{prefix}[{element}; {}]{suffix}",
+                        "{soa}{prefix}[{element}; {}]{suffix}",
                         vec!["_"; array.rank].join(", ")
                     )
                 }

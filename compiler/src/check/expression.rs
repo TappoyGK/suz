@@ -45,7 +45,10 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
     super::generic::work();
     match &expr.kind {
         ExpressionKind::ArrayInit {
-            values, lengths, ..
+            values,
+            lengths,
+            soa,
+            ..
         } => {
             let element = values
                 .first()
@@ -55,7 +58,7 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
                     .structs
                     .arrays
                     .borrow_mut()
-                    .intern(element, lengths.len())
+                    .intern_full(element, lengths.len(), None, *soa)
                     .array_reference(true),
             )
         }
@@ -113,7 +116,7 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
                         .structs
                         .arrays
                         .borrow_mut()
-                        .intern(a.element, a.rank - 1)
+                        .intern_full(a.element, a.rank - 1, None, a.soa)
                         .array_reference(readonly)
                 });
             }
@@ -146,6 +149,31 @@ fn operand_type_inner(expr: &Expression, bindings: &Scope) -> Option<Type> {
         ExpressionKind::With { target, .. } => operand_type(target, bindings),
         ExpressionKind::Field { target, name } => {
             let known = operand_type(target, bindings)?;
+            if let Some(array_id) = known.array_id()
+                && !known.is_nilable()
+            {
+                let array = bindings.structs.arrays.borrow().get(array_id);
+                if array.soa
+                    && let Type::Struct(id) = array.element
+                {
+                    let field_ty = bindings
+                        .structs
+                        .get(id)
+                        .fields
+                        .iter()
+                        .find(|field| &field.name == name)
+                        .map(|field| field.ty)?;
+                    let col_soa = matches!(field_ty, Type::Struct(_));
+                    return Some(
+                        bindings
+                            .structs
+                            .arrays
+                            .borrow_mut()
+                            .intern_full(field_ty, array.rank, array.index_enum, col_soa)
+                            .array_reference(known.is_readonly_array()),
+                    );
+                }
+            }
             let Type::Struct(id) = known.pointee().unwrap_or(known) else {
                 return None;
             };

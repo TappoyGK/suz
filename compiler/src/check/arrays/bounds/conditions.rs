@@ -301,6 +301,14 @@ pub(in crate::check) fn pred_expr_from_checked(expr: &CheckedExpression) -> Opti
             Box::new(pred_expr_from_checked(target)?),
             *index,
         )),
+        Value::SoaColumn {
+            target,
+            field_index,
+            ..
+        } => Some(PredExpr::Field(
+            Box::new(pred_expr_from_checked(target)?),
+            *field_index,
+        )),
         Value::Deref(target) => Some(PredExpr::Deref(Box::new(pred_expr_from_checked(target)?))),
         Value::Receiver { target, .. } => pred_expr_from_checked(target),
         Value::Len(target) => Some(PredExpr::Len(Box::new(pred_expr_from_checked(target)?), 0)),

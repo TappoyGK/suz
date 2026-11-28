@@ -42,8 +42,16 @@ fn type_layout(ty: Type, context: &ExpressionContext) -> (usize, usize) {
         Type::Function(_) => (16, 8),
         Type::Text => (32, 8),
         Type::ArrayRef { id, .. } => {
-            let rank = context.arrays.get(id).rank;
-            (align_up(8 + 4 * rank, 8), 8)
+            let array = context.arrays.get(id);
+            let ptr_count = if array.soa {
+                let Type::Struct(sid) = array.element else {
+                    unreachable!()
+                };
+                super::soa::leaves(sid, context).len()
+            } else {
+                1
+            };
+            (align_up(8 * ptr_count + 4 * array.rank, 8), 8)
         }
         Type::Exact => (32, 16),
         Type::Struct(id) => {
@@ -69,9 +77,14 @@ fn type_layout(ty: Type, context: &ExpressionContext) -> (usize, usize) {
     }
 }
 
-/// 構造体の値仮引数を C の読み取り専用ポインタで渡すべきか（16 バイト超の構造体のみ）。
+/// 構造体または SoA 配列参照の値仮引数を C の読み取り専用ポインタで渡すべきか（16 バイト超のみ）。
 pub(super) fn pass_struct_by_pointer(ty: Type, context: &ExpressionContext) -> bool {
-    matches!(ty, Type::Struct(_)) && type_layout(ty, context).0 > SMALL_STRUCT_VALUE_LIMIT_BYTES
+    let by_ref_kind = match ty {
+        Type::Struct(_) => true,
+        Type::ArrayRef { id, .. } => context.arrays.get(id).soa,
+        _ => false,
+    };
+    by_ref_kind && type_layout(ty, context).0 > SMALL_STRUCT_VALUE_LIMIT_BYTES
 }
 
 /// 16 バイト超の構造体の値仮引数は C では読み取り専用ポインタで受け取る。
@@ -98,6 +111,18 @@ pub(super) fn immutable_struct_place(
         } => immutable_struct_place(target, context),
         crate::check::ir::Value::Field { target, .. } => {
             matches!(target.ty, Type::Struct(_)) && immutable_struct_place(target, context)
+        }
+        crate::check::ir::Value::Cast(target)
+            if expr
+                .ty
+                .array_id()
+                .is_some_and(|id| context.arrays.get(id).soa)
+                && target
+                    .ty
+                    .array_id()
+                    .is_some_and(|id| context.arrays.get(id).soa) =>
+        {
+            immutable_struct_place(target, context)
         }
         _ => false,
     }
@@ -196,8 +221,18 @@ fn emit_argument(
     external: bool,
     setup: &mut Vec<String>,
     names: &mut Vec<String>,
+    writebacks: &mut Vec<String>,
     context: &mut ExpressionContext,
 ) {
+    if let crate::check::ir::Value::Receiver {
+        target,
+        mutable: true,
+    } = &argument.value
+        && let Some(wb) = super::soa::try_mutable_receiver(target, setup, names, context)
+    {
+        writebacks.push(wb);
+        return;
+    }
     let by_reference = matches!(
         argument.value,
         crate::check::ir::Value::Receiver { mutable: true, .. }
@@ -257,20 +292,42 @@ fn emit_argument(
 pub(super) fn call(
     id: usize,
     arguments: &[CheckedExpression],
+    result_ty: Type,
     context: &mut ExpressionContext,
     error: Option<&str>,
 ) -> String {
     let external = context.external_ids.contains(&id);
     let mut setup = Vec::new();
     let mut names = Vec::new();
+    let mut writebacks = Vec::new();
     for argument in arguments {
-        emit_argument(argument, external, &mut setup, &mut names, context);
+        emit_argument(
+            argument,
+            external,
+            &mut setup,
+            &mut names,
+            &mut writebacks,
+            context,
+        );
     }
     if let Some(error) = error {
         names.push(format!("&{error}"));
     }
     let call = format!("suz_fn_{id}({})", names.join(", "));
-    if setup.is_empty() {
+    if !writebacks.is_empty() {
+        if result_ty == Type::Void {
+            setup.push(call);
+            setup.extend(writebacks);
+        } else {
+            let ret_idx = context.temporaries.len();
+            context.temporaries.push(result_ty);
+            let ret_tmp = format!("suz_cmp_{ret_idx}");
+            setup.push(format!("{ret_tmp} = {call}"));
+            setup.extend(writebacks);
+            setup.push(ret_tmp);
+        }
+        format!("({})", setup.join(", "))
+    } else if setup.is_empty() {
         call
     } else {
         setup.push(call);
@@ -289,8 +346,16 @@ pub(super) fn invoke(
     context.temporaries.push(target.ty);
     let mut setup = vec![format!("suz_cmp_{id} = {}", expression(target, context))];
     let mut names = Vec::new();
+    let mut writebacks = Vec::new();
     for argument in arguments {
-        emit_argument(argument, false, &mut setup, &mut names, context);
+        emit_argument(
+            argument,
+            false,
+            &mut setup,
+            &mut names,
+            &mut writebacks,
+            context,
+        );
     }
     if let Some(error) = error {
         names.push(format!("&{error}"));

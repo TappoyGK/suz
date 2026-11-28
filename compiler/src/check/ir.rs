@@ -320,6 +320,13 @@ pub(crate) enum Value {
         location: Location,
         handler: Option<CheckedHandler>,
     },
+    /// SoA 配列から取り出した列（葉なら通常の配列参照、入れ子構造体なら SoA 配列参照）。
+    SoaColumn {
+        target: Box<CheckedExpression>,
+        field_index: usize,
+        leaf_offset: usize,
+        leaf_count: usize,
+    },
     ArrayLength {
         target: Box<CheckedExpression>,
         dimension: usize,
@@ -585,6 +592,7 @@ macro_rules! constant_children_visitor {
                     visit(address);
                     return handler(h, visit);
                 }
+                Self::SoaColumn { target, .. } => visit(target),
                 Self::ArrayView { target, start, end, handler: h, .. } | Self::Slice { target, start, end, handler: h, .. } => {
                     visit(target);
                     for value in [start, end].into_iter().flatten() {

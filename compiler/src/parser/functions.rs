@@ -137,6 +137,12 @@ impl Parser<'_, '_> {
         names: bool,
         parameter: bool,
     ) -> Result<(Type, Vec<crate::ast::arrays::Dimension>), Diagnostic> {
+        if names && self.token().kind == Kind::Keyword("soa") {
+            self.cursor += 1;
+            let (ty, dimensions) = self.array_type_dimensions(true, true)?;
+            self.reject_error_spec()?;
+            return Ok((ty, dimensions));
+        }
         if names
             && matches!(self.token().kind, Kind::Symbol("." | "#"))
             && self
@@ -144,7 +150,7 @@ impl Parser<'_, '_> {
                 .get(self.cursor + 1)
                 .is_some_and(|t| t.kind == Kind::Symbol("["))
         {
-            let (ty, dimensions) = self.array_type_dimensions(true)?;
+            let (ty, dimensions) = self.array_type_dimensions(true, false)?;
             self.reject_error_spec()?;
             return Ok((ty, dimensions));
         }
@@ -215,13 +221,16 @@ impl Parser<'_, '_> {
             }
             layers.push((readonly, nilable));
         }
-        let mut ty = if matches!(self.token().kind, Kind::Symbol("." | "#"))
+        let mut ty = if self.token().kind == Kind::Keyword("soa") {
+            self.cursor += 1;
+            self.array_type(true)?
+        } else if matches!(self.token().kind, Kind::Symbol("." | "#"))
             && self
                 .tokens
                 .get(self.cursor + 1)
                 .is_some_and(|t| t.kind == Kind::Symbol("["))
         {
-            self.array_type()?
+            self.array_type(false)?
         } else {
             self.type_leaf()?
         };

@@ -17,6 +17,7 @@ mod functions;
 mod helpers;
 mod logs;
 mod slices;
+mod soa;
 mod statements;
 mod structs;
 mod text;

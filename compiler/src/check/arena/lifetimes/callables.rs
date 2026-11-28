@@ -409,6 +409,7 @@ impl Walk<'_> {
                 }
                 result
             }
+            Value::SoaColumn { target, .. } => self.expr(target),
             Value::ArrayRead { address, handler } => {
                 let pointers = self.expr(address);
                 let mut result = Values::new();

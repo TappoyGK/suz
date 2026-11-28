@@ -157,3 +157,103 @@ fn c_struct_declarations_reject_unsupported_fields_and_conflicts() {
         assert_eq!(error.rule(), "ffi.struct", "{ty}: {error}");
     }
 }
+
+#[test]
+fn soa_extern_struct_copy_and_explicit_writeback_and_c_integer_restrictions() {
+    let directory = TemporaryDirectory::new();
+    fs::write(
+        directory.0.join("fixture.h"),
+        "#include <stdint.h>\nstruct c_item { float x; float y; long count; };\nstatic inline void bump_item(struct c_item *p) { p->x += 5.0f; p->count += 1; }\n",
+    )
+    .unwrap();
+    fs::write(
+        directory.0.join("main.suz"),
+        r#"
+extern "fixture.h" {
+    struct c_item as Citem { x: f32, y: f32, count: _long }
+    fn bump_item(p: *Citem) -> void
+}
+struct Wrap { item: Citem, tag: i32 }
+fn main() -> u8 {
+    fix items = new soa #[
+        Citem { x: 1.0, y: 2.0, count: 10 },
+        Citem { x: 3.0, y: 4.0, count: 20 },
+    ]
+    fix p = new items.[0]
+    trusted {
+        bump_item(p)
+    }
+    // C 側の書き換えは独立したコピーに対するものであり、SoA 配列自体は変わらない。
+    if items.x.[0] != 1.0 || items.count.[0] != 10 { return 1 }
+    // 明示的に書き戻すと SoA の各列へ反映される。
+    items#[0] = .p
+    if items.x.[0] != 6.0 || items.count.[0] != 11 { return 2 }
+
+    // 入れ子に extern 構造体を含む通常構造体の SoA でも同様に動作する。
+    fix wraps = new soa #[Wrap { item: items.[1], tag: 7 }]
+    if wraps.item.y.[0] != 4.0 || wraps.item.count.[0] != 20 { return 3 }
+    return 0
+}
+"#,
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_suz"))
+        .current_dir(&directory.0)
+        .args(["run", "main.suz", "--include-dir", "."])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+
+    // C 固有整数型の列には [ffi.c-integer] の算術制限が維持される。
+    let bad_arith = b"extern \"fixture.h\" { struct c_item as Citem { count: _long } }\nfn main() -> u8 {\n    fix a = new soa #[Citem { count: 1 }]\n    fix x = a.count.[0] + 1\n    return 0\n}";
+    let err = suz::compile(bad_arith).unwrap_err();
+    assert_eq!(err.rule(), "expr.operator-types", "{err}");
+
+    // 生成 C は SoA 参照に列ごとの連続ポインタ (.cols) と 1 回の領域確保を使い、
+    // 葉列への一括書き込みは restrict 付きの連続ループ、16 バイト超の SoA 仮引数は const *restrict ポインタ渡し、
+    // 単一葉フィールド書き込みは参照全体をコピーしない。
+    let soa_codegen_src = br#"
+struct Vec2 { x: f32, y: f32 }
+struct Particle { pos: Vec2, vel: Vec2, life: f32 }
+fn read_first(p: soa .[Particle; n]) -> f32 {
+    return ifexpr n > 0 { p.[0].life } else { 0.0 }
+}
+fn step(p: soa #[Particle; n], dt: f32) -> void {
+    p.pos.x#[p.life > 0.0] += p.vel.x * dt
+    for i in 0..<n {
+        p.[i]#life -= dt
+    }
+}
+fn main() -> u8 {
+    fix p = new soa #[Particle { pos: Vec2 { x: 1.0, y: 2.0 }, vel: Vec2 { x: 3.0, y: 4.0 }, life: 1.0 }; 4]
+    step(p, 0.5)
+    fix v = read_first(p)
+    return ifexpr v == 0.5 { 0 } else { 1 }
+}
+"#;
+    let c_code = suz::compile(soa_codegen_src).unwrap();
+    assert!(
+        c_code.contains("void *cols[5];"),
+        "expected 5 leaf columns in SoA ref:\n{c_code}"
+    );
+    assert!(
+        c_code.contains("typedef suz_array_0 suz_readonly_array_0;"),
+        "expected readonly SoA ref to alias mutable SoA ref:\n{c_code}"
+    );
+    assert!(
+        c_code.contains("float *restrict suz_bulk_dst_"),
+        "expected restrict bulk loop on leaf column:\n{c_code}"
+    );
+    assert!(
+        c_code.contains("const suz_array_0 *restrict suz_ref_0"),
+        "expected large SoA parameter to be passed by const restrict pointer:\n{c_code}"
+    );
+    assert!(
+        !c_code.contains("suz_soa_src_"),
+        "expected single-leaf field store to avoid copying whole SoA ref:\n{c_code}"
+    );
+    assert!(
+        !c_code.contains("(suz_readonly_array_0){"),
+        "expected readonly SoA conversion to avoid compound literal copy:\n{c_code}"
+    );
+}

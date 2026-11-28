@@ -95,6 +95,12 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
                 expression(fallback, context)
             )
         }
+        Value::SoaColumn {
+            ref target,
+            leaf_offset,
+            leaf_count,
+            ..
+        } => super::soa::column(target, leaf_offset, leaf_count, expr.ty, context),
         Value::Receiver { ref target, .. } => expression(target, context),
         Value::TextAppend {
             ref left,
@@ -112,7 +118,12 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
         } => super::arena::allocate(value, expr.ty, location, context),
         Value::Deref(ref value) => format!("(*({}))", expression(value, context)),
         Value::NonNil(ref value) if value.ty.array_id().is_some() => {
-            format!("(({}).data != NULL)", expression(value, context))
+            let array = context.arrays.get(value.ty.array_id().unwrap());
+            if array.soa {
+                format!("(({}).cols[0] != NULL)", expression(value, context))
+            } else {
+                format!("(({}).data != NULL)", expression(value, context))
+            }
         }
         Value::Nil if expr.ty.array_id().is_some() => format!("({}){{0}}", expr.ty.c_name()),
         Value::NonNil(ref value) => format!("({} != NULL)", expression(value, context)),
@@ -225,13 +236,16 @@ pub(super) fn expression(expr: &CheckedExpression, context: &mut ExpressionConte
             super::structs::literal(id, fields, context)
         }
         Value::Field { ref target, index } => {
+            if let Some(direct) = super::soa::try_direct_field_read(expr, context) {
+                return direct;
+            }
             let name = super::structs::field_name(target.ty, index, context);
             format!("({}).{name}", expression(target, context))
         }
         Value::Void => String::new(),
         Value::Call {
             id, ref arguments, ..
-        } => super::functions::call(id, arguments, context, None),
+        } => super::functions::call(id, arguments, expr.ty, context, None),
         Value::Block {
             ref statements,
             ref value,
